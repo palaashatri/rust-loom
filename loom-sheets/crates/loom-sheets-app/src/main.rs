@@ -219,8 +219,8 @@ fn update_selection(
         .raw(selected)
         .map(SharedString::from)
         .unwrap_or_default();
-    app.set_selection_formula(formula.clone());
-    app.set_formula_edit_buffer(formula);
+    app.set_selection_formula(formula);
+    app.invoke_reset_formula_edit_buffer();
     app.set_selected_cell(selected.to_a1().into());
     app.set_selection_value(SharedString::from(cell_value(
         sheet,
@@ -319,10 +319,9 @@ fn run_gui(args: &Args) -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_commit_selected_cell(move || {
+        app.on_commit_selected_cell(move |draft| {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
-                    let draft = app.get_selection_formula();
                     let committed = {
                         let mut current = state.current.borrow_mut();
                         let mut undo = state.undo_stack.borrow_mut();
