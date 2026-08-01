@@ -2,10 +2,53 @@
 // (a Window component cannot be nested), with a virtualized-style grid
 // driven by engine-evaluated cell models.
 
-import { ToolButton, IconButton, Field, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
+
+component FormulaBarField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> placeholder: "";
+    in-out property <string> value: "";
+    callback committed;
+    callback cancelled;
+    height: 28px;
+    min-width: 140px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: text-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: Theme.palette().surface;
+
+    text-input := TextInput {
+        x: 8px;
+        width: parent.width - 16px;
+        single-line: true;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink;
+        text <=> root.value;
+        accepted => { root.committed(); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancelled();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    if root.value == "" : Text {
+        x: 8px;
+        width: parent.width - 16px;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink-disabled;
+        text: root.placeholder;
+    }
+
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.label;
+}
 
 export component SheetsApp inherits Window {
     title: "Loom Sheets";
@@ -27,7 +70,8 @@ export component SheetsApp inherits Window {
     callback undo;
     callback redo;
     callback cell-clicked(int, int);
-    callback edit-selected-cell(string);
+    callback commit-selected-cell;
+    callback cancel-selected-cell;
 
     background: Theme.palette().canvas;
 
@@ -129,12 +173,13 @@ export component SheetsApp inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                Field {
+                FormulaBarField {
                     label: "Selected cell formula or value";
                     placeholder: "Enter a value or formula";
                     value <=> root.selection-formula;
                     horizontal-stretch: 1;
-                    edited(text) => { root.edit-selected-cell(text); }
+                    committed => { root.commit-selected-cell(); }
+                    cancelled => { root.cancel-selected-cell(); }
                 }
                 Text {
                     text: "=";

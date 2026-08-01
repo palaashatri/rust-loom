@@ -12,7 +12,8 @@ use std::rc::Rc;
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::{
-    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellRef, Sheet, Value,
+    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellEditTransaction, CellRef,
+    Sheet, Value,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
@@ -214,19 +215,38 @@ fn update_selection(
     vals: &std::collections::HashMap<CellRef, Value>,
     selected: CellRef,
 ) {
+    let formula = sheet
+        .raw(selected)
+        .map(SharedString::from)
+        .unwrap_or_default();
+    app.set_selection_formula(formula.clone());
+    app.set_formula_edit_buffer(formula);
     app.set_selected_cell(selected.to_a1().into());
-    app.set_selection_formula(
-        sheet
-            .raw(selected)
-            .map(SharedString::from)
-            .unwrap_or_default(),
-    );
     app.set_selection_value(SharedString::from(cell_value(
         sheet,
         vals,
         selected.row,
         selected.col,
     )));
+}
+
+/// Apply one committed formula-bar edit and record one undo transaction.
+fn commit_formula_edit(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<String>,
+    redo_stack: &mut Vec<String>,
+    selected: CellRef,
+    draft: &str,
+) -> bool {
+    let mut transaction = CellEditTransaction::begin(sheet.raw(selected));
+    transaction.update(draft.to_owned());
+    let Some(edit) = transaction.commit() else {
+        return false;
+    };
+    undo_stack.push(sheet_to_json(sheet));
+    redo_stack.clear();
+    sheet.set_raw(selected, edit.after().to_owned());
+    true
 }
 
 fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
@@ -299,20 +319,25 @@ fn run_gui(args: &Args) -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_edit_selected_cell(move |raw| {
+        app.on_commit_selected_cell(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
-                    let raw = raw.to_string();
-                    if state.current.borrow().raw(cell) == Some(raw.as_str()) {
-                        return;
+                    let draft = app.get_selection_formula();
+                    let committed = {
+                        let mut current = state.current.borrow_mut();
+                        let mut undo = state.undo_stack.borrow_mut();
+                        let mut redo = state.redo_stack.borrow_mut();
+                        commit_formula_edit(
+                            &mut current,
+                            &mut undo,
+                            &mut redo,
+                            cell,
+                            draft.as_str(),
+                        )
+                    };
+                    if committed {
+                        apply_sheet(&app, &state.current.borrow());
                     }
-                    state
-                        .undo_stack
-                        .borrow_mut()
-                        .push(sheet_to_json(&state.current.borrow()));
-                    state.redo_stack.borrow_mut().clear();
-                    state.current.borrow_mut().set_raw(cell, raw);
-                    apply_sheet(&app, &state.current.borrow());
                 }
             }
         });
@@ -442,4 +467,88 @@ fn main() -> Result<(), String> {
         return render_headless(&args, out.to_str().unwrap());
     }
     run_gui(&args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formula_bar_draft_is_not_applied_before_commit() {
+        let mut sheet = Sheet::new("test");
+        let selected = CellRef::parse("B1").unwrap();
+        sheet.set_str("A1", "2");
+        sheet.set_str("B1", "3");
+
+        let mut edit = CellEditTransaction::begin(sheet.raw(selected));
+        edit.update("=A1+1");
+
+        assert_eq!(selected.to_a1(), "B1");
+        assert_eq!(edit.commit().unwrap().after(), "=A1+1");
+        assert_eq!(sheet.raw(selected), Some("3"));
+    }
+
+    #[test]
+    fn formula_bar_commit_preserves_formula_raw_and_selected_cell() {
+        let mut sheet = Sheet::new("test");
+        let selected = CellRef::parse("B1").unwrap();
+        sheet.set_str("A1", "2");
+        sheet.set_str("B1", "3");
+        let mut undo = Vec::new();
+        let mut redo = Vec::new();
+
+        assert!(commit_formula_edit(
+            &mut sheet, &mut undo, &mut redo, selected, "=A1+1",
+        ));
+
+        assert_eq!(selected.to_a1(), "B1");
+        assert_eq!(sheet.raw(selected), Some("=A1+1"));
+        assert_eq!(evaluate(&sheet).get(&selected), Some(&Value::Number(3.0)));
+    }
+
+    #[test]
+    fn formula_bar_commit_preserves_literal_and_empty_raw_text() {
+        let mut sheet = Sheet::new("test");
+        let literal = CellRef::parse("A1").unwrap();
+        let empty = CellRef::parse("B1").unwrap();
+        sheet.set_raw(literal, "old");
+        sheet.set_raw(empty, "old");
+        let mut undo = Vec::new();
+        let mut redo = Vec::new();
+
+        assert!(commit_formula_edit(
+            &mut sheet,
+            &mut undo,
+            &mut redo,
+            literal,
+            "  literal text  ",
+        ));
+        assert!(commit_formula_edit(
+            &mut sheet, &mut undo, &mut redo, empty, "",
+        ));
+
+        assert_eq!(sheet.raw(literal), Some("  literal text  "));
+        assert_eq!(sheet.raw(empty), Some(""));
+        assert_eq!(evaluate(&sheet).get(&empty), Some(&Value::Empty));
+    }
+
+    #[test]
+    fn formula_bar_commit_records_one_transaction_and_noop_records_none() {
+        let mut sheet = Sheet::new("test");
+        let selected = CellRef::parse("A1").unwrap();
+        sheet.set_str("A1", "old");
+        let mut undo = Vec::new();
+        let mut redo = vec!["redo".to_string()];
+
+        assert!(commit_formula_edit(
+            &mut sheet, &mut undo, &mut redo, selected, "new",
+        ));
+        assert_eq!(undo.len(), 1);
+        assert!(redo.is_empty());
+
+        assert!(!commit_formula_edit(
+            &mut sheet, &mut undo, &mut redo, selected, "new",
+        ));
+        assert_eq!(undo.len(), 1);
+    }
 }

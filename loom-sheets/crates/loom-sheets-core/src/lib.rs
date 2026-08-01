@@ -136,6 +136,62 @@ impl Cell {
     }
 }
 
+/// A pending formula-bar edit whose workbook mutation happens only on commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellEditTransaction {
+    original: Option<String>,
+    draft: String,
+}
+
+impl CellEditTransaction {
+    /// Start an edit from the selected cell's exact raw state.
+    pub fn begin(original: Option<&str>) -> Self {
+        let original = original.map(str::to_owned);
+        let draft = original.clone().unwrap_or_default();
+        Self { original, draft }
+    }
+
+    /// Replace the uncommitted text without changing the source cell.
+    pub fn update(&mut self, draft: impl Into<String>) {
+        self.draft = draft.into();
+    }
+
+    /// Commit the draft as one raw edit, or return `None` for an unchanged edit.
+    pub fn commit(self) -> Option<RawCellEdit> {
+        if self.original.as_deref() == Some(self.draft.as_str()) {
+            return None;
+        }
+        Some(RawCellEdit {
+            before: self.original,
+            after: self.draft,
+        })
+    }
+
+    /// Cancel the edit and return the exact original raw state.
+    pub fn cancel(self) -> Option<String> {
+        self.original
+    }
+}
+
+/// The before/after raw values for one committed cell edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawCellEdit {
+    before: Option<String>,
+    after: String,
+}
+
+impl RawCellEdit {
+    /// Return the exact raw value before the edit, preserving absent cells.
+    pub fn before(&self) -> Option<&str> {
+        self.before.as_deref()
+    }
+
+    /// Return the exact raw value written by the edit.
+    pub fn after(&self) -> &str {
+        &self.after
+    }
+}
+
 /// A single worksheet.
 #[derive(Debug, Clone, Default)]
 pub struct Sheet {
@@ -1292,6 +1348,36 @@ mod tests {
         sheet.set_raw(cell, "");
         assert_eq!(sheet.raw(cell), Some(""));
         assert_eq!(evaluate(&sheet).get(&cell), Some(&Value::Empty));
+    }
+
+    #[test]
+    fn formula_edit_transaction_commits_once_and_cancels_without_mutation() {
+        let mut canceled = CellEditTransaction::begin(Some("=A1+1"));
+        canceled.update("=A1+12");
+        assert_eq!(canceled.cancel(), Some("=A1+1".to_string()));
+
+        let mut committed = CellEditTransaction::begin(Some("=A1+1"));
+        committed.update("=A1+12");
+        let edit = committed.commit().expect("changed draft commits");
+        assert_eq!(edit.before(), Some("=A1+1"));
+        assert_eq!(edit.after(), "=A1+12");
+
+        let mut unchanged = CellEditTransaction::begin(Some("=A1+1"));
+        unchanged.update("=A1+1");
+        assert!(unchanged.commit().is_none());
+
+        let mut empty = CellEditTransaction::begin(Some("=A1+1"));
+        empty.update("");
+        let empty_edit = empty.commit().expect("empty text is a raw edit");
+        assert_eq!(empty_edit.after(), "");
+
+        let mut new_empty = CellEditTransaction::begin(None);
+        new_empty.update("");
+        let new_empty_edit = new_empty
+            .commit()
+            .expect("empty text differs from absent raw");
+        assert_eq!(new_empty_edit.before(), None);
+        assert_eq!(new_empty_edit.after(), "");
     }
 
     #[test]
