@@ -92,7 +92,6 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
         .map(|layer| layer.name.as_str())
         .unwrap_or("No layer selected");
     app.set_active_layer_index(doc.active_layer_index as i32);
-    app.set_selected_layer_text(SharedString::from(format!("Selected: {selected}")));
     app.set_status_left(SharedString::from(format!(
         "{} motion layers • Selected: {selected}",
         doc.len()

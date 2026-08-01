@@ -13,7 +13,6 @@ export component MotionApp inherits Window {
     in property <string> timecode-text: "00:00:00:00 (60 fps)";
     in property <[string]> layer-labels: [];
     in property <int> active-layer-index: 0;
-    in property <string> selected-layer-text: "Selected: Animated Title";
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -129,12 +128,6 @@ export component MotionApp inherits Window {
                         font-size: Theme.tokens.typography.caption;
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
-                    }
-
-                    Text {
-                        text: root.selected-layer-text;
-                        color: Theme.palette().accent;
-                        font-size: Theme.tokens.typography.caption;
                     }
 
                     for label[idx] in root.layer-labels : Rectangle {

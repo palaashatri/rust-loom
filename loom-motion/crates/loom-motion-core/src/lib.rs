@@ -186,6 +186,51 @@ mod tests {
     }
 
     #[test]
+    fn test_load_legacy_motion_without_active_layer_index() {
+        let mut expected = CompositionDocument::new("comp-legacy", "Legacy Title");
+        expected.add_layer(MotionLayer::new("l2", "Background Ribbon", "VectorShape"));
+
+        let mut legacy_payload = serde_json::to_value(&expected).expect("serialize payload");
+        legacy_payload
+            .as_object_mut()
+            .expect("document payload must be an object")
+            .remove("active_layer_index");
+        let content = serde_json::to_vec_pretty(&legacy_payload).expect("serialize legacy payload");
+
+        let mut archive = PackageArchive::new();
+        archive
+            .add("content/motion.json", content.clone())
+            .expect("add motion content");
+        let manifest = Manifest {
+            schema: SchemaVersion::CURRENT,
+            kind: PackageKind::Motion,
+            id: expected.id.clone(),
+            title: expected.name.clone(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            entries: vec![ManifestEntry {
+                path: "content/motion.json".into(),
+                mime: MimeType::parse("application/vnd.loom.motion-content").unwrap(),
+                size: content.len() as u64,
+                sha256: Checksum::from_bytes(zip::sha256(&content)),
+            }],
+        };
+        archive
+            .add("manifest.json", pkg_json::write(&manifest).into_bytes())
+            .expect("add manifest");
+
+        let loaded = load_motion(&archive.to_bytes().expect("serialize archive"))
+            .expect("legacy package should load");
+
+        assert_eq!(loaded.active_layer_index, 0);
+        assert_eq!(loaded.id, expected.id);
+        assert_eq!(loaded.name, expected.name);
+        assert_eq!(
+            serde_json::to_value(&loaded.layers).expect("serialize loaded layers"),
+            serde_json::to_value(&expected.layers).expect("serialize expected layers")
+        );
+    }
+
+    #[test]
     fn test_save_load_roundtrip() {
         let mut doc = CompositionDocument::new("comp-test", "Title Lower Third");
         doc.add_layer(MotionLayer::new("l2", "Background Ribbon", "VectorShape"));

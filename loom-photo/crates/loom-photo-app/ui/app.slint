@@ -13,7 +13,6 @@ export component PhotoApp inherits Window {
     in property <string> dimensions-text: "3840 x 2160 • 300 DPI";
     in property <[string]> layer-labels: [];
     in property <int> active-layer-index: 0;
-    in property <string> selected-layer-text: "Selected: Background";
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -134,12 +133,6 @@ export component PhotoApp inherits Window {
                         font-size: Theme.tokens.typography.caption;
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
-                    }
-
-                    Text {
-                        text: root.selected-layer-text;
-                        color: Theme.palette().accent;
-                        font-size: Theme.tokens.typography.caption;
                     }
 
                     for label[idx] in root.layer-labels : Rectangle {
