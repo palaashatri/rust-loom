@@ -13,12 +13,14 @@ fn main() {
         eprintln!("  demo (prints an evaluated example)");
         eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
         eprintln!("  to-csv <csv-file> (normalizes a CSV through the engine)");
+        eprintln!("  create <file.loomsheet> <name>");
         std::process::exit(2);
     }
     let result = match args[1].as_str() {
         "demo" => cmd_demo(),
         "eval" => cmd_eval(&args[2]),
         "to-csv" => cmd_tocsv(&args[2], &args[3]),
+        "create" => cmd_create(&args[2], &args[3]),
         other => {
             eprintln!("unknown command: {other}");
             std::process::exit(2);
@@ -54,6 +56,50 @@ fn cmd_demo() -> Result<(), String> {
     for ((row, col), line) in rows {
         println!("{}: {}", CellRef { row, col }.to_a1(), line);
     }
+    Ok(())
+}
+
+fn cmd_create(path: &str, name: &str) -> Result<(), String> {
+    use loom_package::manifest::{Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion};
+    use loom_package::zip::{self, PackageArchive};
+
+    let mut sheet = Sheet::new(name);
+    sheet.set_str("A1", "Category");
+    sheet.set_str("B1", "Amount");
+    sheet.set_str("A2", "Development");
+    sheet.set_str("B2", "15000");
+    sheet.set_str("A3", "Design");
+    sheet.set_str("B3", "8000");
+    sheet.set_str("A4", "QA & Testing");
+    sheet.set_str("B4", "5000");
+    sheet.set_str("A5", "Total");
+    sheet.set_str("B5", "=SUM(B2:B4)");
+
+    let content_json = loom_sheets_core::sheet_to_json(&sheet);
+    let mut arch = PackageArchive::new();
+    arch.add("content/sheet.json", content_json.clone().into_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Sheets,
+        id: "sample-sheet-1".into(),
+        title: name.to_string(),
+        app_version: "0.1.0".into(),
+        entries: vec![ManifestEntry {
+            path: "content/sheet.json".into(),
+            mime: MimeType::parse("application/vnd.loom.sheet-content").unwrap(),
+            size: content_json.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(content_json.as_bytes())),
+        }],
+    };
+    let manifest_str = loom_package::manifest::json::write(&manifest);
+    arch.add("manifest.json", manifest_str.into_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let bytes = arch.to_bytes().map_err(|e| e.to_string())?;
+    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+    println!("wrote {path}");
     Ok(())
 }
 
