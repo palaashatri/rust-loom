@@ -73,6 +73,8 @@ pub struct VideoProject {
     pub width: u32,
     pub height: u32,
     pub tracks: Vec<Track>,
+    #[serde(default)]
+    pub active_track_index: usize,
 }
 
 impl VideoProject {
@@ -84,6 +86,7 @@ impl VideoProject {
             width: 1920,
             height: 1080,
             tracks: Vec::new(),
+            active_track_index: 0,
         };
         proj.tracks
             .push(Track::new("v1", "Video 1", TrackType::Video));
@@ -94,6 +97,15 @@ impl VideoProject {
 
     pub fn add_track(&mut self, track: Track) {
         self.tracks.push(track);
+    }
+
+    pub fn select_track(&mut self, index: usize) -> bool {
+        if index < self.tracks.len() {
+            self.active_track_index = index;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn total_clips(&self) -> usize {
@@ -160,6 +172,14 @@ mod tests {
         let mut proj = VideoProject::new("v-1", "Documentary Edit");
         proj.tracks[0].add_clip(Clip::new("clip-1", "B-Roll Shot 1.mp4", 5.0));
         assert_eq!(proj.total_clips(), 1);
+    }
+
+    #[test]
+    fn test_select_track_rejects_invalid_index() {
+        let mut proj = VideoProject::new("v-1", "Documentary Edit");
+        assert!(proj.select_track(1));
+        assert!(!proj.select_track(2));
+        assert_eq!(proj.active_track_index, 1);
     }
 
     #[test]

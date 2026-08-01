@@ -115,6 +115,19 @@ fn apply_encode(app: &EncodeApp, q: &EncodeQueue) {
     app.set_job_labels(ModelRc::new(VecModel::from(job_labels)));
     app.set_job_details(ModelRc::new(VecModel::from(job_details)));
     app.set_job_statuses(ModelRc::new(VecModel::from(job_statuses)));
+    app.set_active_job_index(q.active_job_index as i32);
+    let (selected_job_text, selected_job_details) = q
+        .jobs
+        .get(q.active_job_index)
+        .map(|job| {
+            (
+                format!("Selected: {}", job.source_file),
+                format!("{} • {} kbps", job.preset.name, job.preset.bitrate_kbps),
+            )
+        })
+        .unwrap_or_else(|| ("No job selected".to_string(), String::new()));
+    app.set_selected_job_text(selected_job_text.into());
+    app.set_selected_job_details(selected_job_details.into());
     app.set_status_left(SharedString::from(format!("{} jobs queued", q.jobs.len())));
     app.set_status_right("Offline".into());
 }
@@ -166,6 +179,22 @@ fn main() -> Result<(), String> {
             if let Some(app) = app_ref.upgrade() {
                 *state.current.borrow_mut() = sample_encode();
                 apply_encode(&app, &state.current.borrow());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_job(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if current.select_job(index as usize) {
+                    apply_encode(&app, &current);
+                }
             }
         });
     }

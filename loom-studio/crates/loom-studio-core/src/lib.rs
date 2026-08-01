@@ -67,6 +67,8 @@ pub struct StudioProject {
     pub sample_rate: u32,
     pub mode: WorkspaceMode,
     pub tracks: Vec<StudioTrack>,
+    #[serde(default)]
+    pub active_track_index: usize,
 }
 
 impl StudioProject {
@@ -78,6 +80,7 @@ impl StudioProject {
             sample_rate: 48000,
             mode: WorkspaceMode::Quick,
             tracks: Vec::new(),
+            active_track_index: 0,
         };
         let mut t1 = StudioTrack::new("track-1", "Vocal Guide", TrackKind::Audio);
         t1.add_region(AudioRegion {
@@ -97,6 +100,15 @@ impl StudioProject {
 
     pub fn add_track(&mut self, track: StudioTrack) {
         self.tracks.push(track);
+    }
+
+    pub fn select_track(&mut self, index: usize) -> bool {
+        if index < self.tracks.len() {
+            self.active_track_index = index;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn total_regions(&self) -> usize {
@@ -169,6 +181,14 @@ mod tests {
             length_samples: 48000 * 8,
         });
         assert_eq!(proj.total_regions(), 2);
+    }
+
+    #[test]
+    fn test_select_track_rejects_invalid_index() {
+        let mut proj = StudioProject::new("studio-1", "Acoustic Ballad");
+        assert!(proj.select_track(1));
+        assert!(!proj.select_track(2));
+        assert_eq!(proj.active_track_index, 1);
     }
 
     #[test]

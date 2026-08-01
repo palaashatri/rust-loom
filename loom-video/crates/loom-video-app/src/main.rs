@@ -90,8 +90,21 @@ fn apply_video(app: &VideoApp, proj: &VideoProject) {
         })
         .collect();
     app.set_track_labels(ModelRc::new(VecModel::from(track_labels)));
+    app.set_active_track_index(proj.active_track_index as i32);
+    let selected = proj
+        .tracks
+        .get(proj.active_track_index)
+        .map(|track| {
+            format!(
+                "{} ({:?}, {} clips)",
+                track.name,
+                track.track_type,
+                track.clips.len()
+            )
+        })
+        .unwrap_or_else(|| "No track selected".to_string());
     app.set_status_left(SharedString::from(format!(
-        "{} tracks, {} clips",
+        "{} tracks, {} clips • Selected: {selected}",
         proj.tracks.len(),
         proj.total_clips()
     )));
@@ -155,12 +168,31 @@ fn main() -> Result<(), String> {
             if let Some(app) = app_ref.upgrade() {
                 let mut current = state.current.borrow_mut();
                 let count = current.total_clips() + 1;
-                current.tracks[0].add_clip(Clip::new(
-                    format!("c-{count}"),
-                    format!("Clip_{count}.mp4"),
-                    5.0,
-                ));
+                let active_track_index = current.active_track_index;
+                if let Some(track) = current.tracks.get_mut(active_track_index) {
+                    track.add_clip(Clip::new(
+                        format!("c-{count}"),
+                        format!("Clip_{count}.mp4"),
+                        5.0,
+                    ));
+                }
                 apply_video(&app, &current);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_track(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if current.select_track(index as usize) {
+                    apply_video(&app, &current);
+                }
             }
         });
     }

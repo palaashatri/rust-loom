@@ -76,6 +76,8 @@ pub struct EncodeQueue {
     pub id: String,
     pub name: String,
     pub jobs: Vec<EncodeJob>,
+    #[serde(default)]
+    pub active_job_index: usize,
 }
 
 impl EncodeQueue {
@@ -84,6 +86,7 @@ impl EncodeQueue {
             id: id.into(),
             name: name.into(),
             jobs: Vec::new(),
+            active_job_index: 0,
         };
         q.jobs.push(EncodeJob::new(
             "job-1",
@@ -96,6 +99,15 @@ impl EncodeQueue {
 
     pub fn add_job(&mut self, job: EncodeJob) {
         self.jobs.push(job);
+    }
+
+    pub fn select_job(&mut self, index: usize) -> bool {
+        if index < self.jobs.len() {
+            self.active_job_index = index;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn pending_count(&self) -> usize {
@@ -158,6 +170,20 @@ mod tests {
         let q = EncodeQueue::new("q-1", "Broadcast Delivery");
         assert_eq!(q.jobs.len(), 1);
         assert_eq!(q.pending_count(), 1);
+    }
+
+    #[test]
+    fn test_select_job_rejects_invalid_index() {
+        let mut q = EncodeQueue::new("q-1", "Broadcast Delivery");
+        q.add_job(EncodeJob::new(
+            "job-2",
+            "Source.mov",
+            "Output.mp4",
+            EncodePreset::h264_1080p(),
+        ));
+        assert!(q.select_job(1));
+        assert!(!q.select_job(2));
+        assert_eq!(q.active_job_index, 1);
     }
 
     #[test]

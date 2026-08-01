@@ -94,7 +94,16 @@ fn apply_studio(app: &StudioApp, proj: &StudioProject) {
         })
         .collect();
     app.set_track_labels(ModelRc::new(VecModel::from(track_labels)));
-    app.set_status_left(SharedString::from(format!("{} tracks", proj.tracks.len())));
+    app.set_active_track_index(proj.active_track_index as i32);
+    let selected = proj
+        .tracks
+        .get(proj.active_track_index)
+        .map(|track| format!("{} ({:?})", track.name, track.kind))
+        .unwrap_or_else(|| "No track selected".to_string());
+    app.set_status_left(SharedString::from(format!(
+        "{} tracks • Selected: {selected}",
+        proj.tracks.len()
+    )));
     app.set_status_right("Offline".into());
 }
 
@@ -145,6 +154,22 @@ fn main() -> Result<(), String> {
             if let Some(app) = app_ref.upgrade() {
                 *state.current.borrow_mut() = sample_studio();
                 apply_studio(&app, &state.current.borrow());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_track(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if current.select_track(index as usize) {
+                    apply_studio(&app, &current);
+                }
             }
         });
     }
