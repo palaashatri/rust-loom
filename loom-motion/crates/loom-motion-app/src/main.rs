@@ -4,9 +4,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use loom_motion_core::{save_motion, CompositionDocument, MotionLayer};
+use loom_motion_core::{load_motion, save_motion, CompositionDocument, MotionLayer};
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, PhysicalSize, SharedString};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -62,12 +62,30 @@ fn sample_motion() -> CompositionDocument {
     doc
 }
 
+fn initial_motion(args: &Args) -> Result<CompositionDocument, String> {
+    match args.open.as_deref() {
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read motion composition '{path}': {e}"))?;
+            load_motion(&bytes)
+                .map_err(|e| format!("failed to load motion composition '{path}': {e}"))
+        }
+        None => Ok(sample_motion()),
+    }
+}
+
 fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
     app.set_comp_name(doc.name.as_str().into());
     app.set_timecode_text(SharedString::from(format!(
         "00:00:00:00 ({} fps • {:.0}s)",
         doc.frame_rate, doc.duration_secs
     )));
+    let layer_labels: Vec<SharedString> = doc
+        .layers
+        .iter()
+        .map(|layer| SharedString::from(format!("{} ({})", layer.name, layer.layer_type)))
+        .collect();
+    app.set_layer_labels(ModelRc::new(VecModel::from(layer_labels)));
     app.set_status_left(SharedString::from(format!("{} motion layers", doc.len())));
     app.set_status_right("Offline".into());
 }
@@ -80,7 +98,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
-    let doc = sample_motion();
+    let doc = initial_motion(args)?;
     apply_motion(&app, &doc);
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
@@ -109,7 +127,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let state = Rc::new(GuiState {
-        current: RefCell::new(sample_motion()),
+        current: RefCell::new(initial_motion(&args)?),
     });
 
     {

@@ -5,10 +5,10 @@ use std::path::Path;
 use std::rc::Rc;
 
 use loom_studio_core::{
-    save_studio_project, StudioProject, StudioTrack, TrackKind, WorkspaceMode,
+    load_studio_project, save_studio_project, StudioProject, StudioTrack, TrackKind, WorkspaceMode,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, PhysicalSize, SharedString};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -64,6 +64,18 @@ fn sample_studio() -> StudioProject {
     proj
 }
 
+fn initial_studio(args: &Args) -> Result<StudioProject, String> {
+    match args.open.as_deref() {
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read studio project '{path}': {e}"))?;
+            load_studio_project(&bytes)
+                .map_err(|e| format!("failed to load studio project '{path}': {e}"))
+        }
+        None => Ok(sample_studio()),
+    }
+}
+
 fn apply_studio(app: &StudioApp, proj: &StudioProject) {
     app.set_song_title(proj.name.as_str().into());
     app.set_tempo_text(SharedString::from(format!("{:.0} BPM • 48kHz", proj.bpm)));
@@ -71,6 +83,17 @@ fn apply_studio(app: &StudioApp, proj: &StudioProject) {
         WorkspaceMode::Quick => "Quick Workspace".into(),
         WorkspaceMode::Pro => "Pro Workspace".into(),
     });
+    let track_labels: Vec<SharedString> = proj
+        .tracks
+        .iter()
+        .map(|track| {
+            SharedString::from(format!(
+                "{} ({:?}) • {:.1} dB",
+                track.name, track.kind, track.volume_db
+            ))
+        })
+        .collect();
+    app.set_track_labels(ModelRc::new(VecModel::from(track_labels)));
     app.set_status_left(SharedString::from(format!("{} tracks", proj.tracks.len())));
     app.set_status_right("Offline".into());
 }
@@ -83,7 +106,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
-    let proj = sample_studio();
+    let proj = initial_studio(args)?;
     apply_studio(&app, &proj);
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
@@ -112,7 +135,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let state = Rc::new(GuiState {
-        current: RefCell::new(sample_studio()),
+        current: RefCell::new(initial_studio(&args)?),
     });
 
     {

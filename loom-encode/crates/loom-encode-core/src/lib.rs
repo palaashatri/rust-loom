@@ -1,5 +1,9 @@
 //! Core batch media encoding and transcoding queue engine for Loom Encode.
 
+use loom_package::manifest::{
+    json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+};
+use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -104,14 +108,41 @@ impl EncodeQueue {
 
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
-    let mut arch = loom_package::PackageArchive::new();
-    arch.add("content/queue.json", json)
+    let mut arch = PackageArchive::new();
+    arch.add("content/queue.json", json.clone())
+        .map_err(|e| e.to_string())?;
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Encode,
+        id: q.id.clone(),
+        title: q.name.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries: vec![ManifestEntry {
+            path: "content/queue.json".into(),
+            mime: MimeType::parse("application/vnd.loom.encode-content").unwrap(),
+            size: json.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(&json)),
+        }],
+    };
+    arch.add("manifest.json", pkg_json::write(&manifest).into_bytes())
         .map_err(|e| e.to_string())?;
     arch.to_bytes().map_err(|e| e.to_string())
 }
 
 pub fn load_encode_queue(bytes: &[u8]) -> Result<EncodeQueue, String> {
-    let arch = loom_package::PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let arch = PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let manifest_bytes = arch
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_str =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest not utf8".to_string())?;
+    let manifest: Manifest =
+        pkg_json::parse_manifest(manifest_str).map_err(|e| format!("manifest: {e}"))?;
+    if manifest.kind != PackageKind::Encode {
+        return Err("not an Encode queue".to_string());
+    }
+    arch.validate_manifest(&manifest)
+        .map_err(|e| format!("validation: {e}"))?;
     let content = arch
         .get("content/queue.json")
         .ok_or_else(|| "missing queue.json".to_string())?;
@@ -139,6 +170,13 @@ mod tests {
             EncodePreset::prores_master(),
         ));
         let bytes = save_encode_queue(&q).expect("save failed");
+        let arch = PackageArchive::from_bytes(&bytes).expect("archive parse failed");
+        let manifest_bytes = arch.get("manifest.json").expect("manifest missing");
+        let manifest_str = std::str::from_utf8(manifest_bytes).expect("manifest not utf8");
+        let manifest = pkg_json::parse_manifest(manifest_str).expect("manifest parse failed");
+        assert_eq!(manifest.kind, PackageKind::Encode);
+        arch.validate_manifest(&manifest)
+            .expect("manifest validation failed");
         let loaded = load_encode_queue(&bytes).expect("load failed");
         assert_eq!(loaded.name, "Daily Dailies");
         assert_eq!(loaded.jobs.len(), 2);

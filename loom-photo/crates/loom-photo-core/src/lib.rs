@@ -1,5 +1,9 @@
 //! Core nondestructive photo and image editing engine for Loom Photo.
 
+use loom_package::manifest::{
+    json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+};
+use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,14 +111,41 @@ impl PhotoDocument {
 
 pub fn save_photo(doc: &PhotoDocument) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(doc).map_err(|e| e.to_string())?;
-    let mut arch = loom_package::PackageArchive::new();
-    arch.add("content/photo.json", json)
+    let mut arch = PackageArchive::new();
+    arch.add("content/photo.json", json.clone())
+        .map_err(|e| e.to_string())?;
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Photo,
+        id: doc.id.clone(),
+        title: doc.name.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries: vec![ManifestEntry {
+            path: "content/photo.json".into(),
+            mime: MimeType::parse("application/vnd.loom.photo-content").unwrap(),
+            size: json.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(&json)),
+        }],
+    };
+    arch.add("manifest.json", pkg_json::write(&manifest).into_bytes())
         .map_err(|e| e.to_string())?;
     arch.to_bytes().map_err(|e| e.to_string())
 }
 
 pub fn load_photo(bytes: &[u8]) -> Result<PhotoDocument, String> {
-    let arch = loom_package::PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let arch = PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let manifest_bytes = arch
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_str =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest not utf8".to_string())?;
+    let manifest: Manifest =
+        pkg_json::parse_manifest(manifest_str).map_err(|e| format!("manifest: {e}"))?;
+    if manifest.kind != PackageKind::Photo {
+        return Err("not a Photo project".to_string());
+    }
+    arch.validate_manifest(&manifest)
+        .map_err(|e| format!("validation: {e}"))?;
     let content = arch
         .get("content/photo.json")
         .ok_or_else(|| "missing photo.json".to_string())?;
@@ -151,6 +182,13 @@ mod tests {
         let mut doc = PhotoDocument::new("photo-test", "Landscape Composite", 4000, 3000);
         doc.add_layer(Layer::new_pixel("layer-sky", "Sky Mask"));
         let bytes = save_photo(&doc).expect("save failed");
+        let arch = PackageArchive::from_bytes(&bytes).expect("archive parse failed");
+        let manifest_bytes = arch.get("manifest.json").expect("manifest missing");
+        let manifest_str = std::str::from_utf8(manifest_bytes).expect("manifest not utf8");
+        let manifest = pkg_json::parse_manifest(manifest_str).expect("manifest parse failed");
+        assert_eq!(manifest.kind, PackageKind::Photo);
+        arch.validate_manifest(&manifest)
+            .expect("manifest validation failed");
         let loaded = load_photo(&bytes).expect("load failed");
         assert_eq!(loaded.name, "Landscape Composite");
         assert_eq!(loaded.len(), 2);

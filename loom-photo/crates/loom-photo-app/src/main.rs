@@ -4,9 +4,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use loom_photo_core::{save_photo, Layer, PhotoDocument};
+use loom_photo_core::{load_photo, save_photo, Layer, PhotoDocument};
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, PhysicalSize, SharedString};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -67,12 +67,29 @@ fn sample_photo() -> PhotoDocument {
     doc
 }
 
+fn initial_photo(args: &Args) -> Result<PhotoDocument, String> {
+    match args.open.as_deref() {
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read photo project '{path}': {e}"))?;
+            load_photo(&bytes).map_err(|e| format!("failed to load photo project '{path}': {e}"))
+        }
+        None => Ok(sample_photo()),
+    }
+}
+
 fn apply_photo(app: &PhotoApp, doc: &PhotoDocument) {
     app.set_project_name(doc.name.as_str().into());
     app.set_dimensions_text(SharedString::from(format!(
         "{} x {} • {} DPI",
         doc.width, doc.height, doc.dpi
     )));
+    let layer_labels: Vec<SharedString> = doc
+        .layers
+        .iter()
+        .map(|layer| SharedString::from(format!("{} ({:?})", layer.name, layer.kind)))
+        .collect();
+    app.set_layer_labels(ModelRc::new(VecModel::from(layer_labels)));
     app.set_status_left(SharedString::from(format!("{} layers", doc.len())));
     app.set_status_right("Offline".into());
 }
@@ -85,7 +102,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = PhotoApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
-    let doc = sample_photo();
+    let doc = initial_photo(args)?;
     apply_photo(&app, &doc);
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
@@ -113,7 +130,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let state = Rc::new(GuiState {
-        current: RefCell::new(sample_photo()),
+        current: RefCell::new(initial_photo(&args)?),
     });
 
     {

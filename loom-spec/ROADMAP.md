@@ -7,13 +7,14 @@ Phase plan with honest current status. Statuses are maintained in
 
 **Status: DONE** (with known gaps)
 
-- Parent `loom/` workspace with all 15 repositories created; every repository
-  is a git repo; shared licensing (MIT OR Apache-2.0) and root `AGENTS.md`
-  in place; task ledger and ownership map defined in the root directive.
-- Gaps: `loom-bootstrap` has only empty `ci/`, `docker/`, `scripts/`
-  directories — no README, no justfile, no `COMPATIBILITY.toml`, no CI
-  workflows yet (Phase 2/6 work). `loom-design-bible` docs directory is
-  empty (Phase 1).
+- Parent `loom/` workspace with all 15 repositories created; shared licensing
+  (MIT OR Apache-2.0), root `AGENTS.md`, task ledger, and ownership map are in
+  place. The parent tracks the sibling repositories; they do not currently
+  have independent `.git` histories.
+- `loom-bootstrap` now has README/BOOTSTRAP guidance, scripts, Docker files,
+  `COMPATIBILITY.toml`, and CI workflow scaffolding. `loom-design-bible`
+  contains the visual, motion, interaction, accessibility, and baseline
+  specifications; the remaining gap is application baseline coverage.
 
 ## Phase 1 — Foundation specifications
 
@@ -28,14 +29,14 @@ Phase plan with honest current status. Statuses are maintained in
   compatibility), RFC-0017 (application command system), RFC-0019 (local
   search), RFC-0020 (localization) — PROPOSED, not yet drafted.
 - `loom-design-bible` visual/motion/interaction/accessibility documents are
-  not yet written.
+  written; six application light/dark baseline pairs are still missing.
 - The first cross-repository contracts frozen so far: package container and
   manifest (`loom-package`), command/history/jobs/storage/text/color crate
   boundaries, vision provider model, plugin manifest schema.
 
 ## Phase 2 — Shared platform
 
-**Status: PARTIAL (8 core crates exist with tests; no UI crate yet)**
+**Status: PARTIAL (core crates, a shared UI crate, and app showcase slices exist)**
 
 Implemented in `loom-core/crates/` (all `0.1.0`, MSRV 1.80):
 
@@ -50,12 +51,14 @@ Implemented in `loom-core/crates/` (all `0.1.0`, MSRV 1.80):
 | `loom-history` | transactional undo/redo history | 7 |
 | `loom-storage` | storage paths and transactional file operations | 7 |
 
-Not yet implemented: `loom-app-runtime`, `loom-ui` (Slint component
-library — `RFC-0003-Slint-Integration-Model.md`), `loom-render`,
+Not yet implemented: `loom-app-runtime`, `loom-render`,
 `loom-animation`, `loom-autosave`, `loom-recovery`, `loom-media`,
 `loom-fonts`, `loom-search`, `loom-settings`, `loom-accessibility`,
 `loom-shortcuts`, `loom-clipboard`, `loom-diagnostics`, `loom-test-support`,
-plugin host integration with core, component gallery, visual test harness.
+plugin host integration with core, richer component gallery, visual test
+harness, and the full editing/runtime command layer. The `loom-ui` Slint
+component crate and shared app styling are present and used by the eight
+application slices.
 
 ## Phase 3 — Loom Vision foundation
 
@@ -76,18 +79,22 @@ plugin host integration with core, component gallery, visual test harness.
 
 ## Phase 4 — Application vertical slices
 
-**Status: IN PROGRESS** — Writer and Sheets engines complete; no GUI anywhere yet.
+**Status: IN PROGRESS** — all eight application repositories now contain
+tested model/CLI/package slices and limited Slint showcase UIs. Full editing,
+rendering, media, and export capabilities remain incomplete per the matrices.
 
 - **Loom Writer** (`loom-writer-core` + CLI, 6 tests): rich-text block
   document model, `.loomdoc` save/load, Markdown and plain-text export,
-  `create`/`info`/`export-md`/`validate` CLI commands. Slint GUI NOT_STARTED.
+  `create`/`info`/`export-md`/`validate` CLI commands and a Slint quick-start
+  showcase; the UI is not yet a full text editor.
 - **Loom Sheets** (`loom-sheets-core` + CLI, 12 tests): formula engine
   (tokenizer, recursive-descent parser, A1 cell references, dependency-graph
   evaluator with topological ordering and cycle detection), CSV import/export,
-  `.loomtable` JSON round-trip. Slint GUI NOT_STARTED.
-- **Present, Photo, Motion, Video, Studio, Encode**: no code yet
-  (empty repositories). Their vertical slices are planned after the shared
-  platform and UI foundation land.
+  `.loomtable` JSON round-trip and a Slint grid showcase; cells are not yet
+  editable in the UI.
+- **Present, Photo, Motion, Video, Studio, Encode**: model/CLI/package
+  round-trips plus populated Slint showcase UIs now exist. Their professional
+  editing engines and media pipelines remain planned work.
 
 ## Phase 5 — Professional feature expansion
 
@@ -103,25 +110,25 @@ dialogs and recovery (see `CROSS_APP_WORKFLOWS.md`).
 
 ## Phase 7 — Hardening
 
-**Status: NOT_STARTED.** Full suite tests, deterministic mutation fuzzing
-(`docs/adrs/ADR-0004-Deterministic-Mutation-Fuzzing.md`), dependency and
-license audits, offline tests, corruption and crash-recovery tests, memory
-and performance tests, visual regression, accessibility audits, packaging
-tests.
+**Status: PARTIAL.** The suite has deterministic unit tests, dependency and
+license reports, host build/test/lint gates, smoke tests, package extraction
+tests, and a visual regression harness. Remaining hardening includes mutation
+fuzzing (`docs/adrs/ADR-0004-Deterministic-Mutation-Fuzzing.md`), offline
+coverage, corruption/crash-recovery tests, memory/performance tests,
+accessibility audits, and the missing application visual baselines.
 
 ## Phase 8 — Release packaging
 
-**Status: NOT_STARTED.** Development builds, Linux release binaries, AppImage
-where practical, Flatpak manifests where practical, distribution-neutral
-archives, checksums, SBOM, license notices, build provenance, sample projects
-(`../loom-samples/`), documentation, source archives, verified
-`Loom-Complete.zip` per the root directive §26.
+**Status: PARTIAL.** Host release builds, checksums, sample projects,
+documentation, a deterministic `Loom-Complete.zip`, and extracted-package
+verification exist. Linux release binaries, AppImage/Flatpak manifests,
+SBOM/build provenance, and a final visual-baseline-complete release remain.
 
 ## Current milestone focus
 
-1. Finish Phase 1 specs (remaining RFCs, design bible).
-2. Bootstrap `loom-bootstrap` orchestration (CI, Docker, COMPATIBILITY.toml).
-3. Land `loom-ui` Slint component library and the first application GUI
-   (Writer), completing its vertical slice end-to-end.
-4. Wire Loom Vision into the Photo/S sheets workflows.
-5. Then proceed app by app through Phase 4.
+1. Finish Phase 1 specs (remaining RFCs and design-bible baselines).
+2. Harden the current eight app vertical slices: real editing interactions,
+   persistence UX, and application-level regression coverage.
+3. Complete the required light/dark visual baselines for all eight apps.
+4. Wire Loom Vision into Photo/Sheets workflows and then proceed with the
+   professional capabilities app by app.

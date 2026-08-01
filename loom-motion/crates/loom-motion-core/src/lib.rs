@@ -1,5 +1,9 @@
 //! Core motion graphics and compositing engine for Loom Motion.
 
+use loom_package::manifest::{
+    json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+};
+use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,14 +105,41 @@ impl CompositionDocument {
 
 pub fn save_motion(doc: &CompositionDocument) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(doc).map_err(|e| e.to_string())?;
-    let mut arch = loom_package::PackageArchive::new();
-    arch.add("content/motion.json", json)
+    let mut arch = PackageArchive::new();
+    arch.add("content/motion.json", json.clone())
+        .map_err(|e| e.to_string())?;
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Motion,
+        id: doc.id.clone(),
+        title: doc.name.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries: vec![ManifestEntry {
+            path: "content/motion.json".into(),
+            mime: MimeType::parse("application/vnd.loom.motion-content").unwrap(),
+            size: json.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(&json)),
+        }],
+    };
+    arch.add("manifest.json", pkg_json::write(&manifest).into_bytes())
         .map_err(|e| e.to_string())?;
     arch.to_bytes().map_err(|e| e.to_string())
 }
 
 pub fn load_motion(bytes: &[u8]) -> Result<CompositionDocument, String> {
-    let arch = loom_package::PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let arch = PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let manifest_bytes = arch
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_str =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest not utf8".to_string())?;
+    let manifest: Manifest =
+        pkg_json::parse_manifest(manifest_str).map_err(|e| format!("manifest: {e}"))?;
+    if manifest.kind != PackageKind::Motion {
+        return Err("not a Motion composition".to_string());
+    }
+    arch.validate_manifest(&manifest)
+        .map_err(|e| format!("validation: {e}"))?;
     let content = arch
         .get("content/motion.json")
         .ok_or_else(|| "missing motion.json".to_string())?;
@@ -139,6 +170,13 @@ mod tests {
         let mut doc = CompositionDocument::new("comp-test", "Title Lower Third");
         doc.add_layer(MotionLayer::new("l2", "Background Ribbon", "VectorShape"));
         let bytes = save_motion(&doc).expect("save failed");
+        let arch = PackageArchive::from_bytes(&bytes).expect("archive parse failed");
+        let manifest_bytes = arch.get("manifest.json").expect("manifest missing");
+        let manifest_str = std::str::from_utf8(manifest_bytes).expect("manifest not utf8");
+        let manifest = pkg_json::parse_manifest(manifest_str).expect("manifest parse failed");
+        assert_eq!(manifest.kind, PackageKind::Motion);
+        arch.validate_manifest(&manifest)
+            .expect("manifest validation failed");
         let loaded = load_motion(&bytes).expect("load failed");
         assert_eq!(loaded.name, "Title Lower Third");
         assert_eq!(loaded.len(), 2);

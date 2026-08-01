@@ -36,8 +36,9 @@ for repo in $REPOS; do
 done
 
 log "SUMMARY build: pass=$PASS skip=$SKIP fail=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if [ "$FAIL" -gt 0 ] || [ "$SKIP" -gt 0 ]; then
   log "FAILED:$FAILED_REPOS"
+  [ "$SKIP" -gt 0 ] && log "INCOMPLETE: $SKIP workspace(s) were not present"
   log "tail of failing build logs:"
   for f in "$WORK"/build-*.log; do
     [ -f "$f" ] || continue

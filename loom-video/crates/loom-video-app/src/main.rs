@@ -5,8 +5,8 @@ use std::path::Path;
 use std::rc::Rc;
 
 use loom_test_support::capture::{set_platform, snapshot_component};
-use loom_video_core::{save_video_project, Clip, VideoProject};
-use slint::{ComponentHandle, PhysicalSize, SharedString};
+use loom_video_core::{load_video_project, save_video_project, Clip, VideoProject};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -63,8 +63,33 @@ fn sample_video() -> VideoProject {
     proj
 }
 
+fn initial_video(args: &Args) -> Result<VideoProject, String> {
+    match args.open.as_deref() {
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read video project '{path}': {e}"))?;
+            load_video_project(&bytes)
+                .map_err(|e| format!("failed to load video project '{path}': {e}"))
+        }
+        None => Ok(sample_video()),
+    }
+}
+
 fn apply_video(app: &VideoApp, proj: &VideoProject) {
     app.set_project_name(proj.name.as_str().into());
+    let track_labels: Vec<SharedString> = proj
+        .tracks
+        .iter()
+        .map(|track| {
+            SharedString::from(format!(
+                "{} ({:?}, {} clips)",
+                track.name,
+                track.track_type,
+                track.clips.len()
+            ))
+        })
+        .collect();
+    app.set_track_labels(ModelRc::new(VecModel::from(track_labels)));
     app.set_status_left(SharedString::from(format!(
         "{} tracks, {} clips",
         proj.tracks.len(),
@@ -81,7 +106,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
-    let proj = sample_video();
+    let proj = initial_video(args)?;
     apply_video(&app, &proj);
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
@@ -109,7 +134,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let state = Rc::new(GuiState {
-        current: RefCell::new(sample_video()),
+        current: RefCell::new(initial_video(&args)?),
     });
 
     {

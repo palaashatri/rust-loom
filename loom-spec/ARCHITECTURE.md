@@ -82,8 +82,10 @@ Autosave and recovery are specified in `docs/rfcs/RFC-0018-Autosave-and-Recovery
 ## 5. Rendering
 
 - Application UI: Slint (pinned 1.17.1), a `.slint` component library in
-  `loom-core`'s UI crate (`loom-ui`, not yet implemented) consumed via
-  `library_paths` by every app. See `docs/rfcs/RFC-0003-Slint-Integration-Model.md`.
+  `loom-core`'s UI crate (`loom-ui`) consumed via `library_paths` by every
+  app. The shared library and populated showcase UIs are implemented; full
+  editing surfaces remain app-specific work. See
+  `docs/rfcs/RFC-0003-Slint-Integration-Model.md`.
 - Custom GPU rendering (canvas, timeline, grid) will use `wgpu` with Vulkan as
   the primary Linux target (`docs/rfcs/RFC-0004-GPU-Renderer.md` — not yet
   drafted; GPU work is not started).
@@ -113,10 +115,11 @@ and `../loom-vision/ARCHITECTURE.md`.
 
 ## 7. UI/engine separation (normative)
 
-All application engines are headless libraries with CLI harnesses
-(Writer and Sheets today; others planned). Engines own the document model,
-persistence, and logic; the future Slint UI layer will consume engines
-through commands and subscribe to change notifications. This keeps unit,
+All application engines are headless libraries with CLI harnesses, and each
+currently has a limited Slint showcase (Writer, Sheets, Present, Photo,
+Motion, Video, Studio, and Encode). Engines own the document model,
+persistence, and logic; the Slint UI consumes the current foundation through
+callbacks, while a command-driven editing layer remains future work. This keeps unit,
 property, fuzz, and integration tests display-free and deterministic, and
 makes Docker visual QA feasible without GPUs.
 

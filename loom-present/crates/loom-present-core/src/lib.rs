@@ -1,5 +1,9 @@
 //! Core domain engine for Loom Present presentation authoring suite.
 
+use loom_package::manifest::{
+    json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+};
+use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -106,18 +110,54 @@ impl PresentationDocument {
     pub fn active_slide_mut(&mut self) -> Option<&mut Slide> {
         self.slides.get_mut(self.active_index)
     }
+
+    pub fn select_slide(&mut self, index: usize) -> bool {
+        if index < self.slides.len() {
+            self.active_index = index;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub fn save_presentation(doc: &PresentationDocument) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(doc).map_err(|e| e.to_string())?;
-    let mut arch = loom_package::PackageArchive::new();
-    arch.add("content/presentation.json", json)
+    let mut arch = PackageArchive::new();
+    arch.add("content/presentation.json", json.clone())
+        .map_err(|e| e.to_string())?;
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Present,
+        id: doc.id.clone(),
+        title: doc.title.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries: vec![ManifestEntry {
+            path: "content/presentation.json".into(),
+            mime: MimeType::parse("application/vnd.loom.deck-content").unwrap(),
+            size: json.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(&json)),
+        }],
+    };
+    arch.add("manifest.json", pkg_json::write(&manifest).into_bytes())
         .map_err(|e| e.to_string())?;
     arch.to_bytes().map_err(|e| e.to_string())
 }
 
 pub fn load_presentation(bytes: &[u8]) -> Result<PresentationDocument, String> {
-    let arch = loom_package::PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let arch = PackageArchive::from_bytes(bytes).map_err(|e| e.to_string())?;
+    let manifest_bytes = arch
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_str =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest not utf8".to_string())?;
+    let manifest: Manifest =
+        pkg_json::parse_manifest(manifest_str).map_err(|e| format!("manifest: {e}"))?;
+    if manifest.kind != PackageKind::Present {
+        return Err("not a Present deck".to_string());
+    }
+    arch.validate_manifest(&manifest)
+        .map_err(|e| format!("validation: {e}"))?;
     let content = arch
         .get("content/presentation.json")
         .ok_or_else(|| "missing presentation.json".to_string())?;
@@ -171,10 +211,30 @@ mod tests {
     }
 
     #[test]
+    fn test_select_slide_bounds() {
+        let mut doc = PresentationDocument::new("deck-1", "Quarterly Product Update");
+        doc.add_slide("Market Overview", "content");
+
+        assert!(doc.select_slide(0));
+        assert_eq!(doc.active_index, 0);
+        assert!(doc.select_slide(1));
+        assert_eq!(doc.active_index, 1);
+        assert!(!doc.select_slide(2));
+        assert_eq!(doc.active_index, 1);
+    }
+
+    #[test]
     fn test_save_load_roundtrip() {
         let mut doc = PresentationDocument::new("deck-test", "Architecture Deck");
         doc.add_slide("Slide 2", "blank");
         let bytes = save_presentation(&doc).expect("save failed");
+        let arch = PackageArchive::from_bytes(&bytes).expect("archive parse failed");
+        let manifest_bytes = arch.get("manifest.json").expect("manifest missing");
+        let manifest_str = std::str::from_utf8(manifest_bytes).expect("manifest not utf8");
+        let manifest = pkg_json::parse_manifest(manifest_str).expect("manifest parse failed");
+        assert_eq!(manifest.kind, PackageKind::Present);
+        arch.validate_manifest(&manifest)
+            .expect("manifest validation failed");
         let loaded = load_presentation(&bytes).expect("load failed");
         assert_eq!(loaded.title, "Architecture Deck");
         assert_eq!(loaded.len(), 2);

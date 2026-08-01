@@ -60,7 +60,9 @@ fn cmd_demo() -> Result<(), String> {
 }
 
 fn cmd_create(path: &str, name: &str) -> Result<(), String> {
-    use loom_package::manifest::{Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion};
+    use loom_package::manifest::{
+        Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+    };
     use loom_package::zip::{self, PackageArchive};
 
     let mut sheet = Sheet::new(name);

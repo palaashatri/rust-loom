@@ -4,9 +4,9 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use loom_present_core::{export_pdf, save_presentation, PresentationDocument};
+use loom_present_core::{export_pdf, load_presentation, save_presentation, PresentationDocument};
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, PhysicalSize, SharedString};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -64,6 +64,18 @@ fn sample_deck() -> PresentationDocument {
     doc
 }
 
+fn initial_deck(args: &Args) -> Result<PresentationDocument, String> {
+    match args.open.as_deref() {
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read presentation '{path}': {e}"))?;
+            load_presentation(&bytes)
+                .map_err(|e| format!("failed to load presentation '{path}': {e}"))
+        }
+        None => Ok(sample_deck()),
+    }
+}
+
 fn apply_deck(app: &PresentApp, doc: &PresentationDocument) {
     app.set_deck_title(doc.title.as_str().into());
     if let Some(slide) = doc.active_slide() {
@@ -71,6 +83,13 @@ fn apply_deck(app: &PresentApp, doc: &PresentationDocument) {
     } else {
         app.set_slide_title("No Slide Selected".into());
     }
+    let slide_titles: Vec<SharedString> = doc
+        .slides
+        .iter()
+        .map(|slide| SharedString::from(slide.title.as_str()))
+        .collect();
+    app.set_slide_titles(ModelRc::new(VecModel::from(slide_titles)));
+    app.set_active_slide_index(doc.active_index as i32);
     app.set_slide_count_text(SharedString::from(format!("{} Slides", doc.len())));
     app.set_status_left(SharedString::from(format!("{} slides in deck", doc.len())));
     app.set_status_right("Offline".into());
@@ -84,7 +103,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
-    let doc = sample_deck();
+    let doc = initial_deck(args)?;
     apply_deck(&app, &doc);
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
@@ -113,7 +132,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let state = Rc::new(GuiState {
-        current: RefCell::new(sample_deck()),
+        current: RefCell::new(initial_deck(&args)?),
     });
 
     {
@@ -136,6 +155,19 @@ fn main() -> Result<(), String> {
                 let count = current.len() + 1;
                 current.add_slide(format!("New Slide {count}"), "content");
                 apply_deck(&app, &current);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_slide(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                if current.select_slide(index as usize) {
+                    apply_deck(&app, &current);
+                }
             }
         });
     }

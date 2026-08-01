@@ -5,10 +5,10 @@ use std::path::Path;
 use std::rc::Rc;
 
 use loom_encode_core::{
-    save_encode_queue, EncodeJob, EncodePreset, EncodeQueue,
+    load_encode_queue, save_encode_queue, EncodeJob, EncodePreset, EncodeQueue, JobStatus,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, PhysicalSize, SharedString};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -69,8 +69,52 @@ fn sample_encode() -> EncodeQueue {
     q
 }
 
+fn initial_encode(args: &Args) -> Result<EncodeQueue, String> {
+    match args.open.as_deref() {
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read encode queue '{path}': {e}"))?;
+            load_encode_queue(&bytes)
+                .map_err(|e| format!("failed to load encode queue '{path}': {e}"))
+        }
+        None => Ok(sample_encode()),
+    }
+}
+
 fn apply_encode(app: &EncodeApp, q: &EncodeQueue) {
     app.set_queue_name(q.name.as_str().into());
+    let job_labels: Vec<SharedString> = q
+        .jobs
+        .iter()
+        .enumerate()
+        .map(|(idx, job)| SharedString::from(format!("Job {}: {}", idx + 1, job.source_file)))
+        .collect();
+    let job_details: Vec<SharedString> = q
+        .jobs
+        .iter()
+        .map(|job| {
+            SharedString::from(format!(
+                "Preset: {} ({} kbps) -> {}",
+                job.preset.name, job.preset.bitrate_kbps, job.output_file
+            ))
+        })
+        .collect();
+    let job_statuses: Vec<SharedString> = q
+        .jobs
+        .iter()
+        .map(|job| {
+            let status = match &job.status {
+                JobStatus::Queued => "QUEUED".to_string(),
+                JobStatus::Encoding { progress } => format!("ENCODING {:.0}%", progress * 100.0),
+                JobStatus::Complete => "COMPLETE".to_string(),
+                JobStatus::Failed(reason) => format!("FAILED: {reason}"),
+            };
+            SharedString::from(status)
+        })
+        .collect();
+    app.set_job_labels(ModelRc::new(VecModel::from(job_labels)));
+    app.set_job_details(ModelRc::new(VecModel::from(job_details)));
+    app.set_job_statuses(ModelRc::new(VecModel::from(job_statuses)));
     app.set_status_left(SharedString::from(format!("{} jobs queued", q.jobs.len())));
     app.set_status_right("Offline".into());
 }
@@ -83,7 +127,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
-    let q = sample_encode();
+    let q = initial_encode(args)?;
     apply_encode(&app, &q);
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
@@ -112,7 +156,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let state = Rc::new(GuiState {
-        current: RefCell::new(sample_encode()),
+        current: RefCell::new(initial_encode(&args)?),
     });
 
     {

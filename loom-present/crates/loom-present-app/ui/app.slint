@@ -12,6 +12,8 @@ export component PresentApp inherits Window {
     in property <string> deck-title: "Untitled Deck";
     in property <string> slide-title: "Slide Title";
     in property <string> slide-count-text: "1 Slide";
+    in property <[string]> slide-titles: [];
+    in property <int> active-slide-index: 0;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -19,6 +21,7 @@ export component PresentApp inherits Window {
     callback open-deck;
     callback save-deck;
     callback add-slide;
+    callback select-slide(int);
     callback export-pdf;
     callback undo;
     callback redo;
@@ -96,20 +99,29 @@ export component PresentApp inherits Window {
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
                     }
-                    Rectangle {
+                    for title[idx] in root.slide-titles : Rectangle {
                         height: 80px;
-                        background: Theme.palette().canvas;
+                        background: idx == root.active-slide-index
+                            ? Theme.palette().selection-soft
+                            : Theme.palette().canvas;
                         border-radius: 4px;
                         border-width: 2px;
-                        border-color: Theme.palette().accent;
+                        border-color: idx == root.active-slide-index
+                            ? Theme.palette().accent
+                            : Theme.palette().border;
 
                         Text {
-                            text: "1. " + root.slide-title;
+                            text: (idx + 1) + ". " + title;
                             color: Theme.palette().ink;
                             font-size: Theme.tokens.typography.body;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
+                        touch := TouchArea {
+                            clicked => { root.select-slide(idx); }
+                        }
+                        accessible-role: button;
+                        accessible-label: "Select slide " + (idx + 1);
                     }
                 }
             }

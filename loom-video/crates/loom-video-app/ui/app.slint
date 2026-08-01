@@ -10,6 +10,7 @@ export component VideoApp inherits Window {
     background: Theme.palette().canvas;
 
     in property <string> project-name: "Untitled Video";
+    in property <[string]> track-labels: [];
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -127,7 +128,7 @@ export component VideoApp inherits Window {
                         color: Theme.palette().ink-secondary;
                     }
 
-                    Rectangle {
+                    for label in root.track-labels : Rectangle {
                         height: 36px;
                         background: Theme.palette().surface-sunken;
                         border-radius: 4px;
@@ -137,7 +138,7 @@ export component VideoApp inherits Window {
                             padding-right: 8px;
 
                             Text {
-                                text: "V1: Video Track (2 clips)";
+                                text: label;
                                 color: Theme.palette().ink;
                                 font-size: Theme.tokens.typography.body;
                                 vertical-alignment: center;
@@ -145,23 +146,6 @@ export component VideoApp inherits Window {
                         }
                     }
 
-                    Rectangle {
-                        height: 36px;
-                        background: Theme.palette().surface-sunken;
-                        border-radius: 4px;
-
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-
-                            Text {
-                                text: "A1: Audio Track (Stereo Master)";
-                                color: Theme.palette().ink-secondary;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
                 }
             }
         }

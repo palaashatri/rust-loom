@@ -26,8 +26,15 @@ for repo in $REPOS; do
   args="test --workspace"
   [ "$OFFLINE" -eq 1 ] && args="test --offline --workspace"
   if ( cd "$PARENT/$repo" && cargo $args ) > "$WORK/test-$repo.log" 2>&1; then
-    PASS=$((PASS + 1))
-    log "PASS $repo"
+    TESTS="$(awk '/^test result: ok\./ { passed += $4 } END { print passed + 0 }' "$WORK/test-$repo.log")"
+    if [ "$TESTS" -gt 0 ]; then
+      PASS=$((PASS + 1))
+      log "PASS $repo ($TESTS tests passed)"
+    else
+      FAIL=$((FAIL + 1))
+      FAILED_REPOS="$FAILED_REPOS $repo"
+      log "FAIL $repo (cargo returned 0 but no tests passed; see $WORK/test-$repo.log)"
+    fi
   else
     FAIL=$((FAIL + 1))
     FAILED_REPOS="$FAILED_REPOS $repo"
@@ -36,8 +43,9 @@ for repo in $REPOS; do
 done
 
 log "SUMMARY test: pass=$PASS skip=$SKIP fail=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if [ "$FAIL" -gt 0 ] || [ "$SKIP" -gt 0 ]; then
   log "FAILED:$FAILED_REPOS"
+  [ "$SKIP" -gt 0 ] && log "INCOMPLETE: $SKIP workspace(s) were not present"
   exit 1
 fi
 log "RESULT: PASS"

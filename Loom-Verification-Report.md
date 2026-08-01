@@ -1,43 +1,45 @@
-# Loom Verification Report — Package
+# Loom verification report — package
 
-Generated: 2026-08-01T09:30:00Z (final packaging session)
+This report is regenerated after packaging. It must describe the archive and
+the extracted-copy checks from the same run; older archive checksums or partial
+workspace claims must not be retained.
 
-## Archive
+## Required evidence
 
-| Artifact | Path | Checksum (SHA-256) |
-|----------|------|--------------------|
-| Package | `/Users/palaashatri/Code/loom/rust-loom/Loom-Complete.zip` (752 KB, 229 files) | `85c2916afc76c09c28a6b74d61481d85c6005f02aba753019568b3130ffa4670` |
-| Checksum file | `Loom-Complete.zip.sha256` | — |
-| Manifest | `Loom-Manifest.json` | — |
+1. `scripts/package.sh` creates a deterministic archive and checksum while
+   excluding `target/`, `.work/`, `.git/`, OS junk, and Python caches.
+2. `scripts/verify-package.sh` extracts the archive, runs the environment check,
+   parses every extracted Cargo workspace, and runs `cargo test --locked
+   --offline --workspace` for each one into a temporary target directory.
+3. `scripts/run-apps.sh` and `scripts/visual-qa-all.sh` are run against the
+   current built binaries. Visual QA is a pass only when every required
+   baseline exists and every comparison is within tolerance.
+4. Docker CI, offline, and visual results are listed only when their commands
+   complete; image-build failures remain explicit blockers.
 
-## Verification performed
+The final archive path, byte size, SHA-256, workspace counts, test totals,
+smoke result, visual result, and Docker result belong below this line and must
+be copied from the final command output.
 
-1. `scripts/package.sh` — deterministic file ordering (`sort`), excludes `target/`,
-   `.git/`, `.work/`, `.DS_Store`, `__pycache__`; PASS.
-2. `scripts/verify-package.sh` — extracted into a clean directory and ran from the
-   extracted tree:
-   - `env-check.sh` — PASS (toolchain, timeout, python3+PIL)
-   - `cargo metadata` on extracted loom-core — PASS
-   - `cargo test --workspace` on extracted loom-core — PASS (84 tests; log in
-     `loom-bootstrap/.work/verify-lite-test.log`)
-3. Scope note: the ZIP contains the 15 `loom-*/` repositories. The parent-root reports
-   (LOOM_MASTER_INDEX.md, FEATURE_STATUS.md, KNOWN_LIMITATIONS.md, LICENSE_REPORT.md,
-   DEPENDENCY_REPORT.md, SECURITY_REPORT.md, ACCESSIBILITY_REPORT.md,
-   PERFORMANCE_REPORT.md, VISUAL_QA_ALL.md, TEST_ALL.md, RUN_ALL.md, BUILD_ALL.md,
-   REPOSITORY_MAP.md, VERIFICATION_REPORT.md, visual-qa-report.md, Loom-Manifest.json)
-   live beside the archive in the parent workspace and are listed in the manifest.
+## Final evidence
 
-## Gate results used as evidence
+- Archive: `/Users/palaashatri/Code/loom/rust-loom/Loom-Complete.zip`
+- Archive contents: 309 files
+- Archive size: 1,054,365 bytes
+- SHA-256: `ff64e72da035feb909ec5cffc88bcc3e4fadc28bfb08b4d76728b25028f5086f`
+- Host Cargo gates: fmt 11/11, clippy 11/11 with 0 Loom-crate issues, build
+  11/11, and tests 11/11 with 250 tests passed
+- Application smoke: 8/8 binaries exited 0
+- Extracted package verification: 11/11 workspaces passed metadata and tests;
+  command exit 0; `verify-target` and `verify-extract` cleanup passed
+- Visual QA: 16 captures, 4 comparisons, 0 diffs, 12 missing baselines;
+  result **INCOMPLETE/FAIL**
+- Docker/offline verification: not rerun in this final host evidence pass
 
-- fmt: PASS (5 cargo repos) | clippy `-D warnings`: PASS (0 diagnostics)
-- tests: PASS — loom-core 84, loom-writer 6, loom-sheets 12, loom-vision, loom-plugin-sdk
-- apps: `run-apps.sh` PASS (writer, sheets smoke); 6 apps skipped (no binary)
-- visual QA: PASS — writer/sheets light+dark, metric 0.000000 (4 comparisons)
-- offline (`--network none` container): PASS for writer, sheets, vision, plugin-sdk;
-  loom-core's only failure is the font-dependent visual baseline (see KNOWN_LIMITATIONS.md)
+## Current visual limitation
 
-## Honest status
-
-The archive contains the implemented suite as of this session. Six application
-repositories are documentation-only; per-repository git history is not initialized.
-No secrets, credentials, or model files are included (exclusion rules verified).
+The current strict visual run has 16 fresh captures, 4 existing baseline
+comparisons with zero diffs, and 12 missing required baselines. It is therefore
+**INCOMPLETE/FAIL**. The screenshots are preserved in
+`loom-bootstrap/.work/screenshots/` for inspection; they are not silently
+auto-approved as baselines.

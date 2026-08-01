@@ -1,38 +1,39 @@
-# Build All
+# Build all
 
-Commands to build every Loom repository. Requirements: Rust >= 1.80, Slint 1.17.1 (pinned in lockfiles).
-
-## One command (orchestrated)
-
-```bash
-cd loom-bootstrap
-bash scripts/build-all.sh          # builds every existing cargo workspace (release)
-bash scripts/env-check.sh          # verifies toolchain and QA tools
-```
-
-## Per-repo (host)
-
-```bash
-cd loom-core    && cargo build --workspace
-cd loom-writer  && cargo build --workspace
-cd loom-sheets  && cargo build --workspace
-cd loom-vision  && cargo build --workspace
-cd loom-plugin-sdk && cargo build --workspace
-```
-
-Application binaries (debug): `loom-writer/target/debug/loom-writer`, `loom-sheets/target/debug/loom-sheets`.
-
-## Docker
+`loom-bootstrap/scripts/build-all.sh` builds every existing Cargo workspace in
+the suite. It uses release mode by default and fails if a declared workspace is
+missing or a build command fails.
 
 ```bash
 cd loom-bootstrap
-bash scripts/docker-build.sh       # builds the Ubuntu 24.04 toolchain image
-bash scripts/docker-test.sh        # runs fmt/clippy/test/build inside the container
+bash scripts/env-check.sh
+bash scripts/build-all.sh --release
 ```
 
-## Status
+The eight application binaries are:
 
-- loom-core: PASS (builds, fmt, clippy -D warnings, 84 tests)
-- loom-writer, loom-sheets: PASS (builds + app binaries)
-- loom-vision, loom-plugin-sdk: PASS
-- present/photo/motion/video/studio/encode: NOT_STARTED — no Cargo workspace yet; build-all.sh reports SKIP (expected).
+```text
+loom-writer/target/release/loom-writer
+loom-sheets/target/release/loom-sheets
+loom-present/target/release/loom-present
+loom-photo/target/release/loom-photo
+loom-motion/target/release/loom-motion
+loom-video/target/release/loom-video
+loom-studio/target/release/loom-studio
+loom-encode/target/release/loom-encode
+```
+
+The remaining Cargo workspaces are `loom-core`, `loom-vision`, and
+`loom-plugin-sdk`; they do not provide an application binary expected by the
+smoke runner. The build gate currently covers all 11 workspaces.
+
+For Docker image construction and CI checks:
+
+```bash
+bash scripts/docker-build.sh
+bash scripts/docker-test.sh
+```
+
+Docker visual QA uses the Ubuntu software-rendered Xvfb image. The visual image
+inherits all required packages from the CI image and does not install optional
+packages at runtime.

@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
   "name": "Loom",
-  "generated": "2026-08-01T04:05:00Z",
-  "parent_workspace_commit": "397f9de",
+  "generated": "2026-08-01T09:00:27Z",
+  "parent_workspace_commit": "bb00870",
   "per_repo_git": "not initialized (subdirectories tracked only by the parent workspace; see KNOWN_LIMITATIONS.md)",
   "msrv": "1.80",
   "slint_version": "1.17.1",
@@ -28,7 +28,7 @@
       "status": "COMPLETE",
       "build": "n/a (docs + baselines)",
       "tests": "n/a (baselines used by visual QA)",
-      "visual_qa": "PASS (writer + sheets, light + dark, metric 0.0)"
+      "visual_qa": "INCOMPLETE (writer + sheets compared; six app baseline pairs still missing)"
     },
     {
       "name": "loom-core",
@@ -44,14 +44,18 @@
       "role": "local computer vision",
       "status": "SCAFFOLDED",
       "build": "PASS",
-      "tests": "PASS"
+      "tests": "PASS (72 passed / 0 failed)",
+      "fmt": "PASS",
+      "clippy": "PASS (0 Loom diagnostics)"
     },
     {
       "name": "loom-plugin-sdk",
       "role": "sandboxed plugins",
       "status": "SCAFFOLDED",
       "build": "PASS",
-      "tests": "PASS"
+      "tests": "PASS (57 passed / 0 failed)",
+      "fmt": "PASS",
+      "clippy": "PASS (0 Loom diagnostics)"
     },
     {
       "name": "loom-writer",
@@ -76,32 +80,62 @@
     {
       "name": "loom-present",
       "role": "presentations",
-      "status": "NOT_STARTED (docs only)"
+      "status": "FUNCTIONAL_WITH_LIMITATIONS",
+      "build": "PASS",
+      "tests": "PASS (5 passed)",
+      "included_binaries": ["loom-present", "loom-present-cli"],
+      "visual_qa": "INCOMPLETE (no committed light/dark baselines)",
+      "smoke": "PASS"
     },
     {
       "name": "loom-photo",
       "role": "image editing",
-      "status": "NOT_STARTED (docs only)"
+      "status": "FUNCTIONAL_WITH_LIMITATIONS",
+      "build": "PASS",
+      "tests": "PASS (3 passed)",
+      "included_binaries": ["loom-photo", "loom-photo-cli"],
+      "visual_qa": "INCOMPLETE (no committed light/dark baselines)",
+      "smoke": "PASS"
     },
     {
       "name": "loom-motion",
       "role": "motion graphics",
-      "status": "NOT_STARTED (docs only)"
+      "status": "FUNCTIONAL_WITH_LIMITATIONS",
+      "build": "PASS",
+      "tests": "PASS (3 passed)",
+      "included_binaries": ["loom-motion", "loom-motion-cli"],
+      "visual_qa": "INCOMPLETE (no committed light/dark baselines)",
+      "smoke": "PASS"
     },
     {
       "name": "loom-video",
       "role": "video editing",
-      "status": "NOT_STARTED (docs only)"
+      "status": "FUNCTIONAL_WITH_LIMITATIONS",
+      "build": "PASS",
+      "tests": "PASS (3 passed)",
+      "included_binaries": ["loom-video", "loom-video-cli"],
+      "visual_qa": "INCOMPLETE (no committed light/dark baselines)",
+      "smoke": "PASS"
     },
     {
       "name": "loom-studio",
       "role": "audio workstation",
-      "status": "NOT_STARTED (docs only)"
+      "status": "FUNCTIONAL_WITH_LIMITATIONS",
+      "build": "PASS",
+      "tests": "PASS (3 passed)",
+      "included_binaries": ["loom-studio", "loom-studio-cli"],
+      "visual_qa": "INCOMPLETE (no committed light/dark baselines)",
+      "smoke": "PASS"
     },
     {
       "name": "loom-encode",
       "role": "transcoding",
-      "status": "NOT_STARTED (docs only)"
+      "status": "FUNCTIONAL_WITH_LIMITATIONS",
+      "build": "PASS",
+      "tests": "PASS (2 passed)",
+      "included_binaries": ["loom-encode", "loom-encode-cli"],
+      "visual_qa": "INCOMPLETE (no committed light/dark baselines)",
+      "smoke": "PASS"
     },
     {
       "name": "loom-samples",
@@ -111,16 +145,17 @@
     }
   ],
   "quality_gates": {
-    "fmt_all": "PASS (5 repos)",
-    "clippy_all": "PASS (5 repos, 0 loom diagnostics)",
-    "test_all": "PASS (5 repos)",
-    "build_all": "PASS (5 repos)",
-    "run_apps": "PASS (writer, sheets; 6 skipped: no binary)",
-    "visual_qa": "PASS (4 comparisons, 0 diffs)",
-    "offline_network_none": "PASS (writer, sheets, vision, plugin-sdk; loom-core fails only on container font baseline — see KNOWN_LIMITATIONS.md)"
+    "fmt_all": "PASS (11/11 workspaces)",
+    "clippy_all": "PASS (11/11 workspaces, 0 Loom diagnostics)",
+    "test_all": "PASS (11/11 workspaces, 250 tests)",
+    "build_all": "PASS (11/11 workspaces)",
+    "run_apps": "PASS (8/8 app binaries)",
+    "visual_qa": "INCOMPLETE/FAIL (16 captures, 4 comparisons, 0 diffs, 12 baselines missing)",
+    "offline_network_none": "NOT_RUN in this fresh host audit"
   },
   "known_limitations": [
-    "six of eight applications exist as docs only",
+    "the eight application slices are functional foundations, not full professional editors",
+    "six application light/dark baseline pairs are still missing from loom-design-bible",
     "visual baselines are macOS-font-dependent; container glyph rendering differs slightly",
     "undo/redo is in-memory only; autosave not wired into apps",
     "file I/O in app callbacks is synchronous (must move to jobs before release)",
@@ -147,6 +182,6 @@
     "loom-bootstrap/COMPATIBILITY.toml"
   ],
   "archive_checksums": {
-    "Loom-Complete.zip": "85c2916afc76c09c28a6b74d61481d85c6005f02aba753019568b3130ffa4670"
+    "Loom-Complete.zip": "ff64e72da035feb909ec5cffc88bcc3e4fadc28bfb08b4d76728b25028f5086f"
   }
 }

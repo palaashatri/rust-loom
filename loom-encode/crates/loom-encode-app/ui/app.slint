@@ -10,6 +10,9 @@ export component EncodeApp inherits Window {
     background: Theme.palette().canvas;
 
     in property <string> queue-name: "Untitled Batch Queue";
+    in property <[string]> job-labels: [];
+    in property <[string]> job-details: [];
+    in property <[string]> job-statuses: [];
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -91,7 +94,7 @@ export component EncodeApp inherits Window {
                         color: Theme.palette().ink-secondary;
                     }
 
-                    Rectangle {
+                    for label[idx] in root.job-labels : Rectangle {
                         height: 52px;
                         background: Theme.palette().surface;
                         border-radius: 4px;
@@ -106,19 +109,19 @@ export component EncodeApp inherits Window {
                             VerticalLayout {
                                 alignment: center;
                                 Text {
-                                    text: "Job 1: Master_Cut_01.mov";
+                                    text: label;
                                     color: Theme.palette().ink;
                                     font-size: Theme.tokens.typography.body;
                                     font-weight: 700;
                                 }
                                 Text {
-                                    text: "Preset: H.264 Web 1080p (8000 kbps) -> Master_Cut_01_Web.mp4";
+                                    text: root.job-details[idx];
                                     color: Theme.palette().ink-secondary;
                                     font-size: Theme.tokens.typography.caption;
                                 }
                             }
                             Text {
-                                text: "QUEUED";
+                                text: root.job-statuses[idx];
                                 color: Theme.palette().accent;
                                 font-size: Theme.tokens.typography.caption;
                                 font-weight: 700;

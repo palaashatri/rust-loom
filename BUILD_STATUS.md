@@ -1,27 +1,57 @@
-# Loom Suite Build Status
+# Loom suite build status
 
-This document records the automated build and verification status across all 11 cargo workspace repositories of the Loom Creative Suite.
+This is a current, evidence-based snapshot. The authoritative generated report
+is [VERIFICATION_REPORT.md](VERIFICATION_REPORT.md); run the bootstrap gates
+again before treating this page as release evidence.
 
-## Workspace Build Matrix
+## Workspace matrix
 
-| Repository | Path | Cargo Workspace | Build Status | Test Status | Clippy Status | Format Status |
-|---|---|---|---|---|---|---|
-| `loom-core` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-core` | Yes | PASS | PASS (84 tests) | PASS | PASS |
-| `loom-writer` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-writer` | Yes | PASS | PASS | PASS | PASS |
-| `loom-sheets` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-sheets` | Yes | PASS | PASS | PASS | PASS |
-| `loom-present` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-present` | Yes | PASS | PASS | PASS | PASS |
-| `loom-photo` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-photo` | Yes | PASS | PASS | PASS | PASS |
-| `loom-motion` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-motion` | Yes | PASS | PASS | PASS | PASS |
-| `loom-video` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-video` | Yes | PASS | PASS | PASS | PASS |
-| `loom-studio` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-studio` | Yes | PASS | PASS | PASS | PASS |
-| `loom-encode` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-encode` | Yes | PASS | PASS | PASS | PASS |
-| `loom-vision` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-vision` | Yes | PASS | PASS | PASS | PASS |
-| `loom-plugin-sdk` | `file:///Users/palaashatri/Code/loom/rust-loom/loom-plugin-sdk` | Yes | PASS | PASS | PASS | PASS |
+| Repository | Cargo workspace | Build | Tests | Clippy | Format |
+|---|---:|---:|---:|---:|---:|
+| `loom-core` | yes | PASS | PASS (84) | PASS | PASS |
+| `loom-writer` | yes | PASS | PASS (6) | PASS | PASS |
+| `loom-sheets` | yes | PASS | PASS (12) | PASS | PASS |
+| `loom-present` | yes | PASS | PASS (4) | PASS | PASS |
+| `loom-photo` | yes | PASS | PASS (3) | PASS | PASS |
+| `loom-motion` | yes | PASS | PASS (3) | PASS | PASS |
+| `loom-video` | yes | PASS | PASS (3) | PASS | PASS |
+| `loom-studio` | yes | PASS | PASS (3) | PASS | PASS |
+| `loom-encode` | yes | PASS | PASS (2) | PASS | PASS |
+| `loom-vision` | yes | PASS | PASS (72) | PASS | PASS |
+| `loom-plugin-sdk` | yes | PASS | PASS (57) | PASS | PASS |
 
-## Verification Scripts
+The counts above come from the current `.work/` logs, not source-file
+presence. Missing workspaces, missing binaries, and zero-test workspaces now
+make their orchestration gate incomplete/failing instead of producing a false
+pass.
 
-- **`test-all.sh`**: Runs unit and integration tests across all 11 repositories. Status: **PASS (11/11)**
-- **`clippy-all.sh`**: Runs strict lint checks across all 11 repositories. Status: **PASS (11/11)**
-- **`fmt-all.sh`**: Enforces canonical code formatting. Status: **PASS (11/11)**
-- **`visual-qa-all.sh`**: Captures headless UI screenshots across light and dark themes. Status: **PASS (16/16 captured)**
-- **`package.sh` & `verify-package.sh`**: Produces deterministic ZIP bundle and verifies extracted build. Status: **PASS**
+## Application and visual evidence
+
+- All 8 declared application binaries built in release mode and all 8 exited
+  `0` under `scripts/run-apps.sh`.
+- Fresh visual captures: 16/16. Existing baselines compared: 4/4 with
+  `metric=0.000000` and 0 diffs.
+- Required baselines still missing: 12 (Present, Photo, Motion, Video,
+  Studio, and Encode in both themes). Therefore the visual gate is
+  **INCOMPLETE/FAIL**, not PASS.
+- The fresh screenshots were inspected. They show the sample models and both
+  light/dark theme paths; the missing-baseline state is the remaining visual
+  release blocker.
+
+## Commands
+
+Run from `loom-bootstrap/`:
+
+```bash
+bash scripts/env-check.sh
+bash scripts/fmt-all.sh
+bash scripts/clippy-all.sh
+bash scripts/test-all.sh
+bash scripts/build-all.sh --release
+bash scripts/run-apps.sh
+bash scripts/visual-qa-all.sh
+```
+
+Docker CI/offline/visual results are recorded separately only after the
+corresponding command completes successfully; an image-build or package
+verification failure is not converted into PASS prose.

@@ -1,42 +1,41 @@
-# Run All
+# Run all
 
-## Applications with binaries (writer, sheets)
-
-```bash
-# Headless smoke (writes a temp PNG, exits 0 on success)
-loom-writer/target/debug/loom-writer --smoke
-loom-sheets/target/debug/loom-sheets --smoke
-
-# Screenshot (headless, deterministic software renderer)
-loom-writer/target/debug/loom-writer --screenshot /tmp/writer.png --size 1280x800 --theme light
-loom-sheets/target/debug/loom-sheets --screenshot /tmp/sheets.png --size 1280x800 --theme dark
-# themes: light | dark | high-contrast
-
-# GUI (requires a display; headless systems must use Xvfb/Wayland headless)
-loom-writer/target/debug/loom-writer --open path/to/doc.loomdoc
-loom-sheets/target/debug/loom-sheets --open path/to/sheet.loomtable
-```
-
-## CLI tools
+All eight application binaries support the same headless QA contract:
 
 ```bash
-loom-writer/target/debug/loom-writer-cli --help     # document creation/export CLI
-loom-sheets/target/debug/loom-sheets-cli --help     # sheet/CSV CLI
+loom-writer/target/release/loom-writer --smoke
+loom-sheets/target/release/loom-sheets --smoke
+loom-present/target/release/loom-present --smoke
+loom-photo/target/release/loom-photo --smoke
+loom-motion/target/release/loom-motion --smoke
+loom-video/target/release/loom-video --smoke
+loom-studio/target/release/loom-studio --smoke
+loom-encode/target/release/loom-encode --smoke
 ```
 
-## Orchestrated
+Capture a deterministic software-rendered image with, for example:
+
+```bash
+loom-present/target/release/loom-present --screenshot /tmp/present.png --size 1280x800 --theme light
+loom-encode/target/release/loom-encode --screenshot /tmp/encode.png --size 1280x800 --theme dark
+```
+
+`--open <path>` loads and validates the corresponding package in both
+headless screenshots and the initial GUI state. Missing files and malformed
+archives exit nonzero with an app-specific error. Package extensions are
+`.loomdoc`, `.loomtable`, `.loomdeck`, `.loomphoto`, `.loommotion`,
+`.loomvideo`, `.loomstudio`, and `.loomencode`.
+
+The orchestrated smoke command is:
 
 ```bash
 cd loom-bootstrap
-bash scripts/run-apps.sh        # smoke-run every implemented app (PASS = rc 0)
+bash scripts/run-apps.sh
 ```
 
-## Not yet runnable
+It exits nonzero if an expected binary is missing, a process times out, or a
+smoke command fails. Fresh evidence has all 8 applications exiting `0`.
 
-loom-present, loom-photo, loom-motion, loom-video, loom-studio, loom-encode —
-specification-only repos; `run-apps.sh` reports SKIP until binaries exist.
-
-## Offline operation
-
-All implemented workflows (create/edit/save/open/export/smoke/screenshot) run with no
-network. Verified in a `--network none` Docker container (`scripts/docker-offline-test.sh`).
+CLI binaries remain available in the writer, sheets, and each newer app
+workspace for package creation/inspection. See each repository README for the
+app-specific subcommands.

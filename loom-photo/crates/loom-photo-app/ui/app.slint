@@ -11,6 +11,7 @@ export component PhotoApp inherits Window {
 
     in property <string> project-name: "Untitled Image";
     in property <string> dimensions-text: "3840 x 2160 • 300 DPI";
+    in property <[string]> layer-labels: [];
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -132,7 +133,7 @@ export component PhotoApp inherits Window {
                         color: Theme.palette().ink-secondary;
                     }
 
-                    Rectangle {
+                    for label in root.layer-labels : Rectangle {
                         height: 40px;
                         background: Theme.palette().surface-sunken;
                         border-radius: 4px;
@@ -142,7 +143,7 @@ export component PhotoApp inherits Window {
                             padding-right: 8px;
 
                             Text {
-                                text: "Curves Adjustment";
+                                text: label;
                                 color: Theme.palette().accent;
                                 font-size: Theme.tokens.typography.body;
                                 vertical-alignment: center;
@@ -150,23 +151,6 @@ export component PhotoApp inherits Window {
                         }
                     }
 
-                    Rectangle {
-                        height: 40px;
-                        background: Theme.palette().surface-sunken;
-                        border-radius: 4px;
-
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-
-                            Text {
-                                text: "Background Pixel Layer";
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
                 }
             }
         }
