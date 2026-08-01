@@ -157,13 +157,13 @@ impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
         if let Some(r) = CellRef::parse(a1) {
-            self.cells.insert(
-                r,
-                Cell {
-                    raw: raw.to_string(),
-                },
-            );
+            self.set_raw(r, raw);
         }
+    }
+
+    /// Set a cell's exact raw input at a resolved cell reference.
+    pub fn set_raw(&mut self, r: CellRef, raw: impl Into<String>) {
+        self.cells.insert(r, Cell { raw: raw.into() });
     }
 
     /// Get raw content of a cell.
@@ -1277,6 +1277,21 @@ mod tests {
             vals.get(&CellRef::parse("B2").unwrap()),
             Some(&Value::Number(2.0))
         );
+    }
+
+    #[test]
+    fn editing_a_cell_retains_formula_and_empty_raw_semantics() {
+        let mut sheet = Sheet::new("t");
+        let cell = CellRef::parse("B1").unwrap();
+        sheet.set_str("A1", "2");
+
+        sheet.set_raw(cell, "=A1+1");
+        assert_eq!(sheet.raw(cell), Some("=A1+1"));
+        assert_eq!(evaluate(&sheet).get(&cell), Some(&Value::Number(3.0)));
+
+        sheet.set_raw(cell, "");
+        assert_eq!(sheet.raw(cell), Some(""));
+        assert_eq!(evaluate(&sheet).get(&cell), Some(&Value::Empty));
     }
 
     #[test]

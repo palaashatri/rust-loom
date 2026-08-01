@@ -162,6 +162,8 @@ fn cell_value(
 
 fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
     let vals = evaluate(sheet);
+    let selected =
+        CellRef::parse(app.get_selected_cell().as_str()).unwrap_or(CellRef { row: 0, col: 0 });
     let cols: Vec<i32> = (0..GRID_COLS as i32).collect();
     let rows: Vec<i32> = (0..GRID_ROWS as i32).collect();
     let headers: Vec<SharedString> = (0..GRID_COLS)
@@ -191,14 +193,7 @@ fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
     app.set_column_headers(ModelRc::new(VecModel::from(headers)));
     app.set_row_headers(ModelRc::new(VecModel::from(row_headers)));
     app.set_cells(ModelRc::new(VecModel::from(cells)));
-    app.set_selected_cell("A1".into());
-    app.set_selection_formula(
-        sheet
-            .raw(CellRef { row: 0, col: 0 })
-            .map(SharedString::from)
-            .unwrap_or_default(),
-    );
-    app.set_selection_value(SharedString::from(cell_value(sheet, &vals, 0, 0)));
+    update_selection(app, sheet, &vals, selected);
     app.set_sheet_name(sheet.name.as_str().into());
     let formulas = sheet
         .cells
@@ -213,16 +208,35 @@ fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
     app.set_status_right("Offline".into());
 }
 
+fn update_selection(
+    app: &SheetsApp,
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+    selected: CellRef,
+) {
+    app.set_selected_cell(selected.to_a1().into());
+    app.set_selection_formula(
+        sheet
+            .raw(selected)
+            .map(SharedString::from)
+            .unwrap_or_default(),
+    );
+    app.set_selection_value(SharedString::from(cell_value(
+        sheet,
+        vals,
+        selected.row,
+        selected.col,
+    )));
+}
+
 fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
     if r < 0 || c < 0 || r >= GRID_ROWS as i32 || c >= GRID_COLS as i32 {
         return;
     }
     let (r, c) = (r as u32, c as u32);
     let refr = CellRef { row: r, col: c };
-    app.set_selected_cell(refr.to_a1().into());
-    app.set_selection_formula(sheet.raw(refr).map(SharedString::from).unwrap_or_default());
     let vals = evaluate(sheet);
-    app.set_selection_value(SharedString::from(cell_value(sheet, &vals, r, c)));
+    update_selection(app, sheet, &vals, refr);
 }
 
 fn apply_theme(app: &SheetsApp, theme: &str) {
@@ -279,6 +293,27 @@ fn run_gui(args: &Args) -> Result<(), String> {
                 state.redo_stack.borrow_mut().clear();
                 *state.current.borrow_mut() = sample_sheet();
                 apply_sheet(&app, &state.current.borrow());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_edit_selected_cell(move |raw| {
+            if let Some(app) = app_ref.upgrade() {
+                if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
+                    let raw = raw.to_string();
+                    if state.current.borrow().raw(cell) == Some(raw.as_str()) {
+                        return;
+                    }
+                    state
+                        .undo_stack
+                        .borrow_mut()
+                        .push(sheet_to_json(&state.current.borrow()));
+                    state.redo_stack.borrow_mut().clear();
+                    state.current.borrow_mut().set_raw(cell, raw);
+                    apply_sheet(&app, &state.current.borrow());
+                }
             }
         });
     }

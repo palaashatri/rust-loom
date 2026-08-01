@@ -18,7 +18,7 @@ export component SheetsApp inherits Window {
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
     in property <string> selected-cell: "A1";
-    in property <string> selection-formula: "";
+    in-out property <string> selection-formula: "";
     in property <string> selection-value: "";
     callback new-sheet;
     callback open-sheet;
@@ -27,6 +27,7 @@ export component SheetsApp inherits Window {
     callback undo;
     callback redo;
     callback cell-clicked(int, int);
+    callback edit-selected-cell(string);
 
     background: Theme.palette().canvas;
 
@@ -128,13 +129,13 @@ export component SheetsApp inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                Text {
-                    text: root.selection-formula != "" ? root.selection-formula : "—";
-                    font-size: Theme.tokens.typography.body;
-                    color: Theme.palette().ink-secondary;
-                    vertical-alignment: center;
+                Field {
+                    label: "Selected cell formula or value";
+                    placeholder: "Enter a value or formula";
+                    value <=> root.selection-formula;
+                    horizontal-stretch: 1;
+                    edited(text) => { root.edit-selected-cell(text); }
                 }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
                 Text {
                     text: "=";
                     font-size: Theme.tokens.typography.body;
