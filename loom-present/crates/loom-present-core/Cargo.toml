@@ -1,0 +1,14 @@
+[package]
+name = "loom-present-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loom-document.workspace = true
+loom-package.workspace = true
+loom-command.workspace = true
+loom-pdf.workspace = true
+serde.workspace = true
+serde_json.workspace = true

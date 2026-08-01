@@ -1,0 +1,161 @@
+import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+export { Theme } from "theme.slint";
+
+export component PresentApp inherits Window {
+    title: "Loom Present";
+    min-width: 900px;
+    min-height: 600px;
+    background: Theme.palette().canvas;
+
+    in property <string> deck-title: "Untitled Deck";
+    in property <string> slide-title: "Slide Title";
+    in property <string> slide-count-text: "1 Slide";
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Offline";
+
+    callback new-deck;
+    callback open-deck;
+    callback save-deck;
+    callback add-slide;
+    callback export-pdf;
+    callback undo;
+    callback redo;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Titlebar
+        Rectangle {
+            min-height: 41px;
+            max-height: 41px;
+            background: Theme.palette().surface;
+
+            HorizontalLayout {
+                spacing: 8px;
+                padding-left: 12px;
+                padding-right: 12px;
+                Icon {
+                    icon: "layers";
+                    size: 18px;
+                    tint: Theme.palette().accent;
+                    y: (parent.height - 18px) / 2;
+                }
+                Text {
+                    text: "Loom Present — " + root.deck-title;
+                    font-size: Theme.tokens.typography.title;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Toolbar
+        Rectangle {
+            min-height: 40px;
+            max-height: 40px;
+            background: Theme.palette().surface-sunken;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 6px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                ToolButton { icon: "new"; text: "New Deck"; clicked => { root.new-deck(); } }
+                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-deck(); } }
+                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-deck(); } }
+                ToolButton { icon: "add"; text: "+ Slide"; clicked => { root.add-slide(); } }
+                ToolButton { icon: "undo"; clicked => { root.undo(); } }
+                ToolButton { icon: "redo"; clicked => { root.redo(); } }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                IconButton { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+            }
+        }
+
+        // Content workspace
+        HorizontalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+
+            // Slide Navigator Sidebar
+            Rectangle {
+                width: 220px;
+                background: Theme.palette().surface;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "SLIDES (" + root.slide-count-text + ")";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    Rectangle {
+                        height: 80px;
+                        background: Theme.palette().canvas;
+                        border-radius: 4px;
+                        border-width: 2px;
+                        border-color: Theme.palette().accent;
+
+                        Text {
+                            text: "1. " + root.slide-title;
+                            color: Theme.palette().ink;
+                            font-size: Theme.tokens.typography.body;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // Slide Canvas view
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.palette().canvas;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        width: 560px;
+                        height: 315px;
+                        background: Theme.palette().surface;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+
+                        VerticalLayout {
+                            alignment: center;
+                            padding: 24px;
+
+                            Text {
+                                text: root.slide-title;
+                                font-size: Theme.tokens.typography.heading;
+                                font-weight: 700;
+                                color: Theme.palette().ink;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "Click '+ Slide' to add slides to your presentation deck.";
+                                font-size: Theme.tokens.typography.body;
+                                color: Theme.palette().ink-secondary;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        StatusBar {
+            status-left: root.status-left;
+            status-right: root.status-right;
+        }
+    }
+}

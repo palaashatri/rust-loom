@@ -1,0 +1,156 @@
+import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+export { Theme } from "theme.slint";
+
+export component MotionApp inherits Window {
+    title: "Loom Motion";
+    min-width: 900px;
+    min-height: 600px;
+    background: Theme.palette().canvas;
+
+    in property <string> comp-name: "Untitled Composition";
+    in property <string> timecode-text: "00:00:00:00 (60 fps)";
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Offline";
+
+    callback new-comp;
+    callback open-comp;
+    callback save-comp;
+    callback add-layer;
+    callback play-pause;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Titlebar
+        Rectangle {
+            min-height: 41px;
+            max-height: 41px;
+            background: Theme.palette().surface;
+
+            HorizontalLayout {
+                spacing: 8px;
+                padding-left: 12px;
+                padding-right: 12px;
+                Icon {
+                    icon: "layers";
+                    size: 18px;
+                    tint: Theme.palette().accent;
+                    y: (parent.height - 18px) / 2;
+                }
+                Text {
+                    text: "Loom Motion — " + root.comp-name;
+                    font-size: Theme.tokens.typography.title;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Toolbar
+        Rectangle {
+            min-height: 40px;
+            max-height: 40px;
+            background: Theme.palette().surface-sunken;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 6px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                ToolButton { icon: "new"; text: "New Comp"; clicked => { root.new-comp(); } }
+                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
+                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
+                ToolButton { icon: "add"; text: "+ Motion Layer"; clicked => { root.add-layer(); } }
+                ToolButton { icon: "redo"; text: "▶ Play"; clicked => { root.play-pause(); } }
+            }
+        }
+
+        // Workspace
+        VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 0px;
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.palette().canvas;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        width: 480px;
+                        height: 270px;
+                        background: Theme.palette().surface;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+
+                        VerticalLayout {
+                            alignment: center;
+
+                            Text {
+                                text: root.comp-name;
+                                color: Theme.palette().ink;
+                                font-size: Theme.tokens.typography.heading;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: root.timecode-text;
+                                color: Theme.palette().accent;
+                                font-size: Theme.tokens.typography.body;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Timeline Track Area
+            Rectangle {
+                height: 160px;
+                background: Theme.palette().surface;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 6px;
+
+                    Text {
+                        text: "TIMELINE TRACKS";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                    }
+
+                    Rectangle {
+                        height: 36px;
+                        background: Theme.palette().surface-sunken;
+                        border-radius: 4px;
+
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+
+                            Text {
+                                text: "Layer 1: Animated Title (Text)";
+                                color: Theme.palette().ink;
+                                font-size: Theme.tokens.typography.body;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        StatusBar {
+            status-left: root.status-left;
+            status-right: root.status-right;
+        }
+    }
+}

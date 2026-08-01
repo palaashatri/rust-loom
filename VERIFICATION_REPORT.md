@@ -1,6 +1,6 @@
 # Loom Verification Report
 
-Generated: 2026-08-01T03:56:11Z by scripts/generate-status-report.sh
+Generated: 2026-08-01T04:42:38Z by scripts/generate-status-report.sh
 
 > Stub: extend with CI evidence and per-feature verification as the suite matures.
 
@@ -8,21 +8,21 @@ Status classes: COMPLETE | FUNCTIONAL_WITH_LIMITATIONS | EXPERIMENTAL | SCAFFOLD
 
 | repo | exists | cargo | builds | tests-pass | status keywords in TASKS.md | missing |
 |------|--------|-------|--------|------------|------------------------------|---------|
-| loom-bootstrap | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-core | yes | yes | yes | yes | — | no-TASKS.md |
-| loom-design-bible | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-encode | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-motion | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-photo | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-plugin-sdk | yes | yes | yes | yes | BLOCKED COMPLETE NOT_STARTED |none |
-| loom-present | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-samples | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-sheets | yes | yes | yes | yes | — | no-TASKS.md |
-| loom-spec | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-studio | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-video | yes | no | no | no | — | no-cargo no-TASKS.md |
-| loom-vision | yes | yes | yes | yes | BLOCKED COMPLETE NOT_STARTED |none |
-| loom-writer | yes | yes | yes | yes | — | no-TASKS.md |
+| loom-bootstrap | yes | no | no | no | — | no-cargo no-TASKS.md no-.git |
+| loom-core | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-design-bible | yes | no | no | no | — | no-cargo no-TASKS.md no-.git |
+| loom-encode | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-motion | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-photo | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-plugin-sdk | yes | yes | yes | yes | BLOCKED COMPLETE NOT_STARTED | no-.git |
+| loom-present | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-samples | yes | no | no | no | — | no-cargo no-TASKS.md no-.git |
+| loom-sheets | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-spec | yes | no | no | no | — | no-cargo no-TASKS.md no-.git |
+| loom-studio | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-video | yes | yes | yes | yes | — | no-TASKS.md no-.git |
+| loom-vision | yes | yes | yes | yes | BLOCKED COMPLETE NOT_STARTED | no-.git |
+| loom-writer | yes | yes | yes | yes | — | no-TASKS.md no-.git |
 
 ## Summary
 
