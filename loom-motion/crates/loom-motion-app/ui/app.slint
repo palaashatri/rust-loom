@@ -12,6 +12,8 @@ export component MotionApp inherits Window {
     in property <string> comp-name: "Untitled Composition";
     in property <string> timecode-text: "00:00:00:00 (60 fps)";
     in property <[string]> layer-labels: [];
+    in property <int> active-layer-index: 0;
+    in property <string> selected-layer-text: "Selected: Animated Title";
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -20,6 +22,7 @@ export component MotionApp inherits Window {
     callback save-comp;
     callback add-layer;
     callback play-pause;
+    callback select-layer(int);
 
     VerticalLayout {
         spacing: 0px;
@@ -128,10 +131,22 @@ export component MotionApp inherits Window {
                         color: Theme.palette().ink-secondary;
                     }
 
-                    for label in root.layer-labels : Rectangle {
+                    Text {
+                        text: root.selected-layer-text;
+                        color: Theme.palette().accent;
+                        font-size: Theme.tokens.typography.caption;
+                    }
+
+                    for label[idx] in root.layer-labels : Rectangle {
                         height: 36px;
-                        background: Theme.palette().surface-sunken;
+                        background: idx == root.active-layer-index
+                            ? Theme.palette().selection-soft
+                            : Theme.palette().surface-sunken;
                         border-radius: 4px;
+                        border-width: 1px;
+                        border-color: idx == root.active-layer-index
+                            ? Theme.palette().accent
+                            : transparent;
 
                         HorizontalLayout {
                             padding-left: 8px;
@@ -144,6 +159,11 @@ export component MotionApp inherits Window {
                                 vertical-alignment: center;
                             }
                         }
+                        touch := TouchArea {
+                            clicked => { root.select-layer(idx); }
+                        }
+                        accessible-role: button;
+                        accessible-label: "Select motion layer " + label;
                     }
                 }
             }

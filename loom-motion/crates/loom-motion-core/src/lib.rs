@@ -70,6 +70,8 @@ pub struct CompositionDocument {
     pub frame_rate: f32,
     pub duration_secs: f32,
     pub layers: Vec<MotionLayer>,
+    #[serde(default)]
+    pub active_layer_index: usize,
 }
 
 impl CompositionDocument {
@@ -82,6 +84,7 @@ impl CompositionDocument {
             frame_rate: 60.0,
             duration_secs: 10.0,
             layers: Vec::new(),
+            active_layer_index: 0,
         };
         let mut title_layer = MotionLayer::new("layer-title", "Animated Title", "Text");
         title_layer.add_keyframe("opacity", 0.0, 0.0);
@@ -100,6 +103,14 @@ impl CompositionDocument {
 
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
+    }
+
+    pub fn select_layer(&mut self, index: usize) -> bool {
+        if index >= self.layers.len() {
+            return false;
+        }
+        self.active_layer_index = index;
+        true
     }
 }
 
@@ -163,6 +174,15 @@ mod tests {
         layer.add_keyframe("x", 0.0, 100.0);
         layer.add_keyframe("x", 2.0, 500.0);
         assert_eq!(layer.position_x_keys.len(), 2);
+    }
+
+    #[test]
+    fn test_select_layer_rejects_invalid_index() {
+        let mut doc = CompositionDocument::new("comp-1", "Logo Intro Animation");
+        doc.add_layer(MotionLayer::new("l2", "Background", "VectorShape"));
+        assert!(doc.select_layer(1));
+        assert!(!doc.select_layer(2));
+        assert_eq!(doc.active_layer_index, 1);
     }
 
     #[test]

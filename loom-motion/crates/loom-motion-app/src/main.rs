@@ -86,7 +86,17 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
         .map(|layer| SharedString::from(format!("{} ({})", layer.name, layer.layer_type)))
         .collect();
     app.set_layer_labels(ModelRc::new(VecModel::from(layer_labels)));
-    app.set_status_left(SharedString::from(format!("{} motion layers", doc.len())));
+    let selected = doc
+        .layers
+        .get(doc.active_layer_index)
+        .map(|layer| layer.name.as_str())
+        .unwrap_or("No layer selected");
+    app.set_active_layer_index(doc.active_layer_index as i32);
+    app.set_selected_layer_text(SharedString::from(format!("Selected: {selected}")));
+    app.set_status_left(SharedString::from(format!(
+        "{} motion layers • Selected: {selected}",
+        doc.len()
+    )));
     app.set_status_right("Offline".into());
 }
 
@@ -154,6 +164,22 @@ fn main() -> Result<(), String> {
                     "VectorShape",
                 ));
                 apply_motion(&app, &current);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_layer(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if current.select_layer(index as usize) {
+                    apply_motion(&app, &current);
+                }
             }
         });
     }

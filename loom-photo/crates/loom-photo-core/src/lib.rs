@@ -107,6 +107,14 @@ impl PhotoDocument {
     pub fn is_empty(&self) -> bool {
         self.layers.is_empty()
     }
+
+    pub fn select_layer(&mut self, index: usize) -> bool {
+        if index >= self.layers.len() {
+            return false;
+        }
+        self.active_layer_index = index;
+        true
+    }
 }
 
 pub fn save_photo(doc: &PhotoDocument) -> Result<Vec<u8>, String> {
@@ -175,6 +183,15 @@ mod tests {
         ));
         assert_eq!(doc.len(), 2);
         assert_eq!(doc.layers[1].kind, LayerKind::Adjustment);
+    }
+
+    #[test]
+    fn test_select_layer_rejects_invalid_index() {
+        let mut doc = PhotoDocument::new("photo-1", "Portrait Retouch", 1920, 1080);
+        doc.add_layer(Layer::new_pixel("layer-2", "Foreground"));
+        assert!(doc.select_layer(0));
+        assert!(!doc.select_layer(2));
+        assert_eq!(doc.active_layer_index, 0);
     }
 
     #[test]

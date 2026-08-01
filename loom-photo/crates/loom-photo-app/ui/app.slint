@@ -12,6 +12,8 @@ export component PhotoApp inherits Window {
     in property <string> project-name: "Untitled Image";
     in property <string> dimensions-text: "3840 x 2160 • 300 DPI";
     in property <[string]> layer-labels: [];
+    in property <int> active-layer-index: 0;
+    in property <string> selected-layer-text: "Selected: Background";
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -21,6 +23,7 @@ export component PhotoApp inherits Window {
     callback add-layer;
     callback add-adjustment;
     callback export-image;
+    callback select-layer(int);
 
     VerticalLayout {
         spacing: 0px;
@@ -133,10 +136,22 @@ export component PhotoApp inherits Window {
                         color: Theme.palette().ink-secondary;
                     }
 
-                    for label in root.layer-labels : Rectangle {
+                    Text {
+                        text: root.selected-layer-text;
+                        color: Theme.palette().accent;
+                        font-size: Theme.tokens.typography.caption;
+                    }
+
+                    for label[idx] in root.layer-labels : Rectangle {
                         height: 40px;
-                        background: Theme.palette().surface-sunken;
+                        background: idx == root.active-layer-index
+                            ? Theme.palette().selection-soft
+                            : Theme.palette().surface-sunken;
                         border-radius: 4px;
+                        border-width: 1px;
+                        border-color: idx == root.active-layer-index
+                            ? Theme.palette().accent
+                            : transparent;
 
                         HorizontalLayout {
                             padding-left: 8px;
@@ -149,6 +164,11 @@ export component PhotoApp inherits Window {
                                 vertical-alignment: center;
                             }
                         }
+                        touch := TouchArea {
+                            clicked => { root.select-layer(idx); }
+                        }
+                        accessible-role: button;
+                        accessible-label: "Select layer " + label;
                     }
 
                 }
