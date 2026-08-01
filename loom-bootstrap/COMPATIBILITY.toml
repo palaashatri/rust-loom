@@ -1,0 +1,95 @@
+# Loom suite compatibility manifest.
+# Owned by loom-bootstrap; it pins the cross-repository contract for toolchain,
+# shared libraries and repository status. Bump schema_version when keys change.
+
+schema_version = 1
+
+[rust]
+# Minimum supported Rust version, verified by scripts/env-check.sh.
+msrv = "1.80"
+edition = "2021"
+note = "All workspace packages declare rust-version = 1.80; upgrade requires an RFC and a full re-run of the suite gates."
+
+[slint]
+version = "1.17.1"
+note = "UI toolkit version pinned across the suite. Upgrades require a visual regression pass (scripts/visual-qa-all.sh)."
+
+[licenses]
+policy = "MIT OR Apache-2.0 for all original Loom code; dependency audit required before release"
+model_policy = "No bundled models with non-redistributable licenses; model packs are user-installed and carry manifest provenance"
+unknown_dependency = "BLOCKED" # a dependency whose license cannot be identified blocks release
+
+[repos.loom-bootstrap]
+status = "FUNCTIONAL_WITH_LIMITATIONS"
+required = true
+rev = "local" # path-pinned sibling during development; tagged versions before release
+
+[repos.loom-core]
+status = "FUNCTIONAL_WITH_LIMITATIONS"
+required = true
+rev = "local"
+
+[repos.loom-writer]
+status = "SCAFFOLDED"
+required = true
+rev = "local"
+
+[repos.loom-sheets]
+status = "SCAFFOLDED"
+required = true
+rev = "local"
+
+[repos.loom-present]
+status = "NOT_STARTED"
+required = true
+rev = "local"
+
+[repos.loom-photo]
+status = "NOT_STARTED"
+required = true
+rev = "local"
+
+[repos.loom-motion]
+status = "NOT_STARTED"
+required = true
+rev = "local"
+
+[repos.loom-video]
+status = "NOT_STARTED"
+required = true
+rev = "local"
+
+[repos.loom-studio]
+status = "NOT_STARTED"
+required = true
+rev = "local"
+
+[repos.loom-encode]
+status = "NOT_STARTED"
+required = true
+rev = "local"
+
+[repos.loom-vision]
+status = "SCAFFOLDED"
+required = true
+rev = "local"
+
+[repos.loom-plugin-sdk]
+status = "SCAFFOLDED"
+required = true
+rev = "local"
+
+[repos.loom-design-bible]
+status = "SCAFFOLDED"
+required = true
+rev = "local"
+
+[repos.loom-spec]
+status = "SCAFFOLDED"
+required = true
+rev = "local"
+
+[repos.loom-samples]
+status = "NOT_STARTED"
+required = false
+rev = "local"

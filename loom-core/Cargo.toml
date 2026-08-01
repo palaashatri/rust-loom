@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/loom-package",
+    "crates/loom-document",
+    "crates/loom-color",
+    "crates/loom-jobs",
+    "crates/loom-command",
+    "crates/loom-history",
+    "crates/loom-text",
+    "crates/loom-storage",
+    "crates/loom-test-support",
+    "crates/loom-pdf",
+    "crates/loom-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+debug = 1

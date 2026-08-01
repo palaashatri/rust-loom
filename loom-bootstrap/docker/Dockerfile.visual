@@ -1,0 +1,9 @@
+# Loom visual-QA image: CI image plus input automation and GL diagnostics.
+FROM loom-bootstrap-ci
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xdotool \
+        mesa-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/loom-bootstrap

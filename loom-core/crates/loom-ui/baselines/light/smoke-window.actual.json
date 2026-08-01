@@ -1,0 +1,11 @@
+{
+  "baseline": "/workspace/loom-core/crates/loom-ui/baselines/light/smoke-window.png",
+  "renderer": "software",
+  "report": {
+    "differing_ratio": 0.030915431678295135,
+    "max_abs_error": 227.0,
+    "mean_abs_error": 2.6077024936676025,
+    "size_mismatch": false
+  },
+  "timestamp": "1785556165"
+}

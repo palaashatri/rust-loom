@@ -1,0 +1,2 @@
+Demo plugin asset. This file is shipped inside the demo .loomplugin package
+to exercise safe asset extraction during install.

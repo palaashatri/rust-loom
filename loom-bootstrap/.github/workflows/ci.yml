@@ -1,0 +1,61 @@
+name: Loom CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    steps:
+      # In a real deployment each Loom repo is a separate repository and would
+      # use its own checkout step. In this monorepo workspace every repo lives
+      # under one parent directory, so a single checkout of that parent suffices
+      # for the scripts (they locate siblings relative to this repo).
+      - uses: actions/checkout@v4
+        with:
+          path: loom-suite
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loom-suite/loom-core
+            loom-suite/loom-writer
+            loom-suite/loom-sheets
+            loom-suite/loom-vision
+            loom-suite/loom-plugin-sdk
+
+      - name: Environment check
+        working-directory: loom-suite/loom-bootstrap
+        run: bash scripts/env-check.sh
+
+      - name: Format check
+        working-directory: loom-suite/loom-bootstrap
+        run: bash scripts/fmt-all.sh
+
+      - name: Clippy
+        working-directory: loom-suite/loom-bootstrap
+        run: bash scripts/clippy-all.sh
+
+      - name: Tests
+        working-directory: loom-suite/loom-bootstrap
+        run: bash scripts/test-all.sh
+
+      - name: Release build
+        working-directory: loom-suite/loom-bootstrap
+        run: bash scripts/build-all.sh
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: loom-suite/loom-bootstrap/.work/*.log
+          retention-days: 14

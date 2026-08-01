@@ -1,0 +1,258 @@
+# Loom Design Tokens — canonical source of truth
+#
+# Single source for every design value in the Loom suite. DESIGN_TOKENS.md
+# and THEMING.md mirror this file exactly; a token generator (loom-core)
+# emits Slint constants from it. The TOML wins on any conflict.
+#
+# Conventions:
+#   * Name format: category-role-scale (see docs/adrs/ADR-0001-design-tokens.md).
+#   * Palette tokens vary by theme; all other tokens are theme-independent.
+#   * Order is deterministic: categories in the order below, values sorted
+#     ascending. Do not reorder.
+#   * Colors are sRGB hex, the canonical values for the software renderer.
+
+format-version = "1.0.0"
+
+[meta]
+name = "loom-design-tokens"
+version = "1.0.0"
+owner = "design-system-lead"
+generated-by = "loom-design-bible"
+reference = "DESIGN_TOKENS.md, THEMING.md"
+
+# ============================================================================
+# 1. Palette
+# ============================================================================
+
+# Light theme — default. Warm neutrals; terracotta accent.
+[palette.light]
+canvas          = "#FAF9F7"  # window and canvas ground
+surface         = "#FFFFFF"  # raised: panels, dialogs, controls, cards
+surface-sunken  = "#F1EFEA"  # wells, inputs, media beds, disabled regions
+ink             = "#26221C"  # primary text (15.0:1 on canvas)
+ink-secondary   = "#5C564C"  # secondary text, captions (6.9:1 on canvas)
+accent          = "#B4552D"  # warm terracotta: selection, focus, primary actions
+accent-ink      = "#FFFFFF"  # text/icons on accent fills (4.9:1 on accent)
+accent-hover    = "#C9643A"  # accent hover/pressed state
+success         = "#3E6B4F"  # success signals (6.1:1 on white)
+warning         = "#A8681E"  # warning signals (4.5:1 on white)
+danger          = "#A43424"  # errors, destructive actions (6.8:1 on white)
+info            = "#3B5E7A"  # informational signals (6.9:1 on white)
+
+# Dark theme — low-light and media review.
+[palette.dark]
+canvas          = "#201D19"
+surface         = "#2A2621"
+surface-sunken  = "#171512"
+ink             = "#F2EFE9"  # (14.6:1 on canvas)
+ink-secondary   = "#B9B2A6"  # (8.0:1 on canvas)
+accent          = "#D97A4A"  # lightened for dark ground
+accent-ink      = "#1F1710"  # derived: >= 4.5:1 on accent (5.7:1)
+accent-hover    = "#E88B5E"  # derived: hover step of accent
+success         = "#7FA98C"
+warning         = "#D5A14A"
+danger          = "#E0654F"
+info            = "#7FA3C4"
+
+# High-contrast theme — accessibility: true black/white, doubled-contrast
+# accents (all >= 7:1 against pure black). Surfaces collapse to black;
+# separation is carried by white borders and text tiers.
+[palette.high-contrast]
+canvas          = "#000000"
+surface         = "#000000"
+surface-sunken  = "#000000"
+ink             = "#FFFFFF"
+ink-secondary   = "#E6E6E6"  # tertiary labels only (16.8:1)
+accent          = "#FF8A3C"  # (8.95:1 on black; 2.35:1 on white — use on black)
+accent-ink      = "#000000"
+accent-hover    = "#FFA266"
+success         = "#4ADE80"
+warning         = "#FFC24D"
+danger          = "#FF6B5E"
+info            = "#6CB2FF"
+
+# ============================================================================
+# 1b. Semantic token names (category-role-scale)
+# ============================================================================
+# Maps every semantic token name to its value source. The generator and CI
+# resolve names through this table; DESIGN_TOKENS.md and THEMING.md must
+# reference only names listed here. "palette.{theme}.<role>" resolves to the
+# same role key in each of palette.light, palette.dark, palette.high-contrast.
+[semantic]
+color-surface-canvas  = { source = "palette.{theme}.canvas" }
+color-surface-raised  = { source = "palette.{theme}.surface" }
+color-surface-sunken  = { source = "palette.{theme}.surface-sunken" }
+color-ink-primary     = { source = "palette.{theme}.ink" }
+color-ink-secondary   = { source = "palette.{theme}.ink-secondary" }
+color-accent-default  = { source = "palette.{theme}.accent" }
+color-accent-ink      = { source = "palette.{theme}.accent-ink" }
+color-accent-hover    = { source = "palette.{theme}.accent-hover" }
+color-status-success  = { source = "palette.{theme}.success" }
+color-status-warning  = { source = "palette.{theme}.warning" }
+color-status-danger   = { source = "palette.{theme}.danger" }
+color-status-info     = { source = "palette.{theme}.info" }
+space-2               = { source = "spacing.scale[0]" }
+space-4               = { source = "spacing.scale[1]" }
+space-6               = { source = "spacing.scale[2]" }
+space-8               = { source = "spacing.scale[3]" }
+space-12              = { source = "spacing.scale[4]" }
+space-16              = { source = "spacing.scale[5]" }
+space-20              = { source = "spacing.scale[6]" }
+space-24              = { source = "spacing.scale[7]" }
+space-32              = { source = "spacing.scale[8]" }
+space-40              = { source = "spacing.scale[9]" }
+space-48              = { source = "spacing.scale[10]" }
+space-64              = { source = "spacing.scale[11]" }
+radius-2              = { source = "radius.scale[0]" }
+radius-4              = { source = "radius.scale[1]" }
+radius-6              = { source = "radius.scale[2]" }
+radius-8              = { source = "radius.scale[3]" }
+radius-12             = { source = "radius.scale[4]" }
+border-width-hairline = { source = "border.hairline" }
+border-width-default  = { source = "border.default" }
+border-width-strong   = { source = "border.strong" }
+type-size-11          = { source = "type.size.\"11\"" }
+type-size-12          = { source = "type.size.\"12\"" }
+type-size-13          = { source = "type.size.\"13\"" }
+type-size-14          = { source = "type.size.\"14\"" }
+type-size-16          = { source = "type.size.\"16\"" }
+type-size-20          = { source = "type.size.\"20\"" }
+type-size-24          = { source = "type.size.\"24\"" }
+type-size-32          = { source = "type.size.\"32\"" }
+type-size-40          = { source = "type.size.\"40\"" }
+type-leading-compact  = { source = "type.leading.compact" }
+type-leading-body     = { source = "type.leading.body" }
+type-leading-relaxed  = { source = "type.leading.relaxed" }
+type-weight-regular   = { source = "type.weight.regular" }
+type-weight-medium    = { source = "type.weight.medium" }
+type-weight-semibold  = { source = "type.weight.semibold" }
+type-weight-bold      = { source = "type.weight.bold" }
+motion-duration-instant    = { source = "motion.duration.instant" }
+motion-duration-fast       = { source = "motion.duration.fast" }
+motion-duration-standard   = { source = "motion.duration.standard" }
+motion-duration-deliberate = { source = "motion.duration.deliberate" }
+motion-duration-slow       = { source = "motion.duration.slow" }
+motion-easing-out-quad = { source = "motion.easing.out-quad" }
+motion-easing-in-out   = { source = "motion.easing.in-out" }
+motion-easing-out-back = { source = "motion.easing.out-back" }
+shadow-none            = { source = "shadow.none" }
+shadow-popover         = { source = "shadow.popover" }
+icon-viewbox-20        = { source = "icon.viewbox" }
+icon-stroke-width-15   = { source = "icon.stroke-width", note = "1.5px encoded as 15 (x10)" }
+icon-corner-radius-2   = { source = "icon.corner-radius" }
+
+# ============================================================================
+# 2. Spacing scale (px) — the only allowed spacing values
+# ============================================================================
+[spacing]
+units = "px"
+scale = [2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+
+# ============================================================================
+# 3. Corner radii (px)
+# ============================================================================
+[radius]
+units = "px"
+scale = [2, 4, 6, 8, 12]
+
+# ============================================================================
+# 4. Border widths (px)
+# ============================================================================
+[border]
+units = "px"
+hairline = 1   # dividers inside panels
+default  = 1   # control outlines, panel edges
+strong   = 2   # focus rings (equals space-2), emphasized grouping
+
+# ============================================================================
+# 5. Type
+# ============================================================================
+[type.size]
+units = "px"
+"11" = 11   # caption
+"12" = 12   # small labels
+"13" = 13   # ui labels
+"14" = 14   # body (default)
+"16" = 16   # body-large
+"20" = 20   # subtitle
+"24" = 24   # heading
+"32" = 32   # display-1
+"40" = 40   # display-2
+
+[type.leading]  # ratio of line height to font size
+compact = 1.4   # headings, dense UI
+body    = 1.45  # default body
+relaxed = 1.5   # long-form text, small sizes
+
+[type.weight]
+regular = 400
+medium  = 500
+semibold = 600
+bold    = 700
+
+[type.family]
+ui    = "Noto Sans"                        # default sans for all chrome
+serif = "Noto Serif"                       # document content option
+mono  = "Noto Sans Mono"                   # code, logs, timecode where required
+fallback = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans KR",
+            "Noto Sans Arabic", "Noto Sans Devanagari", "DejaVu Sans",
+            "sans-serif"]
+
+# ============================================================================
+# 6. Motion
+# ============================================================================
+[motion.duration]
+units = "ms"
+instant    = 0     # hover onset, press, focus change
+fast       = 120   # tiny state changes, reduced-motion opacity cap
+standard   = 200   # default for all panel/selection/state transitions
+deliberate = 320   # larger surfaces: sidebar, dialog, reorder settle
+slow       = 500   # emphasis only; never per-frame UI
+
+[motion.easing]    # cubic-bezier control points (x1, y1, x2, y2)
+out-quad = [0.33, 1.00, 0.68, 1.00]   # default entrance/state change
+in-out   = [0.65, 0.00, 0.35, 1.00]   # value transitions, cross-fades
+out-back = [0.34, 1.56, 0.64, 1.00]   # spring-ish arrival, sparingly
+
+# ============================================================================
+# 7. Shadows
+# ============================================================================
+[shadow]
+# Flat by principle: depth via color steps. shadow-none is the default for
+# every surface; shadow-popover is the ONLY allowed shadow.
+none       = "none"
+popover    = "0 1px 3px rgba(38, 34, 28, 0.12)"   # popovers, menus, tooltips
+
+# ============================================================================
+# 8. Icon grid
+# ============================================================================
+[icon]
+units = "px"
+viewbox      = 20    # all icons authored on the 20px grid
+stroke-width = 1.5   # uniform stroke weight (token: icon-stroke-width-15)
+corner-radius = 2    # corner radius for shapes with corners
+align-guides = [4, 8, 12, 16]  # optical alignment guides at 20/40/60/80% marks
+
+# ============================================================================
+# 9. Data visualization
+# ============================================================================
+[data-viz]
+# Categorical series palette; valid in light and dark. Max 6 series, then
+# group. Never pair with color-status-* in the same chart; disambiguate by
+# pattern/label, never color alone.
+categorical = ["#B4552D",  # terracotta (suite accent; series 1)
+               "#2E7D6E",  # teal
+               "#C98A2E",  # ochre (>= 3:1 as large marks only)
+               "#4A6B8A",  # slate
+               "#7A5C8A",  # plum
+               "#6B8A4A"]  # moss
+
+# ============================================================================
+# 10. Accessibility floors (informational; enforced by CI)
+# ============================================================================
+[a11y]
+contrast-body   = 4.5   # body text, captions (WCAG 2.x ratio)
+contrast-large  = 3.0   # large text (>= 24px or >= 18.66px bold)
+contrast-ui     = 3.0   # UI components, iconographic indicators
+target-minimum  = 44    # minimum pointer target, logical px
+text-scale      = [1.0, 1.25, 1.5]

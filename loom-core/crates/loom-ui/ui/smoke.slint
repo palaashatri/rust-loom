@@ -1,0 +1,167 @@
+// Loom UI smoke fixture: one window exercising every shared component,
+// used by the crate visual test and as the integration reference for
+// applications. Not part of the library API.
+//
+// The window chrome is built inline (mirroring LoomWindow) because a
+// component that inherits Window cannot be nested inside another window.
+//
+// Layout notes (verified empirically against Slint 1.17.1):
+// * Toolbar/bottom rows use `height: parent.height` plus
+//   `cross-axis-alignment: center` on the inner layout; `alignment` on the
+//   main axis forces the inner layout to fill its parent and centers the
+//   whole group, which breaks the stretch spacer.
+// * A stretch row must not wrap its children in a plain Rectangle: a plain
+//   item's default `height: 100%` resolves circularly inside a layout and
+//   pins the row to its preferred height. Place container components
+//   directly in the row and declare `vertical-stretch: 1` on every child
+//   that should share the cross-axis space.
+// * A stretched child (component, Rectangle, or a nested layout such as
+//   GridLayout) is capped at its preferred size unless it also declares a
+//   large explicit `max-width` / `max-height` (10000px is the house
+//   convention). Without it the layout never grows into the shared space.
+
+import { ToolButton, IconButton, PrimaryButton, SearchField, SegmentedControl, Field, EmptyState, Panel, InspectorSection, StatusBar } from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export component SmokeWindow inherits Window {
+    title: "Loom UI Smoke";
+    width: 900px;
+    height: 600px;
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        Rectangle {
+            min-height: 41px;
+            max-height: 41px;
+            background: Theme.palette().surface;
+
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 6px;
+                    padding-right: 12px;
+                    Icon {
+                        icon: "layers";
+                        size: 18px;
+                        tint: Theme.palette().accent;
+                        y: (parent.height - 18px) / 2;
+                    }
+                    Text {
+                        text: "Loom Writer";
+                        font-size: Theme.tokens.typography.title;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+            }
+        }
+
+        Rectangle {
+            min-height: 40px;
+            max-height: 40px;
+            background: Theme.palette().surface-sunken;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 6px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                ToolButton { icon: "new"; text: "New"; }
+                ToolButton { icon: "open"; text: "Open"; }
+                ToolButton { icon: "save"; text: "Save"; }
+                ToolButton { icon: "undo"; }
+                ToolButton { icon: "redo"; }
+
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                SearchField { placeholder: "Search document"; }
+                IconButton { icon: "settings"; label: "Settings"; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+            padding: 0px;
+            vertical-stretch: 1;
+
+            Panel {
+                width: 240px;
+                vertical-stretch: 1;
+                header: "Inspector";
+
+                VerticalLayout {
+                    spacing: 8px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+
+                    InspectorSection { title: "Character"; }
+                    Field { label: "Font size"; value: "12 pt"; }
+                    SegmentedControl { items: ["Normal", "Bold", "Italic"]; }
+                    InspectorSection { title: "Paragraph"; }
+                    Field { label: "Spacing"; value: "1.5 lines"; }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                background: Theme.palette().canvas;
+
+                EmptyState {
+                    width: 100%;
+                    height: 100%;
+                    icon: "document";
+                    title: "No document open";
+                    description: "Create a new document or open an existing one to start writing.";
+                    action-text: "New Document";
+                }
+            }
+        }
+
+        Rectangle {
+            min-height: 32px;
+            max-height: 32px;
+            background: Theme.palette().surface;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 6px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                PrimaryButton { text: "Export PDF"; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                Text {
+                    text: "Saved automatically";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-disabled;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        StatusBar {
+            status-left: "Paragraph 12 of 34";
+            status-right: "Zoom 100%";
+        }
+    }
+}

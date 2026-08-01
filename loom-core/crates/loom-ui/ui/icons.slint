@@ -1,0 +1,126 @@
+// Loom icon family — original minimal line icons.
+//
+// All icons are drawn on a 20x20 logical grid with a 1.5px stroke and
+// round caps/joins, matching loom-design-bible/ICONOGRAPHY.md. They are
+// original geometric constructions, not derived from any proprietary set.
+// The `commands` property takes SVG path data (parsed by the Slint
+// compiler), keeping each icon deterministic and serializable.
+
+import { Theme } from "theme.slint";
+
+export component Icon inherits Rectangle {
+    in property <string> icon: "generic";
+    in property <color> tint: Theme.palette().ink;
+    in property <length> size: 20px;
+    width: size;
+    height: size;
+    background: transparent;
+
+    Path {
+        x: 0px;
+        y: 0px;
+        width: 20px;
+        height: 20px;
+        stroke: parent.tint;
+        stroke-width: 1.5px;
+        fill: transparent;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        commands: { if (parent.icon == "document") { "M4.5 2.5 L12.5 2.5 L15.5 5.5 L15.5 17.5 L4.5 17.5 Z"
+            }
+            else if (parent.icon == "folder") { "M2.5 5.5 L8.5 5.5 L10 7.5 L17.5 7.5 L17.5 15.5 L2.5 15.5 Z"
+            }
+            else if (parent.icon == "save") { "M4.5 2.5 L13.5 2.5 L17.5 6.5 L17.5 17.5 L2.5 17.5 L2.5 2.5 Z M6 2.5 L6 7.5 L14 7.5 M5.5 17.5 L5.5 11.5 L14.5 11.5 L14.5 17.5"
+            }
+            else if (parent.icon == "open") { "M2.5 6.5 L7 6.5 L8.5 8.5 L17.5 8.5 L15.5 15.5 L4.5 15.5 Z"
+            }
+            else if (parent.icon == "new") { "M10 3 L10 17 M3 10 L17 10"
+            }
+            else if (parent.icon == "undo") { "M14.5 13 C13 16 8.5 16.5 6 14 L3 11 M3 11 L6 11 M3 11 L3 8"
+            }
+            else if (parent.icon == "redo") { "M5.5 13 C7 16 11.5 16.5 14 14 L17 11 M17 11 L14 11 M17 11 L17 8"
+            }
+            else if (parent.icon == "play") { "M6.5 4 L15.5 10 L6.5 16 Z"
+            }
+            else if (parent.icon == "pause") { "M6.5 3.5 L6.5 16.5 M13.5 3.5 L13.5 16.5"
+            }
+            else if (parent.icon == "stop") { "M6 4.5 L14 4.5 L14 15.5 L6 15.5 Z"
+            }
+            else if (parent.icon == "trash") { "M4 5.5 L16 5.5 M8 2.5 L12 2.5 M6.5 5.5 L7 16.5 L13 16.5 L13.5 5.5"
+            }
+            else if (parent.icon == "plus") { "M10 4 L10 16 M4 10 L16 10"
+            }
+            else if (parent.icon == "minus") { "M4 10 L16 10"
+            }
+            else if (parent.icon == "search") { "M8.5 3.5 A5 5 0 1 1 8.5 13.5 A5 5 0 1 1 8.5 3.5 M13 13 L17.5 17.5"
+            }
+            else if (parent.icon == "settings") { "M3 7 L17 7 M3 13 L17 13 M8 5.2 A1.8 1.8 0 1 1 8 8.8 A1.8 1.8 0 1 1 8 5.2 M13.5 11.2 A1.8 1.8 0 1 1 13.5 14.8 A1.8 1.8 0 1 1 13.5 11.2"
+            }
+            else if (parent.icon == "export") { "M10 3 L10 13 M6.5 6.5 L10 3 L13.5 6.5 M4 12 L4 16.5 L16 16.5 L16 12"
+            }
+            else if (parent.icon == "import") { "M10 3 L10 13 M6.5 9.5 L10 13 L13.5 9.5 M4 15 L4 17.5 L16 17.5 L16 15"
+            }
+            else if (parent.icon == "grid") { "M3.5 3.5 L8.5 3.5 L8.5 8.5 L3.5 8.5 Z M11.5 3.5 L16.5 3.5 L16.5 8.5 L11.5 8.5 Z M3.5 11.5 L8.5 11.5 L8.5 16.5 L3.5 16.5 Z M11.5 11.5 L16.5 11.5 L16.5 16.5 L11.5 16.5 Z"
+            }
+            else if (parent.icon == "layers") { "M10 3 L17 7.5 L10 12 L3 7.5 Z M3 11 L17 11 M3 14.5 L17 14.5"
+            }
+            else if (parent.icon == "image") { "M3 4 L17 4 L17 16 L3 16 Z M3 13 L8 8.5 L12 11.5 L17 7 M8.5 6.3 A1.2 1.2 0 1 1 8.5 8.7 A1.2 1.2 0 1 1 8.5 6.3"
+            }
+            else if (parent.icon == "video") { "M3 5 L17 5 L17 15 L3 15 Z M8.5 7.5 L13.5 10 L8.5 12.5 Z"
+            }
+            else if (parent.icon == "audio") { "M8 15.5 L8 5 L15 3.5 L15 14 M6.5 13.5 A2 2 0 1 1 6.5 17.5 A2 2 0 1 1 6.5 13.5 M13.5 12 A2 2 0 1 1 13.5 16 A2 2 0 1 1 13.5 12"
+            }
+            else if (parent.icon == "table") { "M3 3 L17 3 L17 17 L3 17 Z M3 8.5 L17 8.5 M3 14 L17 14 M10 3 L10 17"
+            }
+            else if (parent.icon == "slide") { "M2.5 5 L17.5 5 L17.5 15 L2.5 15 Z M7.5 5 L7.5 15"
+            }
+            else if (parent.icon == "timeline") { "M3 4 L3 16 M6.5 8 L9.5 8 M6.5 12 L13.5 12 M14.5 5 L14.5 15"
+            }
+            else if (parent.icon == "waveform") { "M3 10 L6 10 L7 5.5 L9.5 14.5 L12 6.5 L13.5 10 L17 10"
+            }
+            else if (parent.icon == "check") { "M4 10.5 L8.5 15 L16 5"
+            }
+            else if (parent.icon == "chevron-left") { "M12 4 L7 10 L12 16"
+            }
+            else if (parent.icon == "chevron-right") { "M8 4 L13 10 L8 16"
+            }
+            else if (parent.icon == "close") { "M4.5 4.5 L15.5 15.5 M15.5 4.5 L4.5 15.5"
+            }
+            else if (parent.icon == "zoom-in") { "M9 3.5 A5 5 0 1 1 9 13.5 A5 5 0 1 1 9 3.5 M13.5 13 L17.5 17 M9 6 L9 11 M6.5 8.5 L11.5 8.5"
+            }
+            else if (parent.icon == "cursor") { "M6 3.5 L6 14 L9 11.5 L11 16.5 L13 15.5 L11 11 L14.5 11 Z"
+            }
+            else if (parent.icon == "text") { "M10 3 L10 17 M5 4 L15 4 M5 17 L15 17"
+            }
+            else if (parent.icon == "brush") { "M4 16.5 C6.5 14 11 8 14 5 L15.5 3.5 L16.5 4.5 L15 6 C11 9.5 6.5 13.5 4 16.5"
+            }
+            else if (parent.icon == "camera") { "M2.5 9 L6 9 L8 6 L12 6 L14 9 L17.5 9 L17.5 16 L2.5 16 Z M10 8 A3 3 0 1 1 10 14 A3 3 0 1 1 10 8"
+            }
+            else if (parent.icon == "scissors") { "M6 3.5 A2.5 2.5 0 1 1 6 8.5 A2.5 2.5 0 1 1 6 3.5 M6 11.5 A2.5 2.5 0 1 1 6 16.5 A2.5 2.5 0 1 1 6 11.5 M8 7.5 L16 15 M8 12.5 L16 5"
+            }
+            else if (parent.icon == "clock") { "M10 3 A7 7 0 1 1 10 17 A7 7 0 1 1 10 3 M10 6.5 L10 10.5 L13 12"
+            }
+            else if (parent.icon == "keyboard") { "M2.5 7 L17.5 7 L17.5 15 L2.5 15 Z M7 12.8 L13 12.8 M4.8 10.2 L6.2 10.2 M8.5 10.2 L9.9 10.2 M12.2 10.2 L13.6 10.2"
+            }
+            else if (parent.icon == "eye") { "M2.5 10 C5.5 6 14.5 6 17.5 10 C14.5 14 5.5 14 2.5 10 Z M10 7.5 A2.5 2.5 0 1 1 10 12.5 A2.5 2.5 0 1 1 10 7.5"
+            }
+            else if (parent.icon == "mask") { "M10 3.5 A6.5 6.5 0 1 1 10 16.5 A6.5 6.5 0 1 1 10 3.5 M10 8 A2 2 0 1 1 10 12 A2 2 0 1 1 10 8"
+            }
+            else if (parent.icon == "wand") { "M4 16.5 L13.5 7 M15 3.5 L15 6 M12.5 3.5 L12.5 6 M10 5 L11 6 M15 8 L16 9 M17.5 5 L16.5 6"
+            }
+            else if (parent.icon == "film") { "M2.5 4 L17.5 4 L17.5 16 L2.5 16 Z M5.5 4 L5.5 16 M14.5 4 L14.5 16 M6.5 7.4 L6.5 7 M6.5 13.4 L6.5 13 M13.5 7.4 L13.5 7 M13.5 13.4 L13.5 13"
+            }
+            else if (parent.icon == "link") { "M8.5 13 C6 15.5 3.5 14.5 3.5 11.5 C3.5 8.5 6 7.5 8.5 8 M11.5 7 C14 4.5 16.5 5.5 16.5 8.5 C16.5 11.5 14 12.5 11.5 12"
+            }
+            else if (parent.icon == "terminal") { "M2.5 4.5 L17.5 4.5 L17.5 15.5 L2.5 15.5 Z M6 8 L9.5 10.5 L6 13"
+            }
+            else if (parent.icon == "package") { "M10 2.5 L17 5.5 L17 14.5 L10 17.5 L3 14.5 L3 5.5 Z M3 5.5 L10 8.5 L17 5.5 M10 8.5 L10 17.5"
+            }
+            else if (parent.icon == "scale") { "M10 3 L10 17 M4 17 L16 17 M4 3.5 L4 7 M16 3.5 L16 7 M2.5 7 L5.5 7 M14.5 7 L17.5 7"
+            }
+            else if (parent.icon == "waves") { "M3 10 L5.5 10 C6.5 4 8.5 16 10 9 C11.5 16 13.5 4 14.5 10 L17 10"
+            }
+            else { "M4 10 L16 10" }
+    };
+}
+}

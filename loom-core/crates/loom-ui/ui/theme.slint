@@ -1,0 +1,169 @@
+// Loom design tokens — semantic constants generated from the canonical
+// token file in loom-design-bible/tokens/loom.toml.
+//
+// Palette: light (default), dark, high-contrast. Hosts switch themes by
+// setting the `Theme.active-theme` global property from Rust, e.g.
+// `Theme::get(&window).set_active_theme("dark")`; every component reads
+// `Theme.palette()`, which resolves the active palette.
+
+struct Palette {
+    canvas: color,
+    surface: color,
+    surface-sunken: color,
+    ink: color,
+    ink-secondary: color,
+    ink-disabled: color,
+    accent: color,
+    accent-hover: color,
+    accent-ink: color,
+    success: color,
+    warning: color,
+    danger: color,
+    info: color,
+    border: color,
+    border-strong: color,
+    focus: color,
+    selection: color,
+    selection-soft: color,
+    danger-surface: color,
+}
+
+struct TypeScale {
+    caption: length,
+    body: length,
+    body-large: length,
+    title: length,
+    heading: length,
+    display: length,
+    display-large: length,
+}
+
+struct Spacing {
+    xs: length,
+    sm: length,
+    md: length,
+    lg: length,
+    xl: length,
+    xxl: length,
+    xxxl: length,
+    xxxxl: length,
+}
+
+struct Motion {
+    fast-ms: int,
+    standard-ms: int,
+    deliberate-ms: int,
+    ease-out-x1: float,
+    ease-out-y1: float,
+    ease-out-x2: float,
+    ease-out-y2: float,
+}
+
+struct ThemeTokens {
+    palette: Palette,
+    typography: TypeScale,
+    space: Spacing,
+    motion: Motion,
+    reduced-motion: bool,
+}
+
+// Light palette.
+export global Theme {
+    in-out property <ThemeTokens> tokens: {
+        palette: {
+            canvas: #faf9f7,
+            surface: #ffffff,
+            surface-sunken: #f1efea,
+            ink: #26221c,
+            ink-secondary: #5c564c,
+            ink-disabled: #8f887d,
+            accent: #b4552d,
+            accent-hover: #c9643a,
+            accent-ink: #ffffff,
+            success: #3e6b4f,
+            warning: #a8681e,
+            danger: #a43424,
+            info: #3b5e7a,
+            border: #e0dcd3,
+            border-strong: #c9c3b6,
+            focus: #b4552d,
+            selection: #b4552d,
+            selection-soft: #f3e3d8,
+            danger-surface: #f9e9e4,
+        },
+        typography: { caption: 11px, body: 13px, body-large: 14px, title: 16px, heading: 20px, display: 24px, display-large: 32px },
+        space: { xs: 2px, sm: 4px, md: 8px, lg: 12px, xl: 16px, xxl: 24px, xxxl: 32px, xxxxl: 48px },
+        motion: { fast-ms: 120, standard-ms: 200, deliberate-ms: 320, ease-out-x1: 0.33, ease-out-y1: 1.0, ease-out-x2: 0.68, ease-out-y2: 1.0 },
+        reduced-motion: false,
+    };
+
+    in-out property <string> active-theme: "light";
+
+    public pure function palette() -> Palette {
+        return active-theme == "dark" ? ThemeDark.tokens.palette
+            : active-theme == "high-contrast" ? ThemeHighContrast.tokens.palette
+            : tokens.palette;
+    }
+}
+
+// Dark palette (activated by the host when the user or system prefers dark).
+export global ThemeDark {
+    in-out property <ThemeTokens> tokens: {
+        palette: {
+            canvas: #201d19,
+            surface: #2a2621,
+            surface-sunken: #171512,
+            ink: #f2efe9,
+            ink-secondary: #b9b2a6,
+            ink-disabled: #7d766b,
+            accent: #d97a4a,
+            accent-hover: #e88b5e,
+            accent-ink: #1f1710,
+            success: #7fa98c,
+            warning: #d5a14a,
+            danger: #e0654f,
+            info: #7fa3c4,
+            border: #3a362f,
+            border-strong: #4d483e,
+            focus: #d97a4a,
+            selection: #d97a4a,
+            selection-soft: #46332a,
+            danger-surface: #4a2b26,
+        },
+        typography: { caption: 11px, body: 13px, body-large: 14px, title: 16px, heading: 20px, display: 24px, display-large: 32px },
+        space: { xs: 2px, sm: 4px, md: 8px, lg: 12px, xl: 16px, xxl: 24px, xxxl: 32px, xxxxl: 48px },
+        motion: { fast-ms: 120, standard-ms: 200, deliberate-ms: 320, ease-out-x1: 0.33, ease-out-y1: 1.0, ease-out-x2: 0.68, ease-out-y2: 1.0 },
+        reduced-motion: false,
+    };
+}
+
+// High-contrast palette.
+export global ThemeHighContrast {
+    in-out property <ThemeTokens> tokens: {
+        palette: {
+            canvas: #000000,
+            surface: #000000,
+            surface-sunken: #1a1a1a,
+            ink: #ffffff,
+            ink-secondary: #ffffff,
+            ink-disabled: #b0b0b0,
+            accent: #ffd54a,
+            accent-hover: #ffe082,
+            accent-ink: #000000,
+            success: #7cf27c,
+            warning: #ffb547,
+            danger: #ff6b5e,
+            info: #7cc7ff,
+            border: #ffffff,
+            border-strong: #ffffff,
+            focus: #ffd54a,
+            selection: #ffd54a,
+            selection-soft: #3a3a00,
+            danger-surface: #3a0d0a,
+        },
+        typography: { caption: 11px, body: 13px, body-large: 14px, title: 16px, heading: 20px, display: 24px, display-large: 32px },
+        space: { xs: 2px, sm: 4px, md: 8px, lg: 12px, xl: 16px, xxl: 24px, xxxl: 32px, xxxxl: 48px },
+        motion: { fast-ms: 120, standard-ms: 200, deliberate-ms: 320, ease-out-x1: 0.33, ease-out-y1: 1.0, ease-out-x2: 0.68, ease-out-y2: 1.0 },
+        reduced-motion: false,
+    };
+}

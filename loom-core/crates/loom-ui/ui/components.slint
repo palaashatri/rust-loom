@@ -1,0 +1,494 @@
+// Loom shared UI components — original Slint components built on the
+// Loom design tokens. All components are keyboard-accessible, expose
+// accessible labels, and avoid animation by default (hosts opt into
+// motion per the reduced-motion policy).
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+/// Standard application window chrome: title bar, optional status bar,
+/// and a host-provided content area (via `@children`).
+/// Bottom status bar showing non-color-coded state information.
+export component StatusBar inherits Rectangle {
+    in property <string> status-left: "";
+    in property <string> status-right: "";
+    min-height: 27px;
+    max-height: 27px;
+    background: Theme.palette().surface-sunken;
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        Rectangle {
+            height: 1px;
+            background: Theme.palette().border;
+        }
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 4px;
+        padding-right: 12px;
+        Text {
+            text: root.status-left;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-secondary;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.status-right;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-disabled;
+            vertical-alignment: center;
+        }
+    }
+    }
+}
+
+export component LoomWindow inherits Window {
+    in property <string> app-name: "Loom";
+    in property <string> status-left: "";
+    in property <string> status-right: "";
+    in property <bool> show-status-bar: true;
+    in property <string> theme-name: "light";
+
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        Rectangle {
+            min-height: 41px;
+            max-height: 41px;
+            background: Theme.palette().surface;
+            VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+            HorizontalLayout {
+            spacing: 8px;
+            padding-left: 6px;
+            padding-right: 12px;
+            Icon {
+                icon: "layers";
+                size: 18px;
+                tint: Theme.palette().accent;
+            }
+            Text {
+                text: root.app-name;
+                font-size: Theme.tokens.typography.title;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            }
+            Rectangle {
+                height: 1px;
+                background: Theme.palette().border;
+            }
+            }
+        }
+        @children
+        if root.show-status-bar : StatusBar {
+            status-left: root.status-left;
+            status-right: root.status-right;
+        }
+    }
+}
+
+/// Toolbar button with optional icon and text.
+export component ToolButton inherits Rectangle {
+    in property <string> text: "";
+    in property <string> icon: "";
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 28px;
+    min-width: 28px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: enabled ? (checked ? Theme.palette().accent : transparent) : transparent;
+    background: touch.pressed || checked ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-sunken : Theme.palette().surface;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    FocusScope {
+        key-pressed(event) => {
+            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        padding-left: 0px;
+        padding-right: 8px;
+        if root.icon != "" : Icon {
+            icon: root.icon;
+            size: 16px;
+            tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+        }
+        if root.text != "" : Text {
+            text: root.text;
+            font-size: Theme.tokens.typography.body;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+/// Icon-only square button with an accessible label.
+export component IconButton inherits Rectangle {
+    in property <string> icon: "generic";
+    in property <string> label: "";
+    in property <bool> enabled: true;
+    in property <bool> checked: false;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: enabled ? (checked ? Theme.palette().accent : transparent) : transparent;
+    background: touch.pressed || checked ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-sunken : Theme.palette().surface;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    FocusScope {
+        key-pressed(event) => {
+            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Icon {
+        icon: root.icon;
+        size: 16px;
+        tint: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+/// Primary action button (accent background).
+export component PrimaryButton inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 28px;
+    min-width: 64px;
+    border-radius: 6px;
+    background: root.enabled ? Theme.palette().accent : Theme.palette().border;
+    border-width: 1px;
+    border-color: transparent;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    FocusScope {
+        key-pressed(event) => {
+            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Text {
+        text: root.text;
+        font-size: Theme.tokens.typography.body;
+        font-weight: 600;
+        color: Theme.palette().accent-ink;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+/// A search-style text input with a magnifier icon.
+export component SearchField inherits Rectangle {
+    in property <string> placeholder: "Search";
+    in-out property <string> value: "";
+    callback edited(string);
+    height: 28px;
+    min-width: 160px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: Theme.palette().surface;
+
+    Icon {
+        x: 7px;
+        y: (root.height - 14px) / 2;
+        icon: "search";
+        size: 14px;
+        tint: Theme.palette().ink-disabled;
+    }
+    text-input := TextInput {
+        x: 26px;
+        y: 0px;
+        width: root.width - 32px;
+        height: root.height;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink;
+        text: root.value;
+        edited => {
+            root.value = text-input.text;
+            root.edited(text-input.text);
+        }
+    }
+    if root.value == "" : Text {
+        x: 26px;
+        y: 0px;
+        width: root.width - 32px;
+        height: root.height;
+        vertical-alignment: center;
+        horizontal-alignment: start;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink-disabled;
+        text: root.placeholder;
+    }
+
+    focus-scope := FocusScope { }
+}
+
+/// Labeled text field.
+export component Field inherits Rectangle {
+    in property <string> label: "";
+    in property <string> placeholder: "";
+    in-out property <string> value: "";
+    callback edited(string);
+    height: 28px;
+    min-width: 140px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: Theme.palette().surface;
+
+    text-input := TextInput {
+        x: 8px;
+        width: parent.width - 16px;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink;
+        text: root.value;
+        edited => {
+            root.value = text-input.text;
+            root.edited(text-input.text);
+        }
+    }
+    if root.value == "" : Text {
+        x: 8px;
+        width: parent.width - 16px;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink-disabled;
+        text: root.placeholder;
+    }
+
+    focus-scope := FocusScope { }
+
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.label;
+}
+
+/// Segmented control for mutually exclusive choices.
+export component SegmentedControl inherits Rectangle {
+    in property <[string]> items: [];
+    in-out property <int> current: 0;
+    callback selected(int);
+    height: 28px;
+    border-radius: 6px;
+    background: Theme.palette().surface-sunken;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+
+    HorizontalLayout {
+        spacing: 2px;
+        padding: 2px;
+        for item[idx] in root.items : Rectangle {
+            width: 0px;
+            horizontal-stretch: 1;
+            border-radius: 4px;
+            background: touch.pressed || idx == root.current ? Theme.palette().surface : transparent;
+            border-width: 1px;
+            border-color: idx == root.current ? Theme.palette().accent : transparent;
+            Text {
+                text: item;
+                font-size: Theme.tokens.typography.caption;
+                color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
+            }
+            touch := TouchArea {
+                clicked => {
+                    root.current = idx;
+                    root.selected(idx);
+                }
+            }
+            accessible-role: button;
+            accessible-label: item;
+            accessible-action-default => {
+                root.current = idx;
+                root.selected(idx);
+            }
+        }
+    }
+}
+
+/// Empty-state placeholder: icon, title, description, and optional host actions.
+///
+/// The max-width/max-height keep the root growable inside layouts; without
+/// them the fixed-size inner content makes the component report a fixed
+/// layout size and the surrounding stretch stops working (Slint quirk).
+export component EmptyState inherits Rectangle {
+    in property <string> icon: "layers";
+    in property <string> title: "";
+    in property <string> description: "";
+    in property <string> action-text: "";
+    callback action;
+    background: transparent;
+    max-width: 10000px;
+    max-height: 10000px;
+
+    VerticalLayout {
+        spacing: 8px;
+        alignment: center;
+        cross-axis-alignment: center;
+        Icon {
+            icon: root.icon;
+            size: 40px;
+            tint: Theme.palette().ink-disabled;
+        }
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.title;
+            font-weight: 600;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.description;
+            font-size: Theme.tokens.typography.body;
+            color: Theme.palette().ink-secondary;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            width: 420px;
+        }
+        if root.action-text != "" : PrimaryButton {
+            text: root.action-text;
+            clicked => {
+                root.action();
+            }
+        }
+    }
+}
+
+/// Bordered panel with an optional header.
+///
+/// Same growability note as EmptyState: max sizes keep the panel stretchable
+/// when placed in layouts.
+export component Panel inherits Rectangle {
+    in property <string> header: "";
+    in property <string> footer: "";
+    background: Theme.palette().surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    max-width: 10000px;
+    max-height: 10000px;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        if root.header != "" : Rectangle {
+            min-height: 32px;
+            max-height: 32px;
+            HorizontalLayout {
+                padding-left: 0px;
+        padding-right: 12px;
+                spacing: 8px;
+                Text {
+                    text: root.header;
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        @children
+        if root.footer != "" : Rectangle {
+            min-height: 31px;
+            max-height: 31px;
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+                Rectangle {
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+                HorizontalLayout {
+                    padding-left: 0px;
+                    padding-right: 12px;
+                    Text {
+                        text: root.footer;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-disabled;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Inspector section header.
+export component InspectorSection inherits Rectangle {
+    in property <string> title: "";
+    background: transparent;
+    min-height: 26px;
+    max-height: 26px;
+
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 0px;
+        padding-right: 8px;
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            height: 1px;
+            horizontal-stretch: 1;
+            background: Theme.palette().border;
+        }
+    }
+}

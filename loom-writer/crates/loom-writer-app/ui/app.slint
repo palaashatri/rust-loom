@@ -1,0 +1,145 @@
+// Loom Writer application window: shared components + writer-specific
+// chrome built inline (a Window component cannot be nested, so the app
+// owns its title bar and status bar).
+
+import { ToolButton, IconButton, SearchField, EmptyState, StatusBar } from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+export { Theme } from "theme.slint";
+
+export component WriterApp inherits Window {
+    title: "Loom Writer";
+    in property <string> doc-title: "Untitled";
+    in property <string> doc-content: "";
+    in property <bool> doc-empty: true;
+    in property <string> status-left: "";
+    in property <string> status-right: "";
+    callback new-doc;
+    callback open-doc;
+    callback save-doc;
+    callback export-pdf;
+    callback undo;
+    callback redo;
+
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        Rectangle {
+            min-height: 41px;
+            max-height: 41px;
+            background: Theme.palette().surface;
+
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 6px;
+                    padding-right: 12px;
+                    Icon {
+                        icon: "layers";
+                        size: 18px;
+                        tint: Theme.palette().accent;
+                        y: (parent.height - 18px) / 2;
+                    }
+                    Text {
+                        text: "Loom Writer";
+                        font-size: Theme.tokens.typography.title;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+            }
+        }
+
+        Rectangle {
+            min-height: 40px;
+            max-height: 40px;
+            background: Theme.palette().surface-sunken;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 6px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                ToolButton { icon: "new"; text: "New"; clicked => { root.new-doc(); } }
+                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-doc(); } }
+                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-doc(); } }
+                ToolButton { icon: "undo"; clicked => { root.undo(); } }
+                ToolButton { icon: "redo"; clicked => { root.redo(); } }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                SearchField { placeholder: "Search document"; }
+                IconButton { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+            padding: 0px;
+            vertical-stretch: 1;
+
+            Rectangle {
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+                background: Theme.palette().canvas;
+
+                if root.doc-empty : EmptyState {
+                    width: 100%;
+                    height: 100%;
+                    icon: "document";
+                    title: "No document open";
+                    description: "Create a new document or open an existing one to start writing.";
+                    action-text: "New Document";
+                    action => { root.new-doc(); }
+                }
+
+                if !root.doc-empty : VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding-left: 48px;
+                    padding-right: 48px;
+                    padding-top: 32px;
+                    padding-bottom: 32px;
+
+                    Text {
+                        text: root.doc-title;
+                        font-size: Theme.tokens.typography.heading;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                    }
+                    Rectangle { min-height: 12px; max-height: 12px; }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        clip: true;
+                        Text {
+                            width: parent.width;
+                            text: root.doc-content;
+                            font-size: Theme.tokens.typography.body;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        StatusBar {
+            status-left: root.status-left;
+            status-right: root.status-right;
+        }
+    }
+}
