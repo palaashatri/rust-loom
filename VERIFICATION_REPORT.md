@@ -1,6 +1,6 @@
 # Loom Verification Report
 
-Generated: 2026-08-01T04:42:38Z by scripts/generate-status-report.sh
+Generated: 2026-08-01T05:01:18Z by scripts/generate-status-report.sh
 
 > Stub: extend with CI evidence and per-feature verification as the suite matures.
 

@@ -1,6 +1,6 @@
 # Loom Visual QA Report
 
-Generated: 2026-08-01T04:42:12Z by scripts/visual-qa-all.sh
+Generated: 2026-08-01T04:58:22Z by scripts/visual-qa-all.sh
 Size: 1280x800 | Tolerance: 0.02 | Baselines: /Users/palaashatri/Code/loom/rust-loom/loom-design-bible/baselines
 
 | app | screenshot | dark theme | baseline | result |
