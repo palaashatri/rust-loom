@@ -160,6 +160,8 @@ export component SearchField inherits Rectangle {
     in-out property <string> value: "";
     in property <bool> enabled: true;
     callback edited(string);
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.placeholder;
     height: 30px;
     min-width: 160px;
     border-radius: 6px;
@@ -227,12 +229,13 @@ export component Field inherits Rectangle {
     in property <string> label: "";
     in property <string> placeholder: "";
     in-out property <string> value: "";
+    in property <bool> enabled: true;
     callback edited(string);
     height: 28px;
     min-width: 140px;
     border-radius: 6px;
     border-width: 1px;
-    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    border-color: text-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
     background: Theme.palette().surface;
 
     text-input := TextInput {
@@ -242,6 +245,7 @@ export component Field inherits Rectangle {
         font-size: Theme.tokens.typography.body;
         color: Theme.palette().ink;
         text: root.value;
+        enabled: root.enabled;
         edited => {
             root.value = text-input.text;
             root.edited(text-input.text);
@@ -265,13 +269,35 @@ export component Field inherits Rectangle {
 /// Segmented control for mutually exclusive choices.
 export component SegmentedControl inherits Rectangle {
     in property <[string]> items: [];
+    in property <string> label: "Options";
+    in property <bool> enabled: true;
     in-out property <int> current: 0;
     callback selected(int);
     height: 28px;
     border-radius: 6px;
     background: Theme.palette().surface-sunken;
     border-width: 1px;
-    border-color: Theme.palette().border;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border;
+    accessible-role: group;
+    accessible-label: root.label;
+
+    focus-scope := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled || root.items.length == 0) { return reject; }
+            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+                root.current = max(0, root.current - 1);
+                root.selected(root.current);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+                root.current = min(root.items.length - 1, root.current + 1);
+                root.selected(root.current);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     HorizontalLayout {
         spacing: 2px;
@@ -289,7 +315,9 @@ export component SegmentedControl inherits Rectangle {
                 color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
             }
             touch := TouchArea {
+                enabled: root.enabled;
                 clicked => {
+                    focus-scope.focus();
                     root.current = idx;
                     root.selected(idx);
                 }
@@ -297,8 +325,10 @@ export component SegmentedControl inherits Rectangle {
             accessible-role: button;
             accessible-label: item;
             accessible-action-default => {
-                root.current = idx;
-                root.selected(idx);
+                if (root.enabled) {
+                    root.current = idx;
+                    root.selected(idx);
+                }
             }
         }
     }
@@ -306,6 +336,7 @@ export component SegmentedControl inherits Rectangle {
 
 /// Linear range slider control.
 export component Slider inherits Rectangle {
+    in property <string> label: "Value";
     in-out property <float> value: 0.0;
     in property <float> minimum: 0.0;
     in property <float> maximum: 100.0;
@@ -320,7 +351,7 @@ export component Slider inherits Rectangle {
     accessible-value: root.value;
     accessible-value-minimum: root.minimum;
     accessible-value-maximum: root.maximum;
-    accessible-label: "Slider";
+    accessible-label: root.label;
 
     focus-scope := FocusScope {
         enabled: root.enabled;
@@ -1031,17 +1062,22 @@ export component InspectorSurface inherits Rectangle {
 
 /// Subtle rounded card for library rows, jobs, tracks and layers.
 export component WorkspaceRow inherits Rectangle {
+    in property <string> label: "Workspace item";
     in property <bool> selected: false;
     in property <bool> emphasized: false;
     in property <bool> enabled: true;
     callback clicked;
     min-height: 42px; border-radius: 9px; border-width: 1px;
-    border-color: root.selected ? Theme.palette().accent : root.emphasized ? Theme.palette().border-strong : transparent;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().accent : root.emphasized ? Theme.palette().border-strong : transparent;
     background: root.selected ? Theme.palette().selection-soft : touch.has-hover && root.enabled ? Theme.palette().surface-raised : transparent;
     animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
     if root.selected : Rectangle { x: 0px; y: 8px; width: 3px; height: parent.height - 16px; border-radius: 2px; background: Theme.palette().accent; }
     @children
-    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
 
 
@@ -1060,9 +1096,28 @@ export component CanvasBackdrop inherits Rectangle {
 /// Compact tab strip for inspectors and browsers.
 export component PaneTabs inherits Rectangle {
     in property <[string]> items: [];
+    in property <string> label: "Panel tabs";
     in-out property <int> current: 0;
     callback selected(int);
     height: 36px; background: Theme.palette().panel;
+    accessible-role: group;
+    accessible-label: root.label;
+    focus-scope := FocusScope {
+        key-pressed(event) => {
+            if (root.items.length == 0) { return reject; }
+            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+                root.current = max(0, root.current - 1);
+                root.selected(root.current);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+                root.current = min(root.items.length - 1, root.current + 1);
+                root.selected(root.current);
+                return accept;
+            }
+            return reject;
+        }
+    }
     HorizontalLayout {
         spacing: 3px; padding-left: 8px; padding-right: 8px; padding-top: 4px; padding-bottom: 4px;
         for item[idx] in root.items : Rectangle {
@@ -1071,7 +1126,10 @@ export component PaneTabs inherits Rectangle {
             border-width: 1px; border-color: idx == root.current ? Theme.palette().border-strong : transparent;
             Text { text: item; font-size: Theme.tokens.typography.caption; font-weight: idx == root.current ? 700 : 500; color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; }
             if idx == root.current : Rectangle { y: parent.height - 3px; x: 10px; width: parent.width - 20px; height: 2px; border-radius: 1px; background: Theme.palette().accent; }
-            tab-touch := TouchArea { clicked => { root.current = idx; root.selected(idx); } }
+            tab-touch := TouchArea { clicked => { focus-scope.focus(); root.current = idx; root.selected(idx); } }
+            accessible-role: button;
+            accessible-label: item;
+            accessible-action-default => { root.current = idx; root.selected(idx); }
         }
     }
 }
@@ -1109,6 +1167,8 @@ export component TransportButton inherits Rectangle {
     background: root.active ? (root.destructive ? Theme.palette().danger-surface : Theme.palette().selection-soft) : touch.pressed ? Theme.palette().surface-sunken : touch.has-hover ? Theme.palette().surface-raised : transparent;
     animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
     accessible-role: button; accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
     Icon { icon: root.icon; size: 16px; tint: !root.enabled ? Theme.palette().ink-disabled : root.destructive ? Theme.palette().danger : root.active ? Theme.palette().accent : Theme.palette().ink; }
-    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }

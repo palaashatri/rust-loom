@@ -52,6 +52,10 @@ fn parse_args() -> Result<Args, String> {
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
             }
+            other if !other.starts_with('-') && args.open.is_none() => {
+                args.open = Some(other.to_string());
+            }
+
             other => return Err(format!("unknown argument: {other}")),
         }
     }

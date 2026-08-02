@@ -69,6 +69,21 @@ file and must override it when they disagree.
 - CI now checks callback wiring, production panic patterns, all Cargo workspaces,
   release builds, and distinct light/dark/high-contrast screenshots.
 
+## Measured product score policy
+
+- `loom-bootstrap/scripts/audit-product-readiness.py` reports UI and functionality
+  separately on a ten-point evidence scale. The score is derived from source,
+  tests, native packaging, and screenshot workflows; it is not manually declared.
+- Ten out of ten is reserved for complete adaptive user journeys, native platform
+  integration, production engines, interoperability, accessibility, and measured
+  reliability. A passing regression floor is not equivalent to a 10/10 product.
+- Windows x86-64, macOS Apple silicon, and macOS Intel now build release binaries,
+  render all eight apps in light/dark/high-contrast, run native smoke paths, build
+  MSI/DMG validation packages, and upload those packages and screenshots for review.
+- Native document associations are emitted by Linux, Windows, and macOS packages;
+  every application accepts an associated document path as its first positional
+  argument as well as through `--open`.
+
 ## Non-negotiable direction
 
 - Rust + Slint; no UI-framework rewrite.

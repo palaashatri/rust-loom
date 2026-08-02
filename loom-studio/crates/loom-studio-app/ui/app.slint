@@ -107,7 +107,7 @@ export component StudioApp inherits Window {
             TransportButton { icon: "clock"; label: "Metronome"; active: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             MetricChip { label: "Tempo"; value: Math.round(root.bpm-val) + " BPM"; }
-            Slider { width: 130px; minimum: 40; maximum: 240; value <=> root.bpm-val; changed(value) => { root.bpm-changed(value); } }
+            Slider { label: "Value"; width: 130px; minimum: 40; maximum: 240; value <=> root.bpm-val; changed(value) => { root.bpm-changed(value); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             SegmentedControl {
                 items: ["Quick", "Pro"];
@@ -162,7 +162,7 @@ export component StudioApp inherits Window {
                         padding-right: 14px;
                         spacing: 10px;
                         Text { text: format_time(root.playhead-seconds); width: 86px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; font-weight: 700; vertical-alignment: center; }
-                        Slider { horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.duration-seconds); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
+                        Slider { label: "Playhead"; horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.duration-seconds); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
                         Text { text: format_time(root.duration-seconds); width: 86px; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; horizontal-alignment: right; vertical-alignment: center; }
                     }
                 }
@@ -250,9 +250,9 @@ export component StudioApp inherits Window {
                         spacing: 9px;
                         Text { text: "Channel strip"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                         Text { text: "Volume  " + Math.round(root.track-volumes[root.active-track-index] * 10) / 10 + " dB"; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
-                        Slider { minimum: -60; maximum: 6; value: root.track-volumes[root.active-track-index]; changed(value) => { root.volume-changed(root.active-track-index, value); } }
+                        Slider { label: "Volume"; minimum: -60; maximum: 6; value: root.track-volumes[root.active-track-index]; changed(value) => { root.volume-changed(root.active-track-index, value); } }
                         Text { text: "Pan  " + Math.round(root.track-pans[root.active-track-index] * 100) + "%"; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
-                        Slider { minimum: -1; maximum: 1; value: root.track-pans[root.active-track-index]; changed(value) => { root.pan-changed(root.active-track-index, value); } }
+                        Slider { label: "Pan"; minimum: -1; maximum: 1; value: root.track-pans[root.active-track-index]; changed(value) => { root.pan-changed(root.active-track-index, value); } }
                         HorizontalLayout {
                             spacing: 6px;
                             ToolButton { text: "Mute"; checked: root.track-mutes[root.active-track-index]; clicked => { root.toggle-mute(root.active-track-index); } }

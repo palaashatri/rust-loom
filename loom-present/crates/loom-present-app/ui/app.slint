@@ -247,13 +247,13 @@ export component PresentApp inherits Window {
                         spacing: 9px;
                         Text { text: "POSITION & SIZE"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                         Text { text: "X   " + Math.round(root.element-x); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
+                        Slider { label: "Value"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
                         Text { text: "Y   " + Math.round(root.element-y); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
+                        Slider { label: "Value"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
                         Text { text: "Width   " + Math.round(root.element-width); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
+                        Slider { label: "Value"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
                         Text { text: "Height   " + Math.round(root.element-height); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
+                        Slider { label: "Value"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
                     }
                     if root.inspector-tab == 2 : VerticalLayout {
                         spacing: 10px;

@@ -51,6 +51,10 @@ fn parse_args() -> Result<Args, String> {
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
+            other if !other.starts_with('-') && args.open.is_none() => {
+                args.open = Some(other.to_string());
+            }
+
             other => return Err(format!("unknown argument: {other}")),
         }
     }

@@ -35,6 +35,26 @@ DISPLAY_NAMES = {
     "studio": "Loom Studio",
     "encode": "Loom Encode",
 }
+DOCUMENT_TYPES = {
+    "writer": ("loomdoc", "application/x-loom-writer", "Loom Writer Document"),
+    "sheets": ("loomtable", "application/x-loom-sheets", "Loom Sheets Workbook"),
+    "present": ("loomdeck", "application/x-loom-present", "Loom Present Deck"),
+    "photo": ("loomphoto", "application/x-loom-photo", "Loom Photo Project"),
+    "motion": ("loommotion", "application/x-loom-motion", "Loom Motion Composition"),
+    "video": ("loomvideo", "application/x-loom-video", "Loom Video Project"),
+    "studio": ("loomstudio", "application/x-loom-studio", "Loom Studio Project"),
+    "encode": ("loomencode", "application/x-loom-encode", "Loom Encode Queue"),
+}
+APP_CATEGORIES = {
+    "writer": "public.app-category.productivity",
+    "sheets": "public.app-category.productivity",
+    "present": "public.app-category.productivity",
+    "photo": "public.app-category.graphics-design",
+    "motion": "public.app-category.video",
+    "video": "public.app-category.video",
+    "studio": "public.app-category.music",
+    "encode": "public.app-category.video",
+}
 
 
 @dataclass(frozen=True)
@@ -115,6 +135,50 @@ def loom_svg(app: str) -> str:
 </svg>'''
 
 
+
+def linux_mime_xml() -> str:
+    entries = []
+    for _app, (extension, mime, description) in DOCUMENT_TYPES.items():
+        entries.append(
+            f'''  <mime-type type="{mime}">\n'''
+            f'''    <comment>{description}</comment>\n'''
+            f'''    <glob pattern="*.{extension}"/>\n'''
+            f'''  </mime-type>'''
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n'
+        + "\n".join(entries)
+        + "\n</mime-info>\n"
+    )
+
+
+def macos_document_type(app: str) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    extension, mime, description = DOCUMENT_TYPES[app]
+    identifier = f"org.loom.{app}-document"
+    document_types = [
+        {
+            "CFBundleTypeName": description,
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Owner",
+            "LSItemContentTypes": [identifier],
+            "CFBundleTypeExtensions": [extension],
+            "CFBundleTypeMIMETypes": [mime],
+        }
+    ]
+    declarations = [
+        {
+            "UTTypeIdentifier": identifier,
+            "UTTypeDescription": description,
+            "UTTypeConformsTo": ["public.data"],
+            "UTTypeTagSpecification": {
+                "public.filename-extension": [extension],
+                "public.mime-type": [mime],
+            },
+        }
+    ]
+    return document_types, declarations
+
 def artifact(path: Path, platform: str, architecture: str, signed: bool, kind: str) -> Artifact:
     payload = path.read_bytes()
     return Artifact(
@@ -145,9 +209,11 @@ def package_linux(
         bin_dir = package_root / "usr" / "bin"
         applications = package_root / "usr" / "share" / "applications"
         icons = package_root / "usr" / "share" / "icons" / "hicolor" / "scalable" / "apps"
+        mime_packages = package_root / "usr" / "share" / "mime" / "packages"
         bin_dir.mkdir(parents=True)
         applications.mkdir(parents=True)
         icons.mkdir(parents=True)
+        mime_packages.mkdir(parents=True)
         installed_size = 0
         for app, source in binaries.items():
             destination = bin_dir / f"loom-{app}"
@@ -164,6 +230,7 @@ def package_linux(
                         f"Name={DISPLAY_NAMES[app]}",
                         f"Exec=loom-{app} %F",
                         f"Icon=loom-{app}",
+                        f"MimeType={DOCUMENT_TYPES[app][1]};",
                         "Terminal=false",
                         "Categories=Graphics;AudioVideo;Office;",
                         "StartupNotify=true",
@@ -171,6 +238,7 @@ def package_linux(
                     ]
                 ),
             )
+        write_text(mime_packages / "loom.xml", linux_mime_xml())
         architecture_name = {"x86_64": "amd64", "aarch64": "arm64"}[architecture]
         write_text(
             package_root / "DEBIAN" / "control",
@@ -218,6 +286,7 @@ def package_linux(
                             f"Name={DISPLAY_NAMES[app]}",
                             f"Exec=loom-{app}",
                             f"Icon=loom-{app}",
+                            f"MimeType={DOCUMENT_TYPES[app][1]};",
                             "Terminal=false",
                             "Categories=Graphics;AudioVideo;Office;",
                             "",
@@ -244,13 +313,26 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
     refs: list[str] = []
     for app, source in binaries.items():
         component_id = f"Component_{app}"
+        association_id = f"Association_{app}"
         file_id = f"File_{app}"
+        extension, _mime, description = DOCUMENT_TYPES[app]
+        display = DISPLAY_NAMES[app]
         components.append(
             f'''<Component Id="{component_id}" Guid="*">
               <File Id="{file_id}" Source="{xml_escape(str(source))}" KeyPath="yes" />
+              <Shortcut Id="Shortcut_{app}" Directory="ApplicationProgramsFolder"
+                        Name="{xml_escape(display)}" Target="[INSTALLFOLDER]loom-{app}.exe"
+                        WorkingDirectory="INSTALLFOLDER" />
+            </Component>
+            <Component Id="{association_id}" Guid="*">
+              <RegistryValue Root="HKCR" Key=".{extension}" Value="Loom.{app}" Type="string" KeyPath="yes" />
+              <RegistryValue Root="HKCR" Key="Loom.{app}" Value="{xml_escape(description)}" Type="string" />
+              <RegistryValue Root="HKCR" Key="Loom.{app}\\shell\\open\\command"
+                             Value="&quot;[INSTALLFOLDER]loom-{app}.exe&quot; &quot;%1&quot;" Type="string" />
             </Component>'''
         )
         refs.append(f'<ComponentRef Id="{component_id}" />')
+        refs.append(f'<ComponentRef Id="{association_id}" />')
     upgrade_code = str(uuid.uuid5(uuid.NAMESPACE_URL, "https://loom.local/creator-suite")).upper()
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
@@ -262,6 +344,9 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
       <Directory Id="INSTALLFOLDER" Name="Loom Creator Suite">
         {''.join(components)}
       </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Loom Creator Suite" />
     </StandardDirectory>
     <Feature Id="MainFeature" Title="Loom Creator Suite" Level="1">
       {''.join(refs)}
@@ -349,6 +434,7 @@ def package_macos(
             executable = executable_dir / f"loom-{app}"
             shutil.copy2(source, executable)
             executable.chmod(0o755)
+            document_types, exported_types = macos_document_type(app)
             with (bundle / "Contents" / "Info.plist").open("wb") as handle:
                 plistlib.dump(
                     {
@@ -359,6 +445,10 @@ def package_macos(
                         "CFBundleShortVersionString": version,
                         "CFBundleExecutable": f"loom-{app}",
                         "CFBundlePackageType": "APPL",
+                        "CFBundleDevelopmentRegion": "en",
+                        "CFBundleDocumentTypes": document_types,
+                        "UTExportedTypeDeclarations": exported_types,
+                        "LSApplicationCategoryType": APP_CATEGORIES[app],
                         "LSMinimumSystemVersion": "13.0",
                         "NSHighResolutionCapable": True,
                     },
@@ -378,6 +468,9 @@ def package_macos(
                         str(bundle),
                     ]
                 )
+        applications_link = volume / "Applications"
+        if not applications_link.exists():
+            os.symlink("/Applications", applications_link)
         dmg = output / f"Loom-Creator-Suite-{version}-{architecture}.dmg"
         run(
             [

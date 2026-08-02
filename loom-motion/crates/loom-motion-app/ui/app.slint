@@ -298,6 +298,7 @@ export component MotionApp inherits Window {
                                 clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); }
                             }
                             Slider {
+                                label: "Zoom";
                                 minimum: 10;
                                 maximum: 200;
                                 value <=> root.zoom-value;
@@ -381,6 +382,7 @@ export component MotionApp inherits Window {
 
                         Text { text: "X   " + Math.round(root.pos-x) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
+                            label: "Value";
                             value: root.pos-x;
                             minimum: 0.0;
                             maximum: 1920.0;
@@ -389,6 +391,7 @@ export component MotionApp inherits Window {
 
                         Text { text: "Y   " + Math.round(root.pos-y) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
+                            label: "Value";
                             value: root.pos-y;
                             minimum: 0.0;
                             maximum: 1080.0;
@@ -405,6 +408,7 @@ export component MotionApp inherits Window {
 
                         Text { text: "Scale   " + Math.round(root.scale-val) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
+                            label: "Scale";
                             value: root.scale-val;
                             minimum: 0.0;
                             maximum: 200.0;
@@ -413,6 +417,7 @@ export component MotionApp inherits Window {
 
                         Text { text: "Rotation   " + Math.round(root.rotation-val) + "°"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
+                            label: "Rotation";
                             value: root.rotation-val;
                             minimum: -180.0;
                             maximum: 180.0;
@@ -421,6 +426,7 @@ export component MotionApp inherits Window {
 
                         Text { text: "Opacity   " + Math.round(root.opacity-val) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
+                            label: "Opacity";
                             value: root.opacity-val;
                             minimum: 0.0;
                             maximum: 100.0;

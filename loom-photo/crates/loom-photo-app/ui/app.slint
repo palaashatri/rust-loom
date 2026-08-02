@@ -178,7 +178,7 @@ export component PhotoApp inherits Window {
                         padding-left: 10px;
                         padding-right: 10px;
                         IconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
-                        Slider { minimum: 10; maximum: 200; value <=> root.zoom-value; horizontal-stretch: 1; }
+                        Slider { label: "Zoom"; minimum: 10; maximum: 200; value <=> root.zoom-value; horizontal-stretch: 1; }
                         IconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); } }
                     }
                 }
@@ -198,11 +198,11 @@ export component PhotoApp inherits Window {
                         spacing: 12px;
                         Text { text: "COLOR ADJUSTMENTS"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                         Text { text: "Brightness   " + Math.round(root.brightness-value); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: -100; maximum: 100; value <=> root.brightness-value; changed(value) => { root.brightness-changed(value); } }
+                        Slider { label: "Brightness"; minimum: -100; maximum: 100; value <=> root.brightness-value; changed(value) => { root.brightness-changed(value); } }
                         Text { text: "Contrast   " + Math.round(root.contrast-value); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: -100; maximum: 100; value <=> root.contrast-value; changed(value) => { root.contrast-changed(value); } }
+                        Slider { label: "Contrast"; minimum: -100; maximum: 100; value <=> root.contrast-value; changed(value) => { root.contrast-changed(value); } }
                         Text { text: "Saturation   " + Math.round(root.saturation-value); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: -100; maximum: 100; value <=> root.saturation-value; changed(value) => { root.saturation-changed(value); } }
+                        Slider { label: "Saturation"; minimum: -100; maximum: 100; value <=> root.saturation-value; changed(value) => { root.saturation-changed(value); } }
                     }
                     if root.inspector-tab == 1 : VerticalLayout {
                         spacing: 12px;
@@ -216,7 +216,7 @@ export component PhotoApp inherits Window {
                             }
                         }
                         Text { text: "Opacity   " + Math.round(root.active-layer-opacity) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { minimum: 0; maximum: 100; value: root.active-layer-opacity; changed(value) => { root.opacity-changed(value); } }
+                        Slider { label: "Opacity"; minimum: 0; maximum: 100; value: root.active-layer-opacity; changed(value) => { root.opacity-changed(value); } }
                     }
                     if root.inspector-tab == 2 : VerticalLayout {
                         spacing: 10px;

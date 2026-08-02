@@ -153,7 +153,7 @@ export component VideoApp inherits Window {
                         TransportButton { icon: root.is-playing ? "pause" : "play"; label: "Play selected media"; enabled: root.backend-available && root.clip-labels.length > 0; active: root.is-playing; clicked => { root.play-pause(); } }
                         TransportButton { icon: "stop"; label: "Stop playback"; enabled: root.is-playing; clicked => { root.stop-playback(); } }
                         Text { text: root.timecode-display; width: 88px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; font-weight: 650; vertical-alignment: center; }
-                        Slider { horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.timeline-duration); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
+                        Slider { label: "Playhead"; horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.timeline-duration); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
                         IconButton { icon: "plus-circle"; label: "Add marker"; clicked => { root.add-marker(); } }
                     }
                 }

@@ -222,6 +222,7 @@ export component WriterApp inherits Window {
                         clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); }
                     }
                     Slider {
+                        label: "Zoom";
                         minimum: 40;
                         maximum: 160;
                         value <=> root.zoom-value;
