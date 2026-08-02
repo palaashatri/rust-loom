@@ -1,0 +1,56 @@
+name: Fix Present Clippy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ github.head_ref == 'chatgpt/loom-ui-functional-audit-2' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Apply compiler-suggested derive
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('loom-present/crates/loom-present-core/src/lib.rs')
+          text = path.read_text()
+          old = '''/// Built-in transition between two slides.
+          #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+          pub enum TransitionKind {
+              /// Immediate cut.
+              None,
+          '''
+          new = '''/// Built-in transition between two slides.
+          #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+          pub enum TransitionKind {
+              /// Immediate cut.
+              #[default]
+              None,
+          '''
+          impl = '''
+          impl Default for TransitionKind {
+              fn default() -> Self {
+                  Self::None
+              }
+          }
+          '''
+          if old not in text or impl not in text:
+              raise SystemExit('expected Present transition implementation not found')
+          path.write_text(text.replace(old, new, 1).replace(impl, '\n', 1))
+          PY
+          cargo fmt --manifest-path loom-present/Cargo.toml --all
+      - name: Commit correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add loom-present
+          git commit -m "fix(present): derive default transition kind"
+          git push origin "HEAD:${{ github.head_ref }}"
