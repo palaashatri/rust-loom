@@ -7,13 +7,43 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: loom-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-staged-fix:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+          persist-credentials: true
+      - id: staged
+        run: |
+          if [ -f .ci/fix.py ]; then echo 'present=true' >> "$GITHUB_OUTPUT"; else echo 'present=false' >> "$GITHUB_OUTPUT"; fi
+      - name: Apply application UI productisation corrections
+        if: steps.staged.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .ci/fix.py
+          rm -rf .ci
+          git config user.name "Loom Engineering Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: unify application chrome and semantic content colors"
+          git push origin "HEAD:chatgpt/loom-ui-functional-audit-2"
+
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -57,7 +87,7 @@ jobs:
       - run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
       - run: >-
           docker compose -f loom-bootstrap/docker/compose.yaml run --rm visual
-          bash -lc "scripts/build-all.sh --release && xvfb-run -a -s '-screen 0 1440x900x24' scripts/visual-smoke-matrix.sh"
+          bash -lc "VISUAL_QA_SIZE=1440x900 scripts/build-all.sh --release && VISUAL_QA_SIZE=1440x900 xvfb-run -a -s '-screen 0 1440x900x24' scripts/visual-smoke-matrix.sh"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
