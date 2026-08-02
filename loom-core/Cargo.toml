@@ -15,6 +15,7 @@ members = [
     "crates/loom-runtime",
     "crates/loom-production",
     "crates/loom-interop",
+    "crates/loom-media-runtime",
 ]
 
 [workspace.package]
