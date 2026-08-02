@@ -1,0 +1,40 @@
+name: Format Loom branch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: ${{ github.head_ref == 'chatgpt/loom-ui-functional-audit-2' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Install formatter
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+
+      - name: Format all Rust workspaces
+        run: |
+          set -euo pipefail
+          for dir in loom-core loom-writer loom-sheets loom-present loom-photo loom-motion loom-video loom-studio loom-encode loom-vision loom-plugin-sdk; do
+            (cd "$dir" && cargo +stable fmt --all)
+          done
+
+      - name: Commit formatting
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add loom-core loom-writer loom-sheets loom-present loom-photo loom-motion loom-video loom-studio loom-encode loom-vision loom-plugin-sdk
+          git commit -m "style: format audited Loom workspaces"
+          git push origin "HEAD:${{ github.head_ref }}"
