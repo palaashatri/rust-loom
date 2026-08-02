@@ -27,11 +27,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Detect staged payload
+      - name: Detect complete staged payload
         id: payload
         shell: bash
         run: |
-          if [ -f .ci/loom-tranche-1.patch.xz.b64 ]; then
+          if [ -f .ci/parts.ready ]; then
             echo 'present=true' >> "$GITHUB_OUTPUT"
           else
             echo 'present=false' >> "$GITHUB_OUTPUT"
@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .ci/loom-tranche-1.patch.xz.b64 | xz -dc > /tmp/loom-tranche.patch
+          cat .ci/loom-tranche-1.part-* | base64 -d | xz -dc > /tmp/loom-tranche.patch
           git apply --check --whitespace=error-all /tmp/loom-tranche.patch
           git apply --binary --whitespace=nowarn /tmp/loom-tranche.patch
 
@@ -108,7 +108,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
+            build-essential pkg-config libasound2-dev \
             libfontconfig1-dev libx11-dev libxkbcommon-dev libwayland-dev \
             libgl1-mesa-dev libglu1-mesa-dev
 
