@@ -28,7 +28,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
       - name: Apply productisation changes
-        run: python3 .ci/apply_native_productisation.py
+        run: |
+          python3 .ci/fix_applicator.py
+          python3 .ci/apply_native_productisation.py
       - name: Validate generated Python and audit contracts
         run: |
           python3 -m py_compile \
