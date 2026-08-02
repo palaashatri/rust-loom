@@ -1,12 +1,16 @@
-import { AppHeader, ToolButton, IconButton, StatusBar, Slider, CollapsiblePanel } from "components.slint";
+import {
+    AppHeader, WorkspaceToolbar, ToolButton, IconButton, StatusBar, Slider,
+    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, MetricChip,
+    CanvasBackdrop, TransportButton, EmptyState, PanelHeader
+} from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component MotionApp inherits Window {
     title: "Loom Motion";
-    min-width: 980px;
-    min-height: 680px;
+    min-width: 1100px;
+    min-height: 720px;
     background: Theme.palette().canvas;
 
     in property <string> comp-name: "Untitled Composition";
@@ -17,8 +21,9 @@ export component MotionApp inherits Window {
     in-out property <bool> is-playing: false;
     in-out property <bool> is-looping: false;
     in-out property <bool> curve-drawer-open: false;
+    in-out property <int> inspector-tab: 0;
+    in-out property <float> zoom-value: 68.0;
 
-    // Transform Property Inspector
     in-out property <float> pos-x: 960.0;
     in-out property <float> pos-y: 540.0;
     in-out property <float> scale-val: 100.0;
@@ -48,120 +53,300 @@ export component MotionApp inherits Window {
             document-title: root.comp-name;
             icon: "layers";
             context: root.timecode-text;
-            state-text: "Local project";
-            state-tone: 3;
+            state-text: "Local composition";
+            state-tone: 0;
         }
 
+        WorkspaceToolbar {
+            ToolButton { icon: "new"; text: "New"; clicked => { root.new-comp(); } }
+            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
+            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            ToolButton { icon: "plus"; text: "Layer"; clicked => { root.add-layer(); } }
 
-        // Toolbar & Animation Transport Controls
-        Rectangle {
-            min-height: Theme.tokens.metrics.toolbar-height;
-            max-height: Theme.tokens.metrics.toolbar-height;
-            background: Theme.palette().chrome;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
 
-            HorizontalLayout {
-                height: parent.height;
-                cross-axis-alignment: center;
-                spacing: 6px;
-                padding-left: 8px;
-                padding-right: 8px;
-
-                ToolButton { icon: "new"; text: "New Comp"; clicked => { root.new-comp(); } }
-                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
-                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
-                ToolButton { icon: "add"; text: "+ Motion Layer"; clicked => { root.add-layer(); } }
-
-                Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-
-                // Animation Transport Controls
-                ToolButton { text: "Step Back"; clicked => { root.step-back(); } }
-                ToolButton {
-                    text: root.is-playing ? "Pause" : "Play";
-                    checked: root.is-playing;
-                    clicked => { root.is-playing = !root.is-playing; root.play-pause(); }
+            TransportButton {
+                icon: "chevron-left";
+                label: "Step backward one frame";
+                clicked => { root.step-back(); }
+            }
+            TransportButton {
+                icon: root.is-playing ? "pause" : "play";
+                label: root.is-playing ? "Pause preview" : "Play preview";
+                active: root.is-playing;
+                clicked => {
+                    root.is-playing = !root.is-playing;
+                    root.play-pause();
                 }
-                ToolButton { text: "Step Forward"; clicked => { root.step-forward(); } }
-                ToolButton {
-                    text: "Loop";
-                    checked: root.is-looping;
-                    clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); }
+            }
+            TransportButton {
+                icon: "chevron-right";
+                label: "Step forward one frame";
+                clicked => { root.step-forward(); }
+            }
+            TransportButton {
+                icon: "redo";
+                label: "Loop preview";
+                active: root.is-looping;
+                clicked => {
+                    root.is-looping = !root.is-looping;
+                    root.toggle-loop();
                 }
+            }
+            MetricChip { label: "TC"; value: root.timecode-display; }
 
-                Rectangle {
-                    background: Theme.palette().surface;
-                    border-radius: 4px;
-                    border-width: 1px;
-                    border-color: Theme.palette().border;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
 
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        alignment: center;
-                        Text {
-                            text: root.timecode-display;
-                            font-size: Theme.tokens.typography.body;
-                            font-weight: 700;
-                            color: Theme.palette().accent;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                ToolButton {
-                    text: "Curves";
-                    checked: root.curve-drawer-open;
-                    clicked => {
-                        root.curve-drawer-open = !root.curve-drawer-open;
-                        root.toggle-curve-drawer();
-                    }
+            MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
+            ToolButton {
+                icon: "timeline";
+                text: "Curves";
+                checked: root.curve-drawer-open;
+                clicked => {
+                    root.curve-drawer-open = !root.curve-drawer-open;
+                    root.toggle-curve-drawer();
                 }
             }
         }
 
-        // Main Workspace & Transform Inspector
         HorizontalLayout {
-            vertical-stretch: 1;
             spacing: 0px;
+            vertical-stretch: 1;
 
-            // Canvas Preview Area
-            Rectangle {
-                horizontal-stretch: 1;
-                background: Theme.palette().canvas;
+            SidebarSurface {
+                width: 246px;
+                title: "Layers";
+                detail: root.layer-labels.length + " items";
 
                 VerticalLayout {
-                    alignment: center;
+                    spacing: 7px;
+                    padding: 10px;
+
+                    for label[idx] in root.layer-labels : WorkspaceRow {
+                        height: 48px;
+                        selected: idx == root.active-layer-index;
+                        clicked => { root.select-layer(idx); }
+
+                        HorizontalLayout {
+                            spacing: 9px;
+                            padding-left: 9px;
+                            padding-right: 9px;
+
+                            Rectangle {
+                                width: 31px;
+                                height: 31px;
+                                border-radius: 8px;
+                                background: idx == root.active-layer-index
+                                    ? Theme.palette().selection-soft
+                                    : Theme.palette().surface-sunken;
+                                border-width: 1px;
+                                border-color: idx == root.active-layer-index
+                                    ? Theme.palette().accent
+                                    : Theme.palette().border;
+                                Icon {
+                                    icon: "layers";
+                                    size: 15px;
+                                    tint: idx == root.active-layer-index
+                                        ? Theme.palette().accent
+                                        : Theme.palette().ink-secondary;
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text {
+                                    text: label;
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: idx == root.active-layer-index ? 650 : 500;
+                                    color: Theme.palette().ink;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: idx == root.active-layer-index ? "Selected layer" : "Motion layer";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-disabled;
+                                }
+                            }
+                        }
+                    }
+
+                    if root.layer-labels.length == 0 : EmptyState {
+                        icon: "layers";
+                        title: "No layers";
+                        description: "Add a text, image, or vector layer to start the composition.";
+                        action-text: "Add Layer";
+                        action => { root.add-layer(); }
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    ToolButton { icon: "plus"; text: "Add Motion Layer"; clicked => { root.add-layer(); } }
+                }
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            VerticalLayout {
+                spacing: 0px;
+                horizontal-stretch: 1;
+
+                CanvasBackdrop {
+                    vertical-stretch: 1;
+                    stage-color: Theme.palette().media-stage;
 
                     Rectangle {
-                        width: 480px;
-                        height: 270px;
-                        background: Theme.palette().surface;
-                        border-radius: 4px;
+                        width: min(800px, parent.width - 70px);
+                        height: min(450px, parent.height - 70px);
+                        border-radius: 7px;
+                        background: Theme.palette().paper-ink;
+                        border-width: 1px;
+                        border-color: Theme.palette().border-strong;
+                        clip: true;
+
+                        Rectangle {
+                            x: 18px;
+                            y: 18px;
+                            width: parent.width - 36px;
+                            height: parent.height - 36px;
+                            border-width: 1px;
+                            border-color: Theme.palette().grid-major;
+                            background: Theme.palette().media-stage;
+                        }
+
+                        Rectangle {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 62%;
+                            height: 38%;
+                            border-radius: 10px;
+                            border-width: root.layer-labels.length > 0 ? 2px : 1px;
+                            border-color: root.layer-labels.length > 0
+                                ? Theme.palette().accent
+                                : Theme.palette().border-strong;
+                            background: Theme.palette().content-accent-soft;
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                padding: 18px;
+                                Text {
+                                    text: root.comp-name;
+                                    color: Theme.palette().paper-ink;
+                                    font-size: Theme.tokens.typography.heading;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: root.layer-labels.length > 0
+                                        ? root.layer-labels[root.active-layer-index]
+                                        : "Add a layer to begin";
+                                    color: Theme.palette().content-accent;
+                                    font-size: Theme.tokens.typography.body-large;
+                                    font-weight: 650;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "Position " + Math.round(root.pos-x) + ", " + Math.round(root.pos-y)
+                                        + "   ·   Scale " + Math.round(root.scale-val) + "%"
+                                        + "   ·   Rotation " + Math.round(root.rotation-val) + "°";
+                                    color: Theme.palette().paper-muted;
+                                    font-size: Theme.tokens.typography.caption;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            if root.layer-labels.length > 0 : Rectangle {
+                                x: -4px; y: -4px; width: 8px; height: 8px;
+                                border-radius: 4px; background: Theme.palette().paper;
+                                border-width: 2px; border-color: Theme.palette().accent;
+                            }
+                            if root.layer-labels.length > 0 : Rectangle {
+                                x: parent.width - 4px; y: -4px; width: 8px; height: 8px;
+                                border-radius: 4px; background: Theme.palette().paper;
+                                border-width: 2px; border-color: Theme.palette().accent;
+                            }
+                            if root.layer-labels.length > 0 : Rectangle {
+                                x: -4px; y: parent.height - 4px; width: 8px; height: 8px;
+                                border-radius: 4px; background: Theme.palette().paper;
+                                border-width: 2px; border-color: Theme.palette().accent;
+                            }
+                            if root.layer-labels.length > 0 : Rectangle {
+                                x: parent.width - 4px; y: parent.height - 4px; width: 8px; height: 8px;
+                                border-radius: 4px; background: Theme.palette().paper;
+                                border-width: 2px; border-color: Theme.palette().accent;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        x: 28px;
+                        y: parent.height - 56px;
+                        width: 250px;
+                        height: 34px;
+                        border-radius: 9px;
+                        background: Theme.palette().overlay;
                         border-width: 1px;
                         border-color: Theme.palette().border;
 
-                        VerticalLayout {
-                            alignment: center;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            padding-left: 9px;
+                            padding-right: 9px;
+                            IconButton {
+                                icon: "minus";
+                                label: "Zoom out";
+                                clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); }
+                            }
+                            Slider {
+                                minimum: 10;
+                                maximum: 200;
+                                value <=> root.zoom-value;
+                                horizontal-stretch: 1;
+                            }
+                            IconButton {
+                                icon: "plus";
+                                label: "Zoom in";
+                                clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); }
+                            }
+                        }
+                    }
+                }
 
-                            Text {
-                                text: root.comp-name;
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.heading;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: root.timecode-text;
-                                color: Theme.palette().accent;
-                                font-size: Theme.tokens.typography.body;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: "Pos: (" + Math.round(root.pos-x) + ", " + Math.round(root.pos-y) + ") • Scale: " + Math.round(root.scale-val) + "% • Rot: " + Math.round(root.rotation-val) + "°";
-                                color: Theme.palette().ink-secondary;
-                                font-size: Theme.tokens.typography.caption;
-                                horizontal-alignment: center;
+                if root.curve-drawer-open : Rectangle {
+                    height: 160px;
+                    background: Theme.palette().panel;
+                    border-width: 0px;
+
+                    VerticalLayout {
+                        spacing: 0px;
+                        PanelHeader { title: "Keyframe Graph"; detail: "Selected property"; }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            background: Theme.palette().canvas-alt;
+                            border-width: 0px;
+
+                            Rectangle { x: 25%; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+                            Rectangle { x: 50%; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
+                            Rectangle { x: 75%; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+                            Rectangle { y: 33%; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+                            Rectangle { y: 66%; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 5px;
+                                Text {
+                                    text: "No keyed property selected";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: 650;
+                                    color: Theme.palette().ink;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "The graph will show real interpolation handles after a property has keyframes.";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    horizontal-alignment: center;
+                                }
                             }
                         }
                     }
@@ -170,94 +355,71 @@ export component MotionApp inherits Window {
 
             Rectangle { width: 1px; background: Theme.palette().border; }
 
-            // Transform Property Inspector Sidebar
-            Rectangle {
-                width: 260px;
-                background: Theme.palette().surface;
+            InspectorSurface {
+                width: 294px;
+                title: "Inspector";
+                detail: root.layer-labels.length > 0 ? "Layer " + (root.active-layer-index + 1) : "No selection";
+
+                PaneTabs {
+                    items: ["Transform", "Timing"];
+                    current <=> root.inspector-tab;
+                }
 
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 10px;
+                    spacing: 12px;
+                    padding: 14px;
 
-                    Text {
-                        text: "TRANSFORM INSPECTOR";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink-secondary;
-                    }
+                    if root.inspector-tab == 0 : VerticalLayout {
+                        spacing: 12px;
 
-                    // Position X
-                    VerticalLayout {
-                        spacing: 2px;
-                        HorizontalLayout {
-                            Text { text: "Position X"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text { text: Math.round(root.pos-x) + " px"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        Text {
+                            text: "POSITION";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
                         }
+
+                        Text { text: "X   " + Math.round(root.pos-x) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
                             value: root.pos-x;
                             minimum: 0.0;
                             maximum: 1920.0;
                             changed(val) => { root.pos-x = val; root.transform-changed("pos-x", val); }
                         }
-                    }
 
-                    // Position Y
-                    VerticalLayout {
-                        spacing: 2px;
-                        HorizontalLayout {
-                            Text { text: "Position Y"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text { text: Math.round(root.pos-y) + " px"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        }
+                        Text { text: "Y   " + Math.round(root.pos-y) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
                             value: root.pos-y;
                             minimum: 0.0;
                             maximum: 1080.0;
                             changed(val) => { root.pos-y = val; root.transform-changed("pos-y", val); }
                         }
-                    }
 
-                    // Scale
-                    VerticalLayout {
-                        spacing: 2px;
-                        HorizontalLayout {
-                            Text { text: "Scale"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text { text: Math.round(root.scale-val) + "%"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        Rectangle { height: 1px; background: Theme.palette().border; }
+                        Text {
+                            text: "APPEARANCE";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
                         }
+
+                        Text { text: "Scale   " + Math.round(root.scale-val) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
                             value: root.scale-val;
                             minimum: 0.0;
                             maximum: 200.0;
                             changed(val) => { root.scale-val = val; root.transform-changed("scale", val); }
                         }
-                    }
 
-                    // Rotation
-                    VerticalLayout {
-                        spacing: 2px;
-                        HorizontalLayout {
-                            Text { text: "Rotation"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text { text: Math.round(root.rotation-val) + "°"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        }
+                        Text { text: "Rotation   " + Math.round(root.rotation-val) + "°"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
                             value: root.rotation-val;
                             minimum: -180.0;
                             maximum: 180.0;
                             changed(val) => { root.rotation-val = val; root.transform-changed("rotation", val); }
                         }
-                    }
 
-                    // Opacity
-                    VerticalLayout {
-                        spacing: 2px;
-                        HorizontalLayout {
-                            Text { text: "Opacity"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
-                            Rectangle { horizontal-stretch: 1; }
-                            Text { text: Math.round(root.opacity-val) + "%"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        }
+                        Text { text: "Opacity   " + Math.round(root.opacity-val) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                         Slider {
                             value: root.opacity-val;
                             minimum: 0.0;
@@ -265,99 +427,133 @@ export component MotionApp inherits Window {
                             changed(val) => { root.opacity-val = val; root.transform-changed("opacity", val); }
                         }
                     }
+
+                    if root.inspector-tab == 1 : VerticalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: "COMPOSITION";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
+                        }
+                        MetricChip { label: "Time"; value: root.timecode-display; }
+                        MetricChip { label: "Rate"; value: root.timecode-text; }
+                        Rectangle { height: 1px; background: Theme.palette().border; }
+                        Text {
+                            text: "Keyframe editing is available through the property timeline when keyed data exists. No synthetic curves are displayed.";
+                            wrap: word-wrap;
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
         }
 
-        // Keyframe Curve Editor Drawer Panel
-        if root.curve-drawer-open : Rectangle {
-            height: 130px;
-            background: Theme.palette().surface-sunken;
-            border-width: 1px;
-            border-color: Theme.palette().border;
+        Rectangle {
+            height: 176px;
+            background: Theme.palette().panel;
+            border-width: 0px;
 
             VerticalLayout {
-                padding: 8px;
-                spacing: 4px;
+                spacing: 0px;
+                PanelHeader { title: "Timeline"; detail: root.timecode-display; }
 
-                HorizontalLayout {
-                    Text {
-                        text: "KEYFRAME CURVE EDITOR";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().accent;
+                Rectangle {
+                    height: 24px;
+                    background: Theme.palette().chrome;
+                    border-width: 0px;
+
+                    HorizontalLayout {
+                        spacing: 0px;
+                        Rectangle { width: 246px; background: Theme.palette().surface-sunken; }
+                        for marker in ["0s", "2s", "4s", "6s", "8s", "10s"] : Rectangle {
+                            horizontal-stretch: 1;
+                            Text {
+                                text: marker;
+                                font-size: Theme.tokens.typography.micro;
+                                color: Theme.palette().ink-disabled;
+                                horizontal-alignment: start;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { x: 0px; y: parent.height - 7px; width: 1px; height: 7px; background: Theme.palette().grid-major; }
+                        }
                     }
-                    Rectangle { horizontal-stretch: 1; }
-                    ToolButton { text: "Linear"; clicked => {} }
-                    ToolButton { text: "Ease In"; clicked => {} }
-                    ToolButton { text: "Ease Out"; clicked => {} }
-                    ToolButton { text: "Bezier Curve"; checked: true; clicked => {} }
                 }
 
                 Rectangle {
-                    horizontal-stretch: 1;
                     vertical-stretch: 1;
-                    background: Theme.palette().surface;
-                    border-radius: 4px;
-                    border-width: 1px;
-                    border-color: Theme.palette().border;
+                    background: Theme.palette().canvas-alt;
+                    clip: true;
 
-                    HorizontalLayout {
-                        alignment: center;
-                        Text {
-                            text: "S-Curve Bezier Editor — Handle Points [P0, P1, P2, P3]";
-                            font-size: Theme.tokens.typography.caption;
-                            color: Theme.palette().ink-secondary;
-                            vertical-alignment: center;
+                    VerticalLayout {
+                        spacing: 3px;
+                        padding-top: 5px;
+                        padding-bottom: 5px;
+
+                        for label[idx] in root.layer-labels : WorkspaceRow {
+                            height: 40px;
+                            selected: idx == root.active-layer-index;
+                            clicked => { root.select-layer(idx); }
+
+                            HorizontalLayout {
+                                spacing: 0px;
+
+                                Rectangle {
+                                    width: 246px;
+                                    background: Theme.palette().panel;
+                                    border-width: 0px;
+                                    HorizontalLayout {
+                                        spacing: 7px;
+                                        padding-left: 11px;
+                                        padding-right: 9px;
+                                        Icon { icon: "layers"; size: 14px; tint: Theme.palette().ink-secondary; }
+                                        Text { text: label; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; overflow: elide; }
+                                    }
+                                }
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    background: Theme.palette().canvas-alt;
+                                    border-width: 0px;
+
+                                    Rectangle {
+                                        x: 10px + idx * 14px;
+                                        y: 6px;
+                                        width: max(120px, parent.width * 0.62 - idx * 18px);
+                                        height: parent.height - 12px;
+                                        border-radius: 7px;
+                                        background: idx == root.active-layer-index
+                                            ? Theme.palette().selection-soft
+                                            : Theme.palette().surface-raised;
+                                        border-width: 1px;
+                                        border-color: idx == root.active-layer-index
+                                            ? Theme.palette().accent
+                                            : Theme.palette().border;
+                                        Text {
+                                            x: 9px;
+                                            width: parent.width - 18px;
+                                            text: label;
+                                            font-size: Theme.tokens.typography.caption;
+                                            color: Theme.palette().ink;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-            }
-        }
 
-        // Timeline Track Area
-        Rectangle {
-            height: 140px;
-            background: Theme.palette().surface;
-
-            VerticalLayout {
-                padding: 10px;
-                spacing: 6px;
-
-                Text {
-                    text: "TIMELINE TRACKS";
-                    font-size: Theme.tokens.typography.caption;
-                    font-weight: 700;
-                    color: Theme.palette().ink-secondary;
-                }
-
-                for label[idx] in root.layer-labels : Rectangle {
-                    height: 36px;
-                    background: idx == root.active-layer-index
-                        ? Theme.palette().selection-soft
-                        : Theme.palette().surface-sunken;
-                    border-radius: 4px;
-                    border-width: 1px;
-                    border-color: idx == root.active-layer-index
-                        ? Theme.palette().accent
-                        : transparent;
-
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 8px;
-
-                        Text {
-                            text: label;
-                            color: Theme.palette().ink;
-                            font-size: Theme.tokens.typography.body;
-                            vertical-alignment: center;
-                        }
+                    Rectangle {
+                        x: 246px;
+                        y: 0px;
+                        width: 1px;
+                        height: parent.height;
+                        background: Theme.palette().accent;
                     }
-                    touch := TouchArea {
-                        clicked => { root.select-layer(idx); }
-                    }
-                    accessible-role: button;
-                    accessible-label: "Select motion layer " + label;
                 }
             }
         }
