@@ -134,7 +134,8 @@ pub fn save_presentation(doc: &PresentationDocument) -> Result<Vec<u8>, String> 
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         entries: vec![ManifestEntry {
             path: "content/presentation.json".into(),
-            mime: MimeType::parse("application/vnd.loom.deck-content").unwrap(),
+            mime: MimeType::parse("application/vnd.loom.deck-content")
+                .map_err(|e| format!("invalid built-in presentation MIME type: {e}"))?,
             size: json.len() as u64,
             sha256: Checksum::from_bytes(zip::sha256(&json)),
         }],

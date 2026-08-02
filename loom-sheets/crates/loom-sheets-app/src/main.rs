@@ -134,7 +134,8 @@ fn save_sheet(path: &str, sheet: &Sheet) -> Result<(), String> {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         entries: vec![ManifestEntry {
             path: "content/sheet.json".into(),
-            mime: MimeType::parse("application/vnd.loom.sheet-content").unwrap(),
+            mime: MimeType::parse("application/vnd.loom.sheet-content")
+                .map_err(|e| format!("invalid built-in sheets MIME type: {e}"))?,
             size: json.len() as u64,
             sha256: Checksum::from_bytes(loom_package::zip::sha256(json.as_bytes())),
         }],
@@ -343,6 +344,15 @@ fn run_gui(args: &Args) -> Result<(), String> {
         });
     }
     {
+        let app_ref = app.as_weak();
+        app.on_cancel_selected_cell(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.invoke_reset_formula_edit_buffer();
+                app.set_formula_feedback("Edit cancelled".into());
+            }
+        });
+    }
+    {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_quick_formula(move |func| {
@@ -531,7 +541,8 @@ fn main() -> Result<(), String> {
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-sheets-smoke-{}.png", std::process::id()));
-        return render_headless(&args, out.to_str().unwrap());
+        let out = out.to_string_lossy().into_owned();
+        return render_headless(&args, &out);
     }
     run_gui(&args)
 }

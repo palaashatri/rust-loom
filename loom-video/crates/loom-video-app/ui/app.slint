@@ -1,4 +1,4 @@
-import { ToolButton, IconButton, StatusBar, Slider, SearchField } from "components.slint";
+import { AppHeader, ToolButton, IconButton, StatusBar, Slider, SearchField } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -35,7 +35,6 @@ export component VideoApp inherits Window {
     callback select-track(int);
     callback toggle-track-mute(int);
     callback toggle-track-solo(int);
-    callback export-video;
 
     callback select-nle-tool(string);
     callback toggle-snap;
@@ -46,31 +45,15 @@ export component VideoApp inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: "Loom Video — " + root.project-name;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Video";
+            document-title: root.project-name;
+            icon: "video";
+            context: root.timecode-display;
+            state-text: "Media engine pending";
+            state-tone: 3;
         }
+
 
         // Toolbar & NLE Editing Bar
         Rectangle {
@@ -114,7 +97,7 @@ export component VideoApp inherits Window {
                 }
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                IconButton { icon: "export"; label: "Export Video"; clicked => { root.export-video(); } }
+                IconButton { icon: "export"; label: "Export requires media and encode engines"; enabled: false; }
             }
         }
 
@@ -243,7 +226,7 @@ export component VideoApp inherits Window {
                         ToolButton {
                             text: root.is-playing ? "⏸ Pause" : "▶ Play";
                             checked: root.is-playing;
-                            clicked => { root.is-playing = !root.is-playing; root.play-pause(); }
+                            enabled: false;
                         }
 
                         Text {

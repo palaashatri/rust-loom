@@ -1,4 +1,4 @@
-import { ToolButton, IconButton, StatusBar, Slider, Field } from "components.slint";
+import { AppHeader, ToolButton, IconButton, StatusBar, Slider, Field } from "components.slint";
 import { ComboBox } from "std-widgets.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
@@ -21,8 +21,8 @@ export component EncodeApp inherits Window {
     in property <string> selected-job-details: "";
     in-out property <string> selected-preset: "Web 1080p";
     in-out property <string> output-directory: "/exports/encode/";
-    in-out property <float> batch-progress: 45.0;
-    in-out property <float> active-job-progress: 65.0;
+    in-out property <float> batch-progress: 0.0;
+    in-out property <float> active-job-progress: 0.0;
 
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
@@ -32,7 +32,6 @@ export component EncodeApp inherits Window {
     callback save-queue;
     callback add-job;
     callback select-job(int);
-    callback start-batch;
     callback preset-changed(string);
     callback output-dir-changed(string);
     callback browse-output-dir;
@@ -40,31 +39,15 @@ export component EncodeApp inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: "Loom Encode — " + root.queue-name;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Encode";
+            document-title: root.queue-name;
+            icon: "export";
+            context: root.selected-job-details;
+            state-text: "Encoder pending";
+            state-tone: 3;
         }
+
 
         // Toolbar & Batch Progress Bar
         Rectangle {
@@ -111,7 +94,7 @@ export component EncodeApp inherits Window {
                 }
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                IconButton { icon: "export"; label: "Start Batch Encoding"; clicked => { root.start-batch(); } }
+                IconButton { icon: "export"; label: "Start requires a transcoder backend"; enabled: false; }
             }
         }
 

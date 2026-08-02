@@ -12,8 +12,8 @@ import { Icon } from "icons.slint";
 export component StatusBar inherits Rectangle {
     in property <string> status-left: "";
     in property <string> status-right: "";
-    min-height: 27px;
-    max-height: 27px;
+    min-height: 28px;
+    max-height: 28px;
     background: Theme.palette().surface-sunken;
     VerticalLayout {
         spacing: 0px;
@@ -24,7 +24,7 @@ export component StatusBar inherits Rectangle {
         }
     HorizontalLayout {
         spacing: 12px;
-        padding-left: 4px;
+        padding-left: 12px;
         padding-right: 12px;
         Text {
             text: root.status-left;
@@ -101,8 +101,8 @@ export component ToolButton inherits Rectangle {
     in property <bool> checked: false;
     in property <bool> enabled: true;
     callback clicked;
-    height: 28px;
-    min-width: 28px;
+    height: 30px;
+    min-width: 30px;
     border-radius: 6px;
     border-width: 1px;
     border-color: !enabled ? transparent
@@ -138,8 +138,8 @@ export component ToolButton inherits Rectangle {
     HorizontalLayout {
         spacing: 6px;
         alignment: center;
-        padding-left: 0px;
-        padding-right: 8px;
+        padding-left: root.icon != "" ? 8px : 10px;
+        padding-right: root.text != "" ? 10px : 8px;
         if root.icon != "" : Icon {
             icon: root.icon;
             size: 16px;
@@ -168,8 +168,8 @@ export component IconButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> checked: false;
     callback clicked;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     border-radius: 6px;
     border-width: 1px;
     border-color: !enabled ? transparent
@@ -222,8 +222,8 @@ export component PrimaryButton inherits Rectangle {
     in property <string> text: "";
     in property <bool> enabled: true;
     callback clicked;
-    height: 28px;
-    min-width: 64px;
+    height: 30px;
+    min-width: 72px;
     border-radius: 6px;
     background: !enabled ? Theme.palette().border
         : touch.pressed ? Theme.palette().accent
@@ -274,7 +274,7 @@ export component SearchField inherits Rectangle {
     in-out property <string> value: "";
     in property <bool> enabled: true;
     callback edited(string);
-    height: 28px;
+    height: 30px;
     min-width: 160px;
     border-radius: 6px;
     border-width: 1px;
@@ -938,7 +938,7 @@ export component Panel inherits Rectangle {
             min-height: 32px;
             max-height: 32px;
             HorizontalLayout {
-                padding-left: 0px;
+                padding-left: 12px;
                 padding-right: 12px;
                 spacing: 8px;
                 Text {
@@ -962,7 +962,7 @@ export component Panel inherits Rectangle {
                     background: Theme.palette().border;
                 }
                 HorizontalLayout {
-                    padding-left: 0px;
+                    padding-left: 12px;
                     padding-right: 12px;
                     Text {
                         text: root.footer;
@@ -998,6 +998,205 @@ export component InspectorSection inherits Rectangle {
             height: 1px;
             horizontal-stretch: 1;
             background: Theme.palette().border;
+        }
+    }
+}
+
+/// Compact semantic badge used for local/offline state, prototype limitations,
+/// success, warnings, and errors. Tone: 0 neutral, 1 accent, 2 success,
+/// 3 warning, 4 danger.
+export component StatusPill inherits Rectangle {
+    in property <string> text: "Local";
+    in property <int> tone: 0;
+    min-width: 48px;
+    height: 22px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: root.tone == 1 ? Theme.palette().accent
+        : root.tone == 2 ? Theme.palette().success
+        : root.tone == 3 ? Theme.palette().warning
+        : root.tone == 4 ? Theme.palette().danger
+        : Theme.palette().border-strong;
+    background: root.tone == 1 ? Theme.palette().selection-soft
+        : root.tone == 4 ? Theme.palette().danger-surface
+        : Theme.palette().surface-sunken;
+
+    Text {
+        text: root.text;
+        font-size: Theme.tokens.typography.caption;
+        font-weight: 600;
+        color: root.tone == 1 ? Theme.palette().accent
+            : root.tone == 2 ? Theme.palette().success
+            : root.tone == 3 ? Theme.palette().warning
+            : root.tone == 4 ? Theme.palette().danger
+            : Theme.palette().ink-secondary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+/// Suite-wide application header. It keeps the application identity, document
+/// identity, context and local state in stable locations across every Loom app.
+export component AppHeader inherits Rectangle {
+    in property <string> app-name: "Loom";
+    in property <string> document-title: "Untitled";
+    in property <string> icon: "layers";
+    in property <string> context: "";
+    in property <string> state-text: "Local";
+    in property <int> state-tone: 0;
+
+    min-height: 48px;
+    max-height: 48px;
+    background: Theme.palette().surface;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            padding-left: 12px;
+            padding-right: 12px;
+            cross-axis-alignment: center;
+
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 8px;
+                background: Theme.palette().selection-soft;
+                Icon {
+                    icon: root.icon;
+                    size: 17px;
+                    tint: Theme.palette().accent;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 0px;
+                Text {
+                    text: root.app-name;
+                    font-size: Theme.tokens.typography.title;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                }
+                Text {
+                    text: root.document-title;
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+
+            if root.context != "" : Text {
+                text: root.context;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-disabled;
+                vertical-alignment: center;
+            }
+
+            StatusPill {
+                text: root.state-text;
+                tone: root.state-tone;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.palette().border;
+        }
+    }
+}
+
+/// Consistent title row for sidebars, inspectors, browsers and timeline panes.
+export component PanelHeader inherits Rectangle {
+    in property <string> title: "Panel";
+    in property <string> detail: "";
+    min-height: 34px;
+    max-height: 34px;
+    background: Theme.palette().surface;
+
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 12px;
+        padding-right: 10px;
+        cross-axis-alignment: center;
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-disabled;
+        }
+    }
+}
+
+/// Vertical workspace/mode rail item with an explicit selected state and full
+/// keyboard/accessibility behavior.
+export component RailButton inherits Rectangle {
+    in property <string> text: "";
+    in property <string> icon: "generic";
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 56px;
+    height: 48px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.checked ? Theme.palette().accent
+        : focus-scope.has-focus ? Theme.palette().focus
+        : transparent;
+    background: root.checked ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-sunken
+        : transparent;
+
+    animate background, border-color {
+        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
+    }
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    focus-scope := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 3px;
+        alignment: center;
+        Icon {
+            icon: root.icon;
+            size: 17px;
+            tint: root.enabled ? (root.checked ? Theme.palette().accent : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
+        }
+        Text {
+            text: root.text;
+            font-size: 10px;
+            color: root.enabled ? (root.checked ? Theme.palette().accent : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
+            horizontal-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            focus-scope.focus();
+            root.clicked();
         }
     }
 }

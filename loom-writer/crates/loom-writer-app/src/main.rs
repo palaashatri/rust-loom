@@ -516,7 +516,8 @@ fn main() -> Result<(), String> {
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-writer-smoke-{}.png", std::process::id()));
-        return render_headless(&args, out.to_str().unwrap());
+        let out = out.to_string_lossy().into_owned();
+        return render_headless(&args, &out);
     }
     run_gui(&args)
 }

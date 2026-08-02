@@ -1,4 +1,4 @@
-import { ToolButton, IconButton, StatusBar, Slider, CollapsiblePanel } from "components.slint";
+import { AppHeader, ToolButton, IconButton, StatusBar, Slider, CollapsiblePanel } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -43,31 +43,15 @@ export component MotionApp inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: "Loom Motion — " + root.comp-name;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Motion";
+            document-title: root.comp-name;
+            icon: "layers";
+            context: root.timecode-text;
+            state-text: "Model preview";
+            state-tone: 3;
         }
+
 
         // Toolbar & Animation Transport Controls
         Rectangle {

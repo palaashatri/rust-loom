@@ -1,4 +1,4 @@
-import { ToolButton, IconButton, StatusBar, Slider, SegmentedControl } from "components.slint";
+import { AppHeader, ToolButton, IconButton, StatusBar, Slider, SegmentedControl } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -39,7 +39,6 @@ export component StudioApp inherits Window {
     callback select-track(int);
     callback toggle-workspace;
     callback set-workspace-mode(int);
-    callback export-audio;
 
     // Transport Callbacks
     callback play;
@@ -59,31 +58,15 @@ export component StudioApp inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: "Loom Studio — " + root.song-title + " (" + root.workspace-mode + ")";
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Studio";
+            document-title: root.song-title;
+            icon: "audio";
+            context: root.tempo-text + " · " + root.workspace-mode;
+            state-text: "Audio engine pending";
+            state-tone: 3;
         }
+
 
         // DAW Transport Bar & Toolbar
         Rectangle {
@@ -109,16 +92,16 @@ export component StudioApp inherits Window {
                 ToolButton {
                     text: root.is-playing ? "⏸ Pause" : "▶ Play";
                     checked: root.is-playing;
-                    clicked => { root.is-playing = !root.is-playing; root.play(); }
+                    enabled: false;
                 }
                 ToolButton {
                     text: "⏹ Stop";
-                    clicked => { root.is-playing = false; root.is-recording = false; root.stop(); }
+                    enabled: false;
                 }
                 ToolButton {
                     text: "⏺ Record";
                     checked: root.is-recording;
-                    clicked => { root.is-recording = !root.is-recording; root.record(); }
+                    enabled: false;
                 }
                 ToolButton {
                     text: "🔁 Loop";
@@ -169,7 +152,7 @@ export component StudioApp inherits Window {
                 }
 
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                IconButton { icon: "export"; label: "Export Mix"; clicked => { root.export-audio(); } }
+                IconButton { icon: "export"; label: "Export requires the audio engine"; enabled: false; }
             }
         }
 

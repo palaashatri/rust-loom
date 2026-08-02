@@ -128,7 +128,8 @@ fn main() -> Result<(), String> {
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-motion-smoke-{}.png", std::process::id()));
-        return render_headless(&args, out.to_str().unwrap());
+        let out = out.to_string_lossy().into_owned();
+        return render_headless(&args, &out);
     }
 
     let app = MotionApp::new().map_err(|e| e.to_string())?;
@@ -147,6 +148,26 @@ fn main() -> Result<(), String> {
             if let Some(app) = app_ref.upgrade() {
                 *state.current.borrow_mut() = sample_motion();
                 apply_motion(&app, &state.current.borrow());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_open_comp(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match std::fs::read(SAVE_FILENAME)
+                    .map_err(|e| format!("failed to read {SAVE_FILENAME}: {e}"))
+                    .and_then(|bytes| load_motion(&bytes))
+                {
+                    Ok(doc) => {
+                        *state.current.borrow_mut() = doc;
+                        apply_motion(&app, &state.current.borrow());
+                        app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
+                    }
+                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                }
             }
         });
     }

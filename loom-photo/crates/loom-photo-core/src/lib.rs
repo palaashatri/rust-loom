@@ -130,7 +130,8 @@ pub fn save_photo(doc: &PhotoDocument) -> Result<Vec<u8>, String> {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         entries: vec![ManifestEntry {
             path: "content/photo.json".into(),
-            mime: MimeType::parse("application/vnd.loom.photo-content").unwrap(),
+            mime: MimeType::parse("application/vnd.loom.photo-content")
+                .map_err(|e| format!("invalid built-in photo MIME type: {e}"))?,
             size: json.len() as u64,
             sha256: Checksum::from_bytes(zip::sha256(&json)),
         }],

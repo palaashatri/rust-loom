@@ -129,7 +129,8 @@ pub fn save_studio_project(proj: &StudioProject) -> Result<Vec<u8>, String> {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         entries: vec![ManifestEntry {
             path: "content/studio.json".into(),
-            mime: MimeType::parse("application/vnd.loom.studio-content").unwrap(),
+            mime: MimeType::parse("application/vnd.loom.studio-content")
+                .map_err(|e| format!("invalid built-in studio MIME type: {e}"))?,
             size: json.len() as u64,
             sha256: Checksum::from_bytes(zip::sha256(&json)),
         }],

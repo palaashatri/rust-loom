@@ -1,4 +1,4 @@
-import { ToolButton, IconButton, StatusBar, SegmentedControl, Slider } from "components.slint";
+import { AppHeader, ToolButton, IconButton, StatusBar, SegmentedControl, Slider } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 import { TextEdit } from "std-widgets.slint";
@@ -34,8 +34,6 @@ export component PresentApp inherits Window {
     callback add-slide;
     callback select-slide(int);
     callback export-pdf;
-    callback undo;
-    callback redo;
 
     callback notes-edited(string);
     callback toggle-preview-mode;
@@ -47,36 +45,15 @@ export component PresentApp inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: root.is-preview-mode ? "Loom Present — Presenter Playback Preview Mode" : ("Loom Present — " + root.deck-title);
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-                Rectangle { horizontal-stretch: 1; }
-                if root.is-preview-mode : ToolButton {
-                    text: "Exit Preview";
-                    clicked => { root.toggle-preview-mode(); }
-                }
-            }
+        AppHeader {
+            app-name: root.is-preview-mode ? "Loom Present · Preview" : "Loom Present";
+            document-title: root.deck-title;
+            icon: "layers";
+            context: root.slide-count-text;
+            state-text: root.is-preview-mode ? "Preview" : "Saved locally";
+            state-tone: root.is-preview-mode ? 1 : 0;
         }
+
 
         // Toolbar (only visible in edit mode)
         if !root.is-preview-mode : Rectangle {
@@ -95,8 +72,8 @@ export component PresentApp inherits Window {
                 ToolButton { icon: "open"; text: "Open"; clicked => { root.open-deck(); } }
                 ToolButton { icon: "save"; text: "Save"; clicked => { root.save-deck(); } }
                 ToolButton { icon: "add"; text: "+ Slide"; clicked => { root.add-slide(); } }
-                ToolButton { icon: "undo"; clicked => { root.undo(); } }
-                ToolButton { icon: "redo"; clicked => { root.redo(); } }
+                ToolButton { icon: "undo"; text: "Undo"; enabled: false; }
+                ToolButton { icon: "redo"; text: "Redo"; enabled: false; }
 
                 Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
 

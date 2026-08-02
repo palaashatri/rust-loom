@@ -144,7 +144,8 @@ fn main() -> Result<(), String> {
     }
     if args.smoke {
         let out = std::env::temp_dir().join(format!("loom-photo-smoke-{}.png", std::process::id()));
-        return render_headless(&args, out.to_str().unwrap());
+        let out = out.to_string_lossy().into_owned();
+        return render_headless(&args, &out);
     }
 
     let app = PhotoApp::new().map_err(|e| e.to_string())?;
@@ -170,6 +171,26 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_open_project(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match std::fs::read(SAVE_FILENAME)
+                    .map_err(|e| format!("failed to read {SAVE_FILENAME}: {e}"))
+                    .and_then(|bytes| load_photo(&bytes))
+                {
+                    Ok(doc) => {
+                        *state.current.borrow_mut() = doc;
+                        apply_photo(&app, &state.current.borrow());
+                        app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
+                    }
+                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_add_layer(move || {
             if let Some(app) = app_ref.upgrade() {
                 let mut current = state.current.borrow_mut();
@@ -179,6 +200,25 @@ fn main() -> Result<(), String> {
                     format!("Pixel Layer {count}"),
                 ));
                 apply_photo(&app, &current);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_add_adjustment(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                let count = current.layers.len() + 1;
+                current.add_layer(Layer::new_adjustment(
+                    format!("adjustment-{count}"),
+                    format!("Brightness {count}"),
+                    "brightness",
+                    0.0,
+                ));
+                apply_photo(&app, &current);
+                app.set_status_left(SharedString::from("Added editable brightness adjustment metadata"));
             }
         });
     }

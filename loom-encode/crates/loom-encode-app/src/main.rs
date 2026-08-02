@@ -129,6 +129,21 @@ fn apply_encode(app: &EncodeApp, q: &EncodeQueue) {
     app.set_job_progresses(ModelRc::new(VecModel::from(job_progresses)));
     app.set_active_job_index(q.active_job_index as i32);
 
+    let progress_for = |job: &loom_encode_core::EncodeJob| match &job.status {
+        JobStatus::Queued => 0.0,
+        JobStatus::Encoding { progress } => (*progress).clamp(0.0, 1.0) * 100.0,
+        JobStatus::Complete => 100.0,
+        JobStatus::Failed(_) => 0.0,
+    };
+    let batch_progress = if q.jobs.is_empty() {
+        0.0
+    } else {
+        q.jobs.iter().map(progress_for).sum::<f32>() / q.jobs.len() as f32
+    };
+    let active_progress = q.jobs.get(q.active_job_index).map(progress_for).unwrap_or(0.0);
+    app.set_batch_progress(batch_progress);
+    app.set_active_job_progress(active_progress);
+
     let (selected_job_text, selected_job_details, preset_name) = q
         .jobs
         .get(q.active_job_index)
@@ -182,7 +197,8 @@ fn main() -> Result<(), String> {
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-encode-smoke-{}.png", std::process::id()));
-        return render_headless(&args, out.to_str().unwrap());
+        let out = out.to_string_lossy().into_owned();
+        return render_headless(&args, &out);
     }
 
     let app = EncodeApp::new().map_err(|e| e.to_string())?;
@@ -201,6 +217,26 @@ fn main() -> Result<(), String> {
             if let Some(app) = app_ref.upgrade() {
                 *state.current.borrow_mut() = sample_encode();
                 apply_encode(&app, &state.current.borrow());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_open_queue(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match std::fs::read(SAVE_FILENAME)
+                    .map_err(|e| format!("failed to read {SAVE_FILENAME}: {e}"))
+                    .and_then(|bytes| load_encode_queue(&bytes))
+                {
+                    Ok(queue) => {
+                        *state.current.borrow_mut() = queue;
+                        apply_encode(&app, &state.current.borrow());
+                        app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
+                    }
+                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                }
             }
         });
     }
@@ -278,28 +314,12 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_browse_output_dir(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_output_directory("/Users/Shared/LoomExports/".into());
-                app.set_status_left(SharedString::from("Selected destination directory /Users/Shared/LoomExports/"));
+                app.set_output_directory("./exports/encode/".into());
+                app.set_status_left(SharedString::from("Selected destination directory ./exports/encode/"));
             }
         });
     }
 
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_start_batch(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                for job in &mut current.jobs {
-                    job.status = JobStatus::Encoding { progress: 0.75 };
-                }
-                app.set_batch_progress(75.0);
-                app.set_active_job_progress(75.0);
-                apply_encode(&app, &current);
-                app.set_status_left(SharedString::from("Started batch encoding engine..."));
-            }
-        });
-    }
 
     {
         let state = state.clone();

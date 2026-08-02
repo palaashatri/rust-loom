@@ -1131,7 +1131,8 @@ pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip:
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         entries: vec![ManifestEntry {
             path: "content/document.json".into(),
-            mime: MimeType::parse("application/vnd.loom.document-content").unwrap(),
+            mime: MimeType::parse("application/vnd.loom.document-content")
+                .map_err(|e| format!("invalid built-in writer MIME type: {e}"))?,
             size: doc.to_content_json().len() as u64,
             sha256: Checksum::from_bytes(zip::sha256(doc.to_content_json().as_bytes())),
         }],

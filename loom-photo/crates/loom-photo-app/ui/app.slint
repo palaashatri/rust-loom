@@ -1,4 +1,4 @@
-import { ToolButton, IconButton, StatusBar, Slider } from "components.slint";
+import { AppHeader, ToolButton, IconButton, StatusBar, Slider } from "components.slint";
 import { ComboBox } from "std-widgets.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
@@ -29,7 +29,6 @@ export component PhotoApp inherits Window {
     callback save-project;
     callback add-layer;
     callback add-adjustment;
-    callback export-image;
     callback select-layer(int);
     callback select-tool(string);
     callback toggle-layer-visibility(int);
@@ -42,31 +41,15 @@ export component PhotoApp inherits Window {
     VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: "Loom Photo — " + root.project-name;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Photo";
+            document-title: root.project-name;
+            icon: "image";
+            context: root.dimensions-text;
+            state-text: "Renderer pending";
+            state-tone: 3;
         }
+
 
         // Toolbar
         Rectangle {
@@ -87,7 +70,7 @@ export component PhotoApp inherits Window {
                 ToolButton { icon: "add"; text: "+ Layer"; clicked => { root.add-layer(); } }
                 ToolButton { icon: "settings"; text: "+ Adjustment"; clicked => { root.add-adjustment(); } }
                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                IconButton { icon: "export"; label: "Export PNG"; clicked => { root.export-image(); } }
+                IconButton { icon: "export"; label: "Export requires the pixel renderer"; enabled: false; }
             }
         }
 
