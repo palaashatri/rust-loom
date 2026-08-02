@@ -1,0 +1,68 @@
+name: Cross-platform and installer validation
+
+on:
+  pull_request:
+    paths:
+      - 'loom-*/**'
+      - '.github/workflows/cross-platform.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loom-cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-build:
+    name: ${{ matrix.platform }}-${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+            architecture: x86_64
+          - runner: windows-latest
+            platform: windows
+            architecture: x86_64
+          - runner: macos-latest
+            platform: macos
+            architecture: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux native dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev \
+            libfontconfig1-dev libx11-dev libxkbcommon-dev libwayland-dev \
+            libgl1-mesa-dev libglu1-mesa-dev dpkg-dev
+      - name: Select Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version
+          cargo --version
+      - name: Build every application workspace
+        shell: bash
+        run: bash loom-bootstrap/scripts/build-all.sh --release
+      - name: Validate installer inputs and target matrix
+        shell: bash
+        run: >-
+          python3 loom-bootstrap/packaging/release.py
+          --root "$GITHUB_WORKSPACE"
+          --output "$RUNNER_TEMP/loom-packages"
+          --platform "${{ matrix.platform }}"
+          --architecture "${{ matrix.architecture }}"
+          --version 0.1.0
+          --allow-unsigned
+          --validate-only
+      - name: Run suite contract audit
+        shell: bash
+        run: python3 loom-bootstrap/scripts/audit-contracts.py
