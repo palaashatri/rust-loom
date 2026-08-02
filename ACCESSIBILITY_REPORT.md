@@ -13,15 +13,16 @@ release requirement, not a post-launch add-on.
 - Non-color status indicators: status surfaces carry icons + text, not color alone.
 - Reduced motion: theme token (`Theme.active-motion`) defined; motion spec documented in
   loom-design-bible (MOTION.md); reduced-motion final states specified for visual QA.
-- Themes: light, dark, high-contrast verified working in writer and sheets (screenshots
-  captured; contrast designed for WCAG AA targets in the tokens).
+- Themes: light and dark are verified in the current application screenshot
+  gate. High-contrast contrast targets are specified in the design tokens but
+  that visual matrix is not run by the current harness.
 - Scalable UI: token-based sizing; Slint supports UI scaling (scale parameter in the
   capture platform and window scaling at runtime).
 
 ## Verified this session
 
-- writer + sheets render in light/dark/high-contrast themes (visual QA PASS; HC toolbar
-  and status bars verified at pixel level).
+- writer + sheets render in the default light/dark themes (visual QA PASS for
+  the current capture/baseline gate).
 - Focus/keyboard E2E automation: NOT yet implemented (no input-injection test harness).
 
 ## Not yet done

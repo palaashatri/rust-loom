@@ -89,7 +89,11 @@ fn apply_video(app: &VideoApp, proj: &VideoProject) {
             ))
         })
         .collect();
+    let track_mutes: Vec<bool> = proj.tracks.iter().map(|t| t.muted).collect();
+    let track_solos: Vec<bool> = proj.tracks.iter().map(|_| false).collect();
     app.set_track_labels(ModelRc::new(VecModel::from(track_labels)));
+    app.set_track_mutes(ModelRc::new(VecModel::from(track_mutes)));
+    app.set_track_solos(ModelRc::new(VecModel::from(track_solos)));
     app.set_active_track_index(proj.active_track_index as i32);
     let selected = proj
         .tracks
@@ -200,6 +204,88 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_toggle_track_mute(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if let Some(track) = current.tracks.get_mut(index as usize) {
+                    track.muted = !track.muted;
+                    apply_video(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_track_solo(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Toggled Solo for Track {index}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_select_nle_tool(move |tool| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Selected NLE Tool: {tool}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_snap(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let snap = app.get_snap_enabled();
+                app.set_status_left(SharedString::from(format!("Timeline Snapping: {snap}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_play_pause(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let playing = app.get_is_playing();
+                app.set_status_left(SharedString::from(if playing {
+                    "Playing video timeline..."
+                } else {
+                    "Paused timeline playback"
+                }));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_seek(move |pos| {
+            if let Some(app) = app_ref.upgrade() {
+                let sec = (pos / 100.0 * 180.0) as u32;
+                let min = sec / 60;
+                let s = sec % 60;
+                let timecode = format!("00:{min:02}:{s:02}:00");
+                app.set_timecode_display(timecode.into());
+                app.set_status_left(SharedString::from(format!("Scrubbed playhead to {pos:.1}%")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_add_marker(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from("Added timeline marker at current playhead"));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_save_project(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Ok(bytes) = save_video_project(&state.current.borrow()) {
@@ -215,3 +301,4 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
+

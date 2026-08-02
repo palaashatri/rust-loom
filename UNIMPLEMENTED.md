@@ -5,11 +5,11 @@ To uphold the core execution principle of honest completion reporting (Section 2
 ## Application Engine Limitations
 
 ### 1. Loom Writer (`loom-writer`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Rich text document model, style hierarchy, paginated PDF export, ZIP package serialization (`.loomdoc`), continuous view, CLI tool, Slint UI.
-- **Unimplemented / Future**: Complex DOCX/ODT import filters (currently Markdown and plain text supported), automatic bibliography querying.
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Rich-text document model, style hierarchy, editable multiline plain-text surface, paginated PDF export, ZIP package serialization (`.loomdoc`), continuous view, CLI tool, and Slint UI.
+- **Unimplemented / Future**: Full rich-text formatting controls, complex DOCX/ODT import filters (currently Markdown and plain text are supported), tables, footnotes, change tracking, and automatic bibliography querying.
 
 ### 2. Loom Sheets (`loom-sheets`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Virtualized cell grid model, formula calculation engine, dependency graph, CSV/TSV import/export, ZIP package serialization (`.loomsheet`), Slint UI.
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Cell grid model, formula calculation engine, dependency graph, formula/value-bar editing for the selected cell, CSV/TSV import/export, ZIP package serialization (`.loomtable`), and Slint UI.
 - **Unimplemented / Future**: XLSX binary chart importer, complex pivot table wizard.
 
 ### 3. Loom Present (`loom-present`)
@@ -17,24 +17,24 @@ To uphold the core execution principle of honest completion reporting (Section 2
 - **Unimplemented / Future**: Presenter hardware display dual-monitor split, live video presenter overlay.
 
 ### 4. Loom Photo (`loom-photo`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Layer compositing (pixel, vector, text, adjustment), blend modes, curve controls, ZIP package serialization (`.loomphoto`), Slint UI.
-- **Unimplemented / Future**: RAW camera sensor demosaicing pipeline (currently standard image formats PNG/JPEG/WebP are supported), 3D warp mesh editor.
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Layer metadata/model, blend-mode metadata, ZIP package serialization (`.loomphoto`), and Slint UI.
+- **Unimplemented / Future**: Pixel decode and compositing, real adjustments/curves, RAW camera sensor demosaicing, standard image-format processing, and 3D warp mesh editing.
 
 ### 5. Loom Motion (`loom-motion`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Composition layer model, timeline keyframing, property interpolation, ZIP package serialization (`.loommotion`), Slint UI.
-- **Unimplemented / Future**: 2.5D camera light depth mapping.
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Composition layer model, timeline keyframe metadata, ZIP package serialization (`.loommotion`), and Slint UI.
+- **Unimplemented / Future**: Property interpolation, rendering, preview/playback, and 2.5D camera/light depth mapping.
 
 ### 6. Loom Video (`loom-video`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Multitrack non-linear editing timeline, clip trimming/splitting, audio/video track model, ZIP package serialization (`.loomvideo`), Slint UI.
-- **Unimplemented / Future**: Hardware-accelerated GPU optical-flow retiming (software retiming available).
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Track/clip metadata model, ZIP package serialization (`.loomvideo`), and Slint UI.
+- **Unimplemented / Future**: Media decode/playback, media-backed trimming/splitting, export, and hardware-accelerated GPU optical-flow retiming.
 
 ### 7. Loom Studio (`loom-studio`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Multitrack DAW model, Quick vs Pro workspace modes, audio/MIDI regions, track volume/pan/mute controls, ZIP package serialization (`.loomstudio`), Slint UI.
-- **Unimplemented / Future**: VST3/CLAP Linux plugin sandboxed host (WASI plugin host available).
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Track/region metadata model, ZIP package serialization (`.loomstudio`), and Slint UI.
+- **Unimplemented / Future**: Audio I/O, mixing, MIDI processing, track controls beyond the model, export, and VST3/CLAP plugin hosting.
 
 ### 8. Loom Encode (`loom-encode`)
-- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Batch transcoding job queue, encoding presets (H.264 Web 1080p, ProRes 422 HQ), ZIP package serialization (`.loomencode`), Slint UI.
-- **Unimplemented / Future**: AV1 AVIF hardware encoder pipeline.
+- **Implemented (`FUNCTIONAL_WITH_LIMITATIONS`)**: Queue/preset metadata model, ZIP package serialization (`.loomencode`), and Slint UI.
+- **Unimplemented / Future**: Codec invocation, batch execution, pause/resume, output inspection, and AV1/AVIF hardware encoding.
 
 ## Platform Infrastructure
 - **Cloud Synchronization**: Intentionally NOT included per Section 2.1 ("Local First").

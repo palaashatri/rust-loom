@@ -2,24 +2,39 @@
 // chrome built inline (a Window component cannot be nested, so the app
 // owns its title bar and status bar).
 
-import { ToolButton, IconButton, SearchField, EmptyState, StatusBar } from "components.slint";
+import { ToolButton, IconButton, SearchField, StatusBar, SegmentedControl } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { TextEdit } from "std-widgets.slint";
 export { Theme } from "theme.slint";
+export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
     title: "Loom Writer";
     in property <string> doc-title: "Untitled";
-    in property <string> doc-content: "";
-    in property <bool> doc-empty: true;
+    in-out property <string> doc-content: "";
     in property <string> status-left: "";
     in property <string> status-right: "";
+
+    // Rich Text Formatting properties
+    in-out property <bool> is-bold: false;
+    in-out property <bool> is-italic: false;
+    in-out property <bool> is-underline: false;
+    in-out property <int> heading-level: 0; // 0: Normal, 1: H1, 2: H2, 3: H3
+    in-out property <int> text-alignment: 0; // 0: Left, 1: Center, 2: Right
+
     callback new-doc;
     callback open-doc;
     callback save-doc;
     callback export-pdf;
     callback undo;
     callback redo;
+    callback document-edited(string);
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback select-heading(int);
+    callback select-alignment(int);
 
     background: Theme.palette().canvas;
 
@@ -28,8 +43,8 @@ export component WriterApp inherits Window {
         padding: 0px;
 
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             VerticalLayout {
@@ -63,6 +78,7 @@ export component WriterApp inherits Window {
             }
         }
 
+        // Standard Action Toolbar
         Rectangle {
             min-height: 40px;
             max-height: 40px;
@@ -86,6 +102,80 @@ export component WriterApp inherits Window {
             }
         }
 
+        // Rich Text Formatting Toolbar
+        Rectangle {
+            min-height: 36px;
+            max-height: 36px;
+            background: Theme.palette().surface;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 8px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                Text {
+                    text: "Style:";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+                SegmentedControl {
+                    items: ["Normal", "H1", "H2", "H3"];
+                    current <=> root.heading-level;
+                    selected(idx) => { root.select-heading(idx); }
+                }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+
+                ToolButton {
+                    text: "B";
+                    checked: root.is-bold;
+                    clicked => {
+                        root.is-bold = !root.is-bold;
+                        root.toggle-bold();
+                    }
+                }
+                ToolButton {
+                    text: "I";
+                    checked: root.is-italic;
+                    clicked => {
+                        root.is-italic = !root.is-italic;
+                        root.toggle-italic();
+                    }
+                }
+                ToolButton {
+                    text: "U";
+                    checked: root.is-underline;
+                    clicked => {
+                        root.is-underline = !root.is-underline;
+                        root.toggle-underline();
+                    }
+                }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+
+                Text {
+                    text: "Align:";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+                SegmentedControl {
+                    items: ["Left", "Center", "Right"];
+                    current <=> root.text-alignment;
+                    selected(idx) => { root.select-alignment(idx); }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.palette().border;
+        }
+
+        // Main Paper Canvas with margin container & shadow effect
         HorizontalLayout {
             spacing: 0px;
             padding: 0px;
@@ -96,41 +186,72 @@ export component WriterApp inherits Window {
                 horizontal-stretch: 1;
                 background: Theme.palette().canvas;
 
-                if root.doc-empty : EmptyState {
-                    width: 100%;
-                    height: 100%;
-                    icon: "document";
-                    title: "No document open";
-                    description: "Create a new document or open an existing one to start writing.";
-                    action-text: "New Document";
-                    action => { root.new-doc(); }
-                }
+                HorizontalLayout {
+                    alignment: center;
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-top: 24px;
+                    padding-bottom: 24px;
 
-                if !root.doc-empty : VerticalLayout {
-                    width: 100%;
-                    height: 100%;
-                    padding-left: 48px;
-                    padding-right: 48px;
-                    padding-top: 32px;
-                    padding-bottom: 32px;
-
-                    Text {
-                        text: root.doc-title;
-                        font-size: Theme.tokens.typography.heading;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
-                    }
-                    Rectangle { min-height: 12px; max-height: 12px; }
+                    // Paper Canvas Container with Margin & Subtle Shadow Border
                     Rectangle {
+                        max-width: 760px;
                         horizontal-stretch: 1;
-                        vertical-stretch: 1;
-                        clip: true;
-                        Text {
-                            width: parent.width;
-                            text: root.doc-content;
-                            font-size: Theme.tokens.typography.body;
-                            color: Theme.palette().ink-secondary;
-                            wrap: word-wrap;
+                        height: 100%;
+                        background: Theme.palette().surface;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border-strong;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            padding-left: 48px;
+                            padding-right: 48px;
+                            padding-top: 36px;
+                            padding-bottom: 36px;
+
+                            Text {
+                                text: root.doc-title;
+                                font-size: root.heading-level == 1 ? Theme.tokens.typography.title
+                                         : root.heading-level == 2 ? Theme.tokens.typography.heading
+                                         : root.heading-level == 3 ? Theme.tokens.typography.body
+                                         : Theme.tokens.typography.heading;
+                                font-weight: 700;
+                                color: Theme.palette().ink;
+                                horizontal-alignment: root.text-alignment == 1 ? center : root.text-alignment == 2 ? right : left;
+                            }
+                            Rectangle { min-height: 16px; max-height: 16px; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                clip: true;
+                                TextEdit {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text <=> root.doc-content;
+                                    font-size: Theme.tokens.typography.body;
+                                    placeholder-text: "Start writing…";
+                                    wrap: word-wrap;
+                                    edited => {
+                                        root.document-edited(self.text);
+                                    }
+                                    key-pressed(event) => {
+                                        if (event.modifiers.control && (event.text == "z" || event.text == "Z")) {
+                                            if (event.modifiers.shift) {
+                                                root.redo();
+                                            } else {
+                                                root.undo();
+                                            }
+                                            accept
+                                        } else if (event.modifiers.control && (event.text == "y" || event.text == "Y")) {
+                                            root.redo();
+                                            accept
+                                        }
+                                        reject
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -143,3 +264,4 @@ export component WriterApp inherits Window {
         }
     }
 }
+

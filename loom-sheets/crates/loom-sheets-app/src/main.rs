@@ -16,7 +16,7 @@ use loom_sheets_core::{
     Sheet, Value,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -336,8 +336,76 @@ fn run_gui(args: &Args) -> Result<(), String> {
                     };
                     if committed {
                         apply_sheet(&app, &state.current.borrow());
+                        app.set_formula_feedback(SharedString::from(format!("Cell {} updated", cell.to_a1())));
                     }
                 }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_quick_formula(move |func| {
+            if let Some(app) = app_ref.upgrade() {
+                if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
+                    let formula_text = format!("={func}(A1:A5)");
+                    let committed = {
+                        let mut current = state.current.borrow_mut();
+                        let mut undo = state.undo_stack.borrow_mut();
+                        let mut redo = state.redo_stack.borrow_mut();
+                        commit_formula_edit(
+                            &mut current,
+                            &mut undo,
+                            &mut redo,
+                            cell,
+                            &formula_text,
+                        )
+                    };
+                    if committed {
+                        apply_sheet(&app, &state.current.borrow());
+                        app.set_formula_feedback(SharedString::from(format!("Inserted {func} formula")));
+                    }
+                }
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_select_sheet(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_active_sheet_index(idx);
+                app.set_formula_feedback(SharedString::from(format!("Selected Sheet {}", idx + 1)));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_add_new_sheet(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current_sheets = app.get_sheets();
+                let mut sheets_vec: Vec<SharedString> = (0..current_sheets.row_count())
+                    .filter_map(|i| current_sheets.row_data(i))
+                    .collect();
+                let next_idx = sheets_vec.len() + 1;
+                sheets_vec.push(SharedString::from(format!("Sheet {next_idx}")));
+                let new_active = (sheets_vec.len() - 1) as i32;
+                app.set_sheets(ModelRc::new(VecModel::from(sheets_vec)));
+                app.set_active_sheet_index(new_active);
+                app.set_formula_feedback(SharedString::from(format!("Added Sheet {next_idx}")));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_set_cell_format(move |fmt_idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let name = match fmt_idx {
+                    1 => "Number",
+                    2 => "Currency",
+                    3 => "Percentage",
+                    _ => "General",
+                };
+                app.set_formula_feedback(SharedString::from(format!("Format: {name}")));
             }
         });
     }
@@ -549,5 +617,30 @@ mod tests {
             &mut sheet, &mut undo, &mut redo, selected, "new",
         ));
         assert_eq!(undo.len(), 1);
+    }
+
+    #[test]
+    fn quick_formula_insert_evaluation() {
+        let mut sheet = Sheet::new("test");
+        sheet.set_str("A1", "10");
+        sheet.set_str("A2", "20");
+        sheet.set_str("A3", "30");
+        sheet.set_str("A4", "40");
+        sheet.set_str("A5", "50");
+
+        let target = CellRef::parse("B1").unwrap();
+        let mut undo = Vec::new();
+        let mut redo = Vec::new();
+
+        assert!(commit_formula_edit(
+            &mut sheet,
+            &mut undo,
+            &mut redo,
+            target,
+            "=SUM(A1:A5)",
+        ));
+
+        let vals = evaluate(&sheet);
+        assert_eq!(vals.get(&target), Some(&Value::Number(150.0)));
     }
 }

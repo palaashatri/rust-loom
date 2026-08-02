@@ -80,8 +80,10 @@ fn apply_deck(app: &PresentApp, doc: &PresentationDocument) {
     app.set_deck_title(doc.title.as_str().into());
     if let Some(slide) = doc.active_slide() {
         app.set_slide_title(slide.title.as_str().into());
+        app.set_slide_notes(SharedString::from(&slide.speaker_notes));
     } else {
         app.set_slide_title("No Slide Selected".into());
+        app.set_slide_notes("".into());
     }
     let slide_titles: Vec<SharedString> = doc
         .slides
@@ -175,6 +177,94 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_notes_edited(move |notes| {
+            if let Some(_app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                if let Some(slide) = current.active_slide_mut() {
+                    slide.speaker_notes = notes.as_str().to_string();
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_preview_mode(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current = app.get_is_preview_mode();
+                app.set_is_preview_mode(!current);
+                app.set_status_left(SharedString::from(if !current {
+                    "Entered Presenter Playback Preview Mode"
+                } else {
+                    "Exited Presenter Playback Preview Mode"
+                }));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_apply_template(move |tmpl_idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                let layout = match tmpl_idx {
+                    0 => "cover",
+                    2 => "two-column",
+                    3 => "image-text",
+                    _ => "content",
+                };
+                if let Some(slide) = current.active_slide_mut() {
+                    slide.layout = layout.to_string();
+                }
+                apply_deck(&app, &current);
+                app.set_status_left(SharedString::from(format!("Applied template: {layout}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_update_property(move |prop_name, val| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Updated {prop_name} to {val:.1}")));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_prev_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                if current.active_index > 0 {
+                    let prev = current.active_index - 1;
+                    current.select_slide(prev);
+                    apply_deck(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_next_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                if current.active_index + 1 < current.len() {
+                    let next = current.active_index + 1;
+                    current.select_slide(next);
+                    apply_deck(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_save_deck(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Ok(bytes) = save_presentation(&state.current.borrow()) {
@@ -201,4 +291,23 @@ fn main() -> Result<(), String> {
     app.show().map_err(|e| e.to_string())?;
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slide_notes_and_templates() {
+        let mut deck = sample_deck();
+        assert_eq!(deck.len(), 3);
+        if let Some(slide) = deck.active_slide_mut() {
+            slide.speaker_notes = "Key notes for presenter".to_string();
+            slide.layout = "two-column".to_string();
+        }
+
+        let active = deck.active_slide().unwrap();
+        assert_eq!(active.speaker_notes, "Key notes for presenter");
+        assert_eq!(active.layout, "two-column");
+    }
 }

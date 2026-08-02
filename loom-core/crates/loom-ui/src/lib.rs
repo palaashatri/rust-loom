@@ -48,7 +48,11 @@ mod smoke_window {
 /// order. Used by tooling and documentation; the authoritative drawing of
 /// each icon lives in `ui/icons.slint`.
 pub const ICON_NAMES: &[&str] = &[
+    "align-center",
+    "align-left",
+    "align-right",
     "audio",
+    "bold",
     "brush",
     "camera",
     "check",
@@ -60,22 +64,28 @@ pub const ICON_NAMES: &[&str] = &[
     "document",
     "export",
     "eye",
+    "eye-off",
     "film",
     "folder",
     "grid",
     "image",
     "import",
+    "italic",
     "keyboard",
     "layers",
     "link",
+    "lock",
     "mask",
     "minus",
+    "mute",
     "new",
     "open",
     "package",
     "pause",
     "play",
     "plus",
+    "plus-circle",
+    "record",
     "redo",
     "save",
     "scale",
@@ -83,14 +93,19 @@ pub const ICON_NAMES: &[&str] = &[
     "search",
     "settings",
     "slide",
+    "slider",
     "stop",
     "table",
     "terminal",
     "text",
     "timeline",
     "trash",
+    "trash-2",
+    "underline",
     "undo",
+    "unlock",
     "video",
+    "volume",
     "wand",
     "waveform",
     "waves",
@@ -98,14 +113,68 @@ pub const ICON_NAMES: &[&str] = &[
 ];
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn icon_names_are_sorted_and_unique() {
+        for window in ICON_NAMES.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "ICON_NAMES should be sorted alphabetically: {} >= {}",
+                window[0],
+                window[1]
+            );
+        }
+    }
+
+    #[test]
+    fn icon_names_contains_all_requested_icons() {
+        let expected = [
+            "bold",
+            "italic",
+            "underline",
+            "align-left",
+            "align-center",
+            "align-right",
+            "eye-off",
+            "lock",
+            "unlock",
+            "volume",
+            "mute",
+            "record",
+            "slider",
+            "plus-circle",
+            "trash-2",
+            "scissors",
+        ];
+        for icon in expected {
+            assert!(
+                ICON_NAMES.contains(&icon),
+                "ICON_NAMES must contain icon '{}'",
+                icon
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod visual_tests {
     use super::smoke_window::*;
 
     fn baseline_path() -> std::path::PathBuf {
+        // Slint's software renderer uses platform font rasterization. Keep
+        // the host golden separate from the Linux CI/Docker golden so a
+        // valid cross-platform render is not reported as a regression.
+        let filename = if cfg!(target_os = "linux") {
+            "smoke-window-linux.png"
+        } else {
+            "smoke-window.png"
+        };
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("baselines")
             .join("light")
-            .join("smoke-window.png")
+            .join(filename)
     }
 
     #[test]

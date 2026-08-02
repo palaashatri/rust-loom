@@ -12,7 +12,7 @@ deliver the complete Loom suite from `loom-bootstrap`.
 | `just` | any recent | optional | nicer task runner over scripts/ |
 | `docker` + compose plugin | any recent | optional | visual QA + offline containers |
 | `zip`, `unzip` | any | packaging + verification | |
-| ImageMagick (`compare`) **or** python3+PIL | any | visual QA comparison | |
+| python3 + PIL | any | contract-aligned RGBA visual comparison | |
 | `timeout` (coreutils) | any | recommended | smoke/screenshot timeouts (fallback built in) |
 
 Verify with:
@@ -63,20 +63,26 @@ warnings/errors in Loom's own crates fail the run.
 
 ## 4. Visual QA
 
-Prerequisites: app binaries built (release or debug) and baselines in
-`../loom-design-bible/baselines/<app>/<app>-{light,dark}.png`.
+Prerequisites: app binaries built (release or debug). The harness captures the
+default light and dark screens for each app. It compares when a committed
+baseline exists, reports missing baselines as incomplete, and never writes a
+baseline automatically. This is only the default light/dark slice; it does
+not run the design-bible high-contrast, text-scale, reduced-motion, locale,
+component/state, or error-state matrix.
 
 ```sh
 bash scripts/visual-qa-all.sh
 ```
 
 Per app: runs `<bin> --screenshot <work>/screenshots/<app>-light.png
---size 1280x800`, attempts the dark variant with `--theme dark` (noted as
-unsupported if it fails), then compares each screenshot against its baseline
-with `scripts/img-compare.sh` (ImageMagick `compare -metric RMSE`, falling
-back to python3+PIL). Result table → `../visual-qa-report.md`. Exit 1 when a
-comparison is available and exceeds tolerance (default 0.02, override via
-`VISUAL_QA_TOLERANCE`).
+--size 1280x800`, attempts the dark variant with `--theme dark`, then
+compares each available screenshot against its baseline with
+`scripts/img-compare.sh` (Python 3 + PIL, RGBA mean absolute error < 1.0 and
+one-pixel-eroded differing-pixel ratio < 0.01). ImageMagick alone is not a
+valid fallback because it cannot evaluate both contract gates. Result table →
+`../visual-qa-report.md`. Exit 1 for a diff, missing baseline, missing binary,
+screenshot failure, or size mismatch; exit 2 when comparison tooling or input
+is unavailable. Override the size with `--size WIDTHxHEIGHT`.
 
 Inside Docker:
 
@@ -107,7 +113,23 @@ cargo registry or vendored. Repos without a `Cargo.lock` are reported
 explicitly. A core workflow failing without network is a release-blocking
 defect.
 
-## 6. Smoke launch
+## 6. Cleanup
+
+Inspect generated output before cleanup, especially when preserving visual
+evidence:
+
+```sh
+bash scripts/cleanup-targets.sh --dry-run
+bash scripts/cleanup-targets.sh
+```
+
+The allowlist covers sibling Cargo `target/` directories, the documented
+plugin fixture target, and package-verification temporary paths. Logs,
+screenshots, reports, historical run directories, and arbitrary
+`CARGO_TARGET_DIR` paths are preserved. Pass `--visual-diffs` only when the
+current diff images are no longer needed.
+
+## 7. Smoke launch
 
 ```sh
 bash scripts/run-apps.sh   # each existing binary runs --smoke for 5s
@@ -116,7 +138,7 @@ bash scripts/run-apps.sh   # each existing binary runs --smoke for 5s
 A binary that exits cleanly or stays alive for the full 5 seconds counts as
 launched. No binary → reported as missing, not a failure.
 
-## 7. Packaging (ZIP delivery)
+## 8. Packaging (ZIP delivery)
 
 ```sh
 bash scripts/package.sh
@@ -126,24 +148,32 @@ Creates `../Loom-Complete.zip` from the suite root:
 
 - includes every `loom-*` repo,
 - excludes `target/`, `.git/`, `.DS_Store`, `.work/`, `__pycache__`,
-- deterministic: sorted file list piped to `zip -X -r -@`,
+- excludes symbolic links deliberately; `find -P ... -type f` never follows
+  untrusted link targets,
+- deterministic ordering: sorted regular-file list piped to `zip -X -q -@`,
 - writes `../Loom-Complete.zip.sha256`.
+
+Checksum generation is fatal. A previous zip and checksum sidecar are removed
+before packaging so a failed run cannot leave a stale `.sha256` paired with a
+new or partial archive.
 
 Limitation: zip embeds file mtimes, so two runs at different times are not
 byte-identical even with identical content; ordering is deterministic.
 
-## 8. Verification of extraction
+## 9. Verification of extraction
 
 ```sh
 bash scripts/verify-package.sh
 ```
 
 Extracts the zip into `.work/verify-extract/` and re-runs from the extracted
-tree: `env-check.sh`, a quick `cargo metadata --no-deps` parse of `loom-core`,
-and `cargo test --workspace` in `loom-core` (test-all-lite). Reports success
-or the failing step.
+tree: `env-check.sh`, `cargo metadata --no-deps` for each expected workspace,
+and the full `cargo test --locked --offline --workspace` suite for each
+expected workspace. The temporary extracted tree and verification target are
+removed on startup and exit, using exact allowlisted paths only. Reports
+success or the failing step.
 
-## 9. Status reporting
+## 10. Status reporting
 
 ```sh
 bash scripts/generate-status-report.sh   # → ../VERIFICATION_REPORT.md
@@ -153,7 +183,7 @@ Walks every `loom-*` repo and records: exists / cargo / builds / tests-pass
 (from the last `.work/test-*.log`) / status keywords from `TASKS.md` or
 `FEATURE_STATUS.md` / missing items.
 
-## 10. Docker environment
+## 11. Docker environment
 
 ```sh
 bash scripts/docker-build.sh [service]   # build ci, visual, offline images
@@ -171,7 +201,7 @@ screenshots written under `.work/` land on the host. Images:
 - `Dockerfile.dev` — ci + git/bash/curl/vim/jq.
 - `Dockerfile.visual` — ci + xdotool, mesa-utils.
 
-## 11. GitHub Actions
+## 12. GitHub Actions
 
 `.github/workflows/ci.yml` runs on ubuntu-24.04: single checkout (this
 monorepo workspace), Rust stable with rustfmt+clippy, cargo cache, then

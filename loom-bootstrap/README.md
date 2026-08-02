@@ -21,10 +21,11 @@ loom-bootstrap/
 │   ├── clippy-all.sh           clippy -D warnings; fails only on Loom crates
 │   ├── run-apps.sh             launch each existing binary with --smoke for 5s
 │   ├── visual-qa-all.sh        --screenshot capture + baseline comparison
-│   ├── img-compare.sh          tiny compare helper (ImageMagick or PIL)
+│   ├── img-compare.sh          contract-aligned RGBA compare helper (Python + PIL)
 │   ├── offline-test.sh         suite tests with network disabled (proxy-off / docker --network none)
-│   ├── package.sh              deterministic Loom-Complete.zip + .sha256
-│   ├── verify-package.sh       extract + env-check + metadata + lite tests
+│   ├── cleanup-targets.sh       allowlisted target/temp cleanup with dry-run
+│   ├── package.sh              deterministic Loom-Complete.zip + .sha256 (regular files only)
+│   ├── verify-package.sh       extract + env-check + metadata + full workspace tests
 │   ├── generate-status-report.sh → ../VERIFICATION_REPORT.md
 │   └── docker-*.sh             thin docker compose wrappers
 ├── docker/                     Dockerfile.ci / .dev / .visual, compose.yaml
@@ -42,6 +43,11 @@ Sibling repos: `../loom-core`, `../loom-writer`, `../loom-sheets`,
 # 1. Verify the toolchain (rustc/cargo >= 1.80; docker is optional)
 bash scripts/env-check.sh
 
+# Optional space guard: inspect generated output, then remove only allowlisted
+# Cargo targets and package-verification temporary paths.
+bash scripts/cleanup-targets.sh --dry-run
+bash scripts/cleanup-targets.sh
+
 # 2. Format, lint, test, build — per existing repo
 bash scripts/fmt-all.sh
 bash scripts/clippy-all.sh
@@ -49,7 +55,7 @@ bash scripts/test-all.sh
 bash scripts/build-all.sh          # release
 bash scripts/build-all.sh --debug  # debug
 
-# 3. Visual QA (needs built binaries + baselines in ../loom-design-bible/baselines)
+# 3. Visual QA: default light/dark captures only; no baseline is auto-written
 bash scripts/visual-qa-all.sh
 
 # 4. Offline check (mode A: proxies off; mode B: docker --network none)
@@ -71,12 +77,15 @@ SKIP/FAIL/missing items explicitly instead of failing hard:
 
 - no `Cargo.toml` → skipped by build/test/fmt/clippy, logged as `SKIP`
 - no built `loom-<app>` binary → `run-apps.sh` and `visual-qa-all.sh` report
-  "no binary" and continue
-- no baselines in `loom-design-bible/baselines/` → screenshot captured,
-  comparison skipped and noted
-- missing `compare`/PIL → images copied, marked "compare unavailable"
+  the missing binary and return an incomplete result
+- no baseline in `loom-design-bible/baselines/` → the screenshot is retained,
+  the missing baseline is reported, and the visual gate remains incomplete
+  - missing python3+PIL → images are retained and the comparison is marked
+    unavailable; the visual gate fails rather than passing without both metrics
 
-Scripts exit 1 only when a step that was actually executed fails.
+Scripts exit 1 for executed failures and incomplete gates; they never silently
+turn missing evidence into a pass. The visual script explicitly reports that
+its default light/dark run is not the full design-bible matrix.
 
 ## Artifacts
 
@@ -84,6 +93,7 @@ Scripts exit 1 only when a step that was actually executed fails.
 |------|---------|
 | `.work/` | logs, screenshots, diffs (gitignored) |
 | `../visual-qa-report.md` | latest visual QA report |
+| `docs/visual-qa-baseline-review.md` | reviewed baseline provenance and open matrix gaps |
 | `../VERIFICATION_REPORT.md` | per-repo status stub |
 | `../Loom-Complete.zip` | packaged suite |
 | `../Loom-Complete.zip.sha256` | its checksum |

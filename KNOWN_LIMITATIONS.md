@@ -1,22 +1,22 @@
 # Loom — Known Limitations
 
-Last updated: 2026-08-01. This list is honest, not aspirational. Anything not listed here that is described as implemented is verified in FEATURE_STATUS.md / VERIFICATION_REPORT.md.
+Last updated: 2026-08-02. This list is honest, not aspirational. Anything not listed here that is described as implemented is verified in FEATURE_STATUS.md / VERIFICATION_REPORT.md.
 
 ## Cross-platform visual baselines
-- The existing writer/sheets baselines and current host captures use the macOS
-  font stack. Inside the Ubuntu CI container (`fonts-noto-core`) the same tests
-  render glyph edges differently (the historical smoke comparison recorded a
-  mean absolute error of 2.6077024936676025 and a differing ratio of
-  0.030915431678295135), so those macOS images are not interchangeable with
-  container images. New application baselines must be generated deliberately
-  in the Docker visual environment at fixed 1280×800; they are never
-  auto-approved. A pinned cross-platform font policy remains TODO.
+- Earlier writer/sheets baselines and host captures used the macOS font stack.
+  Inside the Ubuntu CI container (`fonts-noto-core`) the same tests render glyph
+  edges differently (the historical smoke comparison recorded a mean absolute
+  error of 2.6077024936676025 and a differing ratio of 0.030915431678295135),
+  so macOS images are not interchangeable with container images. The committed
+  application baselines were deliberately regenerated in the Docker visual
+  environment at fixed 1280×800; a pinned cross-platform font policy remains
+  TODO.
 
 ## Applications
 - All eight application repositories now contain compilable Rust/Slint binaries and headless smoke/screenshot paths. Present, Photo, Motion, Video, Studio, and Encode are small functional vertical slices, not documentation-only repositories; their production feature sets remain limited (see FEATURE_STATUS.md).
-- Writer: the package model, sample document, PDF export, CLI, and persistence are implemented, but the current UI renders document text rather than providing a complete editable rich-text surface. No tables, footnotes, change tracking, or broad import/export beyond the `.loomdoc` package and PDF export.
+- Writer: the package model, sample document, PDF export, CLI, persistence, and an editable multiline plain-text surface are implemented. It is not a complete rich-text editor: no formatting controls, tables, footnotes, change tracking, or broad import/export beyond the `.loomdoc` package and PDF export.
 - Writer PDF export is a minimal paginated renderer (title, headings, paragraphs); no embedded images, tables, or style tables yet.
-- Sheets: fixed 8×6 visible grid window (virtualization not implemented), cells are not yet editable through the UI, and formulas are limited to the loom-sheets-core evaluator (basic arithmetic, SUM, AVERAGE, etc. as shipped); no charts, pivot tables, XLSX/ODS import yet.
+- Sheets: fixed 8×6 visible grid window (virtualization not implemented); the formula/value bar edits the selected cell, but full in-grid editing is not implemented. Formulas are limited to the loom-sheets-core evaluator (basic arithmetic, SUM, AVERAGE, etc. as shipped); no charts, pivot tables, XLSX/ODS import yet.
 - Sheets CSV export uses the core `to_csv`; import accepts .csv and .loomtable.
 - Present: sample-deck UI and PDF export are functional; interactive editing, full open behavior, presenter display, and richer slide content are not complete.
 - Photo: layer metadata and package persistence are functional; image decode, pixel buffers, compositing, and real adjustments are not complete.
@@ -43,4 +43,4 @@ Last updated: 2026-08-01. This list is honest, not aspirational. Anything not li
   every extracted Cargo workspace with offline locked tests in a temporary
   target directory; it does not prove that a GUI can launch inside the
   extracted archive or that visual baselines are complete.
-- The strict visual gate requires a baseline for every light/dark application capture. Current evidence has 12 missing baselines, so visual QA is not release-complete even though the 4 existing comparisons are clean.
+- The strict visual gate requires a baseline for every light/dark application capture. Current evidence has all 16 required baselines and 16 clean comparisons for the default light/dark slice. Because the newly added baselines came from the same reviewed Docker capture set, this proves capture/baseline consistency rather than independent historical regression protection. The full design-bible matrix remains unrun.

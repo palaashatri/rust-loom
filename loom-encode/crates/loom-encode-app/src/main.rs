@@ -105,29 +105,51 @@ fn apply_encode(app: &EncodeApp, q: &EncodeQueue) {
         .map(|job| {
             let status = match &job.status {
                 JobStatus::Queued => "QUEUED".to_string(),
-                JobStatus::Encoding { progress } => format!("ENCODING {:.0}%", progress * 100.0),
+                JobStatus::Encoding { progress } => format!("ENCODING ({:.0}%)", progress * 100.0),
                 JobStatus::Complete => "COMPLETE".to_string(),
                 JobStatus::Failed(reason) => format!("FAILED: {reason}"),
             };
             SharedString::from(status)
         })
         .collect();
+    let job_progresses: Vec<f32> = q
+        .jobs
+        .iter()
+        .map(|job| match &job.status {
+            JobStatus::Queued => 0.0,
+            JobStatus::Encoding { progress } => progress * 100.0,
+            JobStatus::Complete => 100.0,
+            JobStatus::Failed(_) => 0.0,
+        })
+        .collect();
+
     app.set_job_labels(ModelRc::new(VecModel::from(job_labels)));
     app.set_job_details(ModelRc::new(VecModel::from(job_details)));
     app.set_job_statuses(ModelRc::new(VecModel::from(job_statuses)));
+    app.set_job_progresses(ModelRc::new(VecModel::from(job_progresses)));
     app.set_active_job_index(q.active_job_index as i32);
-    let (selected_job_text, selected_job_details) = q
+
+    let (selected_job_text, selected_job_details, preset_name) = q
         .jobs
         .get(q.active_job_index)
         .map(|job| {
             (
                 format!("Selected: {}", job.source_file),
                 format!("{} • {} kbps", job.preset.name, job.preset.bitrate_kbps),
+                job.preset.name.clone(),
             )
         })
-        .unwrap_or_else(|| ("No job selected".to_string(), String::new()));
+        .unwrap_or_else(|| ("No job selected".to_string(), String::new(), "Web 1080p".to_string()));
+
     app.set_selected_job_text(selected_job_text.into());
     app.set_selected_job_details(selected_job_details.into());
+    app.set_selected_preset(match preset_name.as_str() {
+        p if p.contains("ProRes") => "ProRes 422".into(),
+        p if p.contains("AV1") => "AV1 High".into(),
+        p if p.contains("MP4") => "MP4 H.264".into(),
+        _ => "Web 1080p".into(),
+    });
+
     app.set_status_left(SharedString::from(format!("{} jobs queued", q.jobs.len())));
     app.set_status_right("Offline".into());
 }
@@ -220,6 +242,68 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_preset_changed(move |preset_str| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                let idx = current.active_job_index;
+                if let Some(job) = current.jobs.get_mut(idx) {
+                    job.preset = match preset_str.as_str() {
+                        "ProRes 422" => EncodePreset::prores_master(),
+                        "AV1 High" => EncodePreset {
+                            name: "AV1 High Profile".to_string(),
+                            container: "mp4".to_string(),
+                            video_codec: "av1".to_string(),
+                            audio_codec: "opus".to_string(),
+                            bitrate_kbps: 6000,
+                        },
+                        "MP4 H.264" => EncodePreset::h264_1080p(),
+                        _ => EncodePreset::h264_1080p(),
+                    };
+                    apply_encode(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_output_dir_changed(move |path| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Output Path: {path}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_browse_output_dir(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_output_directory("/Users/Shared/LoomExports/".into());
+                app.set_status_left(SharedString::from("Selected destination directory /Users/Shared/LoomExports/"));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_start_batch(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                for job in &mut current.jobs {
+                    job.status = JobStatus::Encoding { progress: 0.75 };
+                }
+                app.set_batch_progress(75.0);
+                app.set_active_job_progress(75.0);
+                apply_encode(&app, &current);
+                app.set_status_left(SharedString::from("Started batch encoding engine..."));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_save_queue(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Ok(bytes) = save_encode_queue(&state.current.borrow()) {
@@ -235,3 +319,4 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
+

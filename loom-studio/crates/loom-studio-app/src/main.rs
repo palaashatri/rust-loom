@@ -79,10 +79,14 @@ fn initial_studio(args: &Args) -> Result<StudioProject, String> {
 fn apply_studio(app: &StudioApp, proj: &StudioProject) {
     app.set_song_title(proj.name.as_str().into());
     app.set_tempo_text(SharedString::from(format!("{:.0} BPM • 48kHz", proj.bpm)));
-    app.set_workspace_mode(match proj.mode {
-        WorkspaceMode::Quick => "Quick Workspace".into(),
-        WorkspaceMode::Pro => "Pro Workspace".into(),
-    });
+    app.set_bpm_val(proj.bpm);
+    let (mode_str, mode_idx) = match proj.mode {
+        WorkspaceMode::Quick => ("Quick Workspace", 0),
+        WorkspaceMode::Pro => ("Pro Workspace", 1),
+    };
+    app.set_workspace_mode(mode_str.into());
+    app.set_workspace_mode_index(mode_idx);
+
     let track_labels: Vec<SharedString> = proj
         .tracks
         .iter()
@@ -93,7 +97,19 @@ fn apply_studio(app: &StudioApp, proj: &StudioProject) {
             ))
         })
         .collect();
+    let track_mutes: Vec<bool> = proj.tracks.iter().map(|t| t.mute).collect();
+    let track_solos: Vec<bool> = proj.tracks.iter().map(|t| t.solo).collect();
+    let track_arms: Vec<bool> = proj.tracks.iter().map(|_| false).collect();
+    let track_volumes: Vec<f32> = proj.tracks.iter().map(|t| t.volume_db).collect();
+    let track_pans: Vec<f32> = proj.tracks.iter().map(|t| t.pan).collect();
+
     app.set_track_labels(ModelRc::new(VecModel::from(track_labels)));
+    app.set_track_mutes(ModelRc::new(VecModel::from(track_mutes)));
+    app.set_track_solos(ModelRc::new(VecModel::from(track_solos)));
+    app.set_track_arms(ModelRc::new(VecModel::from(track_arms)));
+    app.set_track_volumes(ModelRc::new(VecModel::from(track_volumes)));
+    app.set_track_pans(ModelRc::new(VecModel::from(track_pans)));
+
     app.set_active_track_index(proj.active_track_index as i32);
     let selected = proj
         .tracks
@@ -192,6 +208,22 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_set_workspace_mode(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                current.mode = if idx == 1 {
+                    WorkspaceMode::Pro
+                } else {
+                    WorkspaceMode::Quick
+                };
+                apply_studio(&app, &current);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_add_track(move || {
             if let Some(app) = app_ref.upgrade() {
                 let mut current = state.current.borrow_mut();
@@ -202,6 +234,152 @@ fn main() -> Result<(), String> {
                     TrackKind::Audio,
                 ));
                 apply_studio(&app, &current);
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_play(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let playing = app.get_is_playing();
+                app.set_status_left(SharedString::from(if playing {
+                    "DAW Transport: Playing audio engine"
+                } else {
+                    "DAW Transport: Paused"
+                }));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_stop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from("DAW Transport: Stopped"));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_record(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let rec = app.get_is_recording();
+                app.set_status_left(SharedString::from(if rec {
+                    "DAW Transport: Recording active..."
+                } else {
+                    "DAW Transport: Recording disarmed"
+                }));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_loop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let looping = app.get_is_looping();
+                app.set_status_left(SharedString::from(format!("DAW Loop Mode: {looping}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_metronome(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let metro = app.get_metronome_on();
+                app.set_status_left(SharedString::from(format!("Metronome Click: {metro}")));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_bpm_changed(move |val| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                current.bpm = val;
+                app.set_status_left(SharedString::from(format!("Tempo updated: {val:.0} BPM")));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_toggle_mute(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                if idx < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if let Some(track) = current.tracks.get_mut(idx as usize) {
+                    track.mute = !track.mute;
+                    apply_studio(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_toggle_solo(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                if idx < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if let Some(track) = current.tracks.get_mut(idx as usize) {
+                    track.solo = !track.solo;
+                    apply_studio(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_rec_arm(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Toggled Rec Arm on track {idx}")));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_volume_changed(move |idx, vol| {
+            if let Some(app) = app_ref.upgrade() {
+                if idx < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if let Some(track) = current.tracks.get_mut(idx as usize) {
+                    track.volume_db = vol;
+                    apply_studio(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_pan_changed(move |idx, pan| {
+            if let Some(app) = app_ref.upgrade() {
+                if idx < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if let Some(track) = current.tracks.get_mut(idx as usize) {
+                    track.pan = pan;
+                    apply_studio(&app, &current);
+                }
             }
         });
     }
@@ -224,3 +402,4 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
+

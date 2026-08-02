@@ -89,7 +89,21 @@ fn apply_photo(app: &PhotoApp, doc: &PhotoDocument) {
         .iter()
         .map(|layer| SharedString::from(format!("{} ({:?})", layer.name, layer.kind)))
         .collect();
+    let layer_visibilities: Vec<bool> = doc.layers.iter().map(|l| l.visible).collect();
     app.set_layer_labels(ModelRc::new(VecModel::from(layer_labels)));
+    app.set_layer_visibilities(ModelRc::new(VecModel::from(layer_visibilities)));
+
+    if let Some(active_layer) = doc.layers.get(doc.active_layer_index) {
+        let mode_str = match active_layer.blend_mode {
+            loom_photo_core::BlendMode::Normal => "Normal",
+            loom_photo_core::BlendMode::Multiply => "Multiply",
+            loom_photo_core::BlendMode::Screen => "Screen",
+            loom_photo_core::BlendMode::Overlay => "Overlay",
+        };
+        app.set_active_blend_mode(mode_str.into());
+        app.set_active_layer_opacity(active_layer.opacity * 100.0);
+    }
+
     let selected = doc
         .layers
         .get(doc.active_layer_index)
@@ -188,6 +202,94 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_toggle_layer_visibility(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                if let Some(layer) = current.layers.get_mut(index as usize) {
+                    layer.visible = !layer.visible;
+                    apply_photo(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_blend_mode_changed(move |val| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                let idx = current.active_layer_index;
+                if let Some(layer) = current.layers.get_mut(idx) {
+                    layer.blend_mode = match val.as_str() {
+                        "Multiply" => loom_photo_core::BlendMode::Multiply,
+                        "Screen" => loom_photo_core::BlendMode::Screen,
+                        "Overlay" => loom_photo_core::BlendMode::Overlay,
+                        _ => loom_photo_core::BlendMode::Normal,
+                    };
+                    apply_photo(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_opacity_changed(move |val| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut current = state.current.borrow_mut();
+                let idx = current.active_layer_index;
+                if let Some(layer) = current.layers.get_mut(idx) {
+                    layer.opacity = (val / 100.0).clamp(0.0, 1.0);
+                    apply_photo(&app, &current);
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_select_tool(move |tool| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Selected Tool: {tool}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_brightness_changed(move |v| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Brightness: {v:.0}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_contrast_changed(move |v| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Contrast: {v:.0}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_saturation_changed(move |v| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Saturation: {v:.0}")));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_save_project(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Ok(bytes) = save_photo(&state.current.borrow()) {
@@ -203,3 +305,4 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
+

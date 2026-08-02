@@ -1,21 +1,29 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar, Slider, Field } from "components.slint";
+import { ComboBox } from "std-widgets.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component EncodeApp inherits Window {
     title: "Loom Encode";
-    min-width: 900px;
-    min-height: 600px;
+    min-width: 980px;
+    min-height: 680px;
     background: Theme.palette().canvas;
 
     in property <string> queue-name: "Untitled Batch Queue";
     in property <[string]> job-labels: [];
     in property <[string]> job-details: [];
     in property <[string]> job-statuses: [];
+    in property <[float]> job-progresses: [];
     in property <int> active-job-index: 0;
+
     in property <string> selected-job-text: "No job selected";
     in property <string> selected-job-details: "";
+    in-out property <string> selected-preset: "Web 1080p";
+    in-out property <string> output-directory: "/exports/encode/";
+    in-out property <float> batch-progress: 45.0;
+    in-out property <float> active-job-progress: 65.0;
+
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -25,14 +33,17 @@ export component EncodeApp inherits Window {
     callback add-job;
     callback select-job(int);
     callback start-batch;
+    callback preset-changed(string);
+    callback output-dir-changed(string);
+    callback browse-output-dir;
 
     VerticalLayout {
         spacing: 0px;
 
         // Titlebar
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             HorizontalLayout {
@@ -55,10 +66,10 @@ export component EncodeApp inherits Window {
             }
         }
 
-        // Toolbar
+        // Toolbar & Batch Progress Bar
         Rectangle {
-            min-height: 40px;
-            max-height: 40px;
+            min-height: 44px;
+            max-height: 44px;
             background: Theme.palette().surface-sunken;
 
             HorizontalLayout {
@@ -72,6 +83,33 @@ export component EncodeApp inherits Window {
                 ToolButton { icon: "open"; text: "Open"; clicked => { root.open-queue(); } }
                 ToolButton { icon: "save"; text: "Save"; clicked => { root.save-queue(); } }
                 ToolButton { icon: "add"; text: "+ Add Job"; clicked => { root.add-job(); } }
+
+                Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+
+                // Batch Progress Bar Component
+                Text {
+                    text: "Batch Progress:";
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                }
+
+                Slider {
+                    width: 160px;
+                    value: root.batch-progress;
+                    minimum: 0.0;
+                    maximum: 100.0;
+                }
+
+                Text {
+                    text: Math.round(root.batch-progress) + "%";
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().accent;
+                    vertical-alignment: center;
+                }
+
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 IconButton { icon: "export"; label: "Start Batch Encoding"; clicked => { root.start-batch(); } }
             }
@@ -99,7 +137,7 @@ export component EncodeApp inherits Window {
                     }
 
                     for label[idx] in root.job-labels : Rectangle {
-                        height: 52px;
+                        height: 68px;
                         background: idx == root.active-job-index
                             ? Theme.palette().selection-soft
                             : Theme.palette().surface;
@@ -109,31 +147,65 @@ export component EncodeApp inherits Window {
                             ? Theme.palette().accent
                             : Theme.palette().border;
 
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            alignment: space-between;
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 4px;
 
-                            VerticalLayout {
-                                alignment: center;
-                                Text {
-                                    text: label;
-                                    color: Theme.palette().ink;
-                                    font-size: Theme.tokens.typography.body;
-                                    font-weight: 700;
+                            HorizontalLayout {
+                                alignment: space-between;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Text {
+                                        text: label;
+                                        color: Theme.palette().ink;
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: 700;
+                                    }
+                                    Text {
+                                        text: root.job-details[idx];
+                                        color: Theme.palette().ink-secondary;
+                                        font-size: Theme.tokens.typography.caption;
+                                    }
                                 }
-                                Text {
-                                    text: root.job-details[idx];
-                                    color: Theme.palette().ink-secondary;
-                                    font-size: Theme.tokens.typography.caption;
+
+                                // Job Status Badge
+                                Rectangle {
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: root.job-statuses[idx] == "COMPLETE" ? #10b98120
+                                        : root.job-statuses[idx] == "QUEUED" ? #3b82f620
+                                        : root.job-statuses[idx] == "ENCODING" ? #f59e0b20
+                                        : #ef444420;
+                                    border-width: 1px;
+                                    border-color: root.job-statuses[idx] == "COMPLETE" ? #10b981
+                                        : root.job-statuses[idx] == "QUEUED" ? #3b82f6
+                                        : root.job-statuses[idx] == "ENCODING" ? #f59e0b
+                                        : #ef4444;
+
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        alignment: center;
+                                        Text {
+                                            text: root.job-statuses[idx];
+                                            color: root.job-statuses[idx] == "COMPLETE" ? #10b981
+                                                : root.job-statuses[idx] == "QUEUED" ? #3b82f6
+                                                : root.job-statuses[idx] == "ENCODING" ? #f59e0b
+                                                : #ef4444;
+                                            font-size: Theme.tokens.typography.caption;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                    }
                                 }
                             }
-                            Text {
-                                text: root.job-statuses[idx];
-                                color: Theme.palette().accent;
-                                font-size: Theme.tokens.typography.caption;
-                                font-weight: 700;
-                                vertical-alignment: center;
+
+                            // Per-Job Progress Bar
+                            Slider {
+                                value: idx < root.job-progresses.length ? root.job-progresses[idx] : 0.0;
+                                minimum: 0.0;
+                                maximum: 100.0;
                             }
                         }
                         touch := TouchArea {
@@ -145,17 +217,19 @@ export component EncodeApp inherits Window {
                 }
             }
 
-            // Preset Inspector Sidebar
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            // Preset Inspector & Target Dir Sidebar
             Rectangle {
-                width: 260px;
+                width: 280px;
                 background: Theme.palette().surface;
 
                 VerticalLayout {
                     padding: 12px;
-                    spacing: 8px;
+                    spacing: 12px;
 
                     Text {
-                        text: "SELECTED JOB";
+                        text: "SELECTED JOB INSPECTOR";
                         font-size: Theme.tokens.typography.caption;
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
@@ -174,26 +248,68 @@ export component EncodeApp inherits Window {
                                 text: root.selected-job-text;
                                 color: Theme.palette().accent;
                                 font-size: Theme.tokens.typography.body;
+                                font-weight: 700;
                                 vertical-alignment: center;
                             }
                         }
                     }
 
-                    Rectangle {
-                        height: 38px;
-                        background: Theme.palette().surface-sunken;
-                        border-radius: 4px;
-
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-
-                            Text {
-                                text: root.selected-job-details;
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
+                    // Preset Selector Dropdown
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text {
+                            text: "Encoding Preset";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink;
+                        }
+                        ComboBox {
+                            model: ["Web 1080p", "ProRes 422", "MP4 H.264", "AV1 High"];
+                            current-value: root.selected-preset;
+                            selected(val) => {
+                                root.selected-preset = val;
+                                root.preset-changed(val);
                             }
+                        }
+                    }
+
+                    // Output Directory Path Picker Field
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text {
+                            text: "Output Directory";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink;
+                        }
+                        HorizontalLayout {
+                            spacing: 4px;
+                            Field {
+                                horizontal-stretch: 1;
+                                value: root.output-directory;
+                                placeholder: "Destination path...";
+                                edited(val) => {
+                                    root.output-directory = val;
+                                    root.output-dir-changed(val);
+                                }
+                            }
+                            ToolButton {
+                                text: "Browse";
+                                clicked => { root.browse-output-dir(); }
+                            }
+                        }
+                    }
+
+                    // Active Job Progress
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text {
+                            text: "Active Job Progress (" + Math.round(root.active-job-progress) + "%)";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink;
+                        }
+                        Slider {
+                            value: root.active-job-progress;
+                            minimum: 0.0;
+                            maximum: 100.0;
                         }
                     }
                 }
@@ -206,3 +322,4 @@ export component EncodeApp inherits Window {
         }
     }
 }
+

@@ -1,6 +1,7 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar, SegmentedControl, Slider } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { TextEdit } from "std-widgets.slint";
 export { Theme } from "theme.slint";
 
 export component PresentApp inherits Window {
@@ -17,6 +18,16 @@ export component PresentApp inherits Window {
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
+    // Slide Notes, Presenter Mode, Templates, and Inspector state
+    in-out property <string> slide-notes: "";
+    in-out property <bool> show-notes-drawer: true;
+    in-out property <bool> is-preview-mode: false;
+    in-out property <int> active-template-index: 1; // 0: Title, 1: Content, 2: Two Column, 3: Image & Text
+    in-out property <int> selected-element-type: 0; // 0: Text, 1: Shape, 2: Image
+    in-out property <float> text-font-size: 24.0;
+    in-out property <float> shape-corner-radius: 4.0;
+    in-out property <int> image-fit-index: 0; // 0: Contain, 1: Cover, 2: Fill
+
     callback new-deck;
     callback open-deck;
     callback save-deck;
@@ -26,13 +37,20 @@ export component PresentApp inherits Window {
     callback undo;
     callback redo;
 
+    callback notes-edited(string);
+    callback toggle-preview-mode;
+    callback apply-template(int);
+    callback update-property(string, float);
+    callback prev-slide;
+    callback next-slide;
+
     VerticalLayout {
         spacing: 0px;
 
         // Titlebar
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             HorizontalLayout {
@@ -46,17 +64,22 @@ export component PresentApp inherits Window {
                     y: (parent.height - 18px) / 2;
                 }
                 Text {
-                    text: "Loom Present — " + root.deck-title;
+                    text: root.is-preview-mode ? "Loom Present — Presenter Playback Preview Mode" : ("Loom Present — " + root.deck-title);
                     font-size: Theme.tokens.typography.title;
                     font-weight: 700;
                     color: Theme.palette().ink;
                     vertical-alignment: center;
                 }
+                Rectangle { horizontal-stretch: 1; }
+                if root.is-preview-mode : ToolButton {
+                    text: "Exit Preview";
+                    clicked => { root.toggle-preview-mode(); }
+                }
             }
         }
 
-        // Toolbar
-        Rectangle {
+        // Toolbar (only visible in edit mode)
+        if !root.is-preview-mode : Rectangle {
             min-height: 40px;
             max-height: 40px;
             background: Theme.palette().surface-sunken;
@@ -74,6 +97,29 @@ export component PresentApp inherits Window {
                 ToolButton { icon: "add"; text: "+ Slide"; clicked => { root.add-slide(); } }
                 ToolButton { icon: "undo"; clicked => { root.undo(); } }
                 ToolButton { icon: "redo"; clicked => { root.redo(); } }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+
+                Text {
+                    text: "Template:";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+                SegmentedControl {
+                    items: ["Title", "Content", "2-Col", "Image"];
+                    current <=> root.active-template-index;
+                    selected(idx) => { root.apply-template(idx); }
+                }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+
+                ToolButton {
+                    text: root.is-preview-mode ? "Exit Present" : "▶ Present";
+                    checked: root.is-preview-mode;
+                    clicked => { root.toggle-preview-mode(); }
+                }
+
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 IconButton { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
             }
@@ -84,8 +130,8 @@ export component PresentApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
 
-            // Slide Navigator Sidebar
-            Rectangle {
+            // Slide Navigator Sidebar (hidden in preview mode)
+            if !root.is-preview-mode : Rectangle {
                 width: 220px;
                 background: Theme.palette().surface;
 
@@ -126,41 +172,195 @@ export component PresentApp inherits Window {
                 }
             }
 
-            // Slide Canvas view
-            Rectangle {
+            // Central Area: Slide Canvas + Speaker Notes Drawer
+            VerticalLayout {
                 horizontal-stretch: 1;
-                background: Theme.palette().canvas;
+                spacing: 0px;
 
-                VerticalLayout {
-                    alignment: center;
+                // Slide Canvas view
+                Rectangle {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    background: Theme.palette().canvas;
 
-                    Rectangle {
-                        width: 560px;
-                        height: 315px;
-                        background: Theme.palette().surface;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
+                    VerticalLayout {
+                        alignment: center;
 
-                        VerticalLayout {
-                            alignment: center;
-                            padding: 24px;
+                        Rectangle {
+                            width: root.is-preview-mode ? 720px : 560px;
+                            height: root.is-preview-mode ? 405px : 315px;
+                            background: Theme.palette().surface;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: Theme.palette().border-strong;
 
-                            Text {
-                                text: root.slide-title;
-                                font-size: Theme.tokens.typography.heading;
-                                font-weight: 700;
-                                color: Theme.palette().ink;
-                                horizontal-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                padding: 24px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: root.slide-title;
+                                    font-size: Theme.tokens.typography.heading;
+                                    font-weight: 700;
+                                    color: Theme.palette().ink;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: root.active-template-index == 0 ? "[Title Presentation Cover Layout]"
+                                        : root.active-template-index == 2 ? "[Two Column Side-by-Side Content Layout]"
+                                        : root.active-template-index == 3 ? "[Hero Image & Supporting Text Layout]"
+                                        : "Click '+ Slide' or select a slide template to add content.";
+                                    font-size: Theme.tokens.typography.body;
+                                    color: Theme.palette().ink-secondary;
+                                    horizontal-alignment: center;
+                                }
                             }
+                        }
+
+                        if root.is-preview-mode : HorizontalLayout {
+                            alignment: center;
+                            spacing: 16px;
+                            padding-top: 16px;
+
+                            ToolButton { text: "◀ Previous"; clicked => { root.prev-slide(); } }
                             Text {
-                                text: "Click '+ Slide' to add slides to your presentation deck.";
+                                text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length;
                                 font-size: Theme.tokens.typography.body;
+                                color: Theme.palette().ink;
+                                vertical-alignment: center;
+                            }
+                            ToolButton { text: "Next ▶"; clicked => { root.next-slide(); } }
+                        }
+                    }
+                }
+
+                // Slide Notes Drawer at Bottom
+                if !root.is-preview-mode && root.show-notes-drawer : Rectangle {
+                    min-height: 120px;
+                    max-height: 140px;
+                    background: Theme.palette().surface;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+
+                        Rectangle {
+                            height: 1px;
+                            background: Theme.palette().border;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: "SLIDE NOTES (Speaker Notes)";
+                                font-size: Theme.tokens.typography.caption;
+                                font-weight: 700;
                                 color: Theme.palette().ink-secondary;
-                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            IconButton {
+                                icon: "close";
+                                label: "Hide notes drawer";
+                                clicked => { root.show-notes-drawer = false; }
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            vertical-stretch: 1;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+                            background: Theme.palette().surface-sunken;
+
+                            TextEdit {
+                                width: parent.width;
+                                height: parent.height;
+                                text <=> root.slide-notes;
+                                font-size: Theme.tokens.typography.body;
+                                placeholder-text: "Add presenter speaker notes here…";
+                                edited => { root.notes-edited(self.text); }
                             }
                         }
                     }
+                }
+            }
+
+            // Element Property Inspector Sidebar (hidden in preview mode)
+            if !root.is-preview-mode : Rectangle {
+                width: 220px;
+                background: Theme.palette().surface;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "INSPECTOR";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                    }
+
+                    Text {
+                        text: "Target Element:";
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink;
+                    }
+
+                    SegmentedControl {
+                        items: ["Text", "Shape", "Image"];
+                        current <=> root.selected-element-type;
+                    }
+
+                    Rectangle { height: 1px; background: Theme.palette().border; }
+
+                    if root.selected-element-type == 0 : VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Font Size: " + Math.round(root.text-font-size) + "pt";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink;
+                        }
+                        Slider {
+                            minimum: 12.0;
+                            maximum: 72.0;
+                            value <=> root.text-font-size;
+                            changed(val) => { root.update-property("font-size", val); }
+                        }
+                    }
+
+                    if root.selected-element-type == 1 : VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Corner Radius: " + Math.round(root.shape-corner-radius) + "px";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink;
+                        }
+                        Slider {
+                            minimum: 0.0;
+                            maximum: 32.0;
+                            value <=> root.shape-corner-radius;
+                            changed(val) => { root.update-property("corner-radius", val); }
+                        }
+                    }
+
+                    if root.selected-element-type == 2 : VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Image Fit Mode:";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink;
+                        }
+                        SegmentedControl {
+                            items: ["Contain", "Cover", "Fill"];
+                            current <=> root.image-fit-index;
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
                 }
             }
         }

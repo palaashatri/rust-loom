@@ -14,8 +14,11 @@ Status: architecture + qualitative verification; automated benchmarks pending.
 
 - Writer/sheets smoke and screenshots complete in well under a second each (debug build)
   including PNG save — consistent with the warm-launch budget.
-- Visual QA runs 4 screenshots + 4 comparisons in seconds.
-- Full test suite (5 workspaces) completes in ~2–3 minutes on this machine (debug).
+- The default visual QA gate covers 16 screenshots and 16 comparisons; no
+  benchmark timing is recorded for the harness.
+- Extracted-package verification covers all 11 Cargo workspaces and 276 tests;
+  elapsed time is retained in the command logs but is not a performance
+  benchmark.
 
 ## Budgets (targets from the directive)
 

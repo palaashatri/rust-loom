@@ -80,6 +80,7 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
         "00:00:00:00 ({} fps • {:.0}s)",
         doc.frame_rate, doc.duration_secs
     )));
+    app.set_timecode_display("00:00:00:00".into());
     let layer_labels: Vec<SharedString> = doc
         .layers
         .iter()
@@ -184,6 +185,67 @@ fn main() -> Result<(), String> {
     }
 
     {
+        let app_ref = app.as_weak();
+        app.on_play_pause(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let playing = app.get_is_playing();
+                app.set_status_left(SharedString::from(if playing {
+                    "Playing motion preview..."
+                } else {
+                    "Paused playback"
+                }));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_step_back(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from("Stepped back 1 frame"));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_step_forward(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from("Stepped forward 1 frame"));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_loop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let looping = app.get_is_looping();
+                app.set_status_left(SharedString::from(format!("Loop mode: {looping}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_transform_changed(move |prop, val| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left(SharedString::from(format!("Transform {prop}: {val:.1}")));
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_curve_drawer(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let open = app.get_curve_drawer_open();
+                app.set_status_left(SharedString::from(format!("Keyframe drawer open: {open}")));
+            }
+        });
+    }
+
+    {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_save_comp(move || {
@@ -201,3 +263,4 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
+

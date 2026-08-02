@@ -1,17 +1,30 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar, Slider, SearchField } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component VideoApp inherits Window {
     title: "Loom Video";
-    min-width: 900px;
-    min-height: 600px;
+    min-width: 980px;
+    min-height: 680px;
     background: Theme.palette().canvas;
 
     in property <string> project-name: "Untitled Video";
     in property <[string]> track-labels: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[string]> media-bin-items: ["Scene_01.mp4", "Scene_02.mp4", "B-Roll_Beach.mov", "Voiceover_V1.wav", "Score_Track.mp3"];
     in property <int> active-track-index: 0;
+
+    // NLE Editing state
+    in-out property <string> active-nle-tool: "Blade";
+    in-out property <bool> snap-enabled: true;
+
+    // Playback state
+    in-out property <bool> is-playing: false;
+    in-out property <float> playhead-position: 25.0;
+    in-out property <string> timecode-display: "00:01:24:12";
+
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -20,15 +33,23 @@ export component VideoApp inherits Window {
     callback save-project;
     callback add-clip;
     callback select-track(int);
+    callback toggle-track-mute(int);
+    callback toggle-track-solo(int);
     callback export-video;
+
+    callback select-nle-tool(string);
+    callback toggle-snap;
+    callback play-pause;
+    callback seek(float);
+    callback add-marker;
 
     VerticalLayout {
         spacing: 0px;
 
         // Titlebar
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             HorizontalLayout {
@@ -51,7 +72,7 @@ export component VideoApp inherits Window {
             }
         }
 
-        // Toolbar
+        // Toolbar & NLE Editing Bar
         Rectangle {
             min-height: 40px;
             max-height: 40px;
@@ -68,97 +89,261 @@ export component VideoApp inherits Window {
                 ToolButton { icon: "open"; text: "Open"; clicked => { root.open-project(); } }
                 ToolButton { icon: "save"; text: "Save"; clicked => { root.save-project(); } }
                 ToolButton { icon: "add"; text: "+ Clip"; clicked => { root.add-clip(); } }
+
+                Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+
+                // NLE Editing Toolbar
+                ToolButton {
+                    text: "✂ Blade/Split";
+                    checked: root.active-nle-tool == "Blade";
+                    clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); }
+                }
+                ToolButton {
+                    text: "↔ Ripple Trim";
+                    checked: root.active-nle-tool == "Ripple";
+                    clicked => { root.active-nle-tool = "Ripple"; root.select-nle-tool("Ripple"); }
+                }
+                ToolButton {
+                    text: "📍 Add Marker";
+                    clicked => { root.add-marker(); }
+                }
+                ToolButton {
+                    text: "🧲 Snap";
+                    checked: root.snap-enabled;
+                    clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); }
+                }
+
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 IconButton { icon: "export"; label: "Export Video"; clicked => { root.export-video(); } }
             }
         }
 
-        // Workspace
-        VerticalLayout {
+        // Main Workspace
+        HorizontalLayout {
             vertical-stretch: 1;
             spacing: 0px;
 
+            // Media Bin Panel Sidebar
             Rectangle {
-                vertical-stretch: 1;
-                background: Theme.palette().canvas;
+                width: 220px;
+                background: Theme.palette().surface;
 
                 VerticalLayout {
-                    alignment: center;
+                    padding: 10px;
+                    spacing: 8px;
 
-                    Rectangle {
-                        width: 500px;
-                        height: 280px;
-                        background: Theme.palette().surface;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
+                    Text {
+                        text: "MEDIA BIN";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                    }
 
-                        VerticalLayout {
-                            alignment: center;
+                    SearchField {
+                        placeholder: "Filter Media...";
+                    }
 
-                            Text {
-                                text: root.project-name;
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.heading;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: "1920 x 1080 • 30.00 fps";
-                                color: Theme.palette().accent;
-                                font-size: Theme.tokens.typography.body;
-                                horizontal-alignment: center;
+                    VerticalLayout {
+                        spacing: 4px;
+                        for item in root.media-bin-items : Rectangle {
+                            height: 32px;
+                            background: Theme.palette().surface-sunken;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 6px;
+
+                                Icon {
+                                    icon: "layers";
+                                    size: 14px;
+                                    tint: Theme.palette().accent;
+                                    y: (parent.height - 14px) / 2;
+                                }
+
+                                Text {
+                                    text: item;
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Multitrack Timeline Area
-            Rectangle {
-                height: 160px;
-                background: Theme.palette().surface;
+            Rectangle { width: 1px; background: Theme.palette().border; }
 
-                VerticalLayout {
-                    padding: 12px;
-                    spacing: 6px;
+            // Video Preview & Multitrack Timeline Area
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 0px;
 
-                    Text {
-                        text: "MULTITRACK NLE TIMELINE";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink-secondary;
+                // Preview Player Viewport
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Theme.palette().canvas;
+
+                    VerticalLayout {
+                        alignment: center;
+
+                        Rectangle {
+                            width: 500px;
+                            height: 280px;
+                            background: Theme.palette().surface;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+
+                            VerticalLayout {
+                                alignment: center;
+
+                                Text {
+                                    text: root.project-name;
+                                    color: Theme.palette().ink;
+                                    font-size: Theme.tokens.typography.heading;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "1920 x 1080 • 30.00 fps";
+                                    color: Theme.palette().accent;
+                                    font-size: Theme.tokens.typography.body;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "Tool: " + root.active-nle-tool + " • Snap: " + (root.snap-enabled ? "ON" : "OFF");
+                                    color: Theme.palette().ink-secondary;
+                                    font-size: Theme.tokens.typography.caption;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
                     }
+                }
 
-                    for label[idx] in root.track-labels : Rectangle {
-                        height: 36px;
-                        background: idx == root.active-track-index
-                            ? Theme.palette().selection-soft
-                            : Theme.palette().surface-sunken;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: idx == root.active-track-index
-                            ? Theme.palette().accent
-                            : transparent;
+                // Playback Transport Bar
+                Rectangle {
+                    height: 42px;
+                    background: Theme.palette().surface-sunken;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
 
-                        HorizontalLayout {
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        ToolButton {
+                            text: root.is-playing ? "⏸ Pause" : "▶ Play";
+                            checked: root.is-playing;
+                            clicked => { root.is-playing = !root.is-playing; root.play-pause(); }
+                        }
+
+                        Text {
+                            text: "Scrub:";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            vertical-alignment: center;
+                        }
+
+                        Slider {
+                            horizontal-stretch: 1;
+                            value: root.playhead-position;
+                            minimum: 0.0;
+                            maximum: 100.0;
+                            changed(val) => { root.playhead-position = val; root.seek(val); }
+                        }
+
+                        Rectangle {
+                            background: Theme.palette().surface;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
                             padding-left: 8px;
                             padding-right: 8px;
 
-                            Text {
-                                text: label;
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
+                            HorizontalLayout {
+                                alignment: center;
+                                Text {
+                                    text: root.timecode-display;
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: 700;
+                                    color: Theme.palette().accent;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
-                        touch := TouchArea {
-                            clicked => { root.select-track(idx); }
-                        }
-                        accessible-role: button;
-                        accessible-label: "Select video track " + label;
                     }
+                }
 
+                // Multitrack NLE Timeline Area
+                Rectangle {
+                    height: 180px;
+                    background: Theme.palette().surface;
+
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+
+                        Text {
+                            text: "MULTITRACK NLE TIMELINE";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
+                        }
+
+                        for label[idx] in root.track-labels : Rectangle {
+                            height: 38px;
+                            background: idx == root.active-track-index
+                                ? Theme.palette().selection-soft
+                                : Theme.palette().surface-sunken;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: idx == root.active-track-index
+                                ? Theme.palette().accent
+                                : transparent;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 6px;
+
+                                // Mute (M) Toggle Button
+                                ToolButton {
+                                    text: "M";
+                                    checked: idx < root.track-mutes.length && root.track-mutes[idx];
+                                    clicked => { root.toggle-track-mute(idx); }
+                                }
+
+                                // Solo (S) Toggle Button
+                                ToolButton {
+                                    text: "S";
+                                    checked: idx < root.track-solos.length && root.track-solos[idx];
+                                    clicked => { root.toggle-track-solo(idx); }
+                                }
+
+                                Text {
+                                    text: label;
+                                    color: Theme.palette().ink;
+                                    font-size: Theme.tokens.typography.body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            touch := TouchArea {
+                                clicked => { root.select-track(idx); }
+                            }
+                            accessible-role: button;
+                            accessible-label: "Select video track " + label;
+                        }
+                    }
                 }
             }
         }
@@ -169,3 +354,4 @@ export component VideoApp inherits Window {
         }
     }
 }
+

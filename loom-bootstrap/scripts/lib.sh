@@ -7,7 +7,9 @@ if [ -z "${ROOT:-}" ]; then
 fi
 PARENT="$(cd "$ROOT/.." && pwd)"
 WORK="${LOOM_WORK:-$ROOT/.work}"
-mkdir -p "$WORK/screenshots" "$WORK/diffs"
+if [ "${LOOM_SKIP_WORK_INIT:-0}" != "1" ]; then
+  mkdir -p "$WORK/screenshots" "$WORK/diffs"
+fi
 
 # Cargo workspace repos that are part of the suite. Doc/spec/design/samples repos are
 # intentionally excluded (they are not cargo workspaces).
@@ -22,7 +24,10 @@ has_cargo() { [ -f "$PARENT/$1/Cargo.toml" ]; }
 
 # find_app_bin <app> -> prints path to a built loom-<app> binary, or empty string.
 find_app_bin() {
-  local app="$1" repo="$PARENT/loom-$app" target_root bin=""
+  local app="$1"
+  local repo="$PARENT/loom-$app"
+  local target_root
+  local bin=""
   target_root="${CARGO_TARGET_DIR:-$repo/target}"
   if [ -x "$target_root/release/loom-$app" ]; then
     bin="$target_root/release/loom-$app"

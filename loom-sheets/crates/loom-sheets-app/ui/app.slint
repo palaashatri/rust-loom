@@ -2,7 +2,7 @@
 // (a Window component cannot be nested), with a virtualized-style grid
 // driven by engine-evaluated cell models.
 
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar, SegmentedControl } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -64,6 +64,13 @@ export component SheetsApp inherits Window {
     in property <string> selection-formula: "";
     property <string> formula-edit-buffer: "";
     in property <string> selection-value: "";
+
+    // Sheets, Cell Format, and Formula Feedback state
+    in-out property <[string]> sheets: ["Sheet 1"];
+    in-out property <int> active-sheet-index: 0;
+    in-out property <int> cell-format-index: 0; // 0: General, 1: Number, 2: Currency, 3: %
+    in-out property <string> formula-feedback: "Ready";
+
     callback new-sheet;
     callback open-sheet;
     callback save-sheet;
@@ -73,6 +80,12 @@ export component SheetsApp inherits Window {
     callback cell-clicked(int, int);
     callback commit-selected-cell(string);
     callback cancel-selected-cell;
+
+    // Quick formula actions, sheet tab navigation, cell formatting
+    callback quick-formula(string);
+    callback select-sheet(int);
+    callback add-new-sheet;
+    callback set-cell-format(int);
 
     public function reset-formula-edit-buffer() {
         formula-edit-buffer = selection-formula;
@@ -85,8 +98,8 @@ export component SheetsApp inherits Window {
         padding: 0px;
 
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             VerticalLayout {
@@ -126,6 +139,7 @@ export component SheetsApp inherits Window {
             }
         }
 
+        // Action Toolbar with Quick Formula Actions and Cell Format Selector
         Rectangle {
             min-height: 40px;
             max-height: 40px;
@@ -143,11 +157,42 @@ export component SheetsApp inherits Window {
                 ToolButton { icon: "save"; text: "Save"; clicked => { root.save-sheet(); } }
                 ToolButton { icon: "undo"; clicked => { root.undo(); } }
                 ToolButton { icon: "redo"; clicked => { root.redo(); } }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+
+                Text {
+                    text: "Fx:";
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().accent;
+                    vertical-alignment: center;
+                }
+                ToolButton { text: "SUM"; clicked => { root.quick-formula("SUM"); } }
+                ToolButton { text: "AVG"; clicked => { root.quick-formula("AVERAGE"); } }
+                ToolButton { text: "COUNT"; clicked => { root.quick-formula("COUNT"); } }
+                ToolButton { text: "MIN"; clicked => { root.quick-formula("MIN"); } }
+                ToolButton { text: "MAX"; clicked => { root.quick-formula("MAX"); } }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+
+                Text {
+                    text: "Format:";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+                SegmentedControl {
+                    items: ["General", "Number", "Currency", "%"];
+                    current <=> root.cell-format-index;
+                    selected(idx) => { root.set-cell-format(idx); }
+                }
+
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 IconButton { icon: "export"; label: "Export CSV"; clicked => { root.export-csv(); } }
             }
         }
 
+        // Enhanced Formula Bar with Commit/Cancel Actions & Clear Validation Feedback
         Rectangle {
             min-height: 36px;
             max-height: 36px;
@@ -178,9 +223,24 @@ export component SheetsApp inherits Window {
                         vertical-alignment: center;
                     }
                 }
+
+                IconButton {
+                    icon: "check";
+                    label: "Commit formula";
+                    clicked => { root.commit-selected-cell(root.formula-edit-buffer); }
+                }
+                IconButton {
+                    icon: "close";
+                    label: "Cancel editing";
+                    clicked => {
+                        root.formula-edit-buffer = root.selection-formula;
+                        root.cancel-selected-cell();
+                    }
+                }
+
                 FormulaBarField {
                     label: "Selected cell formula or value";
-                    placeholder: "Enter a value or formula";
+                    placeholder: "Enter a value or formula (e.g. =SUM(A1:A5))";
                     value <=> root.formula-edit-buffer;
                     horizontal-stretch: 1;
                     committed(text) => { root.commit-selected-cell(text); }
@@ -202,6 +262,13 @@ export component SheetsApp inherits Window {
                     color: Theme.palette().accent;
                     vertical-alignment: center;
                 }
+
+                if root.formula-feedback != "" : Text {
+                    text: "· " + root.formula-feedback;
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
             }
         }
 
@@ -211,6 +278,7 @@ export component SheetsApp inherits Window {
             background: Theme.palette().border;
         }
 
+        // Cell Grid
         GridLayout {
             vertical-stretch: 1;
             horizontal-stretch: 1;
@@ -220,69 +288,115 @@ export component SheetsApp inherits Window {
             padding-left: 4px;
             padding-top: 4px;
 
-                Row {
-                    Rectangle {
-                        min-width: 36px;
-                        max-width: 36px;
-                        min-height: 22px;
-                        max-height: 22px;
-                    }
-                    for c in root.cols : Rectangle {
-                        min-width: 120px;
-                        max-width: 120px;
-                        min-height: 22px;
-                        max-height: 22px;
-                        background: Theme.palette().surface-sunken;
-                        Text {
-                            text: root.column-headers[c];
-                            font-size: Theme.tokens.typography.caption;
-                            font-weight: 700;
-                            color: Theme.palette().ink-secondary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+            Row {
+                Rectangle {
+                    min-width: 36px;
+                    max-width: 36px;
+                    min-height: 22px;
+                    max-height: 22px;
                 }
-
-                for r in root.rows : Row {
-                    Rectangle {
-                        min-width: 36px;
-                        max-width: 36px;
-                        min-height: 26px;
-                        max-height: 26px;
-                        background: Theme.palette().surface-sunken;
-                        Text {
-                            text: root.row-headers[r];
-                            font-size: Theme.tokens.typography.caption;
-                            color: Theme.palette().ink-secondary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-                    for c in root.cols : Rectangle {
-                        min-width: 120px;
-                        max-width: 120px;
-                        min-height: 26px;
-                        max-height: 26px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
-                        background: ta.has-hover ? Theme.palette().selection-soft : Theme.palette().surface;
-                        Text {
-                            x: 4px;
-                            width: parent.width - 8px;
-                            text: root.cells[r * root.cols.length + c];
-                            font-size: Theme.tokens.typography.body;
-                            color: Theme.palette().ink;
-                            horizontal-alignment: left;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        ta := TouchArea {
-                            clicked => { root.cell-clicked(r, c); }
-                        }
+                for c in root.cols : Rectangle {
+                    min-width: 120px;
+                    max-width: 120px;
+                    min-height: 22px;
+                    max-height: 22px;
+                    background: Theme.palette().surface-sunken;
+                    Text {
+                        text: root.column-headers[c];
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
             }
+
+            for r in root.rows : Row {
+                Rectangle {
+                    min-width: 36px;
+                    max-width: 36px;
+                    min-height: 26px;
+                    max-height: 26px;
+                    background: Theme.palette().surface-sunken;
+                    Text {
+                        text: root.row-headers[r];
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                for c in root.cols : Rectangle {
+                    min-width: 120px;
+                    max-width: 120px;
+                    min-height: 26px;
+                    max-height: 26px;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    background: ta.has-hover ? Theme.palette().selection-soft : Theme.palette().surface;
+                    Text {
+                        x: 4px;
+                        width: parent.width - 8px;
+                        text: root.cells[r * root.cols.length + c];
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                        horizontal-alignment: left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    ta := TouchArea {
+                        clicked => { root.cell-clicked(r, c); }
+                    }
+                }
+            }
+        }
+
+        // Sheet Tabs Bar at bottom
+        Rectangle {
+            min-height: 32px;
+            max-height: 32px;
+            background: Theme.palette().surface;
+
+            HorizontalLayout {
+                height: parent.height;
+                cross-axis-alignment: center;
+                spacing: 4px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                for sheet[idx] in root.sheets : Rectangle {
+                    height: 24px;
+                    border-radius: 4px;
+                    background: idx == root.active-sheet-index ? Theme.palette().surface-sunken : Theme.palette().surface;
+                    border-width: 1px;
+                    border-color: idx == root.active-sheet-index ? Theme.palette().accent : Theme.palette().border;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        alignment: center;
+                        Text {
+                            text: sheet;
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: idx == root.active-sheet-index ? 700 : 400;
+                            color: idx == root.active-sheet-index ? Theme.palette().accent : Theme.palette().ink;
+                            vertical-alignment: center;
+                        }
+                    }
+                    TouchArea {
+                        clicked => { root.select-sheet(idx); }
+                    }
+                }
+
+                ToolButton {
+                    text: "+ New Sheet";
+                    clicked => { root.add-new-sheet(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
 
         StatusBar {
             status-left: root.status-left;
@@ -290,3 +404,4 @@ export component SheetsApp inherits Window {
         }
     }
 }
+

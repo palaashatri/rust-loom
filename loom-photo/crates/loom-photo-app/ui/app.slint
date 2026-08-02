@@ -1,18 +1,26 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar, Slider } from "components.slint";
+import { ComboBox } from "std-widgets.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component PhotoApp inherits Window {
     title: "Loom Photo";
-    min-width: 900px;
-    min-height: 600px;
+    min-width: 960px;
+    min-height: 640px;
     background: Theme.palette().canvas;
 
     in property <string> project-name: "Untitled Image";
     in property <string> dimensions-text: "3840 x 2160 • 300 DPI";
     in property <[string]> layer-labels: [];
+    in property <[bool]> layer-visibilities: [];
     in property <int> active-layer-index: 0;
+    in-out property <string> active-tool: "Select";
+    in-out property <string> active-blend-mode: "Normal";
+    in-out property <float> active-layer-opacity: 100.0;
+    in-out property <float> brightness-val: 0.0;
+    in-out property <float> contrast-val: 0.0;
+    in-out property <float> saturation-val: 0.0;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -23,14 +31,21 @@ export component PhotoApp inherits Window {
     callback add-adjustment;
     callback export-image;
     callback select-layer(int);
+    callback select-tool(string);
+    callback toggle-layer-visibility(int);
+    callback blend-mode-changed(string);
+    callback opacity-changed(float);
+    callback brightness-changed(float);
+    callback contrast-changed(float);
+    callback saturation-changed(float);
 
     VerticalLayout {
         spacing: 0px;
 
         // Titlebar
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             HorizontalLayout {
@@ -81,6 +96,62 @@ export component PhotoApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
 
+            // Tool Palette Sidebar
+            Rectangle {
+                width: 72px;
+                background: Theme.palette().surface;
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    alignment: start;
+
+                    Text {
+                        text: "TOOLS";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                    }
+
+                    ToolButton {
+                        text: "Select";
+                        checked: root.active-tool == "Select";
+                        clicked => { root.active-tool = "Select"; root.select-tool("Select"); }
+                    }
+                    ToolButton {
+                        text: "Crop";
+                        checked: root.active-tool == "Crop";
+                        clicked => { root.active-tool = "Crop"; root.select-tool("Crop"); }
+                    }
+                    ToolButton {
+                        text: "Brush";
+                        checked: root.active-tool == "Brush";
+                        clicked => { root.active-tool = "Brush"; root.select-tool("Brush"); }
+                    }
+                    ToolButton {
+                        text: "Heal";
+                        checked: root.active-tool == "Heal";
+                        clicked => { root.active-tool = "Heal"; root.select-tool("Heal"); }
+                    }
+                    ToolButton {
+                        text: "Text";
+                        checked: root.active-tool == "Text";
+                        clicked => { root.active-tool = "Text"; root.select-tool("Text"); }
+                    }
+                    ToolButton {
+                        text: "Shapes";
+                        checked: root.active-tool == "Shapes";
+                        clicked => { root.active-tool = "Shapes"; root.select-tool("Shapes"); }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 1px;
+                background: Theme.palette().border;
+            }
+
             // Canvas Area
             Rectangle {
                 horizontal-stretch: 1;
@@ -114,56 +185,222 @@ export component PhotoApp inherits Window {
                                 font-size: Theme.tokens.typography.body;
                                 horizontal-alignment: center;
                             }
+                            Text {
+                                text: "Active Tool: " + root.active-tool;
+                                color: Theme.palette().accent;
+                                font-size: Theme.tokens.typography.caption;
+                                horizontal-alignment: center;
+                            }
                         }
                     }
                 }
             }
 
-            // Layers Sidebar
             Rectangle {
-                width: 240px;
+                width: 1px;
+                background: Theme.palette().border;
+            }
+
+            // Layers & Adjustments Sidebar
+            Rectangle {
+                width: 280px;
                 background: Theme.palette().surface;
 
                 VerticalLayout {
                     padding: 12px;
-                    spacing: 8px;
+                    spacing: 12px;
 
-                    Text {
-                        text: "LAYERS";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink-secondary;
+                    // Layers Section
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "LAYERS";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
+                        }
+
+                        for label[idx] in root.layer-labels : Rectangle {
+                            height: 38px;
+                            background: idx == root.active-layer-index
+                                ? Theme.palette().selection-soft
+                                : Theme.palette().surface-sunken;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: idx == root.active-layer-index
+                                ? Theme.palette().accent
+                                : transparent;
+
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: 6px;
+                                spacing: 4px;
+
+                                IconButton {
+                                    icon: (idx < root.layer-visibilities.length && root.layer-visibilities[idx]) ? "visible" : "hidden";
+                                    label: "Eye Toggle";
+                                    clicked => { root.toggle-layer-visibility(idx); }
+                                }
+
+                                Text {
+                                    text: label;
+                                    color: Theme.palette().accent;
+                                    font-size: Theme.tokens.typography.body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            touch := TouchArea {
+                                clicked => { root.select-layer(idx); }
+                            }
+                            accessible-role: button;
+                            accessible-label: "Select layer " + label;
+                        }
                     }
 
-                    for label[idx] in root.layer-labels : Rectangle {
-                        height: 40px;
-                        background: idx == root.active-layer-index
-                            ? Theme.palette().selection-soft
-                            : Theme.palette().surface-sunken;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: idx == root.active-layer-index
-                            ? Theme.palette().accent
-                            : transparent;
+                    // Layer Properties (Opacity & Blend Mode)
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "LAYER PROPERTIES";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
+                        }
 
                         HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: 8px;
-
+                            spacing: 8px;
                             Text {
-                                text: label;
-                                color: Theme.palette().accent;
+                                text: "Blend Mode";
                                 font-size: Theme.tokens.typography.body;
+                                color: Theme.palette().ink;
                                 vertical-alignment: center;
                             }
+                            ComboBox {
+                                model: ["Normal", "Multiply", "Screen", "Overlay"];
+                                current-value: root.active-blend-mode;
+                                selected(val) => {
+                                    root.active-blend-mode = val;
+                                    root.blend-mode-changed(val);
+                                }
+                            }
                         }
-                        touch := TouchArea {
-                            clicked => { root.select-layer(idx); }
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                Text {
+                                    text: "Opacity";
+                                    font-size: Theme.tokens.typography.body;
+                                    color: Theme.palette().ink;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: Math.round(root.active-layer-opacity) + "%";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+                            Slider {
+                                value: root.active-layer-opacity;
+                                minimum: 0.0;
+                                maximum: 100.0;
+                                changed(val) => {
+                                    root.active-layer-opacity = val;
+                                    root.opacity-changed(val);
+                                }
+                            }
                         }
-                        accessible-role: button;
-                        accessible-label: "Select layer " + label;
                     }
 
+                    // Adjustments Controls Section
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "ADJUSTMENTS";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 700;
+                            color: Theme.palette().ink-secondary;
+                        }
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                Text {
+                                    text: "Brightness";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: Math.round(root.brightness-val) + "";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+                            Slider {
+                                value: root.brightness-val;
+                                minimum: -100.0;
+                                maximum: 100.0;
+                                changed(val) => {
+                                    root.brightness-val = val;
+                                    root.brightness-changed(val);
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                Text {
+                                    text: "Contrast";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: Math.round(root.contrast-val) + "";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+                            Slider {
+                                value: root.contrast-val;
+                                minimum: -100.0;
+                                maximum: 100.0;
+                                changed(val) => {
+                                    root.contrast-val = val;
+                                    root.contrast-changed(val);
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                Text {
+                                    text: "Saturation";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: Math.round(root.saturation-val) + "";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+                            Slider {
+                                value: root.saturation-val;
+                                minimum: -100.0;
+                                maximum: 100.0;
+                                changed(val) => {
+                                    root.saturation-val = val;
+                                    root.saturation-changed(val);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -174,3 +411,4 @@ export component PhotoApp inherits Window {
         }
     }
 }
+

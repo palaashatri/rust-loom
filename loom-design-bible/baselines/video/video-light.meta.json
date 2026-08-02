@@ -1,0 +1,17 @@
+{
+  "app": "video",
+  "capture_date": "2026-08-01",
+  "captured_at": "2026-08-01T19:54:03Z",
+  "capture_run": "docker-postwriter",
+  "commit_id": "f01eca31e5ba6565a9aa3312ff5403ed7292cd6e",
+  "source_worktree_dirty": true,
+  "renderer_id": "slint-software-xvfb",
+  "container_image": "loom-bootstrap-visual@sha256:46f9c5adc5fd9f93a9727154c8848951b7b9c2763c9bb7880101c7742e3afe72",
+  "font_configuration": "Ubuntu 24.04 with fonts-noto-core from Dockerfile.ci",
+  "theme": "light",
+  "text_scale": 1.0,
+  "locale": "en-US",
+  "reduced_motion": false,
+  "window_layout": "1280x800 logical pixels; Xvfb 1280x800x24",
+  "seed": "app-default-sample"
+}

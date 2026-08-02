@@ -1,19 +1,34 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { ToolButton, IconButton, StatusBar, Slider, SegmentedControl } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component StudioApp inherits Window {
     title: "Loom Studio";
-    min-width: 900px;
-    min-height: 600px;
+    min-width: 1000px;
+    min-height: 700px;
     background: Theme.palette().canvas;
 
     in property <string> song-title: "Untitled Song";
     in property <string> tempo-text: "120 BPM • 4/4";
+    in-out property <float> bpm-val: 120.0;
     in property <string> workspace-mode: "Quick Workspace";
+    in-out property <int> workspace-mode-index: 0;
+
     in property <[string]> track-labels: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[bool]> track-arms: [];
+    in property <[float]> track-volumes: [];
+    in property <[float]> track-pans: [];
     in property <int> active-track-index: 0;
+
+    // DAW Transport State
+    in-out property <bool> is-playing: false;
+    in-out property <bool> is-recording: false;
+    in-out property <bool> is-looping: false;
+    in-out property <bool> metronome-on: true;
+
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
 
@@ -23,15 +38,31 @@ export component StudioApp inherits Window {
     callback add-track;
     callback select-track(int);
     callback toggle-workspace;
+    callback set-workspace-mode(int);
     callback export-audio;
+
+    // Transport Callbacks
+    callback play;
+    callback stop;
+    callback record;
+    callback toggle-loop;
+    callback toggle-metronome;
+    callback bpm-changed(float);
+
+    // Channel Strip Callbacks
+    callback toggle-mute(int);
+    callback toggle-solo(int);
+    callback toggle-rec-arm(int);
+    callback volume-changed(int, float);
+    callback pan-changed(int, float);
 
     VerticalLayout {
         spacing: 0px;
 
         // Titlebar
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: 40px;
+            max-height: 40px;
             background: Theme.palette().surface;
 
             HorizontalLayout {
@@ -54,10 +85,10 @@ export component StudioApp inherits Window {
             }
         }
 
-        // Toolbar
+        // DAW Transport Bar & Toolbar
         Rectangle {
-            min-height: 40px;
-            max-height: 40px;
+            min-height: 44px;
+            max-height: 44px;
             background: Theme.palette().surface-sunken;
 
             HorizontalLayout {
@@ -71,7 +102,72 @@ export component StudioApp inherits Window {
                 ToolButton { icon: "open"; text: "Open"; clicked => { root.open-song(); } }
                 ToolButton { icon: "save"; text: "Save"; clicked => { root.save-song(); } }
                 ToolButton { icon: "add"; text: "+ Track"; clicked => { root.add-track(); } }
-                ToolButton { icon: "settings"; text: "Switch Mode"; clicked => { root.toggle-workspace(); } }
+
+                Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+
+                // DAW Transport Bar Controls
+                ToolButton {
+                    text: root.is-playing ? "⏸ Pause" : "▶ Play";
+                    checked: root.is-playing;
+                    clicked => { root.is-playing = !root.is-playing; root.play(); }
+                }
+                ToolButton {
+                    text: "⏹ Stop";
+                    clicked => { root.is-playing = false; root.is-recording = false; root.stop(); }
+                }
+                ToolButton {
+                    text: "⏺ Record";
+                    checked: root.is-recording;
+                    clicked => { root.is-recording = !root.is-recording; root.record(); }
+                }
+                ToolButton {
+                    text: "🔁 Loop";
+                    checked: root.is-looping;
+                    clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); }
+                }
+                ToolButton {
+                    text: "⏱ Metronome";
+                    checked: root.metronome-on;
+                    clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); }
+                }
+
+                Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+
+                // BPM Control
+                Text {
+                    text: "BPM:";
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                }
+                Slider {
+                    width: 90px;
+                    value: root.bpm-val;
+                    minimum: 40.0;
+                    maximum: 240.0;
+                    changed(val) => { root.bpm-val = val; root.bpm-changed(val); }
+                }
+                Text {
+                    text: Math.round(root.bpm-val) + "";
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().accent;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+
+                // Quick vs Pro Workspace Toggle
+                SegmentedControl {
+                    items: ["Quick Workspace", "Pro Workspace"];
+                    current: root.workspace-mode-index;
+                    selected(idx) => {
+                        root.workspace-mode-index = idx;
+                        root.set-workspace-mode(idx);
+                    }
+                }
+
                 Rectangle { horizontal-stretch: 1; background: transparent; }
                 IconButton { icon: "export"; label: "Export Mix"; clicked => { root.export-audio(); } }
             }
@@ -92,14 +188,14 @@ export component StudioApp inherits Window {
                     spacing: 8px;
 
                     Text {
-                        text: "MULTITRACK DAW ARRANGER (" + root.tempo-text + ")";
+                        text: "MULTITRACK DAW ARRANGER (" + Math.round(root.bpm-val) + " BPM • " + root.workspace-mode + ")";
                         font-size: Theme.tokens.typography.caption;
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
                     }
 
                     for label[idx] in root.track-labels : Rectangle {
-                        height: 44px;
+                        height: root.workspace-mode-index == 1 ? 64px : 46px;
                         background: idx == root.active-track-index
                             ? Theme.palette().selection-soft
                             : Theme.palette().surface;
@@ -109,17 +205,74 @@ export component StudioApp inherits Window {
                             ? Theme.palette().accent
                             : Theme.palette().border;
 
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
+                        VerticalLayout {
+                            padding: 6px;
+                            spacing: 4px;
 
-                            Text {
-                                text: label;
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
+                            HorizontalLayout {
+                                spacing: 6px;
+
+                                // Channel Strip: Mute (M), Solo (S), Rec Arm (R)
+                                ToolButton {
+                                    text: "M";
+                                    checked: idx < root.track-mutes.length && root.track-mutes[idx];
+                                    clicked => { root.toggle-mute(idx); }
+                                }
+                                ToolButton {
+                                    text: "S";
+                                    checked: idx < root.track-solos.length && root.track-solos[idx];
+                                    clicked => { root.toggle-solo(idx); }
+                                }
+                                ToolButton {
+                                    text: "R";
+                                    checked: idx < root.track-arms.length && root.track-arms[idx];
+                                    clicked => { root.toggle-rec-arm(idx); }
+                                }
+
+                                Text {
+                                    text: label;
+                                    color: Theme.palette().ink;
+                                    font-size: Theme.tokens.typography.body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            // Pro Mode Extended Channel Controls
+                            if root.workspace-mode-index == 1 : HorizontalLayout {
+                                spacing: 8px;
+                                alignment: center;
+
+                                Text {
+                                    text: "Vol:";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    width: 120px;
+                                    value: idx < root.track-volumes.length ? root.track-volumes[idx] : 0.0;
+                                    minimum: -60.0;
+                                    maximum: 6.0;
+                                    changed(val) => { root.volume-changed(idx, val); }
+                                }
+
+                                Text {
+                                    text: "Pan:";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    width: 80px;
+                                    value: idx < root.track-pans.length ? root.track-pans[idx] : 0.0;
+                                    minimum: -1.0;
+                                    maximum: 1.0;
+                                    changed(val) => { root.pan-changed(idx, val); }
+                                }
                             }
                         }
+
                         touch := TouchArea {
                             clicked => { root.select-track(idx); }
                         }
@@ -130,39 +283,98 @@ export component StudioApp inherits Window {
                 }
             }
 
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
             // Studio Mixer Sidebar
             Rectangle {
-                width: 220px;
+                width: 240px;
                 background: Theme.palette().surface;
 
                 VerticalLayout {
                     padding: 12px;
-                    spacing: 8px;
+                    spacing: 10px;
 
                     Text {
-                        text: "MIXER CHANNELS";
+                        text: "ACTIVE CHANNEL STRIP";
                         font-size: Theme.tokens.typography.caption;
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
                     }
 
                     Rectangle {
-                        height: 120px;
                         background: Theme.palette().surface-sunken;
                         border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+
+                            Text {
+                                text: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
+                                font-size: Theme.tokens.typography.body;
+                                font-weight: 700;
+                                color: Theme.palette().accent;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 4px;
+                                ToolButton { text: "Mute (M)"; clicked => { root.toggle-mute(root.active-track-index); } }
+                                ToolButton { text: "Solo (S)"; clicked => { root.toggle-solo(root.active-track-index); } }
+                                ToolButton { text: "Arm (R)"; clicked => { root.toggle-rec-arm(root.active-track-index); } }
+                            }
+
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Fader Volume (dB)"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
+                                Slider {
+                                    value: root.active-track-index < root.track-volumes.length ? root.track-volumes[root.active-track-index] : 0.0;
+                                    minimum: -60.0;
+                                    maximum: 6.0;
+                                    changed(val) => { root.volume-changed(root.active-track-index, val); }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Pan Knob (L/R)"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; }
+                                Slider {
+                                    value: root.active-track-index < root.track-pans.length ? root.track-pans[root.active-track-index] : 0.0;
+                                    minimum: -1.0;
+                                    maximum: 1.0;
+                                    changed(val) => { root.pan-changed(root.active-track-index, val); }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "MASTER OUT";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                    }
+
+                    Rectangle {
+                        height: 70px;
+                        background: Theme.palette().surface-sunken;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
 
                         VerticalLayout {
                             alignment: center;
 
                             Text {
-                                text: "Master Out";
+                                text: "Master Stereo Out";
                                 color: Theme.palette().accent;
                                 font-size: Theme.tokens.typography.body;
                                 font-weight: 700;
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: "0.0 dB • Peak -0.3";
+                                text: "0.0 dB • Peak -0.3 dB";
                                 color: Theme.palette().ink;
                                 font-size: Theme.tokens.typography.caption;
                                 horizontal-alignment: center;
@@ -179,3 +391,4 @@ export component StudioApp inherits Window {
         }
     }
 }
+
