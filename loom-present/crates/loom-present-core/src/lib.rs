@@ -333,6 +333,21 @@ impl PresentationSession {
         true
     }
 
+    /// Returns whether the session has an undo snapshot.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Returns whether the session has a redo snapshot.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Returns the outgoing transition for a slide.
+    pub fn transition_for(&self, slide_id: &str) -> TransitionKind {
+        self.transitions.get(slide_id).cloned().unwrap_or_default()
+    }
+
     /// Duplicates a slide and selects the copy.
     pub fn duplicate_slide(&mut self, index: usize) -> bool {
         let Some(source) = self.document.slides.get(index).cloned() else {
@@ -540,6 +555,72 @@ impl PresentationSession {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPresentationSession {
+    document: PresentationDocument,
+    theme: DeckTheme,
+    transitions: std::collections::BTreeMap<String, TransitionKind>,
+}
+
+/// Serializes the complete presentation session, including theme and transitions.
+pub fn save_presentation_session(session: &PresentationSession) -> Result<Vec<u8>, String> {
+    let persisted = PersistedPresentationSession {
+        document: session.document.clone(),
+        theme: session.theme.clone(),
+        transitions: session.transitions.clone(),
+    };
+    let json = serde_json::to_vec_pretty(&persisted).map_err(|error| error.to_string())?;
+    let mut archive = PackageArchive::new();
+    archive
+        .add("content/presentation-session.json", json.clone())
+        .map_err(|error| error.to_string())?;
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Present,
+        id: session.document.id.clone(),
+        title: session.document.title.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries: vec![ManifestEntry {
+            path: "content/presentation-session.json".into(),
+            mime: MimeType::parse("application/vnd.loom.deck-session")
+                .map_err(|error| format!("invalid built-in presentation MIME type: {error}"))?,
+            size: json.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(&json)),
+        }],
+    };
+    archive
+        .add("manifest.json", pkg_json::write(&manifest).into_bytes())
+        .map_err(|error| error.to_string())?;
+    archive.to_bytes().map_err(|error| error.to_string())
+}
+
+/// Loads a complete presentation session, accepting legacy document-only decks.
+pub fn load_presentation_session(bytes: &[u8]) -> Result<PresentationSession, String> {
+    let archive = PackageArchive::from_bytes(bytes).map_err(|error| error.to_string())?;
+    let manifest_bytes = archive
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_text =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest is not UTF-8".to_string())?;
+    let manifest =
+        pkg_json::parse_manifest(manifest_text).map_err(|error| format!("manifest: {error}"))?;
+    if manifest.kind != PackageKind::Present {
+        return Err("not a Loom Present deck".into());
+    }
+    archive
+        .validate_manifest(&manifest)
+        .map_err(|error| format!("validation: {error}"))?;
+    if let Some(content) = archive.get("content/presentation-session.json") {
+        let persisted: PersistedPresentationSession = serde_json::from_slice(content)
+            .map_err(|error| format!("parse presentation session: {error}"))?;
+        let mut session = PresentationSession::new(persisted.document);
+        session.theme = persisted.theme;
+        session.transitions = persisted.transitions;
+        return Ok(session);
+    }
+    load_presentation(bytes).map(PresentationSession::new)
+}
+
 fn unique_slide_id(document: &PresentationDocument, prefix: &str) -> String {
     let mut serial = document.slides.len() + 1;
     loop {
@@ -651,5 +732,27 @@ mod tests {
             .validate()
             .iter()
             .any(|issue| issue.message.contains("duplicate element")));
+    }
+
+    #[test]
+    fn session_persistence_preserves_theme_and_transitions() {
+        let mut session = PresentationSession::new(PresentationDocument::new("deck", "Deck"));
+        session.theme.accent = "#ff8800".into();
+        let slide_id = session.document.slides[0].id.clone();
+        assert!(session.set_transition(&slide_id, TransitionKind::Dissolve));
+        let bytes = save_presentation_session(&session).unwrap();
+        let loaded = load_presentation_session(&bytes).unwrap();
+        assert_eq!(loaded.theme.accent, "#ff8800");
+        assert_eq!(loaded.transition_for(&slide_id), TransitionKind::Dissolve);
+    }
+
+    #[test]
+    fn history_capabilities_track_mutations() {
+        let mut session = PresentationSession::new(PresentationDocument::new("deck", "Deck"));
+        assert!(!session.can_undo());
+        session.duplicate_slide(0);
+        assert!(session.can_undo());
+        session.undo();
+        assert!(session.can_redo());
     }
 }

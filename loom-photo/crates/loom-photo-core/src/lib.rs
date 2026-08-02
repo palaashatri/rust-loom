@@ -1,11 +1,13 @@
 //! Core nondestructive photo and image editing engine for Loom Photo.
 
+use image::ImageEncoder;
 use loom_package::manifest::{
     json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::io::Cursor;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum LayerKind {
@@ -373,6 +375,22 @@ impl PhotoCanvas {
         self.layer_images.get(layer_id)
     }
 
+    /// Returns an attached mask for a layer.
+    pub fn layer_mask(&self, layer_id: &str) -> Option<&[u8]> {
+        self.layer_masks.get(layer_id).map(Vec::as_slice)
+    }
+
+    /// Removes pixel and mask payloads for a layer.
+    pub fn remove_layer_payload(&mut self, layer_id: &str) {
+        self.layer_images.remove(layer_id);
+        self.layer_masks.remove(layer_id);
+    }
+
+    /// Returns the number of pixel payloads stored by this canvas.
+    pub fn pixel_payload_count(&self) -> usize {
+        self.layer_images.len()
+    }
+
     /// Composites all visible layers bottom-to-top.
     pub fn composite(&self) -> Result<RgbaImage, String> {
         let mut output = RgbaImage::transparent(self.document.width, self.document.height)?;
@@ -403,6 +421,292 @@ impl PhotoCanvas {
         }
         Ok(output)
     }
+}
+
+/// A serializable, undoable authoring session around a [`PhotoCanvas`].
+#[derive(Debug, Clone)]
+pub struct PhotoSession {
+    /// Current nondestructive canvas.
+    pub canvas: PhotoCanvas,
+    undo: Vec<PhotoCanvas>,
+    redo: Vec<PhotoCanvas>,
+    history_limit: usize,
+}
+
+impl PhotoSession {
+    /// Creates a session with bounded snapshot history.
+    pub fn new(canvas: PhotoCanvas) -> Self {
+        Self {
+            canvas,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            history_limit: 32,
+        }
+    }
+
+    /// Returns whether undo is currently possible.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Returns whether redo is currently possible.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Stores the current canvas before a mutation.
+    pub fn checkpoint(&mut self) {
+        self.undo.push(self.canvas.clone());
+        if self.undo.len() > self.history_limit {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Restores the previous canvas state.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo
+            .push(std::mem::replace(&mut self.canvas, previous));
+        true
+    }
+
+    /// Reapplies the next canvas state.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.canvas, next));
+        true
+    }
+
+    /// Adds an empty pixel layer and records history.
+    pub fn add_pixel_layer(&mut self, id: impl Into<String>, name: impl Into<String>) {
+        self.checkpoint();
+        self.canvas.document.add_layer(Layer::new_pixel(id, name));
+    }
+
+    /// Adds an adjustment layer and records history.
+    pub fn add_adjustment(
+        &mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        adjustment_type: impl Into<String>,
+        value: f32,
+    ) {
+        self.checkpoint();
+        self.canvas
+            .document
+            .add_layer(Layer::new_adjustment(id, name, adjustment_type, value));
+    }
+
+    /// Removes a layer while keeping at least one layer in the document.
+    pub fn remove_layer(&mut self, index: usize) -> bool {
+        if self.canvas.document.layers.len() <= 1 || index >= self.canvas.document.layers.len() {
+            return false;
+        }
+        self.checkpoint();
+        let removed = self.canvas.document.layers.remove(index);
+        self.canvas.remove_layer_payload(&removed.id);
+        self.canvas.document.active_layer_index = self
+            .canvas
+            .document
+            .active_layer_index
+            .min(self.canvas.document.layers.len().saturating_sub(1));
+        true
+    }
+
+    /// Moves a layer in the compositing order.
+    pub fn move_layer(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.canvas.document.layers.len()
+            || to >= self.canvas.document.layers.len()
+            || from == to
+        {
+            return false;
+        }
+        self.checkpoint();
+        let layer = self.canvas.document.layers.remove(from);
+        self.canvas.document.layers.insert(to, layer);
+        self.canvas.document.active_layer_index = to;
+        true
+    }
+}
+
+/// Encodes the full nondestructive canvas, including pixel and mask payloads.
+pub fn save_photo_canvas(canvas: &PhotoCanvas) -> Result<Vec<u8>, String> {
+    canvas.composite()?;
+    let json = serde_json::to_vec_pretty(&canvas.document).map_err(|error| error.to_string())?;
+    let mut archive = PackageArchive::new();
+    let mut entries = Vec::new();
+    add_canvas_entry(
+        &mut archive,
+        &mut entries,
+        "content/photo.json",
+        "application/vnd.loom.photo-content",
+        json,
+    )?;
+
+    for (index, layer) in canvas.document.layers.iter().enumerate() {
+        if let Some(image) = canvas.layer_images.get(&layer.id) {
+            image.validate()?;
+            add_canvas_entry(
+                &mut archive,
+                &mut entries,
+                &format!("assets/layers/{index}.rgba"),
+                "application/vnd.loom.rgba8",
+                image.pixels.clone(),
+            )?;
+        }
+        if let Some(mask) = canvas.layer_masks.get(&layer.id) {
+            add_canvas_entry(
+                &mut archive,
+                &mut entries,
+                &format!("assets/masks/{index}.gray8"),
+                "application/vnd.loom.gray8",
+                mask.clone(),
+            )?;
+        }
+    }
+
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Photo,
+        id: canvas.document.id.clone(),
+        title: canvas.document.name.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries,
+    };
+    archive
+        .add("manifest.json", pkg_json::write(&manifest).into_bytes())
+        .map_err(|error| error.to_string())?;
+    archive.to_bytes().map_err(|error| error.to_string())
+}
+
+fn add_canvas_entry(
+    archive: &mut PackageArchive,
+    entries: &mut Vec<ManifestEntry>,
+    path: &str,
+    mime: &str,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let entry = ManifestEntry {
+        path: path.to_string(),
+        mime: MimeType::parse(mime)
+            .map_err(|error| format!("invalid built-in MIME type: {error}"))?,
+        size: bytes.len() as u64,
+        sha256: Checksum::from_bytes(zip::sha256(&bytes)),
+    };
+    archive
+        .add(path, bytes)
+        .map_err(|error| error.to_string())?;
+    entries.push(entry);
+    Ok(())
+}
+
+/// Loads a full nondestructive canvas. Metadata-only legacy projects remain valid.
+pub fn load_photo_canvas(bytes: &[u8]) -> Result<PhotoCanvas, String> {
+    let archive = PackageArchive::from_bytes(bytes).map_err(|error| error.to_string())?;
+    let manifest_bytes = archive
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_text =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest is not UTF-8".to_string())?;
+    let manifest =
+        pkg_json::parse_manifest(manifest_text).map_err(|error| format!("manifest: {error}"))?;
+    if manifest.kind != PackageKind::Photo {
+        return Err("not a Loom Photo project".into());
+    }
+    archive
+        .validate_manifest(&manifest)
+        .map_err(|error| format!("validation: {error}"))?;
+    let content = archive
+        .get("content/photo.json")
+        .ok_or_else(|| "missing content/photo.json".to_string())?;
+    let document: PhotoDocument =
+        serde_json::from_slice(content).map_err(|error| format!("parse payload: {error}"))?;
+    let width = document.width;
+    let height = document.height;
+    let mut canvas = PhotoCanvas::new(document)?;
+    let expected_rgba = image_byte_len(width, height)?;
+    let expected_mask = width as usize * height as usize;
+
+    for (index, layer) in canvas.document.layers.clone().iter().enumerate() {
+        let image_path = format!("assets/layers/{index}.rgba");
+        if let Some(payload) = archive.get(&image_path) {
+            if payload.len() != expected_rgba {
+                return Err(format!("{image_path} has invalid byte length"));
+            }
+            canvas.set_layer_image(
+                &layer.id,
+                RgbaImage {
+                    width,
+                    height,
+                    pixels: payload.to_vec(),
+                },
+            )?;
+        }
+        let mask_path = format!("assets/masks/{index}.gray8");
+        if let Some(payload) = archive.get(&mask_path) {
+            if payload.len() != expected_mask {
+                return Err(format!("{mask_path} has invalid byte length"));
+            }
+            canvas.set_layer_mask(&layer.id, payload.to_vec())?;
+        }
+    }
+    Ok(canvas)
+}
+
+/// Decodes a supported raster file into the reference RGBA representation.
+pub fn decode_raster(bytes: &[u8]) -> Result<RgbaImage, String> {
+    let decoded = image::load_from_memory(bytes)
+        .map_err(|error| format!("decode image: {error}"))?
+        .into_rgba8();
+    let result = RgbaImage {
+        width: decoded.width(),
+        height: decoded.height(),
+        pixels: decoded.into_raw(),
+    };
+    result.validate()?;
+    Ok(result)
+}
+
+/// Encodes an RGBA image as PNG.
+pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
+    image.validate()?;
+    let buffer = image::RgbaImage::from_raw(image.width, image.height, image.pixels.clone())
+        .ok_or_else(|| "invalid RGBA buffer".to_string())?;
+    let mut cursor = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(buffer)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .map_err(|error| format!("encode PNG: {error}"))?;
+    Ok(cursor.into_inner())
+}
+
+/// Encodes an RGBA image as JPEG, flattening transparency against white.
+pub fn encode_jpeg(image: &RgbaImage, quality: u8) -> Result<Vec<u8>, String> {
+    image.validate()?;
+    let mut rgb = Vec::with_capacity(image.width as usize * image.height as usize * 3);
+    for pixel in image.pixels.chunks_exact(4) {
+        let alpha = pixel[3] as f32 / 255.0;
+        for channel in 0..3 {
+            let value = pixel[channel] as f32 * alpha + 255.0 * (1.0 - alpha);
+            rgb.push(value.round().clamp(0.0, 255.0) as u8);
+        }
+    }
+    let mut output = Vec::new();
+    let encoder =
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, quality.clamp(1, 100));
+    encoder
+        .write_image(
+            &rgb,
+            image.width,
+            image.height,
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|error| format!("encode JPEG: {error}"))?;
+    Ok(output)
 }
 
 fn blend_image(
@@ -612,5 +916,50 @@ mod tests {
         assert_eq!(crop.pixel(0, 0), Some([10, 20, 30, 255]));
         let resized = crop.resize_nearest(3, 2).unwrap();
         assert_eq!(resized.pixel(2, 1), Some([10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn canvas_package_round_trip_preserves_pixels_masks_and_adjustments() {
+        let mut document = PhotoDocument::new("canvas", "Canvas", 2, 1);
+        document.add_layer(Layer::new_adjustment(
+            "adjust", "Contrast", "contrast", 0.25,
+        ));
+        let mut canvas = PhotoCanvas::new(document).unwrap();
+        canvas
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(2, 1, [30, 60, 90, 255]).unwrap(),
+            )
+            .unwrap();
+        canvas.set_layer_mask("adjust", vec![255, 0]).unwrap();
+        let bytes = save_photo_canvas(&canvas).unwrap();
+        let loaded = load_photo_canvas(&bytes).unwrap();
+        assert_eq!(loaded.pixel_payload_count(), 1);
+        assert_eq!(loaded.layer_mask("adjust"), Some(&[255, 0][..]));
+        assert_eq!(loaded.composite().unwrap(), canvas.composite().unwrap());
+    }
+
+    #[test]
+    fn png_and_jpeg_are_real_decodable_exports() {
+        let source = RgbaImage::solid(3, 2, [20, 40, 80, 255]).unwrap();
+        let png = encode_png(&source).unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(decode_raster(&png).unwrap(), source);
+        let jpeg = encode_jpeg(&source, 90).unwrap();
+        assert!(jpeg.starts_with(&[0xff, 0xd8, 0xff]));
+        let decoded = decode_raster(&jpeg).unwrap();
+        assert_eq!((decoded.width, decoded.height), (3, 2));
+    }
+
+    #[test]
+    fn photo_session_undo_redo_restores_layer_stack() {
+        let canvas = PhotoCanvas::new(PhotoDocument::new("session", "Session", 1, 1)).unwrap();
+        let mut session = PhotoSession::new(canvas);
+        session.add_adjustment("a", "Exposure", "exposure", 1.0);
+        assert_eq!(session.canvas.document.layers.len(), 2);
+        assert!(session.undo());
+        assert_eq!(session.canvas.document.layers.len(), 1);
+        assert!(session.redo());
+        assert_eq!(session.canvas.document.layers.len(), 2);
     }
 }

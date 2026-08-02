@@ -213,6 +213,8 @@ pub enum EncodeError {
     Io(std::io::Error),
     /// Encoder returned a non-zero status.
     ProcessFailed { code: Option<i32>, stderr: String },
+    /// Encoding was cancelled by the user.
+    Cancelled,
 }
 
 impl std::fmt::Display for EncodeError {
@@ -223,6 +225,7 @@ impl std::fmt::Display for EncodeError {
             EncodeError::ProcessFailed { code, stderr } => {
                 write!(f, "encoder failed with status {code:?}: {stderr}")
             }
+            EncodeError::Cancelled => write!(f, "encoding cancelled"),
         }
     }
 }
@@ -470,11 +473,76 @@ impl ProgressParser {
     }
 }
 
+/// Probes media duration using the FFprobe executable paired with FFmpeg.
+pub fn probe_duration(
+    backend: &EncoderBackend,
+    input: &std::path::Path,
+) -> Result<Option<f64>, EncodeError> {
+    if !input.is_file() {
+        return Err(EncodeError::InvalidJob(format!(
+            "input does not exist: {}",
+            input.display()
+        )));
+    }
+    let sibling = backend.executable.with_file_name(if cfg!(windows) {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    });
+    let executable = if sibling.is_file() {
+        sibling
+    } else {
+        std::path::PathBuf::from(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        })
+    };
+    let output = std::process::Command::new(executable)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(input)
+        .output()?;
+    if !output.status.success() {
+        return Err(EncodeError::ProcessFailed {
+            code: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|duration| *duration > 0.0))
+}
+
 /// Executes one planned job and streams progress updates.
 pub fn execute_job<F>(
     job: &mut EncodeJob,
     plan: &EncodePlan,
     duration_secs: Option<f64>,
+    on_progress: F,
+) -> Result<(), EncodeError>
+where
+    F: FnMut(f32),
+{
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    execute_job_with_cancel(job, plan, duration_secs, &cancel, on_progress)
+}
+
+/// Executes one job with a cooperative cancellation signal.
+pub fn execute_job_with_cancel<F>(
+    job: &mut EncodeJob,
+    plan: &EncodePlan,
+    duration_secs: Option<f64>,
+    cancel: &std::sync::atomic::AtomicBool,
     mut on_progress: F,
 ) -> Result<(), EncodeError>
 where
@@ -482,6 +550,7 @@ where
 {
     use std::io::{BufRead, BufReader, Read};
     use std::process::{Command, Stdio};
+    use std::sync::atomic::Ordering;
     use std::thread;
 
     if !plan.input.is_file() {
@@ -530,17 +599,31 @@ where
         Ok(output)
     });
     let mut parser = ProgressParser::new(duration_secs);
+    let mut cancelled = false;
     for line in BufReader::new(stdout).lines() {
+        if cancel.load(Ordering::Relaxed) {
+            cancelled = true;
+            let _ = child.kill();
+            break;
+        }
         let line = line?;
         if let Some(progress) = parser.push_line(&line) {
             job.status = JobStatus::Encoding { progress };
             on_progress(progress);
         }
     }
+    if cancel.load(Ordering::Relaxed) {
+        cancelled = true;
+        let _ = child.kill();
+    }
     let status = child.wait()?;
     let stderr = stderr_thread
         .join()
         .map_err(|_| EncodeError::InvalidJob("encoder stderr reader panicked".into()))??;
+    if cancelled {
+        job.status = JobStatus::Failed("Cancelled".into());
+        return Err(EncodeError::Cancelled);
+    }
     if status.success() {
         job.status = JobStatus::Complete;
         on_progress(1.0);
@@ -643,5 +726,10 @@ mod tests {
         assert_eq!(queue.progress(), 0.4);
         assert_eq!(queue.recover_interrupted(), 1);
         assert!(matches!(queue.jobs[0].status, JobStatus::Queued));
+    }
+
+    #[test]
+    fn cancellation_error_is_explicit() {
+        assert_eq!(EncodeError::Cancelled.to_string(), "encoding cancelled");
     }
 }

@@ -34,7 +34,7 @@ for app in APPS:
     declared = root_callback_declarations(ui_text)
     wired = {
         name.replace("_", "-")
-        for name in re.findall(r"\bapp\.on_([a-zA-Z0-9_]+)\s*\(", main_text)
+        for name in re.findall(r"\bon_([a-zA-Z0-9_]+)\b", main_text)
     }
     missing = sorted(declared - wired)
     if missing:

@@ -5,6 +5,9 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TrackType {
@@ -612,6 +615,451 @@ fn validate_clip_timing(clip: &Clip) -> Result<(), TimelineError> {
     Ok(())
 }
 
+/// Undoable editing session for a video project.
+#[derive(Debug, Clone)]
+pub struct VideoSession {
+    /// Current project.
+    pub project: VideoProject,
+    undo: Vec<VideoProject>,
+    redo: Vec<VideoProject>,
+    history_limit: usize,
+}
+
+impl VideoSession {
+    /// Creates a new session.
+    pub fn new(project: VideoProject) -> Self {
+        Self {
+            project,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            history_limit: 64,
+        }
+    }
+
+    /// Records a project snapshot before mutation.
+    pub fn checkpoint(&mut self) {
+        self.undo.push(self.project.clone());
+        if self.undo.len() > self.history_limit {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Returns whether undo is possible.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Returns whether redo is possible.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Restores the previous project.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo
+            .push(std::mem::replace(&mut self.project, previous));
+        true
+    }
+
+    /// Reapplies the next project.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.project, next));
+        true
+    }
+}
+
+/// Local FFmpeg/FFprobe/FFplay toolchain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaTools {
+    /// FFmpeg executable.
+    pub ffmpeg: PathBuf,
+    /// FFprobe executable.
+    pub ffprobe: PathBuf,
+    /// FFplay executable.
+    pub ffplay: PathBuf,
+    /// FFmpeg version line.
+    pub version: String,
+}
+
+/// Probed media metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MediaProbe {
+    /// Original path.
+    pub path: PathBuf,
+    /// Duration in seconds.
+    pub duration: f64,
+    /// Primary video width, or zero for audio-only files.
+    pub width: u32,
+    /// Primary video height, or zero for audio-only files.
+    pub height: u32,
+    /// Primary video frame rate.
+    pub frame_rate: f64,
+    /// Whether at least one audio stream exists.
+    pub has_audio: bool,
+}
+
+/// Decoded RGBA preview frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoFrame {
+    /// Frame width.
+    pub width: u32,
+    /// Frame height.
+    pub height: u32,
+    /// Row-major RGBA8 bytes.
+    pub pixels: Vec<u8>,
+}
+
+/// A deterministic FFmpeg sequence-export command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineExportPlan {
+    /// Executable.
+    pub executable: PathBuf,
+    /// Arguments excluding the executable.
+    pub arguments: Vec<String>,
+    /// Output path.
+    pub output: PathBuf,
+    /// Expected output duration.
+    pub duration: f64,
+}
+
+/// Discovers a fully local media toolchain.
+pub fn discover_media_tools() -> Result<MediaTools, String> {
+    let ffmpeg = PathBuf::from(if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    });
+    let output = Command::new(&ffmpeg)
+        .arg("-version")
+        .output()
+        .map_err(|error| format!("start FFmpeg: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let version = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or("ffmpeg")
+        .to_string();
+    Ok(MediaTools {
+        ffmpeg,
+        ffprobe: PathBuf::from(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        }),
+        ffplay: PathBuf::from(if cfg!(windows) {
+            "ffplay.exe"
+        } else {
+            "ffplay"
+        }),
+        version,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ProbeDocument {
+    #[serde(default)]
+    streams: Vec<ProbeStream>,
+    format: Option<ProbeFormat>,
+}
+#[derive(Debug, Deserialize)]
+struct ProbeStream {
+    codec_type: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    r_frame_rate: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct ProbeFormat {
+    duration: Option<String>,
+}
+
+fn parse_ratio(value: &str) -> f64 {
+    let Some((numerator, denominator)) = value.split_once('/') else {
+        return value.parse().unwrap_or(0.0);
+    };
+    let numerator = numerator.parse::<f64>().unwrap_or(0.0);
+    let denominator = denominator.parse::<f64>().unwrap_or(0.0);
+    if denominator.abs() <= f64::EPSILON {
+        0.0
+    } else {
+        numerator / denominator
+    }
+}
+
+/// Probes a local media file through FFprobe JSON output.
+pub fn probe_media(tools: &MediaTools, path: &Path) -> Result<MediaProbe, String> {
+    if !path.is_file() {
+        return Err(format!("media does not exist: {}", path.display()));
+    }
+    let output = Command::new(&tools.ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("start FFprobe: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let document: ProbeDocument = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("parse FFprobe JSON: {error}"))?;
+    let video = document
+        .streams
+        .iter()
+        .find(|stream| stream.codec_type.as_deref() == Some("video"));
+    let has_audio = document
+        .streams
+        .iter()
+        .any(|stream| stream.codec_type.as_deref() == Some("audio"));
+    let duration = document
+        .format
+        .and_then(|format| format.duration)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.0);
+    Ok(MediaProbe {
+        path: path.to_path_buf(),
+        duration,
+        width: video.and_then(|stream| stream.width).unwrap_or(0),
+        height: video.and_then(|stream| stream.height).unwrap_or(0),
+        frame_rate: video
+            .and_then(|stream| stream.r_frame_rate.as_deref())
+            .map(parse_ratio)
+            .unwrap_or(0.0),
+        has_audio,
+    })
+}
+
+/// Decodes one scaled RGBA preview frame through FFmpeg.
+pub fn decode_preview_frame(
+    tools: &MediaTools,
+    path: &Path,
+    time_secs: f64,
+    max_width: u32,
+    max_height: u32,
+) -> Result<VideoFrame, String> {
+    if max_width == 0 || max_height == 0 {
+        return Err("preview dimensions must be non-zero".into());
+    }
+    let probe = probe_media(tools, path)?;
+    if probe.width == 0 || probe.height == 0 {
+        return Err("media has no video stream".into());
+    }
+    let scale = (max_width as f64 / probe.width as f64)
+        .min(max_height as f64 / probe.height as f64)
+        .min(1.0);
+    let width = ((probe.width as f64 * scale).round() as u32).max(2) & !1;
+    let height = ((probe.height as f64 * scale).round() as u32).max(2) & !1;
+    let output = Command::new(&tools.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            &format!("{:.6}", time_secs.max(0.0)),
+            "-i",
+        ])
+        .arg(path)
+        .args([
+            "-frames:v",
+            "1",
+            "-vf",
+            &format!("scale={width}:{height}"),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "pipe:1",
+        ])
+        .output()
+        .map_err(|error| format!("start FFmpeg preview decoder: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let expected = width as usize * height as usize * 4;
+    if output.stdout.len() != expected {
+        return Err(format!(
+            "decoded frame has {} bytes; expected {expected}",
+            output.stdout.len()
+        ));
+    }
+    Ok(VideoFrame {
+        width,
+        height,
+        pixels: output.stdout,
+    })
+}
+
+/// Starts an external local preview player for a source range.
+pub fn spawn_preview_player(
+    tools: &MediaTools,
+    path: &Path,
+    start: f64,
+    duration: Option<f64>,
+) -> Result<Child, String> {
+    if !path.is_file() {
+        return Err(format!("media does not exist: {}", path.display()));
+    }
+    let mut command = Command::new(&tools.ffplay);
+    command.args([
+        "-hide_banner",
+        "-autoexit",
+        "-loglevel",
+        "warning",
+        "-ss",
+        &format!("{:.6}", start.max(0.0)),
+    ]);
+    if let Some(duration) = duration.filter(|duration| *duration > 0.0) {
+        command.args(["-t", &format!("{duration:.6}")]);
+    }
+    command
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("start FFplay: {error}"))
+}
+
+/// Creates a deterministic video-only sequence export plan from the first video track.
+pub fn build_timeline_export_plan(
+    project: &VideoProject,
+    tools: &MediaTools,
+    output: impl Into<PathBuf>,
+) -> Result<TimelineExportPlan, String> {
+    let clips = project
+        .tracks
+        .iter()
+        .filter(|track| track.track_type == TrackType::Video && !track.muted)
+        .flat_map(|track| track.clips.iter())
+        .filter(|clip| clip.enabled && !clip.source_path.trim().is_empty())
+        .collect::<Vec<_>>();
+    if clips.is_empty() {
+        return Err("timeline contains no enabled video clips with source paths".into());
+    }
+    let output = output.into();
+    let mut arguments = vec!["-hide_banner".into(), "-nostdin".into(), "-y".into()];
+    for clip in &clips {
+        if !Path::new(&clip.source_path).is_file() {
+            return Err(format!("missing clip source: {}", clip.source_path));
+        }
+        arguments.extend([
+            "-ss".into(),
+            format!("{:.6}", clip.in_point),
+            "-t".into(),
+            format!("{:.6}", clip.source_span()),
+            "-i".into(),
+            clip.source_path.clone(),
+        ]);
+    }
+    let mut filters = Vec::new();
+    for (index, clip) in clips.iter().enumerate() {
+        filters.push(format!(
+            "[{index}:v]setpts=(PTS-STARTPTS)/{:.8},scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2:black,fps={:.6}[v{index}]",
+            clip.playback_rate, project.width, project.height, project.width, project.height, project.frame_rate
+        ));
+    }
+    let inputs = (0..clips.len())
+        .map(|index| format!("[v{index}]"))
+        .collect::<String>();
+    filters.push(format!("{inputs}concat=n={}:v=1:a=0[vout]", clips.len()));
+    let duration = clips.iter().map(|clip| clip.duration).sum();
+    arguments.extend([
+        "-filter_complex".into(),
+        filters.join(";"),
+        "-map".into(),
+        "[vout]".into(),
+        "-an".into(),
+        "-c:v".into(),
+        "libx264".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        "-nostats".into(),
+        output.to_string_lossy().into_owned(),
+    ]);
+    Ok(TimelineExportPlan {
+        executable: tools.ffmpeg.clone(),
+        arguments,
+        output,
+        duration,
+    })
+}
+
+/// Executes a timeline export and reports normalized progress.
+pub fn execute_timeline_export<F>(plan: &TimelineExportPlan, mut progress: F) -> Result<(), String>
+where
+    F: FnMut(f32),
+{
+    if let Some(parent) = plan.output.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+    }
+    let mut child = Command::new(&plan.executable)
+        .args(&plan.arguments)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("start timeline export: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "FFmpeg stdout was not captured".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "FFmpeg stderr was not captured".to_string())?;
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let mut reader = BufReader::new(stderr);
+        let _ = std::io::Read::read_to_string(&mut reader, &mut text);
+        text
+    });
+    let mut last = 0.0;
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|error| error.to_string())?;
+        if let Some(value) = line
+            .strip_prefix("out_time_us=")
+            .and_then(|value| value.parse::<f64>().ok())
+        {
+            last = (value / 1_000_000.0 / plan.duration.max(0.001)).clamp(0.0, 0.999) as f32;
+            progress(last);
+        } else if line == "progress=end" {
+            last = 1.0;
+            progress(1.0);
+        }
+    }
+    let status = child.wait().map_err(|error| error.to_string())?;
+    let stderr = stderr_reader
+        .join()
+        .unwrap_or_else(|_| "FFmpeg stderr reader panicked".into());
+    if status.success() {
+        if last < 1.0 {
+            progress(1.0);
+        }
+        Ok(())
+    } else {
+        Err(stderr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,5 +1168,43 @@ mod tests {
         project.tracks[0].insert_clip(first).unwrap();
         project.tracks[0].insert_clip(second).unwrap();
         assert_eq!(project.tracks[0].overlaps(), vec![("a".into(), "b".into())]);
+    }
+
+    #[test]
+    fn session_history_restores_timeline_mutations() {
+        let mut session = VideoSession::new(VideoProject::new("video", "Video"));
+        session.checkpoint();
+        session.project.tracks[0].add_clip(Clip::new("clip", "Clip", 2.0));
+        assert!(session.can_undo());
+        assert!(session.undo());
+        assert_eq!(session.project.total_clips(), 0);
+        assert!(session.redo());
+        assert_eq!(session.project.total_clips(), 1);
+    }
+
+    #[test]
+    fn export_plan_maps_real_sources_and_concat_filter() {
+        let directory =
+            std::env::temp_dir().join(format!("loom-video-plan-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("source.mov");
+        std::fs::write(&source, b"fixture").unwrap();
+        let mut project = VideoProject::new("video", "Video");
+        let mut clip = Clip::new("clip", "Clip", 2.0);
+        clip.source_path = source.to_string_lossy().into_owned();
+        project.tracks[0].add_clip(clip);
+        let tools = MediaTools {
+            ffmpeg: "ffmpeg".into(),
+            ffprobe: "ffprobe".into(),
+            ffplay: "ffplay".into(),
+            version: "test".into(),
+        };
+        let plan = build_timeline_export_plan(&project, &tools, directory.join("out.mp4")).unwrap();
+        assert!(plan
+            .arguments
+            .iter()
+            .any(|argument| argument.contains("concat=n=1")));
+        assert!(plan.arguments.iter().any(|argument| argument == "libx264"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

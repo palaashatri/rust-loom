@@ -20,3 +20,9 @@ loom-ui = { path = "../loom-core/crates/loom-ui" }
 loom-test-support = { path = "../loom-core/crates/loom-test-support" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+cpal = "0.18.1"
+midir = "0.11.0"
+arc-swap = "1.7"
+crossbeam-queue = "0.3"
+hound = "3.5.1"

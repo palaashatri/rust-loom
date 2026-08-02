@@ -240,6 +240,43 @@ impl AudioBuffer {
         Ok(buffer)
     }
 
+    /// Resamples the buffer with deterministic linear interpolation.
+    pub fn resample_linear(&self, target_rate: u32) -> Result<Self, String> {
+        self.validate()?;
+        if target_rate == 0 {
+            return Err("target sample rate must be non-zero".into());
+        }
+        if target_rate == self.sample_rate {
+            return Ok(self.clone());
+        }
+        let source_frames = self.frames() as usize;
+        if source_frames == 0 {
+            return Self::silence(target_rate, self.channels, 0);
+        }
+        let target_frames = ((source_frames as f64 * target_rate as f64 / self.sample_rate as f64)
+            .round() as usize)
+            .max(1);
+        let channels = self.channels as usize;
+        let mut samples = vec![0.0; target_frames * channels];
+        let ratio = self.sample_rate as f64 / target_rate as f64;
+        for target_frame in 0..target_frames {
+            let source_position = target_frame as f64 * ratio;
+            let left = source_position.floor() as usize;
+            let right = (left + 1).min(source_frames - 1);
+            let fraction = (source_position - left as f64) as f32;
+            for channel in 0..channels {
+                let a = self.samples[left * channels + channel];
+                let b = self.samples[right * channels + channel];
+                samples[target_frame * channels + channel] = a + (b - a) * fraction;
+            }
+        }
+        Ok(Self {
+            sample_rate: target_rate,
+            channels: self.channels,
+            samples,
+        })
+    }
+
     /// Encodes signed 16-bit PCM WAV bytes.
     pub fn to_wav_pcm16(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
@@ -295,6 +332,211 @@ pub struct MidiNote {
     pub duration_secs: f64,
     /// Velocity in `[0, 1]`.
     pub velocity: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StudioBundleMetadata {
+    project: StudioProject,
+    assets: Vec<StudioBundleAsset>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StudioBundleAsset {
+    name: String,
+    path: String,
+}
+
+/// Saves a Studio project together with locally imported/recorded audio assets.
+pub fn save_studio_bundle(
+    project: &StudioProject,
+    assets: &AudioAssetStore,
+) -> Result<Vec<u8>, String> {
+    let mut archive = PackageArchive::new();
+    let mut asset_records = Vec::new();
+    let mut entries = Vec::new();
+    for (index, (name, buffer)) in assets.iter().enumerate() {
+        let path = format!("assets/audio-{index:04}.wav");
+        let bytes = buffer.to_wav_pcm16()?;
+        archive
+            .add(path.clone(), bytes.clone())
+            .map_err(|error| error.to_string())?;
+        entries.push(ManifestEntry {
+            path: path.clone(),
+            mime: MimeType::parse("audio/wav").map_err(|error| error.to_string())?,
+            size: bytes.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(&bytes)),
+        });
+        asset_records.push(StudioBundleAsset {
+            name: name.to_string(),
+            path,
+        });
+    }
+    let metadata = StudioBundleMetadata {
+        project: project.clone(),
+        assets: asset_records,
+    };
+    let content = serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?;
+    archive
+        .add("content/studio.json", content.clone())
+        .map_err(|error| error.to_string())?;
+    entries.push(ManifestEntry {
+        path: "content/studio.json".into(),
+        mime: MimeType::parse("application/vnd.loom.studio-content")
+            .map_err(|error| error.to_string())?,
+        size: content.len() as u64,
+        sha256: Checksum::from_bytes(zip::sha256(&content)),
+    });
+    let manifest = Manifest {
+        schema: SchemaVersion::CURRENT,
+        kind: PackageKind::Studio,
+        id: project.id.clone(),
+        title: project.name.clone(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        entries,
+    };
+    archive
+        .add("manifest.json", pkg_json::write(&manifest).into_bytes())
+        .map_err(|error| error.to_string())?;
+    archive.to_bytes().map_err(|error| error.to_string())
+}
+
+/// Loads a complete Studio project and its embedded local audio assets.
+pub fn load_studio_bundle(bytes: &[u8]) -> Result<(StudioProject, AudioAssetStore), String> {
+    let archive = PackageArchive::from_bytes(bytes).map_err(|error| error.to_string())?;
+    let manifest_bytes = archive
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_text =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest is not UTF-8".to_string())?;
+    let manifest =
+        pkg_json::parse_manifest(manifest_text).map_err(|error| format!("manifest: {error}"))?;
+    if manifest.kind != PackageKind::Studio {
+        return Err("not a Studio project".into());
+    }
+    archive
+        .validate_manifest(&manifest)
+        .map_err(|error| format!("validation: {error}"))?;
+    let content = archive
+        .get("content/studio.json")
+        .ok_or_else(|| "missing studio.json".to_string())?;
+    if let Ok(bundle) = serde_json::from_slice::<StudioBundleMetadata>(content) {
+        let mut assets = AudioAssetStore::default();
+        for asset in bundle.assets {
+            let bytes = archive
+                .get(&asset.path)
+                .ok_or_else(|| format!("missing embedded audio asset {}", asset.path))?;
+            assets.insert(asset.name, decode_wav(bytes)?)?;
+        }
+        return Ok((bundle.project, assets));
+    }
+    let project = serde_json::from_slice::<StudioProject>(content)
+        .map_err(|error| format!("parse payload: {error}"))?;
+    Ok((project, AudioAssetStore::default()))
+}
+
+/// Decodes a PCM or IEEE-float WAV file into Loom's interleaved float buffer.
+pub fn decode_wav(bytes: &[u8]) -> Result<AudioBuffer, String> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut reader = hound::WavReader::new(cursor).map_err(|error| error.to_string())?;
+    let spec = reader.spec();
+    if spec.channels == 0 || spec.sample_rate == 0 {
+        return Err("WAV contains an invalid channel count or sample rate".into());
+    }
+    let samples = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .map(|sample| sample.map(|value| value.clamp(-1.0, 1.0)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?,
+        hound::SampleFormat::Int => {
+            let scale = 2.0_f32.powi(spec.bits_per_sample.saturating_sub(1) as i32);
+            match spec.bits_per_sample {
+                1..=8 => reader
+                    .samples::<i8>()
+                    .map(|sample| sample.map(|value| value as f32 / scale))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?,
+                9..=16 => reader
+                    .samples::<i16>()
+                    .map(|sample| sample.map(|value| value as f32 / scale))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?,
+                17..=32 => reader
+                    .samples::<i32>()
+                    .map(|sample| sample.map(|value| value as f32 / scale))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?,
+                bits => return Err(format!("unsupported WAV integer depth: {bits}")),
+            }
+        }
+    };
+    let buffer = AudioBuffer {
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        samples,
+    };
+    buffer.validate()?;
+    Ok(buffer)
+}
+
+/// Undoable editing session around a Studio project.
+#[derive(Debug, Clone)]
+pub struct StudioSession {
+    /// Current project.
+    pub project: StudioProject,
+    undo: Vec<StudioProject>,
+    redo: Vec<StudioProject>,
+    history_limit: usize,
+}
+
+impl StudioSession {
+    /// Creates a session with bounded project snapshots.
+    pub fn new(project: StudioProject) -> Self {
+        Self {
+            project,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            history_limit: 64,
+        }
+    }
+
+    /// Records the current project before a mutation.
+    pub fn checkpoint(&mut self) {
+        self.undo.push(self.project.clone());
+        if self.undo.len() > self.history_limit {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Restores the previous project state.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo
+            .push(std::mem::replace(&mut self.project, previous));
+        true
+    }
+
+    /// Reapplies the next project state.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.project, next));
+        true
+    }
+
+    /// Whether undo is available.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Whether redo is available.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
 }
 
 /// Simple volume automation point.
@@ -369,6 +611,23 @@ impl AudioAssetStore {
     /// Retrieves an asset.
     pub fn get(&self, name: &str) -> Option<&AudioBuffer> {
         self.assets.get(name)
+    }
+
+    /// Removes an asset and returns its buffer.
+    pub fn remove(&mut self, name: &str) -> Option<AudioBuffer> {
+        self.assets.remove(name)
+    }
+
+    /// Lists asset identifiers in deterministic order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.assets.keys().map(String::as_str)
+    }
+
+    /// Iterates assets in deterministic name order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &AudioBuffer)> {
+        self.assets
+            .iter()
+            .map(|(name, buffer)| (name.as_str(), buffer))
     }
 }
 
@@ -705,5 +964,32 @@ mod tests {
         assert_eq!(project.tracks[1].regions[0].start_sample, 123);
         assert!(project.remove_region(1, "r1"));
         assert!(project.validate().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod studio_runtime_tests {
+    use super::*;
+
+    #[test]
+    fn wav_round_trip_decodes_pcm16() {
+        let source = AudioBuffer::sine(48_000, 2, 440.0, 0.05, 0.25).unwrap();
+        let bytes = source.to_wav_pcm16().unwrap();
+        let decoded = decode_wav(&bytes).unwrap();
+        assert_eq!(decoded.sample_rate, source.sample_rate);
+        assert_eq!(decoded.channels, source.channels);
+        assert_eq!(decoded.frames(), source.frames());
+        assert!(decoded.samples.iter().any(|sample| sample.abs() > 0.01));
+    }
+
+    #[test]
+    fn studio_session_undo_redo_restores_mixer() {
+        let mut session = StudioSession::new(StudioProject::new("id", "song"));
+        session.checkpoint();
+        session.project.tracks[0].volume_db = -12.0;
+        assert!(session.undo());
+        assert_eq!(session.project.tracks[0].volume_db, 0.0);
+        assert!(session.redo());
+        assert_eq!(session.project.tracks[0].volume_db, -12.0);
     }
 }

@@ -1,10 +1,13 @@
 //! Loom Present desktop presentation application.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
-use loom_present_core::{export_pdf, load_presentation, save_presentation, PresentationDocument};
+use loom_present_core::{
+    export_pdf, load_presentation_session, save_presentation_session, ElementType,
+    PresentationDocument, PresentationSession, SlideElement, TransitionKind,
+};
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
@@ -27,115 +30,240 @@ fn parse_args() -> Result<Args, String> {
         screenshot: None,
         smoke: false,
         size: DEFAULT_SIZE,
-        theme: "dark".to_string(),
+        theme: "dark".into(),
         open: None,
     };
-    let mut it = std::env::args().skip(1);
-    while let Some(a) = it.next() {
-        match a.as_str() {
+    let mut iterator = std::env::args().skip(1);
+    while let Some(argument) = iterator.next() {
+        match argument.as_str() {
             "--screenshot" => {
-                args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
+                args.screenshot = Some(iterator.next().ok_or("--screenshot needs a path")?)
             }
             "--smoke" => args.smoke = true,
             "--size" => {
-                let v = it.next().ok_or("--size needs WxH")?;
-                let (w, h) = v.split_once('x').ok_or("--size must be WxH")?;
+                let value = iterator.next().ok_or("--size needs WxH")?;
+                let (width, height) = value.split_once('x').ok_or("--size must be WxH")?;
                 args.size = (
-                    w.parse().map_err(|_| "bad width")?,
-                    h.parse().map_err(|_| "bad height")?,
+                    width.parse().map_err(|_| "bad width")?,
+                    height.parse().map_err(|_| "bad height")?,
                 );
             }
-            "--theme" => {
-                args.theme = it.next().ok_or("--theme needs a name")?;
-            }
-            "--open" => {
-                args.open = Some(it.next().ok_or("--open needs a path")?);
-            }
+            "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(args)
 }
 
-fn sample_deck() -> PresentationDocument {
-    let mut doc = PresentationDocument::new("deck-sample", "Loom Present Showcase");
-    doc.add_slide("Product Vision", "headline");
-    doc.add_slide("Key Pillars", "grid");
-    doc
+fn text_element(
+    id: &str,
+    kind: ElementType,
+    content: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> SlideElement {
+    SlideElement {
+        id: id.into(),
+        element_type: kind,
+        content: content.into(),
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
-fn initial_deck(args: &Args) -> Result<PresentationDocument, String> {
+fn sample_session() -> PresentationSession {
+    let mut document = PresentationDocument::new("deck-sample", "Loom for Local Creators");
+    if let Some(slide) = document.active_slide_mut() {
+        slide.title = "Create without compromise".into();
+        slide.elements.clear();
+        slide.add_element(text_element(
+            "cover-title",
+            ElementType::Title,
+            "Create without compromise",
+            90.0,
+            90.0,
+            820.0,
+            110.0,
+        ));
+        slide.add_element(text_element(
+            "cover-body",
+            ElementType::BodyText,
+            "A private, native creative studio designed for Linux.",
+            92.0,
+            230.0,
+            700.0,
+            120.0,
+        ));
+    }
+    document.add_slide("The creative system", "content");
+    if let Some(slide) = document.active_slide_mut() {
+        slide.add_element(text_element(
+            "system-title",
+            ElementType::Title,
+            "The creative system",
+            80.0,
+            70.0,
+            820.0,
+            90.0,
+        ));
+        slide.add_element(text_element("system-body", ElementType::BodyText, "Writer, Sheets, Present, Photo, Motion, Video, Studio and Encode share one local-first foundation.", 82.0, 190.0, 760.0, 170.0));
+    }
+    document.add_slide("Built around ownership", "two-column");
+    if let Some(slide) = document.active_slide_mut() {
+        slide.add_element(text_element(
+            "ownership-title",
+            ElementType::Title,
+            "Built around ownership",
+            80.0,
+            70.0,
+            820.0,
+            90.0,
+        ));
+        slide.add_element(text_element("ownership-body", ElementType::BodyText, "No required account. No hidden upload. Open formats, local models, and files that remain yours.", 82.0, 190.0, 760.0, 170.0));
+    }
+    document.active_index = 0;
+    let mut session = PresentationSession::new(document);
+    let first = session.document.slides[0].id.clone();
+    session.set_transition(&first, TransitionKind::Dissolve);
+    session
+}
+
+fn initial_session(args: &Args) -> Result<PresentationSession, String> {
     match args.open.as_deref() {
-        Some(path) => {
-            let bytes = std::fs::read(path)
-                .map_err(|e| format!("failed to read presentation '{path}': {e}"))?;
-            load_presentation(&bytes)
-                .map_err(|e| format!("failed to load presentation '{path}': {e}"))
-        }
-        None => Ok(sample_deck()),
+        Some(path) => std::fs::read(path)
+            .map_err(|error| format!("failed to read presentation '{path}': {error}"))
+            .and_then(|bytes| load_presentation_session(&bytes)),
+        None => Ok(sample_session()),
     }
 }
 
-fn apply_deck(app: &PresentApp, doc: &PresentationDocument) {
-    app.set_deck_title(doc.title.as_str().into());
-    if let Some(slide) = doc.active_slide() {
+struct GuiState {
+    session: RefCell<PresentationSession>,
+    selected_element: Cell<usize>,
+}
+
+fn active_body(session: &PresentationSession) -> String {
+    session
+        .document
+        .active_slide()
+        .and_then(|slide| {
+            slide
+                .elements
+                .iter()
+                .find(|element| element.element_type == ElementType::BodyText)
+        })
+        .map(|element| element.content.clone())
+        .unwrap_or_else(|| "Add supporting content from the toolbar.".into())
+}
+
+fn refresh(app: &PresentApp, state: &GuiState) {
+    let session = state.session.borrow();
+    let document = &session.document;
+    app.set_deck_title(document.title.as_str().into());
+    app.set_can_undo(session.can_undo());
+    app.set_can_redo(session.can_redo());
+    app.set_slide_count_text(SharedString::from(format!("{} slides", document.len())));
+    app.set_slide_titles(ModelRc::new(VecModel::from(
+        document
+            .slides
+            .iter()
+            .map(|slide| SharedString::from(slide.title.as_str()))
+            .collect::<Vec<_>>(),
+    )));
+    app.set_active_slide_index(document.active_index as i32);
+    if let Some(slide) = document.active_slide() {
         app.set_slide_title(slide.title.as_str().into());
-        app.set_slide_notes(SharedString::from(&slide.speaker_notes));
-    } else {
-        app.set_slide_title("No Slide Selected".into());
-        app.set_slide_notes("".into());
+        app.set_slide_body(active_body(&session).into());
+        app.set_slide_notes(slide.speaker_notes.as_str().into());
+        let labels = slide
+            .elements
+            .iter()
+            .map(|element| {
+                SharedString::from(format!("{:?} · {}", element.element_type, element.content))
+            })
+            .collect::<Vec<_>>();
+        app.set_element_labels(ModelRc::new(VecModel::from(labels)));
+        let selected = state
+            .selected_element
+            .get()
+            .min(slide.elements.len().saturating_sub(1));
+        state.selected_element.set(selected);
+        app.set_active_element_index(selected as i32);
+        if let Some(element) = slide.elements.get(selected) {
+            app.set_active_element_content(element.content.as_str().into());
+            app.set_element_x(element.x);
+            app.set_element_y(element.y);
+            app.set_element_width(element.width);
+            app.set_element_height(element.height);
+        } else {
+            app.set_active_element_content("".into());
+        }
+        app.set_transition_index(match session.transition_for(&slide.id) {
+            TransitionKind::None => 0,
+            TransitionKind::Dissolve => 1,
+            TransitionKind::Push => 2,
+            TransitionKind::Morph => 3,
+        });
     }
-    let slide_titles: Vec<SharedString> = doc
-        .slides
-        .iter()
-        .map(|slide| SharedString::from(slide.title.as_str()))
-        .collect();
-    app.set_slide_titles(ModelRc::new(VecModel::from(slide_titles)));
-    app.set_active_slide_index(doc.active_index as i32);
-    app.set_slide_count_text(SharedString::from(format!("{} Slides", doc.len())));
-    app.set_status_left(SharedString::from(format!("{} slides in deck", doc.len())));
-    app.set_status_right("Offline".into());
+    let issue_count = session.validate().len();
+    app.set_status_left(SharedString::from(format!(
+        "{} slides · {} validation issues · undo {}",
+        document.len(),
+        issue_count,
+        if session.can_undo() {
+            "available"
+        } else {
+            "clean"
+        }
+    )));
+    app.set_status_right("Local deck engine".into());
 }
 
 fn apply_theme(app: &PresentApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
-fn render_headless(args: &Args, out: &str) -> Result<(), String> {
+fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
-    let app = PresentApp::new().map_err(|e| e.to_string())?;
+    let app = PresentApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
-    let doc = initial_deck(args)?;
-    apply_deck(&app, &doc);
-    let (w, h) = args.size;
-    let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
-    loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
-    Ok(())
+    let state = GuiState {
+        session: RefCell::new(initial_session(args)?),
+        selected_element: Cell::new(0),
+    };
+    refresh(&app, &state);
+    let image = snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| error.to_string())?;
+    loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
 }
 
-struct GuiState {
-    current: RefCell<PresentationDocument>,
+fn set_status(app: &PresentApp, value: impl Into<SharedString>) {
+    app.set_status_left(value.into());
 }
 
 fn main() -> Result<(), String> {
     let args = parse_args()?;
-    if let Some(out) = &args.screenshot {
-        return render_headless(&args, out);
+    if let Some(output) = &args.screenshot {
+        return render_headless(&args, output);
     }
     if args.smoke {
-        let out =
+        let output =
             std::env::temp_dir().join(format!("loom-present-smoke-{}.png", std::process::id()));
-        let out = out.to_string_lossy().into_owned();
-        return render_headless(&args, &out);
+        return render_headless(&args, &output.to_string_lossy());
     }
 
-    let app = PresentApp::new().map_err(|e| e.to_string())?;
+    let app = PresentApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-
     let state = Rc::new(GuiState {
-        current: RefCell::new(initial_deck(&args)?),
+        session: RefCell::new(initial_session(&args)?),
+        selected_element: Cell::new(0),
     });
 
     {
@@ -143,196 +271,395 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.current.borrow_mut() = sample_deck();
-                apply_deck(&app, &state.current.borrow());
+                *state.session.borrow_mut() = sample_session();
+                state.selected_element.set(0);
+                refresh(&app, &state);
             }
         });
     }
-
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_open_deck(move || {
             if let Some(app) = app_ref.upgrade() {
                 match std::fs::read(SAVE_FILENAME)
-                    .map_err(|e| format!("failed to read {SAVE_FILENAME}: {e}"))
-                    .and_then(|bytes| load_presentation(&bytes))
+                    .map_err(|error| error.to_string())
+                    .and_then(|bytes| load_presentation_session(&bytes))
                 {
-                    Ok(doc) => {
-                        *state.current.borrow_mut() = doc;
-                        apply_deck(&app, &state.current.borrow());
-                        app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
+                    Ok(session) => {
+                        *state.session.borrow_mut() = session;
+                        state.selected_element.set(0);
+                        refresh(&app, &state);
+                        set_status(&app, format!("Opened {SAVE_FILENAME}"));
                     }
-                    Err(err) => {
-                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
-                    }
+                    Err(error) => set_status(&app, format!("Open failed: {error}")),
                 }
             }
         });
     }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_add_slide(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                let count = current.len() + 1;
-                current.add_slide(format!("New Slide {count}"), "content");
-                apply_deck(&app, &current);
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_select_slide(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                if current.select_slide(index as usize) {
-                    apply_deck(&app, &current);
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_notes_edited(move |notes| {
-            if let Some(_app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                if let Some(slide) = current.active_slide_mut() {
-                    slide.speaker_notes = notes.as_str().to_string();
-                }
-            }
-        });
-    }
-
-    {
-        let app_ref = app.as_weak();
-        app.on_toggle_preview_mode(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let current = app.get_is_preview_mode();
-                app.set_is_preview_mode(!current);
-                app.set_status_left(SharedString::from(if !current {
-                    "Entered Presenter Playback Preview Mode"
-                } else {
-                    "Exited Presenter Playback Preview Mode"
-                }));
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_apply_template(move |tmpl_idx| {
-            if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                let layout = match tmpl_idx {
-                    0 => "cover",
-                    2 => "two-column",
-                    3 => "image-text",
-                    _ => "content",
-                };
-                if let Some(slide) = current.active_slide_mut() {
-                    slide.layout = layout.to_string();
-                }
-                apply_deck(&app, &current);
-                app.set_status_left(SharedString::from(format!("Applied template: {layout}")));
-            }
-        });
-    }
-
-    {
-        let app_ref = app.as_weak();
-        app.on_update_property(move |prop_name, val| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from(format!(
-                    "Updated {prop_name} to {val:.1}"
-                )));
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_prev_slide(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                if current.active_index > 0 {
-                    let prev = current.active_index - 1;
-                    current.select_slide(prev);
-                    apply_deck(&app, &current);
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_next_slide(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                if current.active_index + 1 < current.len() {
-                    let next = current.active_index + 1;
-                    current.select_slide(next);
-                    apply_deck(&app, &current);
-                }
-            }
-        });
-    }
-
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_save_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Ok(bytes) = save_presentation(&state.current.borrow()) {
-                    let _ = std::fs::write(SAVE_FILENAME, bytes);
-                    app.set_status_left(SharedString::from(format!("Saved {SAVE_FILENAME}")));
+                match save_presentation_session(&state.session.borrow()).and_then(|bytes| {
+                    std::fs::write(SAVE_FILENAME, bytes).map_err(|error| error.to_string())
+                }) {
+                    Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
+                    Err(error) => set_status(&app, format!("Save failed: {error}")),
                 }
             }
         });
     }
-
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_add_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                session.checkpoint();
+                let count = session.document.len() + 1;
+                session
+                    .document
+                    .add_slide(format!("New Slide {count}"), "content");
+                if let Some(slide) = session.document.active_slide_mut() {
+                    slide.add_element(text_element(
+                        &format!("title-{count}"),
+                        ElementType::Title,
+                        &slide.title,
+                        80.0,
+                        70.0,
+                        820.0,
+                        90.0,
+                    ));
+                    slide.add_element(text_element(
+                        &format!("body-{count}"),
+                        ElementType::BodyText,
+                        "Add your story here.",
+                        82.0,
+                        190.0,
+                        760.0,
+                        170.0,
+                    ));
+                }
+                state.selected_element.set(0);
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_duplicate_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let index = state.session.borrow().document.active_index;
+                state.session.borrow_mut().duplicate_slide(index);
+                state.selected_element.set(0);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_delete_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let index = state.session.borrow().document.active_index;
+                state.session.borrow_mut().remove_slide(index);
+                state.selected_element.set(0);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_undo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                state.session.borrow_mut().undo();
+                state.selected_element.set(0);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_redo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                state.session.borrow_mut().redo();
+                state.selected_element.set(0);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_slide(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index >= 0 {
+                    state
+                        .session
+                        .borrow_mut()
+                        .document
+                        .select_slide(index as usize);
+                    state.selected_element.set(0);
+                    refresh(&app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_element(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index >= 0 {
+                    state.selected_element.set(index as usize);
+                    refresh(&app, &state);
+                }
+            }
+        });
+    }
+    for shape in [false, true] {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        if shape {
+            app.on_add_shape(move || {
+                if let Some(app) = app_ref.upgrade() {
+                    let mut session = state.session.borrow_mut();
+                    let count = session
+                        .document
+                        .active_slide()
+                        .map(|slide| slide.elements.len() + 1)
+                        .unwrap_or(1);
+                    session.add_element(text_element(
+                        &format!("shape-{count}"),
+                        ElementType::ShapeRectangle,
+                        "Shape",
+                        120.0,
+                        260.0,
+                        300.0,
+                        140.0,
+                    ));
+                    state.selected_element.set(count - 1);
+                    drop(session);
+                    refresh(&app, &state);
+                }
+            });
+        } else {
+            app.on_add_text(move || {
+                if let Some(app) = app_ref.upgrade() {
+                    let mut session = state.session.borrow_mut();
+                    let count = session
+                        .document
+                        .active_slide()
+                        .map(|slide| slide.elements.len() + 1)
+                        .unwrap_or(1);
+                    session.add_element(text_element(
+                        &format!("text-{count}"),
+                        ElementType::BodyText,
+                        "New text",
+                        120.0,
+                        220.0,
+                        520.0,
+                        100.0,
+                    ));
+                    state.selected_element.set(count - 1);
+                    drop(session);
+                    refresh(&app, &state);
+                }
+            });
+        }
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_update_element_content(move |content| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                let selected = state.selected_element.get();
+                if session
+                    .document
+                    .active_slide()
+                    .and_then(|slide| slide.elements.get(selected))
+                    .is_some()
+                {
+                    session.checkpoint();
+                    let is_title = if let Some(element) = session
+                        .document
+                        .active_slide_mut()
+                        .and_then(|slide| slide.elements.get_mut(selected))
+                    {
+                        element.content = content.as_str().to_string();
+                        element.element_type == ElementType::Title
+                    } else {
+                        false
+                    };
+                    if is_title {
+                        if let Some(slide) = session.document.active_slide_mut() {
+                            slide.title = content.as_str().to_string();
+                        }
+                    }
+                }
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_transform_element(move |property, value| {
+            if let Some(app) = app_ref.upgrade() {
+                let (id, mut x, mut y, mut width, mut height) = {
+                    let session = state.session.borrow();
+                    let selected = state.selected_element.get();
+                    let Some(element) = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.get(selected))
+                    else {
+                        return;
+                    };
+                    (
+                        element.id.clone(),
+                        element.x,
+                        element.y,
+                        element.width,
+                        element.height,
+                    )
+                };
+                match property.as_str() {
+                    "x" => x = value,
+                    "y" => y = value,
+                    "width" => width = value,
+                    "height" => height = value,
+                    _ => {}
+                }
+                state
+                    .session
+                    .borrow_mut()
+                    .transform_element(&id, x, y, width, height);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_notes_edited(move |notes| {
+            if let Some(_app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                session.checkpoint();
+                if let Some(slide) = session.document.active_slide_mut() {
+                    slide.speaker_notes = notes.as_str().to_string();
+                }
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_preview_mode(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_is_preview_mode(!app.get_is_preview_mode());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_apply_template(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let layout = match index {
+                    0 => "cover",
+                    2 => "two-column",
+                    3 => "image-text",
+                    _ => "content",
+                };
+                let mut session = state.session.borrow_mut();
+                session.checkpoint();
+                if let Some(slide) = session.document.active_slide_mut() {
+                    slide.layout = layout.into();
+                }
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_set_transition(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                if let Some(slide) = session.document.active_slide() {
+                    let id = slide.id.clone();
+                    session.set_transition(
+                        &id,
+                        match index {
+                            1 => TransitionKind::Dissolve,
+                            2 => TransitionKind::Push,
+                            3 => TransitionKind::Morph,
+                            _ => TransitionKind::None,
+                        },
+                    );
+                }
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_prev_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let index = state.session.borrow().document.active_index;
+                if index > 0 {
+                    state.session.borrow_mut().document.select_slide(index - 1);
+                    state.selected_element.set(0);
+                    refresh(&app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_next_slide(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let (index, len) = {
+                    let session = state.session.borrow();
+                    (session.document.active_index, session.document.len())
+                };
+                if index + 1 < len {
+                    state.session.borrow_mut().document.select_slide(index + 1);
+                    state.selected_element.set(0);
+                    refresh(&app, &state);
+                }
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_export_pdf(move || {
             if let Some(app) = app_ref.upgrade() {
-                let bytes = export_pdf(&state.current.borrow());
-                let _ = std::fs::write(EXPORT_FILENAME, bytes);
-                app.set_status_left(SharedString::from(format!("Exported {EXPORT_FILENAME}")));
+                match std::fs::write(
+                    EXPORT_FILENAME,
+                    export_pdf(&state.session.borrow().document),
+                ) {
+                    Ok(()) => set_status(&app, format!("Exported {EXPORT_FILENAME}")),
+                    Err(error) => set_status(&app, format!("Export failed: {error}")),
+                }
             }
         });
     }
 
-    apply_deck(&app, &state.current.borrow());
-    app.show().map_err(|e| e.to_string())?;
-    slint::run_event_loop().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_slide_notes_and_templates() {
-        let mut deck = sample_deck();
-        assert_eq!(deck.len(), 3);
-        if let Some(slide) = deck.active_slide_mut() {
-            slide.speaker_notes = "Key notes for presenter".to_string();
-            slide.layout = "two-column".to_string();
-        }
-
-        let active = deck.active_slide().unwrap();
-        assert_eq!(active.speaker_notes, "Key notes for presenter");
-        assert_eq!(active.layout, "two-column");
-    }
+    refresh(&app, &state);
+    app.show().map_err(|error| error.to_string())?;
+    slint::run_event_loop().map_err(|error| error.to_string())
 }

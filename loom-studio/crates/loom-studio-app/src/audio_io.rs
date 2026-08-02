@@ -116,12 +116,9 @@ impl AudioIo {
                 input_rate = config.sample_rate.0;
                 input_channels = config.channels;
                 input_device_name = input_device.name().ok();
-                if let Ok(stream) = build_input_stream(
-                    &input_device,
-                    config,
-                    format,
-                    capture.clone(),
-                ) {
+                if let Ok(stream) =
+                    build_input_stream(&input_device, config, format, capture.clone())
+                {
                     if stream.play().is_ok() {
                         input_stream = Some(stream);
                     }
@@ -206,7 +203,10 @@ impl AudioIo {
             .playback
             .clip
             .load_full()
-            .map(|clip| (seconds.max(0.0) * clip.sample_rate as f64).min(clip.samples.len() as f64 / clip.channels.max(1) as f64))
+            .map(|clip| {
+                (seconds.max(0.0) * clip.sample_rate as f64)
+                    .min(clip.samples.len() as f64 / clip.channels.max(1) as f64)
+            })
             .unwrap_or(0.0);
         self.playback
             .position_bits
@@ -251,8 +251,8 @@ impl AudioIo {
 
     /// Lists local MIDI input ports.
     pub fn midi_ports() -> Result<Vec<String>, String> {
-        let midi = MidiInput::new("Loom Studio MIDI discovery")
-            .map_err(|error| error.to_string())?;
+        let midi =
+            MidiInput::new("Loom Studio MIDI discovery").map_err(|error| error.to_string())?;
         Ok(midi
             .ports()
             .iter()
@@ -267,8 +267,8 @@ impl AudioIo {
     /// Connects one MIDI input port and retains bounded recent messages.
     pub fn connect_midi(&mut self, index: usize) -> Result<String, String> {
         self.midi_connection = None;
-        let mut midi = MidiInput::new("Loom Studio MIDI input")
-            .map_err(|error| error.to_string())?;
+        let mut midi =
+            MidiInput::new("Loom Studio MIDI input").map_err(|error| error.to_string())?;
         midi.ignore(Ignore::None);
         let ports = midi.ports();
         let port = ports
@@ -336,7 +336,9 @@ fn build_output_stream(
         SampleFormat::F32 => device
             .build_output_stream(
                 config,
-                move |data: &mut [f32], _| fill_output(data, channels, device_rate, &playback, |value| value),
+                move |data: &mut [f32], _| {
+                    fill_output(data, channels, device_rate, &playback, |value| value)
+                },
                 error,
                 None,
             )
@@ -344,7 +346,11 @@ fn build_output_stream(
         SampleFormat::I16 => device
             .build_output_stream(
                 config,
-                move |data: &mut [i16], _| fill_output(data, channels, device_rate, &playback, |value| (value.clamp(-1.0, 1.0) * i16::MAX as f32) as i16),
+                move |data: &mut [i16], _| {
+                    fill_output(data, channels, device_rate, &playback, |value| {
+                        (value.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+                    })
+                },
                 error,
                 None,
             )
@@ -352,7 +358,11 @@ fn build_output_stream(
         SampleFormat::U16 => device
             .build_output_stream(
                 config,
-                move |data: &mut [u16], _| fill_output(data, channels, device_rate, &playback, |value| ((value.clamp(-1.0, 1.0) * 0.5 + 0.5) * u16::MAX as f32) as u16),
+                move |data: &mut [u16], _| {
+                    fill_output(data, channels, device_rate, &playback, |value| {
+                        ((value.clamp(-1.0, 1.0) * 0.5 + 0.5) * u16::MAX as f32) as u16
+                    })
+                },
                 error,
                 None,
             )
@@ -426,7 +436,12 @@ fn build_input_stream(
         SampleFormat::I16 => device
             .build_input_stream(
                 config,
-                move |data: &[i16], _| capture_input(data.iter().map(|value| *value as f32 / i16::MAX as f32), &capture),
+                move |data: &[i16], _| {
+                    capture_input(
+                        data.iter().map(|value| *value as f32 / i16::MAX as f32),
+                        &capture,
+                    )
+                },
                 error,
                 None,
             )
@@ -434,7 +449,13 @@ fn build_input_stream(
         SampleFormat::U16 => device
             .build_input_stream(
                 config,
-                move |data: &[u16], _| capture_input(data.iter().map(|value| *value as f32 / u16::MAX as f32 * 2.0 - 1.0), &capture),
+                move |data: &[u16], _| {
+                    capture_input(
+                        data.iter()
+                            .map(|value| *value as f32 / u16::MAX as f32 * 2.0 - 1.0),
+                        &capture,
+                    )
+                },
                 error,
                 None,
             )

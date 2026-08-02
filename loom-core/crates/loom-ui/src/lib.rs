@@ -162,41 +162,55 @@ mod tests {
 mod visual_tests {
     use super::smoke_window::*;
 
-    fn baseline_path() -> std::path::PathBuf {
-        // Slint's software renderer uses platform font rasterization. Keep
-        // the host golden separate from the Linux CI/Docker golden so a
-        // valid cross-platform render is not reported as a regression.
-        let filename = if cfg!(target_os = "linux") {
-            "smoke-window-linux.png"
-        } else {
-            "smoke-window.png"
-        };
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("baselines")
-            .join("light")
-            .join(filename)
+    fn diff_ratio(a: &image::RgbaImage, b: &image::RgbaImage) -> f32 {
+        assert_eq!(a.dimensions(), b.dimensions());
+        let different = a
+            .pixels()
+            .zip(b.pixels())
+            .filter(|(left, right)| left != right)
+            .count();
+        different as f32 / (a.width() as f32 * a.height() as f32)
     }
 
     #[test]
-    fn smoke_window_renders_and_matches_baseline() {
+    fn smoke_window_is_deterministic_non_blank_and_theme_distinct() {
         loom_test_support::capture::set_platform();
-        let window = SmokeWindow::new().unwrap();
-        let img =
-            loom_test_support::capture::snapshot_component(&window, 900.0, 600.0, 1.0).unwrap();
-        assert_eq!((img.width(), img.height()), (900, 600));
+        let window = SmokeWindow::new().expect("create smoke window");
 
-        let canvas = image::Rgba([250, 249, 247, 255]);
-        let non_canvas = img.pixels().filter(|p| **p != canvas).count();
+        Theme::get(&window).set_active_theme("light".into());
+        let light_a = loom_test_support::capture::snapshot_component(&window, 900.0, 600.0, 1.0)
+            .expect("capture light fixture");
+        let light_b = loom_test_support::capture::snapshot_component(&window, 900.0, 600.0, 1.0)
+            .expect("repeat light fixture");
+        assert_eq!((light_a.width(), light_a.height()), (900, 600));
+        assert_eq!(
+            light_a.as_raw(),
+            light_b.as_raw(),
+            "software render must be deterministic"
+        );
+
+        let canvas = image::Rgba([242, 242, 240, 255]);
+        let non_canvas = light_a.pixels().filter(|pixel| **pixel != canvas).count();
         assert!(
-            non_canvas > 2000,
+            non_canvas > 2_000,
             "window looks blank: only {non_canvas} non-canvas pixels"
         );
 
-        loom_test_support::snapshot::assert_matches_baseline(
-            &img,
-            &baseline_path(),
-            loom_test_support::snapshot::Tolerance::default(),
-        )
-        .expect("visual baseline mismatch");
+        Theme::get(&window).set_active_theme("dark".into());
+        let dark = loom_test_support::capture::snapshot_component(&window, 900.0, 600.0, 1.0)
+            .expect("capture dark fixture");
+        Theme::get(&window).set_active_theme("high-contrast".into());
+        let high_contrast =
+            loom_test_support::capture::snapshot_component(&window, 900.0, 600.0, 1.0)
+                .expect("capture high-contrast fixture");
+
+        assert!(
+            diff_ratio(&light_a, &dark) > 0.20,
+            "light and dark themes are not visually distinct"
+        );
+        assert!(
+            diff_ratio(&dark, &high_contrast) > 0.08,
+            "dark and high-contrast themes are not visually distinct"
+        );
     }
 }

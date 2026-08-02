@@ -1045,8 +1045,8 @@ export component AppHeader inherits Rectangle {
     in property <string> state-text: "Local";
     in property <int> state-tone: 0;
 
-    min-height: 48px;
-    max-height: 48px;
+    min-height: 52px;
+    max-height: 52px;
     background: Theme.palette().surface;
 
     VerticalLayout {
@@ -1055,14 +1055,14 @@ export component AppHeader inherits Rectangle {
 
         HorizontalLayout {
             spacing: 10px;
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: 14px;
+            padding-right: 14px;
             cross-axis-alignment: center;
 
             Rectangle {
-                width: 28px;
-                height: 28px;
-                border-radius: 8px;
+                width: 30px;
+                height: 30px;
+                border-radius: 9px;
                 background: Theme.palette().selection-soft;
                 Icon {
                     icon: root.icon;
@@ -1076,7 +1076,7 @@ export component AppHeader inherits Rectangle {
                 Text {
                     text: root.app-name;
                     font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
+                    font-weight: 650;
                     color: Theme.palette().ink;
                 }
                 Text {
@@ -1199,4 +1199,181 @@ export component RailButton inherits Rectangle {
             root.clicked();
         }
     }
+}
+
+
+/// Hairline separator used between professional workspace regions.
+export component Hairline inherits Rectangle {
+    in property <bool> vertical: false;
+    width: root.vertical ? 1px : 100%;
+    height: root.vertical ? 100% : 1px;
+    background: Theme.palette().border;
+}
+
+/// Raised toolbar surface with a consistent compact layout slot.
+export component WorkspaceToolbar inherits Rectangle {
+    min-height: 42px;
+    max-height: 42px;
+    background: Theme.palette().surface;
+    border-width: 0px;
+    VerticalLayout {
+        spacing: 0px;
+        HorizontalLayout {
+            spacing: 6px;
+            padding-left: 10px;
+            padding-right: 10px;
+            cross-axis-alignment: center;
+            @children
+        }
+        Rectangle { height: 1px; background: Theme.palette().border; }
+    }
+}
+
+/// Quiet sidebar surface used for libraries, outlines, layers and media bins.
+export component SidebarSurface inherits Rectangle {
+    in property <string> title: "";
+    in property <string> detail: "";
+    background: Theme.palette().surface;
+    border-width: 0px;
+    VerticalLayout {
+        spacing: 0px;
+        PanelHeader { title: root.title; detail: root.detail; }
+        Rectangle { height: 1px; background: Theme.palette().border; }
+        @children
+    }
+}
+
+/// Contextual inspector surface shared across the suite.
+export component InspectorSurface inherits Rectangle {
+    in property <string> title: "Inspector";
+    in property <string> detail: "";
+    background: Theme.palette().surface;
+    border-width: 0px;
+    VerticalLayout {
+        spacing: 0px;
+        PanelHeader { title: root.title; detail: root.detail; }
+        Rectangle { height: 1px; background: Theme.palette().border; }
+        @children
+    }
+}
+
+/// Subtle rounded card for library rows, jobs, tracks and layers.
+export component WorkspaceRow inherits Rectangle {
+    in property <bool> selected: false;
+    in property <bool> emphasized: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    min-height: 38px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.selected ? Theme.palette().accent
+        : root.emphasized ? Theme.palette().border-strong
+        : transparent;
+    background: root.selected ? Theme.palette().selection-soft
+        : touch.has-hover && root.enabled ? Theme.palette().surface-sunken
+        : transparent;
+    animate background, border-color {
+        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
+    }
+    @children
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Professional canvas backdrop with a subtle inner stage.
+export component CanvasBackdrop inherits Rectangle {
+    in property <color> stage-color: Theme.palette().surface-sunken;
+    background: Theme.palette().canvas;
+    Rectangle {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        height: parent.height - 24px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: root.stage-color;
+        clip: true;
+        @children
+    }
+}
+
+/// Compact tab strip for inspectors and browsers.
+export component PaneTabs inherits Rectangle {
+    in property <[string]> items: [];
+    in-out property <int> current: 0;
+    callback selected(int);
+    height: 34px;
+    background: Theme.palette().surface;
+    HorizontalLayout {
+        spacing: 2px;
+        padding-left: 8px;
+        padding-right: 8px;
+        for item[idx] in root.items : Rectangle {
+            min-width: 54px;
+            border-radius: 6px;
+            background: idx == root.current ? Theme.palette().surface-sunken : transparent;
+            border-width: idx == root.current ? 1px : 0px;
+            border-color: Theme.palette().border-strong;
+            Text {
+                text: item;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: idx == root.current ? 650 : 500;
+                color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.current = idx; root.selected(idx); } }
+        }
+    }
+}
+
+/// Small metric readout for timecode, zoom, color space and engine state.
+export component MetricChip inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    min-width: 76px;
+    height: 28px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface-sunken;
+    HorizontalLayout {
+        spacing: 5px;
+        padding-left: 8px;
+        padding-right: 8px;
+        Text { text: root.label; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; vertical-alignment: center; }
+        Text { text: root.value; font-size: Theme.tokens.typography.caption; font-weight: 650; color: Theme.palette().ink; vertical-alignment: center; }
+    }
+}
+
+/// Transport control with a circular selected/record state.
+export component TransportButton inherits Rectangle {
+    in property <string> icon: "play";
+    in property <string> label: "";
+    in property <bool> active: false;
+    in property <bool> destructive: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    border-width: 1px;
+    border-color: root.active ? (root.destructive ? Theme.palette().danger : Theme.palette().accent) : Theme.palette().border;
+    background: root.active ? (root.destructive ? Theme.palette().danger-surface : Theme.palette().selection-soft)
+        : touch.has-hover ? Theme.palette().surface-sunken : Theme.palette().surface;
+    accessible-role: button;
+    accessible-label: root.label;
+    Icon {
+        icon: root.icon;
+        size: 16px;
+        tint: !root.enabled ? Theme.palette().ink-disabled
+            : root.destructive ? Theme.palette().danger
+            : root.active ? Theme.palette().accent
+            : Theme.palette().ink;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
