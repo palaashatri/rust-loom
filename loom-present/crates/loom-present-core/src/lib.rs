@@ -192,9 +192,10 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
 }
 
 /// Built-in transition between two slides.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum TransitionKind {
     /// Immediate cut.
+    #[default]
     None,
     /// Cross-fade.
     Dissolve,
@@ -202,12 +203,6 @@ pub enum TransitionKind {
     Push,
     /// Content-aware transform between matching element ids.
     Morph,
-}
-
-impl Default for TransitionKind {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Presentation-wide theme tokens used by renderers and exporters.
