@@ -598,8 +598,9 @@ mod tests {
         history.record(second, third.clone(), HistoryKind::DocumentAction, 200);
 
         assert_eq!(history.undo_len(), 2);
-        assert_eq!(history.undo(), Some(first.clone()));
+        assert_eq!(history.undo(), Some(second));
         assert_eq!(history.undo(), Some(first));
+        assert_eq!(history.redo(), Some(second));
         assert_eq!(history.redo(), Some(third));
     }
 
