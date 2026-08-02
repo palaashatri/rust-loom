@@ -17,6 +17,8 @@ export component WriterApp inherits Window {
     in-out property <string> doc-content: "";
     in property <string> status-left: "";
     in property <string> status-right: "";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
 
     in-out property <bool> is-bold: false;
     in-out property <bool> is-italic: false;
@@ -55,8 +57,8 @@ export component WriterApp inherits Window {
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-doc(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-doc(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            IconButton { icon: "undo"; label: "Undo"; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo"; clicked => { root.redo(); } }
+            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
 
             SegmentedControl {

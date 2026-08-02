@@ -278,6 +278,11 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
     if let Ok(bytes) = loom_writer_core::save_document(&current) {
         let _ = record_snapshot_recovery("writer state", bytes);
     }
+    drop(current);
+    let history = state.history.borrow();
+    app.set_can_undo(!history.undo.is_empty());
+    app.set_can_redo(!history.redo.is_empty());
+    drop(history);
     state.syncing_editor.set(false);
 }
 

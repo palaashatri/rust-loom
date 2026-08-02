@@ -226,6 +226,8 @@ fn update_selection(
     app.set_selection_formula(formula);
     app.invoke_reset_formula_edit_buffer();
     app.set_selected_cell(selected.to_a1().into());
+    app.set_selected_row(selected.row as i32);
+    app.set_selected_col(selected.col as i32);
     app.set_selection_value(SharedString::from(cell_value(
         sheet,
         vals,
