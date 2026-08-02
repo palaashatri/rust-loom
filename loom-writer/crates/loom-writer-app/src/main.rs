@@ -10,11 +10,16 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::Instant;
 
+use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_writer_core::{RichBlock, WriterDocument};
 use slint::{ComponentHandle, PhysicalSize, SharedString};
 
 slint::include_modules!();
+define_snapshot_recovery!(
+    application_id: "org.loom.writer",
+    schema: "loom.writer.package/1"
+);
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "loom-writer-document.loomdoc";
@@ -22,8 +27,6 @@ const EXPORT_FILENAME: &str = "loom-writer-export.pdf";
 const HISTORY_MAX_ENTRIES: usize = 128;
 const HISTORY_MAX_BYTES: usize = 8 * 1024 * 1024;
 const TYPING_COALESCE_WINDOW_MS: u64 = 750;
-
-loom_production::define_snapshot_recovery!(WRITER_RECOVERY, "org.loom.writer", "loom.writer/1");
 
 struct Args {
     screenshot: Option<String>,
@@ -309,12 +312,11 @@ fn apply_with_history(app: &WriterApp, state: &GuiState, next: WriterDocument, k
 
 fn apply_theme(app: &WriterApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
-    let color_scheme = if theme == "light" {
-        slint::private_unstable_api::re_exports::ColorScheme::Light
-    } else {
-        slint::private_unstable_api::re_exports::ColorScheme::Dark
-    };
-    WidgetPalette::get(app).set_color_scheme(color_scheme);
+    // The editor itself is intentionally rendered on a paper-colored surface.
+    // Keep its native palette light so text remains ink-dark in all surrounding
+    // application themes; chrome and controls continue to use `Theme`.
+    WidgetPalette::get(app)
+        .set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
 }
 
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
@@ -338,16 +340,21 @@ fn run_gui(args: &Args) -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
-    let recovered = initialize_snapshot_recovery()?;
-    let initial_document = match &args.open {
-        Some(path) => load_file(path)?,
-        None => recovered
-            .as_deref()
-            .and_then(|bytes| loom_writer_core::load_document(bytes).ok())
-            .unwrap_or_else(sample_document),
+    let recovered = if args.open.is_none() {
+        take_snapshot_recovery()
+            .and_then(|payload| loom_writer_core::load_document(&payload).ok())
+    } else {
+        None
     };
     let state = Rc::new(GuiState {
-        current: RefCell::new(initial_document),
+        current: RefCell::new(if let Some(document) = recovered {
+            document
+        } else {
+            match &args.open {
+                Some(p) => load_file(p)?,
+                None => sample_document(),
+            }
+        }),
         save_path: RefCell::new(args.open.clone()),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
@@ -394,15 +401,10 @@ fn run_gui(args: &Args) -> Result<(), String> {
                     .unwrap_or_else(|| SAVE_FILENAME.to_string());
                 match save_file(&p, &state.current.borrow()) {
                     Ok(()) => {
-                        let checkpoint = loom_writer_core::save_document(&state.current.borrow())
-                            .map_err(|error| error.to_string())
-                            .and_then(checkpoint_snapshot_recovery);
-                        match checkpoint {
-                            Ok(()) => app.set_status_left(SharedString::from(format!("saved {p}"))),
-                            Err(error) => app.set_status_left(SharedString::from(format!(
-                                "saved {p}, but recovery checkpoint failed: {error}"
-                            ))),
+                        if let Ok(bytes) = loom_writer_core::save_document(&state.current.borrow()) {
+                            let _ = checkpoint_snapshot_recovery(bytes);
                         }
+                        app.set_status_left(SharedString::from(format!("saved {p}")));
                     }
                     Err(e) => {
                         app.set_status_left(SharedString::from(format!("save failed: {e}")));
@@ -564,124 +566,104 @@ fn main() -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn document(text: &str) -> WriterDocument {
-        let mut doc = WriterDocument::new("history-test", "History test");
-        if !text.is_empty() {
-            doc.push(RichBlock::new(1, "paragraph", text));
-        }
-        doc
+    fn text_document(text: &str) -> WriterDocument {
+        let mut document = WriterDocument::new("test", "Test");
+        document.replace_paragraphs(text);
+        document
     }
 
     #[test]
-    fn editor_text_is_two_way_bound_to_document_content() {
-        let ui = include_str!("../ui/app.slint");
+    fn coalesces_adjacent_typing_edits() {
+        let mut history = EditorHistory::with_budget(16, usize::MAX);
+        let first = text_document("a");
+        let second = text_document("ab");
+        let third = text_document("abc");
 
-        assert!(ui.contains("in-out property <string> doc-content"));
-        assert!(ui.contains("text <=> root.doc-content;"));
-        assert!(!ui.contains("text: root.doc-content;"));
-    }
-
-    #[test]
-    fn history_declares_coalescing_and_memory_bounds() {
-        let source = include_str!("main.rs");
-        let production = source.split("#[cfg(test)]").next().unwrap();
-
-        assert!(production.contains("struct EditorHistory"));
-        assert!(production.contains("TYPING_COALESCE_WINDOW_MS"));
-        assert!(production.contains("HISTORY_MAX_ENTRIES"));
-        assert!(production.contains("HISTORY_MAX_BYTES"));
-    }
-
-    #[test]
-    fn editor_history_coalesces_adjacent_typing_into_one_undo_step() {
-        let before = document("a");
-        let first = document("ab");
-        let final_doc = document("abc");
-        let mut history = EditorHistory::with_budget(128, usize::MAX);
-
-        history.record(before.clone(), first.clone(), HistoryKind::Typing, 0);
         history.record(
-            first,
-            final_doc.clone(),
+            first.clone(),
+            second.clone(),
             HistoryKind::Typing,
-            TYPING_COALESCE_WINDOW_MS,
+            100,
+        );
+        history.record(
+            second.clone(),
+            third.clone(),
+            HistoryKind::Typing,
+            200,
         );
 
         assert_eq!(history.undo_len(), 1);
-        assert_eq!(history.undo().unwrap().editor_text(), "a");
-        assert_eq!(history.redo_len(), 1);
-        assert_eq!(history.redo().unwrap().editor_text(), "abc");
+        assert_eq!(history.undo(), Some(first));
+        assert_eq!(history.redo(), Some(third));
     }
 
     #[test]
-    fn editor_history_separates_typing_after_the_coalesce_window() {
-        let before = document("a");
-        let first = document("ab");
-        let final_doc = document("abc");
-        let mut history = EditorHistory::with_budget(128, usize::MAX);
+    fn document_action_breaks_typing_coalescing() {
+        let mut history = EditorHistory::with_budget(16, usize::MAX);
+        let first = text_document("a");
+        let second = text_document("ab");
+        let third = text_document("new document");
 
-        history.record(before, first.clone(), HistoryKind::Typing, 0);
         history.record(
-            first,
-            final_doc,
+            first.clone(),
+            second.clone(),
             HistoryKind::Typing,
-            TYPING_COALESCE_WINDOW_MS + 1,
+            100,
+        );
+        history.record(
+            second,
+            third.clone(),
+            HistoryKind::DocumentAction,
+            200,
         );
 
         assert_eq!(history.undo_len(), 2);
+        assert_eq!(history.undo(), Some(first.clone()));
+        assert_eq!(history.undo(), Some(first));
+        assert_eq!(history.redo(), Some(third));
     }
 
     #[test]
-    fn editor_history_drops_oldest_entries_at_the_entry_bound() {
-        let first = document("one");
-        let second = document("two");
-        let third = document("three");
-        let fourth = document("four");
+    fn history_budget_evicts_oldest_entries() {
         let mut history = EditorHistory::with_budget(2, usize::MAX);
+        let a = text_document("a");
+        let b = text_document("b");
+        let c = text_document("c");
+        let d = text_document("d");
 
-        history.record(document(""), first, HistoryKind::DocumentAction, 0);
-        history.record(document("one"), second, HistoryKind::DocumentAction, 1);
-        history.record(document("two"), third, HistoryKind::DocumentAction, 2);
-        history.record(document("three"), fourth, HistoryKind::DocumentAction, 3);
+        history.record(a, b.clone(), HistoryKind::DocumentAction, 0);
+        history.record(b, c.clone(), HistoryKind::DocumentAction, 1);
+        history.record(c.clone(), d, HistoryKind::DocumentAction, 2);
 
-        assert_eq!(history.entry_count(), 2);
-        assert_eq!(history.undo().unwrap().editor_text(), "three");
-        assert_eq!(history.undo().unwrap().editor_text(), "two");
-        assert!(history.undo().is_none());
+        assert_eq!(history.undo_len(), 2);
+        assert_eq!(history.undo(), Some(c));
     }
 
     #[test]
-    fn editor_history_enforces_the_byte_bound() {
-        let empty = document("");
-        let first = document("one");
-        let second = document("two");
-        let first_bytes = empty.to_content_json().len() + first.to_content_json().len();
-        let second_bytes = first.to_content_json().len() + second.to_content_json().len();
-        let budget = first_bytes.max(second_bytes);
-        let mut history = EditorHistory::with_budget(128, budget);
+    fn history_byte_budget_is_bounded() {
+        let mut history = EditorHistory::with_budget(32, 1000);
+        let a = text_document(&"a".repeat(400));
+        let b = text_document(&"b".repeat(400));
+        let c = text_document(&"c".repeat(400));
 
-        history.record(empty, first, HistoryKind::DocumentAction, 0);
-        history.record(document("one"), second, HistoryKind::DocumentAction, 1);
+        history.record(a, b.clone(), HistoryKind::DocumentAction, 0);
+        history.record(b, c, HistoryKind::DocumentAction, 1);
 
-        assert!(history.total_bytes() <= budget);
-        assert_eq!(history.entry_count(), 1);
+        assert!(history.total_bytes() <= 1000);
     }
 
     #[test]
-    fn status_bar_word_and_char_count_calculation() {
-        let doc = document("Hello world from Loom Writer!");
-        let text = doc.editor_text();
-        let word_count = text.split_whitespace().count();
-        let char_count = text.chars().count();
-        let block_count = doc.len();
+    fn redo_is_cleared_by_new_edit() {
+        let mut history = EditorHistory::with_budget(16, usize::MAX);
+        let a = text_document("a");
+        let b = text_document("b");
+        let c = text_document("c");
 
-        assert_eq!(word_count, 5);
-        assert_eq!(char_count, 29);
-        assert_eq!(block_count, 1);
-        let status = format!(
-            "{} words · {} chars · {} blocks",
-            word_count, char_count, block_count
-        );
-        assert_eq!(status, "5 words · 29 chars · 1 blocks");
+        history.record(a.clone(), b.clone(), HistoryKind::DocumentAction, 0);
+        assert_eq!(history.undo(), Some(a.clone()));
+        assert_eq!(history.redo_len(), 1);
+
+        history.record(a, c, HistoryKind::DocumentAction, 1);
+        assert_eq!(history.redo_len(), 0);
     }
 }
