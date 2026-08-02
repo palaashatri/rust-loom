@@ -30,22 +30,18 @@ jobs:
       - id: staged
         run: |
           if [ -f .ci/fix.py ]; then echo 'present=true' >> "$GITHUB_OUTPUT"; else echo 'present=false' >> "$GITHUB_OUTPUT"; fi
-      - name: Apply and format media recovery integration
+      - name: Apply Loom UI productisation pass
         if: steps.staged.outputs.present == 'true'
         shell: bash
         run: |
           set -euo pipefail
           python3 .ci/fix.py
-          rustup toolchain install stable --profile minimal --component rustfmt
-          for workspace in loom-motion loom-video loom-studio loom-encode; do
-            (cd "$workspace" && cargo +stable fmt --all)
-          done
           rm -rf .ci
           git config user.name "Loom Engineering Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "feat: add crash recovery to media and audio apps"
+          git commit -m "feat: establish Loom creator-grade UI foundation"
           git push origin "HEAD:chatgpt/loom-ui-functional-audit-2"
 
   contracts:
@@ -54,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 loom-bootstrap/scripts/audit-contracts.py
+      - run: python3 loom-bootstrap/scripts/audit-product-ui.py
 
   workspace:
     name: ${{ matrix.workspace }}
@@ -90,7 +87,7 @@ jobs:
       - run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
       - run: >-
           docker compose -f loom-bootstrap/docker/compose.yaml run --rm visual
-          bash -lc "scripts/build-all.sh --release && xvfb-run -a -s '-screen 0 1280x800x24' scripts/visual-smoke-matrix.sh"
+          bash -lc "scripts/build-all.sh --release && xvfb-run -a -s '-screen 0 1440x900x24' scripts/visual-smoke-matrix.sh"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
