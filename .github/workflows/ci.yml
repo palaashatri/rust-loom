@@ -1,0 +1,70 @@
+name: Loom CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, cline-implementation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loom-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CI image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build ci
+
+      - name: Audit UI/Rust contracts
+        run: >-
+          docker compose -f loom-bootstrap/docker/compose.yaml run --rm ci
+          python3 scripts/audit-contracts.py
+
+      - name: Format, lint, test, and release build every workspace
+        run: >-
+          docker compose -f loom-bootstrap/docker/compose.yaml run --rm ci
+          bash -lc "scripts/fmt-all.sh && scripts/clippy-all.sh && scripts/test-all.sh && scripts/build-all.sh --release"
+
+      - name: Upload quality logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loom-quality-logs
+          if-no-files-found: warn
+          retention-days: 14
+          path: loom-bootstrap/.work/*.log
+
+  visual-smoke:
+    needs: contracts-and-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build visual-QA image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
+
+      - name: Build applications and capture theme matrix
+        run: >-
+          docker compose -f loom-bootstrap/docker/compose.yaml run --rm visual
+          bash -lc "scripts/build-all.sh --release && xvfb-run -a -s '-screen 0 1280x800x24' scripts/visual-smoke-matrix.sh"
+
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loom-theme-matrix
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            loom-bootstrap/.work/theme-matrix/
+            loom-bootstrap/.work/theme-matrix-report.md
+            loom-bootstrap/.work/theme-*.log
