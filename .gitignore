@@ -39,3 +39,16 @@ Loom-Complete.zip*
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# OS and agent-tool state
+.DS_Store
+__MACOSX/
+.serena/
+.superpowers/
+
+# Generated release/audit artifacts
+Loom-Complete.zip
+Loom-Complete.zip.sha256
+Loom-Manifest.json
+*-Verification-Report.md
+**/.work/
