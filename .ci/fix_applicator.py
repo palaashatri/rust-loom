@@ -28,4 +28,21 @@ for old, new in replacements:
         raise RuntimeError(f"expected one applicator delimiter block, found {count}: {old[:40]!r}")
     text = text.replace(old, new, 1)
 
+old_field_patch = '''    text = replace_once(
+        text,
+        '        text: root.value;\\n        edited => {',
+        '        text: root.value;\\n        enabled: root.enabled;\\n        edited => {',
+        "Field enabled binding",
+    )'''
+new_field_patch = '''    text = replace_once(
+        text,
+        '        color: Theme.palette().ink;\\n        text: root.value;\\n        edited => {',
+        '        color: Theme.palette().ink;\\n        text: root.value;\\n        enabled: root.enabled;\\n        edited => {',
+        "Field enabled binding",
+    )'''
+count = text.count(old_field_patch)
+if count != 1:
+    raise RuntimeError(f"expected one Field patch definition, found {count}")
+text = text.replace(old_field_patch, new_field_patch, 1)
+
 path.write_text(text, encoding="utf-8", newline="\n")
