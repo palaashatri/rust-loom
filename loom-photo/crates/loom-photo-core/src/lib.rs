@@ -689,8 +689,8 @@ pub fn encode_jpeg(image: &RgbaImage, quality: u8) -> Result<Vec<u8>, String> {
     let mut rgb = Vec::with_capacity(image.width as usize * image.height as usize * 3);
     for pixel in image.pixels.chunks_exact(4) {
         let alpha = pixel[3] as f32 / 255.0;
-        for channel in 0..3 {
-            let value = pixel[channel] as f32 * alpha + 255.0 * (1.0 - alpha);
+        for source in pixel.iter().take(3) {
+            let value = *source as f32 * alpha + 255.0 * (1.0 - alpha);
             rgb.push(value.round().clamp(0.0, 255.0) as u8);
         }
     }

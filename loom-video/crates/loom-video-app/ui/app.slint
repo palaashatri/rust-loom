@@ -205,7 +205,7 @@ export component VideoApp inherits Window {
                                     TouchArea { clicked => { root.select-track(index); } }
                                 }
                                 Rectangle {
-                                    horizontal-stretch: 1; background: index % 2 == 0 ? #12151a : #101216;
+                                    horizontal-stretch: 1; background: Math.mod(index, 2) == 0 ? #12151a : #101216;
                                     for clip[clip-index] in root.clip-labels : Rectangle {
                                         visible: index == 0;
                                         x: parent.width * root.clip-starts[clip-index] / Math.max(0.01, root.timeline-duration);

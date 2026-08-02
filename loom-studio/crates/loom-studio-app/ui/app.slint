@@ -206,7 +206,7 @@ export component StudioApp inherits Window {
                                 }
                                 Rectangle {
                                     horizontal-stretch: 1;
-                                    background: index % 2 == 0 ? #12151a : #101216;
+                                    background: Math.mod(index, 2) == 0 ? #12151a : #101216;
                                     if root.track-region-counts[index] > 0 : Rectangle {
                                         x: parent.width * root.track-region-starts[index] / Math.max(0.01, root.duration-seconds);
                                         width: Math.max(54px, parent.width * root.track-region-durations[index] / Math.max(0.01, root.duration-seconds));
@@ -269,6 +269,6 @@ export component StudioApp inherits Window {
     }
 
     pure function format_time(seconds: float) -> string {
-        return Math.floor(seconds / 60) + ":" + (Math.floor(seconds) % 60 < 10 ? "0" : "") + (Math.floor(seconds) % 60);
+        return Math.floor(seconds / 60) + ":" + (Math.mod(Math.floor(seconds), 60) < 10 ? "0" : "") + (Math.mod(Math.floor(seconds), 60));
     }
 }
