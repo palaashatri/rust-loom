@@ -452,7 +452,11 @@ fn run_gui(args: &Args) -> Result<(), String> {
         app.on_toggle_bold(move || {
             if let Some(app) = app_ref.upgrade() {
                 let bold = app.get_is_bold();
-                app.set_status_right(SharedString::from(if bold { "Bold ON" } else { "Bold OFF" }));
+                app.set_status_right(SharedString::from(if bold {
+                    "Bold ON"
+                } else {
+                    "Bold OFF"
+                }));
             }
         });
     }
@@ -461,7 +465,11 @@ fn run_gui(args: &Args) -> Result<(), String> {
         app.on_toggle_italic(move || {
             if let Some(app) = app_ref.upgrade() {
                 let italic = app.get_is_italic();
-                app.set_status_right(SharedString::from(if italic { "Italic ON" } else { "Italic OFF" }));
+                app.set_status_right(SharedString::from(if italic {
+                    "Italic ON"
+                } else {
+                    "Italic OFF"
+                }));
             }
         });
     }
@@ -470,7 +478,11 @@ fn run_gui(args: &Args) -> Result<(), String> {
         app.on_toggle_underline(move || {
             if let Some(app) = app_ref.upgrade() {
                 let underline = app.get_is_underline();
-                app.set_status_right(SharedString::from(if underline { "Underline ON" } else { "Underline OFF" }));
+                app.set_status_right(SharedString::from(if underline {
+                    "Underline ON"
+                } else {
+                    "Underline OFF"
+                }));
             }
         });
     }
@@ -640,7 +652,10 @@ mod tests {
         assert_eq!(word_count, 5);
         assert_eq!(char_count, 29);
         assert_eq!(block_count, 1);
-        let status = format!("{} words · {} chars · {} blocks", word_count, char_count, block_count);
+        let status = format!(
+            "{} words · {} chars · {} blocks",
+            word_count, char_count, block_count
+        );
         assert_eq!(status, "5 words · 29 chars · 1 blocks");
     }
 }

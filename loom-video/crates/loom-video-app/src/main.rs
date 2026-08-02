@@ -180,7 +180,9 @@ fn main() -> Result<(), String> {
                         apply_video(&app, &state.current.borrow());
                         app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
                     }
-                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                    Err(err) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
+                    }
                 }
             }
         });
@@ -243,7 +245,9 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_toggle_track_solo(move |index| {
             if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from(format!("Toggled Solo for Track {index}")));
+                app.set_status_left(SharedString::from(format!(
+                    "Toggled Solo for Track {index}"
+                )));
             }
         });
     }
@@ -290,7 +294,9 @@ fn main() -> Result<(), String> {
                 let s = sec % 60;
                 let timecode = format!("00:{min:02}:{s:02}:00");
                 app.set_timecode_display(timecode.into());
-                app.set_status_left(SharedString::from(format!("Scrubbed playhead to {pos:.1}%")));
+                app.set_status_left(SharedString::from(format!(
+                    "Scrubbed playhead to {pos:.1}%"
+                )));
             }
         });
     }
@@ -299,7 +305,9 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_add_marker(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from("Added timeline marker at current playhead"));
+                app.set_status_left(SharedString::from(
+                    "Added timeline marker at current playhead",
+                ));
             }
         });
     }
@@ -322,4 +330,3 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
-

@@ -140,7 +140,11 @@ fn apply_encode(app: &EncodeApp, q: &EncodeQueue) {
     } else {
         q.jobs.iter().map(progress_for).sum::<f32>() / q.jobs.len() as f32
     };
-    let active_progress = q.jobs.get(q.active_job_index).map(progress_for).unwrap_or(0.0);
+    let active_progress = q
+        .jobs
+        .get(q.active_job_index)
+        .map(progress_for)
+        .unwrap_or(0.0);
     app.set_batch_progress(batch_progress);
     app.set_active_job_progress(active_progress);
 
@@ -154,7 +158,13 @@ fn apply_encode(app: &EncodeApp, q: &EncodeQueue) {
                 job.preset.name.clone(),
             )
         })
-        .unwrap_or_else(|| ("No job selected".to_string(), String::new(), "Web 1080p".to_string()));
+        .unwrap_or_else(|| {
+            (
+                "No job selected".to_string(),
+                String::new(),
+                "Web 1080p".to_string(),
+            )
+        });
 
     app.set_selected_job_text(selected_job_text.into());
     app.set_selected_job_details(selected_job_details.into());
@@ -235,7 +245,9 @@ fn main() -> Result<(), String> {
                         apply_encode(&app, &state.current.borrow());
                         app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
                     }
-                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                    Err(err) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
+                    }
                 }
             }
         });
@@ -315,11 +327,12 @@ fn main() -> Result<(), String> {
         app.on_browse_output_dir(move || {
             if let Some(app) = app_ref.upgrade() {
                 app.set_output_directory("./exports/encode/".into());
-                app.set_status_left(SharedString::from("Selected destination directory ./exports/encode/"));
+                app.set_status_left(SharedString::from(
+                    "Selected destination directory ./exports/encode/",
+                ));
             }
         });
     }
-
 
     {
         let state = state.clone();
@@ -339,4 +352,3 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
-

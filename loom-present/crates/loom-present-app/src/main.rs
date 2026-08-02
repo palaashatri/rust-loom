@@ -163,7 +163,9 @@ fn main() -> Result<(), String> {
                         apply_deck(&app, &state.current.borrow());
                         app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
                     }
-                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                    Err(err) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
+                    }
                 }
             }
         });
@@ -248,7 +250,9 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_update_property(move |prop_name, val| {
             if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from(format!("Updated {prop_name} to {val:.1}")));
+                app.set_status_left(SharedString::from(format!(
+                    "Updated {prop_name} to {val:.1}"
+                )));
             }
         });
     }

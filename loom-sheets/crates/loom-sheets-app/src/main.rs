@@ -337,7 +337,10 @@ fn run_gui(args: &Args) -> Result<(), String> {
                     };
                     if committed {
                         apply_sheet(&app, &state.current.borrow());
-                        app.set_formula_feedback(SharedString::from(format!("Cell {} updated", cell.to_a1())));
+                        app.set_formula_feedback(SharedString::from(format!(
+                            "Cell {} updated",
+                            cell.to_a1()
+                        )));
                     }
                 }
             }
@@ -363,17 +366,13 @@ fn run_gui(args: &Args) -> Result<(), String> {
                         let mut current = state.current.borrow_mut();
                         let mut undo = state.undo_stack.borrow_mut();
                         let mut redo = state.redo_stack.borrow_mut();
-                        commit_formula_edit(
-                            &mut current,
-                            &mut undo,
-                            &mut redo,
-                            cell,
-                            &formula_text,
-                        )
+                        commit_formula_edit(&mut current, &mut undo, &mut redo, cell, &formula_text)
                     };
                     if committed {
                         apply_sheet(&app, &state.current.borrow());
-                        app.set_formula_feedback(SharedString::from(format!("Inserted {func} formula")));
+                        app.set_formula_feedback(SharedString::from(format!(
+                            "Inserted {func} formula"
+                        )));
                     }
                 }
             }

@@ -189,7 +189,9 @@ fn main() -> Result<(), String> {
                         apply_studio(&app, &state.current.borrow());
                         app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
                     }
-                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                    Err(err) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
+                    }
                 }
             }
         });
@@ -366,7 +368,9 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_toggle_rec_arm(move |idx| {
             if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from(format!("Toggled Rec Arm on track {idx}")));
+                app.set_status_left(SharedString::from(format!(
+                    "Toggled Rec Arm on track {idx}"
+                )));
             }
         });
     }
@@ -423,4 +427,3 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
-

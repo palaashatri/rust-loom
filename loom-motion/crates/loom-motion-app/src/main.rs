@@ -166,7 +166,9 @@ fn main() -> Result<(), String> {
                         apply_motion(&app, &state.current.borrow());
                         app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
                     }
-                    Err(err) => app.set_status_left(SharedString::from(format!("Open failed: {err}"))),
+                    Err(err) => {
+                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
+                    }
                 }
             }
         });
@@ -284,4 +286,3 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
-
