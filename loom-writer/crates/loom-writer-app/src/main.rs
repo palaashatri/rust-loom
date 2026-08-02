@@ -599,10 +599,15 @@ mod tests {
         let third = text_document("new document");
 
         history.record(first.clone(), second.clone(), HistoryKind::Typing, 100);
-        history.record(second, third.clone(), HistoryKind::DocumentAction, 200);
+        history.record(
+            second.clone(),
+            third.clone(),
+            HistoryKind::DocumentAction,
+            200,
+        );
 
         assert_eq!(history.undo_len(), 2);
-        assert_eq!(history.undo(), Some(second));
+        assert_eq!(history.undo(), Some(second.clone()));
         assert_eq!(history.undo(), Some(first));
         assert_eq!(history.redo(), Some(second));
         assert_eq!(history.redo(), Some(third));
