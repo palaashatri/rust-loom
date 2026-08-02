@@ -1,0 +1,39 @@
+name: Fix Writer package error
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ github.head_ref == 'chatgpt/loom-ui-functional-audit-2' && github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Preserve ManifestError conversion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('loom-writer/crates/loom-writer-core/src/lib.rs')
+          text = path.read_text()
+          old = '''MimeType::parse("application/vnd.loom.document-content")
+                  .map_err(|e| format!("invalid built-in writer MIME type: {e}"))?'''
+          new = '''MimeType::parse("application/vnd.loom.document-content")?'''
+          if old not in text:
+              raise SystemExit('expected Writer MIME conversion not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --manifest-path loom-writer/Cargo.toml --all
+      - name: Commit correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add loom-writer
+          git commit -m "fix(writer): preserve package manifest error type"
+          git push origin "HEAD:${{ github.head_ref }}"
