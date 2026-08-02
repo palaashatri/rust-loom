@@ -24,6 +24,8 @@ pub struct MotionLayer {
     pub position_y_keys: Vec<Keyframe>,
     pub opacity_keys: Vec<Keyframe>,
     pub scale_keys: Vec<Keyframe>,
+    #[serde(default)]
+    pub rotation_keys: Vec<Keyframe>,
 }
 
 impl MotionLayer {
@@ -42,6 +44,7 @@ impl MotionLayer {
             position_y_keys: Vec::new(),
             opacity_keys: Vec::new(),
             scale_keys: Vec::new(),
+            rotation_keys: Vec::new(),
         }
     }
 
@@ -56,6 +59,7 @@ impl MotionLayer {
             "y" => Some(&mut self.position_y_keys),
             "opacity" => Some(&mut self.opacity_keys),
             "scale" => Some(&mut self.scale_keys),
+            "rotation" => Some(&mut self.rotation_keys),
             _ => None,
         };
         if let Some(keys) = keys {
@@ -178,6 +182,8 @@ pub struct LayerSample {
     pub opacity: f32,
     /// Uniform scale, where `1` is original size.
     pub scale: f32,
+    /// Rotation in degrees.
+    pub rotation: f32,
     /// Whether the layer is active at this time.
     pub visible: bool,
 }
@@ -231,6 +237,7 @@ impl MotionLayer {
             "y" => Some(&mut self.position_y_keys),
             "opacity" => Some(&mut self.opacity_keys),
             "scale" => Some(&mut self.scale_keys),
+            "rotation" => Some(&mut self.rotation_keys),
             _ => None,
         };
         let Some(keys) = keys else {
@@ -252,6 +259,7 @@ impl MotionLayer {
             y: sample_keys(&self.position_y_keys, local_time, 0.0),
             opacity: sample_keys(&self.opacity_keys, local_time, 1.0).clamp(0.0, 1.0),
             scale: sample_keys(&self.scale_keys, local_time, 1.0).max(0.0),
+            rotation: sample_keys(&self.rotation_keys, local_time, 0.0),
             visible,
         }
     }
@@ -372,6 +380,7 @@ impl CompositionDocument {
                 ("y", &layer.position_y_keys),
                 ("opacity", &layer.opacity_keys),
                 ("scale", &layer.scale_keys),
+                ("rotation", &layer.rotation_keys),
             ] {
                 if keys
                     .iter()

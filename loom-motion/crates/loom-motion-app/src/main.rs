@@ -61,6 +61,15 @@ fn parse_args() -> Result<Args, String> {
 fn sample_motion() -> CompositionDocument {
     let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
     doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
+    for layer in &mut doc.layers {
+        layer.add_keyframe("x", 0.0, 960.0);
+        layer.add_keyframe("y", 0.0, 540.0);
+        layer.add_keyframe("scale", 0.0, 1.0);
+        layer.add_keyframe("rotation", 0.0, 0.0);
+        if layer.opacity_keys.is_empty() {
+            layer.add_keyframe("opacity", 0.0, 1.0);
+        }
+    }
     doc
 }
 
@@ -95,6 +104,14 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
         .map(|layer| layer.name.as_str())
         .unwrap_or("No layer selected");
     app.set_active_layer_index(doc.active_layer_index as i32);
+    if let Some(layer) = doc.layers.get(doc.active_layer_index) {
+        let sample = layer.sample(0.0);
+        app.set_pos_x(sample.x);
+        app.set_pos_y(sample.y);
+        app.set_scale_val(sample.scale * 100.0);
+        app.set_rotation_val(sample.rotation);
+        app.set_opacity_val(sample.opacity * 100.0);
+    }
     app.set_status_left(SharedString::from(format!(
         "{} motion layers • Selected: {selected}",
         doc.len()
@@ -195,11 +212,18 @@ fn main() -> Result<(), String> {
             if let Some(app) = app_ref.upgrade() {
                 let mut current = state.current.borrow_mut();
                 let count = current.len() + 1;
-                current.add_layer(MotionLayer::new(
+                let mut layer = MotionLayer::new(
                     format!("layer-{count}"),
                     format!("Motion Layer {count}"),
                     "VectorShape",
-                ));
+                );
+                layer.add_keyframe("x", 0.0, 960.0);
+                layer.add_keyframe("y", 0.0, 540.0);
+                layer.add_keyframe("scale", 0.0, 1.0);
+                layer.add_keyframe("rotation", 0.0, 0.0);
+                layer.add_keyframe("opacity", 0.0, 1.0);
+                current.add_layer(layer);
+                current.active_layer_index = current.layers.len().saturating_sub(1);
                 apply_motion(&app, &current);
             }
         });
@@ -264,10 +288,37 @@ fn main() -> Result<(), String> {
     }
 
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_transform_changed(move |prop, val| {
             if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from(format!("Transform {prop}: {val:.1}")));
+                let mut current = state.current.borrow_mut();
+                let active = current.active_layer_index;
+                let property = match prop.as_str() {
+                    "pos-x" => "x",
+                    "pos-y" => "y",
+                    "scale" => "scale",
+                    "rotation" => "rotation",
+                    "opacity" => "opacity",
+                    _ => {
+                        app.set_status_left(SharedString::from(format!(
+                            "Unsupported transform property: {prop}"
+                        )));
+                        return;
+                    }
+                };
+                let stored_value = match property {
+                    "scale" | "opacity" => val / 100.0,
+                    _ => val,
+                };
+                if let Some(layer) = current.layers.get_mut(active) {
+                    layer.add_keyframe(property, 0.0, stored_value);
+                    let layer_name = layer.name.clone();
+                    apply_motion(&app, &current);
+                    app.set_status_left(SharedString::from(format!(
+                        "Updated {layer_name} {property} to {val:.1}"
+                    )));
+                }
             }
         });
     }
