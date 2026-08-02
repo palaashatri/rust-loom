@@ -12,36 +12,21 @@ import { Icon } from "icons.slint";
 export component StatusBar inherits Rectangle {
     in property <string> status-left: "";
     in property <string> status-right: "";
-    min-height: 28px;
-    max-height: 28px;
-    background: Theme.palette().surface-sunken;
-    VerticalLayout {
-        spacing: 0px;
-        padding: 0px;
-        Rectangle {
-            height: 1px;
-            background: Theme.palette().border;
-        }
+    min-height: 30px;
+    max-height: 30px;
+    background: Theme.palette().chrome;
+    Rectangle { y: 0px; height: 1px; width: parent.width; background: Theme.palette().border; }
     HorizontalLayout {
         spacing: 12px;
-        padding-left: 12px;
-        padding-right: 12px;
-        Text {
-            text: root.status-left;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-secondary;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.status-right;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-disabled;
-            vertical-alignment: center;
-        }
-    }
+        padding-left: 14px;
+        padding-right: 14px;
+        cross-axis-alignment: center;
+        Rectangle { width: 5px; height: 5px; border-radius: 3px; background: Theme.palette().accent; }
+        Text { text: root.status-left; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-stretch: 1; vertical-alignment: center; }
+        Text { text: root.status-right; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-disabled; vertical-alignment: center; }
     }
 }
+
 
 export component LoomWindow inherits Window {
     in property <string> app-name: "Loom";
@@ -101,65 +86,29 @@ export component ToolButton inherits Rectangle {
     in property <bool> checked: false;
     in property <bool> enabled: true;
     callback clicked;
-    height: 30px;
-    min-width: 30px;
-    border-radius: 6px;
+    height: Theme.tokens.metrics.control-height;
+    min-width: Theme.tokens.metrics.control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
-    border-color: !enabled ? transparent
-        : focus-scope.has-focus ? Theme.palette().focus
-        : checked ? Theme.palette().accent
-        : touch.has-hover ? Theme.palette().border-strong
-        : transparent;
-    background: !enabled ? transparent
-        : touch.pressed || checked ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-sunken
-        : Theme.palette().surface;
-
-    animate background, border-color {
-        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-    }
-
+    border-color: !root.enabled ? transparent : focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().border : transparent;
+    background: !root.enabled ? transparent : touch.pressed ? Theme.palette().surface-sunken : root.checked ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-raised : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
     accessible-role: button;
     accessible-label: root.text != "" ? root.text : root.icon;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-    }
-
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
     HorizontalLayout {
         spacing: 6px;
         alignment: center;
-        padding-left: root.icon != "" ? 8px : 10px;
-        padding-right: root.text != "" ? 10px : 8px;
-        if root.icon != "" : Icon {
-            icon: root.icon;
-            size: 16px;
-            tint: root.enabled ? (root.checked ? Theme.palette().accent : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
-        }
-        if root.text != "" : Text {
-            text: root.text;
-            font-size: Theme.tokens.typography.body;
-            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-        }
+        padding-left: root.icon != "" ? 8px : 11px;
+        padding-right: root.text != "" ? 11px : 8px;
+        if root.icon != "" : Icon { icon: root.icon; size: 15px; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
+        if root.text != "" : Text { text: root.text; font-size: Theme.tokens.typography.body; font-weight: root.checked ? 650 : 500; color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled; }
     }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => {
-            focus-scope.focus();
-            root.clicked();
-        }
-    }
+    if root.checked : Rectangle { x: 8px; y: parent.height - 3px; width: parent.width - 16px; height: 2px; border-radius: 1px; background: Theme.palette().accent; }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
+
 
 /// Icon-only square button with an accessible label.
 export component IconButton inherits Rectangle {
@@ -168,105 +117,42 @@ export component IconButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> checked: false;
     callback clicked;
-    width: 30px;
-    height: 30px;
-    border-radius: 6px;
+    width: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
-    border-color: !enabled ? transparent
-        : focus-scope.has-focus ? Theme.palette().focus
-        : checked ? Theme.palette().accent
-        : touch.has-hover ? Theme.palette().border-strong
-        : transparent;
-    background: !enabled ? transparent
-        : touch.pressed || checked ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-sunken
-        : Theme.palette().surface;
-
-    animate background, border-color {
-        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-    }
-
+    border-color: !root.enabled ? transparent : focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().border : transparent;
+    background: !root.enabled ? transparent : touch.pressed ? Theme.palette().surface-sunken : root.checked ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-raised : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
     accessible-role: button;
     accessible-label: root.label != "" ? root.label : root.icon;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-    }
-
-    Icon {
-        icon: root.icon;
-        size: 16px;
-        tint: root.enabled ? (root.checked ? Theme.palette().accent : Theme.palette().ink) : Theme.palette().ink-disabled;
-    }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => {
-            focus-scope.focus();
-            root.clicked();
-        }
-    }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    Icon { icon: root.icon; size: 16px; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
+
 
 /// Primary action button (accent background).
 export component PrimaryButton inherits Rectangle {
     in property <string> text: "";
     in property <bool> enabled: true;
     callback clicked;
-    height: 30px;
-    min-width: 72px;
-    border-radius: 6px;
-    background: !enabled ? Theme.palette().border
-        : touch.pressed ? Theme.palette().accent
-        : touch.has-hover ? Theme.palette().accent-hover
-        : Theme.palette().accent;
+    height: Theme.tokens.metrics.control-height;
+    min-width: 78px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: !root.enabled ? Theme.palette().surface-sunken : touch.pressed ? Theme.palette().accent-pressed : touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent;
     border-width: 1px;
-    border-color: focus-scope.has-focus ? Theme.palette().focus : transparent;
-
-    animate background, border-color {
-        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-    }
-
+    border-color: focus-scope.has-focus ? Theme.palette().focus : root.enabled ? Theme.palette().accent-hover : Theme.palette().border;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
     accessible-role: button;
     accessible-label: root.text;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-    }
-
-    Text {
-        text: root.text;
-        font-size: Theme.tokens.typography.body;
-        font-weight: 600;
-        color: root.enabled ? Theme.palette().accent-ink : Theme.palette().ink-disabled;
-    }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => {
-            focus-scope.focus();
-            root.clicked();
-        }
-    }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    Text { text: root.text; font-size: Theme.tokens.typography.body; font-weight: 650; color: root.enabled ? Theme.palette().accent-ink : Theme.palette().ink-disabled; }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
+
 
 /// A search-style text input with a magnifier icon.
 export component SearchField inherits Rectangle {
@@ -870,42 +756,20 @@ export component EmptyState inherits Rectangle {
     in property <string> description: "";
     in property <string> action-text: "";
     callback action;
-    background: transparent;
-    max-width: 10000px;
-    max-height: 10000px;
-
-    VerticalLayout {
-        spacing: 8px;
-        alignment: center;
-        cross-axis-alignment: center;
-        Icon {
-            icon: root.icon;
-            size: 40px;
-            tint: Theme.palette().ink-disabled;
-        }
-        Text {
-            text: root.title;
-            font-size: Theme.tokens.typography.title;
-            font-weight: 600;
-            color: Theme.palette().ink;
-            horizontal-alignment: center;
-        }
-        Text {
-            text: root.description;
-            font-size: Theme.tokens.typography.body;
-            color: Theme.palette().ink-secondary;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-            width: 420px;
-        }
-        if root.action-text != "" : PrimaryButton {
-            text: root.action-text;
-            clicked => {
-                root.action();
-            }
+    background: transparent; max-width: 10000px; max-height: 10000px;
+    Rectangle {
+        width: min(480px, parent.width - 32px); height: min(280px, parent.height - 32px); border-radius: 16px;
+        background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border;
+        VerticalLayout {
+            spacing: 10px; padding: 28px; alignment: center; cross-axis-alignment: center;
+            Rectangle { width: 54px; height: 54px; border-radius: 18px; background: Theme.palette().selection-soft; Icon { icon: root.icon; size: 25px; tint: Theme.palette().accent; } }
+            Text { text: root.title; font-size: Theme.tokens.typography.heading; font-weight: 650; color: Theme.palette().ink; horizontal-alignment: center; }
+            Text { text: root.description; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; horizontal-alignment: center; wrap: word-wrap; width: 390px; }
+            if root.action-text != "" : PrimaryButton { text: root.action-text; clicked => { root.action(); } }
         }
     }
 }
+
 
 /// Bordered panel with an optional header.
 ///
@@ -1044,97 +908,56 @@ export component AppHeader inherits Rectangle {
     in property <string> context: "";
     in property <string> state-text: "Local";
     in property <int> state-tone: 0;
-
-    min-height: 52px;
-    max-height: 52px;
-    background: Theme.palette().surface;
-
+    min-height: Theme.tokens.metrics.header-height;
+    max-height: Theme.tokens.metrics.header-height;
+    background: Theme.palette().chrome;
     VerticalLayout {
         spacing: 0px;
-        padding: 0px;
-
         HorizontalLayout {
-            spacing: 10px;
+            spacing: 11px;
             padding-left: 14px;
             padding-right: 14px;
             cross-axis-alignment: center;
-
             Rectangle {
-                width: 30px;
-                height: 30px;
-                border-radius: 9px;
+                width: 34px; height: 34px; border-radius: 11px;
                 background: Theme.palette().selection-soft;
-                Icon {
-                    icon: root.icon;
-                    size: 17px;
-                    tint: Theme.palette().accent;
-                }
+                border-width: 1px; border-color: Theme.palette().accent;
+                Icon { icon: root.icon; size: 18px; tint: Theme.palette().accent; }
             }
-
             VerticalLayout {
-                spacing: 0px;
-                Text {
-                    text: root.app-name;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 650;
-                    color: Theme.palette().ink;
-                }
-                Text {
-                    text: root.document-title;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
+                spacing: 1px;
+                Text { text: root.document-title; font-size: Theme.tokens.typography.title; font-weight: 650; color: Theme.palette().ink; }
+                Text { text: root.app-name; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-secondary; }
             }
-
             Rectangle { horizontal-stretch: 1; background: transparent; }
-
-            if root.context != "" : Text {
-                text: root.context;
-                font-size: Theme.tokens.typography.caption;
-                color: Theme.palette().ink-disabled;
-                vertical-alignment: center;
+            if root.context != "" : Rectangle {
+                height: 28px; min-width: 96px; border-radius: 8px; background: Theme.palette().surface-sunken; border-width: 1px; border-color: Theme.palette().border;
+                Text { text: root.context; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; }
             }
-
-            StatusPill {
-                text: root.state-text;
-                tone: root.state-tone;
-            }
+            StatusPill { text: root.state-text; tone: root.state-tone; }
         }
-
-        Rectangle {
-            height: 1px;
-            background: Theme.palette().border;
-        }
+        Rectangle { height: 1px; background: Theme.palette().border; }
     }
 }
+
 
 /// Consistent title row for sidebars, inspectors, browsers and timeline panes.
 export component PanelHeader inherits Rectangle {
     in property <string> title: "Panel";
     in property <string> detail: "";
-    min-height: 34px;
-    max-height: 34px;
-    background: Theme.palette().surface;
-
+    min-height: Theme.tokens.metrics.panel-header-height;
+    max-height: Theme.tokens.metrics.panel-header-height;
+    background: Theme.palette().panel;
     HorizontalLayout {
-        spacing: 8px;
-        padding-left: 12px;
-        padding-right: 10px;
-        cross-axis-alignment: center;
-        Text {
-            text: root.title;
-            font-size: Theme.tokens.typography.caption;
-            font-weight: 700;
-            color: Theme.palette().ink-secondary;
-        }
+        spacing: 8px; padding-left: 12px; padding-right: 10px; cross-axis-alignment: center;
+        Rectangle { width: 3px; height: 14px; border-radius: 2px; background: Theme.palette().accent; }
+        Text { text: root.title; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink; }
         Rectangle { horizontal-stretch: 1; background: transparent; }
-        if root.detail != "" : Text {
-            text: root.detail;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-disabled;
-        }
+        if root.detail != "" : Text { text: root.detail; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().ink-disabled; }
     }
+    Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Theme.palette().border; }
 }
+
 
 /// Vertical workspace/mode rail item with an explicit selected state and full
 /// keyboard/accessibility behavior.
@@ -1144,62 +967,21 @@ export component RailButton inherits Rectangle {
     in property <bool> checked: false;
     in property <bool> enabled: true;
     callback clicked;
-
-    width: 56px;
-    height: 48px;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: root.checked ? Theme.palette().accent
-        : focus-scope.has-focus ? Theme.palette().focus
-        : transparent;
-    background: root.checked ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-sunken
-        : transparent;
-
-    animate background, border-color {
-        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-    }
-
-    accessible-role: button;
-    accessible-label: root.text;
-    accessible-action-default => { if (root.enabled) { root.clicked(); } }
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-    }
-
+    width: 60px; height: 54px; border-radius: 10px; border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().border-strong : transparent;
+    background: root.checked ? Theme.palette().surface-raised : touch.has-hover ? Theme.palette().surface-sunken : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button; accessible-label: root.text; accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    if root.checked : Rectangle { x: 0px; y: 12px; width: 3px; height: parent.height - 24px; border-radius: 2px; background: Theme.palette().accent; }
     VerticalLayout {
-        spacing: 3px;
-        alignment: center;
-        Icon {
-            icon: root.icon;
-            size: 17px;
-            tint: root.enabled ? (root.checked ? Theme.palette().accent : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
-        }
-        Text {
-            text: root.text;
-            font-size: 10px;
-            color: root.enabled ? (root.checked ? Theme.palette().accent : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
-            horizontal-alignment: center;
-        }
+        spacing: 4px; alignment: center;
+        Icon { icon: root.icon; size: 18px; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
+        Text { text: root.text; font-size: Theme.tokens.typography.micro; font-weight: root.checked ? 700 : 550; color: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().ink : Theme.palette().ink-secondary; horizontal-alignment: center; }
     }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => {
-            focus-scope.focus();
-            root.clicked();
-        }
-    }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
+
 
 
 /// Hairline separator used between professional workspace regions.
@@ -1216,50 +998,36 @@ export component Hairline inherits Rectangle {
 
 /// Raised toolbar surface with a consistent compact layout slot.
 export component WorkspaceToolbar inherits Rectangle {
-    min-height: 42px;
-    max-height: 42px;
-    background: Theme.palette().surface;
-    border-width: 0px;
+    min-height: Theme.tokens.metrics.toolbar-height;
+    max-height: Theme.tokens.metrics.toolbar-height;
+    background: Theme.palette().chrome;
     VerticalLayout {
         spacing: 0px;
-        HorizontalLayout {
-            spacing: 6px;
-            padding-left: 10px;
-            padding-right: 10px;
-            cross-axis-alignment: center;
-            @children
-        }
+        HorizontalLayout { spacing: 5px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center; @children }
         Rectangle { height: 1px; background: Theme.palette().border; }
     }
 }
+
 
 /// Quiet sidebar surface used for libraries, outlines, layers and media bins.
 export component SidebarSurface inherits Rectangle {
     in property <string> title: "";
     in property <string> detail: "";
-    background: Theme.palette().surface;
+    background: Theme.palette().panel;
     border-width: 0px;
-    VerticalLayout {
-        spacing: 0px;
-        PanelHeader { title: root.title; detail: root.detail; }
-        Rectangle { height: 1px; background: Theme.palette().border; }
-        @children
-    }
+    VerticalLayout { spacing: 0px; PanelHeader { title: root.title; detail: root.detail; } @children }
 }
+
 
 /// Contextual inspector surface shared across the suite.
 export component InspectorSurface inherits Rectangle {
     in property <string> title: "Inspector";
     in property <string> detail: "";
-    background: Theme.palette().surface;
+    background: Theme.palette().panel;
     border-width: 0px;
-    VerticalLayout {
-        spacing: 0px;
-        PanelHeader { title: root.title; detail: root.detail; }
-        Rectangle { height: 1px; background: Theme.palette().border; }
-        @children
-    }
+    VerticalLayout { spacing: 0px; PanelHeader { title: root.title; detail: root.detail; } @children }
 }
+
 
 /// Subtle rounded card for library rows, jobs, tracks and layers.
 export component WorkspaceRow inherits Rectangle {
@@ -1267,73 +1035,47 @@ export component WorkspaceRow inherits Rectangle {
     in property <bool> emphasized: false;
     in property <bool> enabled: true;
     callback clicked;
-    min-height: 38px;
-    border-radius: 7px;
-    border-width: 1px;
-    border-color: root.selected ? Theme.palette().accent
-        : root.emphasized ? Theme.palette().border-strong
-        : transparent;
-    background: root.selected ? Theme.palette().selection-soft
-        : touch.has-hover && root.enabled ? Theme.palette().surface-sunken
-        : transparent;
-    animate background, border-color {
-        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-    }
+    min-height: 42px; border-radius: 9px; border-width: 1px;
+    border-color: root.selected ? Theme.palette().accent : root.emphasized ? Theme.palette().border-strong : transparent;
+    background: root.selected ? Theme.palette().selection-soft : touch.has-hover && root.enabled ? Theme.palette().surface-raised : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    if root.selected : Rectangle { x: 0px; y: 8px; width: 3px; height: parent.height - 16px; border-radius: 2px; background: Theme.palette().accent; }
     @children
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
+
 
 /// Professional canvas backdrop with a subtle inner stage.
 export component CanvasBackdrop inherits Rectangle {
     in property <color> stage-color: Theme.palette().surface-sunken;
-    background: Theme.palette().canvas;
+    background: Theme.palette().canvas-alt;
+    Rectangle { x: 17px; y: 18px; width: parent.width - 34px; height: parent.height - 34px; border-radius: 14px; background: Theme.palette().shadow; }
     Rectangle {
-        x: 12px;
-        y: 12px;
-        width: parent.width - 24px;
-        height: parent.height - 24px;
-        border-radius: 10px;
-        border-width: 1px;
-        border-color: Theme.palette().border;
-        background: root.stage-color;
-        clip: true;
-        @children
+        x: 12px; y: 12px; width: parent.width - 24px; height: parent.height - 24px;
+        border-radius: 13px; border-width: 1px; border-color: Theme.palette().border-strong; background: root.stage-color; clip: true; @children
     }
 }
+
 
 /// Compact tab strip for inspectors and browsers.
 export component PaneTabs inherits Rectangle {
     in property <[string]> items: [];
     in-out property <int> current: 0;
     callback selected(int);
-    height: 34px;
-    background: Theme.palette().surface;
+    height: 36px; background: Theme.palette().panel;
     HorizontalLayout {
-        spacing: 2px;
-        padding-left: 8px;
-        padding-right: 8px;
+        spacing: 3px; padding-left: 8px; padding-right: 8px; padding-top: 4px; padding-bottom: 4px;
         for item[idx] in root.items : Rectangle {
-            min-width: 54px;
-            border-radius: 6px;
-            background: idx == root.current ? Theme.palette().surface-sunken : transparent;
-            border-width: idx == root.current ? 1px : 0px;
-            border-color: Theme.palette().border-strong;
-            Text {
-                text: item;
-                font-size: Theme.tokens.typography.caption;
-                font-weight: idx == root.current ? 650 : 500;
-                color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            TouchArea { clicked => { root.current = idx; root.selected(idx); } }
+            min-width: 56px; border-radius: 8px;
+            background: idx == root.current ? Theme.palette().surface-raised : tab-touch.has-hover ? Theme.palette().surface-sunken : transparent;
+            border-width: 1px; border-color: idx == root.current ? Theme.palette().border-strong : transparent;
+            Text { text: item; font-size: Theme.tokens.typography.caption; font-weight: idx == root.current ? 700 : 500; color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; }
+            if idx == root.current : Rectangle { y: parent.height - 3px; x: 10px; width: parent.width - 20px; height: 2px; border-radius: 1px; background: Theme.palette().accent; }
+            tab-touch := TouchArea { clicked => { root.current = idx; root.selected(idx); } }
         }
     }
 }
+
 
 /// Small metric readout for timecode, zoom, color space and engine state.
 export component MetricChip inherits Rectangle {
@@ -1362,22 +1104,11 @@ export component TransportButton inherits Rectangle {
     in property <bool> destructive: false;
     in property <bool> enabled: true;
     callback clicked;
-    width: 34px;
-    height: 34px;
-    border-radius: 17px;
-    border-width: 1px;
-    border-color: root.active ? (root.destructive ? Theme.palette().danger : Theme.palette().accent) : Theme.palette().border;
-    background: root.active ? (root.destructive ? Theme.palette().danger-surface : Theme.palette().selection-soft)
-        : touch.has-hover ? Theme.palette().surface-sunken : Theme.palette().surface;
-    accessible-role: button;
-    accessible-label: root.label;
-    Icon {
-        icon: root.icon;
-        size: 16px;
-        tint: !root.enabled ? Theme.palette().ink-disabled
-            : root.destructive ? Theme.palette().danger
-            : root.active ? Theme.palette().accent
-            : Theme.palette().ink;
-    }
+    width: 36px; height: 36px; border-radius: 18px; border-width: 1px;
+    border-color: root.active ? (root.destructive ? Theme.palette().danger : Theme.palette().accent) : touch.has-hover ? Theme.palette().border-strong : Theme.palette().border;
+    background: root.active ? (root.destructive ? Theme.palette().danger-surface : Theme.palette().selection-soft) : touch.pressed ? Theme.palette().surface-sunken : touch.has-hover ? Theme.palette().surface-raised : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button; accessible-label: root.label;
+    Icon { icon: root.icon; size: 16px; tint: !root.enabled ? Theme.palette().ink-disabled : root.destructive ? Theme.palette().danger : root.active ? Theme.palette().accent : Theme.palette().ink; }
     touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }

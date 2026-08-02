@@ -48,16 +48,16 @@ export component MotionApp inherits Window {
             document-title: root.comp-name;
             icon: "layers";
             context: root.timecode-text;
-            state-text: "Model preview";
+            state-text: "Local project";
             state-tone: 3;
         }
 
 
         // Toolbar & Animation Transport Controls
         Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
+            min-height: Theme.tokens.metrics.toolbar-height;
+            max-height: Theme.tokens.metrics.toolbar-height;
+            background: Theme.palette().chrome;
 
             HorizontalLayout {
                 height: parent.height;
@@ -74,15 +74,15 @@ export component MotionApp inherits Window {
                 Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
 
                 // Animation Transport Controls
-                ToolButton { text: "⏮ Step Back"; clicked => { root.step-back(); } }
+                ToolButton { text: "Step Back"; clicked => { root.step-back(); } }
                 ToolButton {
-                    text: root.is-playing ? "⏸ Pause" : "▶ Play";
+                    text: root.is-playing ? "Pause" : "Play";
                     checked: root.is-playing;
                     clicked => { root.is-playing = !root.is-playing; root.play-pause(); }
                 }
-                ToolButton { text: "⏭ Step Fwd"; clicked => { root.step-forward(); } }
+                ToolButton { text: "Step Forward"; clicked => { root.step-forward(); } }
                 ToolButton {
-                    text: "🔁 Loop";
+                    text: "Loop";
                     checked: root.is-looping;
                     clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); }
                 }
@@ -110,7 +110,7 @@ export component MotionApp inherits Window {
                 Rectangle { horizontal-stretch: 1; background: transparent; }
 
                 ToolButton {
-                    text: "📈 Curve Editor";
+                    text: "Curves";
                     checked: root.curve-drawer-open;
                     clicked => {
                         root.curve-drawer-open = !root.curve-drawer-open;
@@ -368,4 +368,3 @@ export component MotionApp inherits Window {
         }
     }
 }
-

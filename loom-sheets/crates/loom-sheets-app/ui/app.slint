@@ -141,9 +141,9 @@ export component SheetsApp inherits Window {
 
         // Action Toolbar with Quick Formula Actions and Cell Format Selector
         Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
+            min-height: Theme.tokens.metrics.toolbar-height;
+            max-height: Theme.tokens.metrics.toolbar-height;
+            background: Theme.palette().chrome;
 
             HorizontalLayout {
                 height: parent.height;
@@ -404,4 +404,3 @@ export component SheetsApp inherits Window {
         }
     }
 }
-

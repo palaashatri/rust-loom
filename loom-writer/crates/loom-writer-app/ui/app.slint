@@ -80,9 +80,9 @@ export component WriterApp inherits Window {
 
         // Standard Action Toolbar
         Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
+            min-height: Theme.tokens.metrics.toolbar-height;
+            max-height: Theme.tokens.metrics.toolbar-height;
+            background: Theme.palette().chrome;
 
             HorizontalLayout {
                 height: parent.height;
@@ -264,4 +264,3 @@ export component WriterApp inherits Window {
         }
     }
 }
-
