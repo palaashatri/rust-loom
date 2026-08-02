@@ -326,11 +326,11 @@ export component MotionApp inherits Window {
                             background: Theme.palette().canvas-alt;
                             border-width: 0px;
 
-                            Rectangle { x: 25%; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
-                            Rectangle { x: 50%; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
-                            Rectangle { x: 75%; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
-                            Rectangle { y: 33%; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
-                            Rectangle { y: 66%; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+                            Rectangle { x: parent.width * 0.25; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+                            Rectangle { x: parent.width * 0.50; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
+                            Rectangle { x: parent.width * 0.75; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+                            Rectangle { y: parent.height * 0.33; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+                            Rectangle { y: parent.height * 0.66; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
 
                             VerticalLayout {
                                 alignment: center;
