@@ -7,28 +7,34 @@ use loom_sheets_core::{evaluate, from_csv, to_csv, CellRef, Sheet};
 use std::collections::BTreeMap;
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: loom-sheets <command> [args]");
         eprintln!("  demo (prints an evaluated example)");
         eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
-        eprintln!("  to-csv <csv-file> (normalizes a CSV through the engine)");
+        eprintln!("  to-csv <csv-file> <output.csv> (normalizes a CSV through the engine)");
         eprintln!("  create <file.loomsheet> <name>");
         std::process::exit(2);
     }
-    let result = match args[1].as_str() {
+    match args[1].as_str() {
         "demo" => cmd_demo(),
-        "eval" => cmd_eval(&args[2]),
-        "to-csv" => cmd_tocsv(&args[2], &args[3]),
-        "create" => cmd_create(&args[2], &args[3]),
-        other => {
-            eprintln!("unknown command: {other}");
-            std::process::exit(2);
-        }
-    };
-    if let Err(e) = result {
-        eprintln!("error: {e}");
-        std::process::exit(1);
+        "eval" => cmd_eval(args.get(2).ok_or("eval requires <csv-file>")?),
+        "to-csv" => cmd_tocsv(
+            args.get(2).ok_or("to-csv requires <csv-file>")?,
+            args.get(3).ok_or("to-csv requires <output.csv>")?,
+        ),
+        "create" => cmd_create(
+            args.get(2).ok_or("create requires <file.loomsheet>")?,
+            args.get(3).ok_or("create requires <name>")?,
+        ),
+        other => Err(format!("unknown command: {other}")),
     }
 }
 
@@ -44,7 +50,6 @@ fn cmd_demo() -> Result<(), String> {
     sheet.set_str("B5", "=SUM(B2:B4)");
     sheet.set_str("B6", "=AVERAGE(B2:B4)");
     let vals = evaluate(&sheet);
-    // Print sheet as BTreeMap for deterministic output.
     let mut rows: BTreeMap<(u32, u32), String> = BTreeMap::new();
     for (r, c) in &sheet.cells {
         let v = vals
@@ -82,6 +87,8 @@ fn cmd_create(path: &str, name: &str) -> Result<(), String> {
     arch.add("content/sheet.json", content_json.clone().into_bytes())
         .map_err(|e| e.to_string())?;
 
+    let mime = MimeType::parse("application/vnd.loom.sheet-content")
+        .map_err(|e| format!("invalid built-in sheet MIME type: {e}"))?;
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Sheets,
@@ -90,7 +97,7 @@ fn cmd_create(path: &str, name: &str) -> Result<(), String> {
         app_version: "0.1.0".into(),
         entries: vec![ManifestEntry {
             path: "content/sheet.json".into(),
-            mime: MimeType::parse("application/vnd.loom.sheet-content").unwrap(),
+            mime,
             size: content_json.len() as u64,
             sha256: Checksum::from_bytes(zip::sha256(content_json.as_bytes())),
         }],
@@ -117,8 +124,8 @@ fn cmd_eval(path: &str) -> Result<(), String> {
             .unwrap_or(loom_sheets_core::Value::Empty);
         rows.insert((r.row, r.col), v.display());
     }
-    for ((row, col), v) in rows {
-        println!("{}{} ", CellRef { row, col }.to_a1(), v);
+    for ((row, col), value) in rows {
+        println!("{}: {}", CellRef { row, col }.to_a1(), value);
     }
     Ok(())
 }
