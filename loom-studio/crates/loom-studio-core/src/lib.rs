@@ -358,7 +358,7 @@ pub fn save_studio_bundle(
         let path = format!("assets/audio-{index:04}.wav");
         let bytes = buffer.to_wav_pcm16()?;
         archive
-            .add(path.clone(), bytes.clone())
+            .add(path.as_str(), bytes.clone())
             .map_err(|error| error.to_string())?;
         entries.push(ManifestEntry {
             path: path.clone(),

@@ -717,7 +717,7 @@ pub struct VideoFrame {
 }
 
 /// A deterministic FFmpeg sequence-export command.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TimelineExportPlan {
     /// Executable.
     pub executable: PathBuf,

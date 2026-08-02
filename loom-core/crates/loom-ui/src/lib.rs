@@ -162,14 +162,15 @@ mod tests {
 mod visual_tests {
     use super::smoke_window::*;
 
-    fn diff_ratio(a: &image::RgbaImage, b: &image::RgbaImage) -> f32 {
+    fn diff_ratio(a: &image::RgbaImage, b: &image::RgbaImage) -> f64 {
         assert_eq!(a.dimensions(), b.dimensions());
         let different = a
             .pixels()
             .zip(b.pixels())
             .filter(|(left, right)| left != right)
             .count();
-        different as f32 / (a.width() as f32 * a.height() as f32)
+        let pixel_count = u64::from(a.width()) * u64::from(a.height());
+        different as f64 / pixel_count as f64
     }
 
     #[test]

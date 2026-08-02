@@ -283,9 +283,8 @@ impl RgbaImage {
         output.reserve(self.width as usize * self.height as usize * 3);
         for pixel in self.pixels.chunks_exact(4) {
             let alpha = pixel[3] as f32 / 255.0;
-            for channel in 0..3 {
-                let value =
-                    pixel[channel] as f32 * alpha + background[channel] as f32 * (1.0 - alpha);
+            for (source, backdrop) in pixel.iter().take(3).zip(background.iter()) {
+                let value = *source as f32 * alpha + *backdrop as f32 * (1.0 - alpha);
                 output.push(value.round().clamp(0.0, 255.0) as u8);
             }
         }
