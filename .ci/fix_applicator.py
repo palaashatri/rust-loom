@@ -20,6 +20,10 @@ replacements = (
         "\n\ndef xml_escape'''\n    text = text[: wix_match.start()] + wix_function + text[wix_match.end() :]",
         '\n\ndef xml_escape"""\n    text = text[: wix_match.start()] + wix_function + text[wix_match.end() :]',
     ),
+    (
+        "        '''#!/usr/bin/env python3\nfrom pathlib import Path\nimport re\nimport sys\n",
+        "        r'''#!/usr/bin/env python3\nfrom pathlib import Path\nimport re\nimport sys\n",
+    ),
 )
 
 for old, new in replacements:
