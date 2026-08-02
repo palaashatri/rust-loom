@@ -21,6 +21,8 @@ description = "Sandboxed extension system for the Loom creative suite."
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+base64 = "0.22"
+ed25519-dalek = "2"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 loom-plugin-manifest = { version = "0.1.0", path = "crates/loom-plugin-manifest" }
 loom-plugin-host = { version = "0.1.0", path = "crates/loom-plugin-host" }
