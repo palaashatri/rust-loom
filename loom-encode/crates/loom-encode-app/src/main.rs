@@ -16,6 +16,8 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "batch.loomencode";
 
+loom_production::define_snapshot_recovery!(ENCODE_RECOVERY, "org.loom.encode", "loom.encode/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -214,6 +216,9 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
         }
         .into(),
     );
+    if let Ok(bytes) = save_encode_queue(queue) {
+        let _ = record_snapshot_recovery("encode queue state", bytes);
+    }
 }
 
 fn apply_theme(app: &EncodeApp, theme: &str) {
@@ -274,8 +279,18 @@ fn main() -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     let backend = discover_ffmpeg(&[]).ok();
+    let recovered = initialize_snapshot_recovery()?;
+    let mut initial = if args.open.is_some() {
+        initial_queue(&args)?
+    } else {
+        recovered
+            .as_deref()
+            .and_then(|bytes| load_encode_queue(bytes).ok())
+            .unwrap_or(initial_queue(&args)?)
+    };
+    initial.recover_interrupted();
     let state = Arc::new(AppState {
-        queue: Mutex::new(initial_queue(&args)?),
+        queue: Mutex::new(initial),
         backend,
         cancel: AtomicBool::new(false),
         running: AtomicBool::new(false),
@@ -336,7 +351,9 @@ fn main() -> Result<(), String> {
         app.on_save_queue(move || {
             if let Some(app) = app_ref.upgrade() {
                 let result = save_encode_queue(&snapshot(&state)).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, bytes).map_err(|error| error.to_string())
+                    std::fs::write(SAVE_FILENAME, &bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
                 });
                 app.set_status_left(
                     match result {

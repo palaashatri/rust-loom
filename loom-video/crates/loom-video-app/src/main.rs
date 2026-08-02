@@ -21,6 +21,8 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "project.loomvideo";
 
+loom_production::define_snapshot_recovery!(VIDEO_RECOVERY, "org.loom.video", "loom.video/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -253,6 +255,9 @@ fn refresh(app: &VideoApp, state: &AppState) {
         app.set_preview_image(frame_image(frame));
         app.set_has_preview(true);
     }
+    if let Ok(bytes) = save_video_project(project) {
+        let _ = record_snapshot_recovery("video state", bytes);
+    }
 }
 
 fn apply_theme(app: &VideoApp, theme: &str) {
@@ -328,8 +333,18 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let recovered = initialize_snapshot_recovery()?;
+    let initial = if args.open.is_some() {
+        initial_session(&args)?
+    } else {
+        recovered
+            .as_deref()
+            .and_then(|bytes| load_video_project(bytes).ok())
+            .map(VideoSession::new)
+            .unwrap_or(initial_session(&args)?)
+    };
     let state = Arc::new(AppState {
-        session: Mutex::new(initial_session(&args)?),
+        session: Mutex::new(initial),
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
         tools: discover_media_tools().ok(),
@@ -374,7 +389,9 @@ fn main() -> Result<(), String> {
         app.on_save_project(move || {
             if let Some(app) = app_ref.upgrade() {
                 let result = save_video_project(&lock(&state.session).project).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, bytes).map_err(|error| error.to_string())
+                    std::fs::write(SAVE_FILENAME, &bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
                 });
                 app.set_status_left(
                     match result {

@@ -21,6 +21,8 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "song.loomstudio";
 
+loom_production::define_snapshot_recovery!(STUDIO_RECOVERY, "org.loom.studio", "loom.studio/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -284,6 +286,9 @@ fn refresh(app: &StudioApp, state: &GuiState) {
         app.set_status_right("Audio unavailable".into());
     }
     app.set_midi_status(state.midi_status.borrow().as_str().into());
+    if let Ok(bytes) = save_studio_bundle(project, &state.assets.borrow()) {
+        let _ = record_snapshot_recovery("studio state", bytes);
+    }
 }
 
 fn mix_current(state: &GuiState) -> Result<AudioBuffer, String> {
@@ -352,7 +357,16 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let (session, assets) = initial_session(&args)?;
+    let recovered = initialize_snapshot_recovery()?;
+    let (session, assets) = if args.open.is_some() {
+        initial_session(&args)?
+    } else {
+        recovered
+            .as_deref()
+            .and_then(|bytes| load_studio_bundle(bytes).ok())
+            .map(|(project, assets)| (StudioSession::new(project), assets))
+            .unwrap_or(initial_session(&args)?)
+    };
     let audio = AudioIo::open_default().ok();
     let midi_ports = AudioIo::midi_ports().unwrap_or_default();
     app.set_midi_ports(ModelRc::new(VecModel::from(
@@ -441,7 +455,9 @@ fn main() -> Result<(), String> {
                 let session = state.session.borrow();
                 let assets = state.assets.borrow();
                 match save_studio_bundle(&session.project, &assets).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, bytes).map_err(|error| error.to_string())
+                    std::fs::write(SAVE_FILENAME, &bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
                 }) {
                     Ok(()) => app.set_status_left(
                         format!("Saved {SAVE_FILENAME} with embedded audio").into(),

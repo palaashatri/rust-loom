@@ -13,6 +13,8 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "comp.loommotion";
 
+loom_production::define_snapshot_recovery!(MOTION_RECOVERY, "org.loom.motion", "loom.motion/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -98,6 +100,9 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
         doc.len()
     )));
     app.set_status_right("Offline".into());
+    if let Ok(bytes) = save_motion(doc) {
+        let _ = record_snapshot_recovery("motion state", bytes);
+    }
 }
 
 fn apply_theme(app: &MotionApp, theme: &str) {
@@ -137,8 +142,17 @@ fn main() -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
+    let recovered = initialize_snapshot_recovery()?;
+    let initial = if args.open.is_some() {
+        initial_motion(&args)?
+    } else {
+        recovered
+            .as_deref()
+            .and_then(|bytes| load_motion(bytes).ok())
+            .unwrap_or(initial_motion(&args)?)
+    };
     let state = Rc::new(GuiState {
-        current: RefCell::new(initial_motion(&args)?),
+        current: RefCell::new(initial),
     });
 
     {
@@ -273,9 +287,20 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_comp(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Ok(bytes) = save_motion(&state.current.borrow()) {
-                    let _ = std::fs::write(SAVE_FILENAME, bytes);
-                    app.set_status_left(SharedString::from(format!("Saved {SAVE_FILENAME}")));
+                match save_motion(&state.current.borrow()) {
+                    Ok(bytes) => match std::fs::write(SAVE_FILENAME, &bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                    {
+                        Ok(()) => app
+                            .set_status_left(SharedString::from(format!("Saved {SAVE_FILENAME}"))),
+                        Err(error) => app.set_status_left(SharedString::from(format!(
+                            "Save/checkpoint failed: {error}"
+                        ))),
+                    },
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!("Save failed: {error}")))
+                    }
                 }
             }
         });
