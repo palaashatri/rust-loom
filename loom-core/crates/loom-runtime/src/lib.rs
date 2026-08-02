@@ -247,7 +247,9 @@ impl Settings {
 
     /// Iterates settings in stable key order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.values.iter().map(|(key, value)| (key.as_str(), value.as_str()))
+        self.values
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
     }
 }
 
@@ -307,7 +309,8 @@ impl RecoveryStore {
         if payload.len() > self.max_snapshot_bytes {
             return Err(RuntimeError::LimitExceeded(format!(
                 "snapshot is {} bytes; limit is {}",
-                payload.len(), self.max_snapshot_bytes
+                payload.len(),
+                self.max_snapshot_bytes
             )));
         }
         let document_dir = self.root.join(document_id);
@@ -599,7 +602,10 @@ impl ShortcutRegistry {
                 });
             }
         }
-        if let Some(old_chord) = self.by_command.insert(command_id.to_string(), chord.clone()) {
+        if let Some(old_chord) = self
+            .by_command
+            .insert(command_id.to_string(), chord.clone())
+        {
             self.by_chord.remove(&old_chord);
         }
         self.by_chord.insert(chord.clone(), command_id.to_string());
@@ -629,7 +635,11 @@ impl ShortcutRegistry {
 fn normalize_chord(chord: &str) -> String {
     let mut modifiers: Vec<String> = Vec::new();
     let mut key = String::new();
-    for part in chord.split('+').map(str::trim).filter(|part| !part.is_empty()) {
+    for part in chord
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
         match part.to_ascii_lowercase().as_str() {
             "ctrl" | "control" => modifiers.push("Ctrl".into()),
             "alt" | "option" => modifiers.push("Alt".into()),
@@ -813,7 +823,12 @@ mod tests {
             .expect("open")
             .with_limits(2, 1024);
         let first = store
-            .save_snapshot("doc-1", "Draft", Some(Path::new("/tmp/draft.loomdoc")), b"one")
+            .save_snapshot(
+                "doc-1",
+                "Draft",
+                Some(Path::new("/tmp/draft.loomdoc")),
+                b"one",
+            )
             .expect("save first");
         store
             .save_snapshot("doc-1", "Draft", None, b"two")
@@ -847,7 +862,9 @@ mod tests {
     fn shortcut_registry_normalizes_and_rejects_conflicts() {
         let mut shortcuts = ShortcutRegistry::default();
         assert_eq!(
-            shortcuts.bind("file.save", "shift + ctrl + s").expect("bind"),
+            shortcuts
+                .bind("file.save", "shift + ctrl + s")
+                .expect("bind"),
             "Ctrl+Shift+S"
         );
         assert_eq!(shortcuts.resolve("CTRL+SHIFT+s"), Some("file.save"));

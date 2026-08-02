@@ -168,7 +168,6 @@ fn cmd_validate(manifest_path: &str) -> i32 {
     }
 }
 
-
 fn cmd_inspect_wasm(args: &[String]) -> i32 {
     let Some(path) = args.first().filter(|value| !value.starts_with('-')) else {
         eprintln!("usage: loom-plugin inspect-wasm <module.wasm> [--memory <bytes>]\n");
@@ -372,7 +371,6 @@ fn cmd_remove(args: &[String]) -> i32 {
     }
 }
 
-
 fn cmd_invoke(args: &[String]) -> i32 {
     let Some(id) = args.first().filter(|value| !value.starts_with('-')) else {
         eprintln!("usage: loom-plugin invoke <id> --dir <store_dir> [-- <args...>]\n");
@@ -433,7 +431,11 @@ fn cmd_invoke(args: &[String]) -> i32 {
                 "plugin {id} exited {:?} in {} ms",
                 result.exit_code, result.duration_ms
             );
-            if result.exit_code == Some(0) { 0 } else { 1 }
+            if result.exit_code == Some(0) {
+                0
+            } else {
+                1
+            }
         }
         Err(error) => {
             eprintln!("invocation failed: {error}");

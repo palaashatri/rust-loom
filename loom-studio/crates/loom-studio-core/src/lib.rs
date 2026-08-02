@@ -161,7 +161,6 @@ pub fn load_studio_project(bytes: &[u8]) -> Result<StudioProject, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
-
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -260,7 +259,10 @@ impl AudioBuffer {
             .checked_mul(self.channels as u32)
             .and_then(|value| value.checked_mul(2))
             .ok_or_else(|| "WAV byte rate overflow".to_string())?;
-        let block_align = self.channels.checked_mul(2).ok_or_else(|| "WAV block align overflow".to_string())?;
+        let block_align = self
+            .channels
+            .checked_mul(2)
+            .ok_or_else(|| "WAV block align overflow".to_string())?;
         let mut output = Vec::with_capacity(riff_size + 8);
         output.extend_from_slice(b"RIFF");
         output.extend_from_slice(&(riff_size as u32).to_le_bytes());
@@ -317,7 +319,8 @@ impl AutomationLane {
         self.points
             .retain(|existing| (existing.time_secs - point.time_secs).abs() > f64::EPSILON);
         self.points.push(point);
-        self.points.sort_by(|left, right| left.time_secs.total_cmp(&right.time_secs));
+        self.points
+            .sort_by(|left, right| left.time_secs.total_cmp(&right.time_secs));
     }
 
     /// Samples the lane.
@@ -444,7 +447,10 @@ impl StudioProject {
             if !track_ids.insert(&track.id) {
                 issues.push(format!("duplicate track id {}", track.id));
             }
-            if !track.volume_db.is_finite() || !track.pan.is_finite() || !(-1.0..=1.0).contains(&track.pan) {
+            if !track.volume_db.is_finite()
+                || !track.pan.is_finite()
+                || !(-1.0..=1.0).contains(&track.pan)
+            {
                 issues.push(format!("track {} has invalid mixer values", track.id));
             }
             for region in &track.regions {
@@ -507,7 +513,10 @@ impl StudioProject {
         for sample in &mut output.samples {
             *sample = sample.clamp(-1.0, 1.0);
         }
-        Ok(MixResult { audio: output, warnings })
+        Ok(MixResult {
+            audio: output,
+            warnings,
+        })
     }
 }
 
@@ -643,12 +652,22 @@ mod tests {
         project.tracks.push(track);
         let mut assets = AudioAssetStore::default();
         assets
-            .insert("tone", AudioBuffer::sine(48_000, 1, 440.0, 0.01, 0.5).unwrap())
+            .insert(
+                "tone",
+                AudioBuffer::sine(48_000, 1, 440.0, 0.01, 0.5).unwrap(),
+            )
             .unwrap();
         let mix = project.mix(&assets).unwrap();
         assert!(mix.warnings.is_empty());
         assert!(mix.audio.samples.iter().any(|sample| sample.abs() > 0.0));
-        let right_energy: f32 = mix.audio.samples.iter().skip(1).step_by(2).map(|s| s.abs()).sum();
+        let right_energy: f32 = mix
+            .audio
+            .samples
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .map(|s| s.abs())
+            .sum();
         let left_energy: f32 = mix.audio.samples.iter().step_by(2).map(|s| s.abs()).sum();
         assert!(left_energy > right_energy);
     }
@@ -668,8 +687,14 @@ mod tests {
         .unwrap();
         assert!(audio.samples.iter().any(|sample| sample.abs() > 0.0));
         let mut lane = AutomationLane::default();
-        lane.set(AutomationPoint { time_secs: 1.0, value: 1.0 });
-        lane.set(AutomationPoint { time_secs: 0.0, value: 0.0 });
+        lane.set(AutomationPoint {
+            time_secs: 1.0,
+            value: 1.0,
+        });
+        lane.set(AutomationPoint {
+            time_secs: 0.0,
+            value: 0.0,
+        });
         assert!((lane.sample(0.5, 0.0) - 0.5).abs() < 0.001);
     }
 
@@ -681,5 +706,4 @@ mod tests {
         assert!(project.remove_region(1, "r1"));
         assert!(project.validate().is_empty());
     }
-
 }

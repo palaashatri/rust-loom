@@ -4,9 +4,7 @@
 //! `.loomdoc` documents. This is also used by the Docker visual-QA pipeline
 //! to exercise document workflows without a display.
 
-use loom_writer_core::{
-    load_document, save_document, PageStyle, RichBlock, WriterDocument,
-};
+use loom_writer_core::{load_document, save_document, PageStyle, RichBlock, WriterDocument};
 use std::path::PathBuf;
 
 fn main() {
@@ -100,7 +98,6 @@ fn cmd_validate(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-
 fn read_document(path: &str) -> Result<WriterDocument, String> {
     let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
     load_document(&bytes).map_err(|error| error.to_string())
@@ -111,7 +108,9 @@ fn cmd_search(path: &str, query: &str) -> Result<(), String> {
     let matches = document.find_all(query, false);
     println!("matches: {}", matches.len());
     for hit in matches {
-        let block = document.get(hit.block_id).ok_or("search returned unknown block")?;
+        let block = document
+            .get(hit.block_id)
+            .ok_or("search returned unknown block")?;
         println!(
             "block {} bytes {}..{}: {}",
             hit.block_id,
@@ -137,7 +136,11 @@ fn cmd_toc(path: &str) -> Result<(), String> {
     let entries = document.table_of_contents();
     println!("entries: {}", entries.len());
     for entry in entries {
-        println!("{}{}", "  ".repeat(entry.level.saturating_sub(1) as usize), entry.title);
+        println!(
+            "{}{}",
+            "  ".repeat(entry.level.saturating_sub(1) as usize),
+            entry.title
+        );
     }
     Ok(())
 }
@@ -147,8 +150,16 @@ fn cmd_paginate(path: &str) -> Result<(), String> {
     let pages = document.paginate(&PageStyle::default())?;
     println!("pages: {}", pages.len());
     for page in pages {
-        let chars: usize = page.fragments.iter().map(|fragment| fragment.text.chars().count()).sum();
-        println!("page {}: {} fragment(s), {chars} characters", page.index + 1, page.fragments.len());
+        let chars: usize = page
+            .fragments
+            .iter()
+            .map(|fragment| fragment.text.chars().count())
+            .sum();
+        println!(
+            "page {}: {} fragment(s), {chars} characters",
+            page.index + 1,
+            page.fragments.len()
+        );
     }
     Ok(())
 }

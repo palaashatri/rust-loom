@@ -30,16 +30,28 @@ fn main() -> Result<(), String> {
         }
         "render-demo" => {
             let out_path = args.get(2).ok_or("missing output path")?;
-            let width = args.get(3).and_then(|value| value.parse().ok()).unwrap_or(640);
-            let height = args.get(4).and_then(|value| value.parse().ok()).unwrap_or(360);
-            let mut document = PhotoDocument::new("render-demo", "Reference Composite", width, height);
+            let width = args
+                .get(3)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(640);
+            let height = args
+                .get(4)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(360);
+            let mut document =
+                PhotoDocument::new("render-demo", "Reference Composite", width, height);
             document.layers[0].blend_mode = BlendMode::Normal;
             document.add_layer(Layer::new_pixel("overlay", "Copper Overlay"));
             document.layers[1].opacity = 0.55;
             document.layers[1].blend_mode = BlendMode::Screen;
-            document.add_layer(Layer::new_adjustment("contrast", "Contrast", "contrast", 0.35));
+            document.add_layer(Layer::new_adjustment(
+                "contrast", "Contrast", "contrast", 0.35,
+            ));
             let mut canvas = PhotoCanvas::new(document)?;
-            canvas.set_layer_image("layer-bg", RgbaImage::solid(width, height, [24, 28, 36, 255])?)?;
+            canvas.set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(width, height, [24, 28, 36, 255])?,
+            )?;
             let mut overlay = RgbaImage::transparent(width, height)?;
             for y in 0..height {
                 for x in 0..width {

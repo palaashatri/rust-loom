@@ -546,7 +546,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     out
 }
 
-
 /// Structural information discovered by the bounded WebAssembly validator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WasmModuleInfo {
@@ -765,10 +764,7 @@ impl PluginInvocation {
     /// that the installed module exports it.
     pub fn declared(plugin: &InstalledPlugin) -> Result<PluginInvocation, HostError> {
         let bytes = fs::read(&plugin.wasm_path)?;
-        let info = validate_wasm_module(
-            &bytes,
-            plugin.manifest.resource_limits.max_memory_bytes,
-        )?;
+        let info = validate_wasm_module(&bytes, plugin.manifest.resource_limits.max_memory_bytes)?;
         if !info.exports_function(&plugin.manifest.entry.function) {
             return Err(HostError::InvalidWasm(format!(
                 "declared entry function {:?} is not exported",
@@ -884,7 +880,12 @@ impl ExternalWasmtimeRuntime {
         let stdout_thread = thread::spawn(move || read_bounded(stdout, MAX_CAPTURE_BYTES));
         let stderr_thread = thread::spawn(move || read_bounded(stderr, MAX_CAPTURE_BYTES));
         let timeout = Duration::from_millis(
-            request.plugin.manifest.resource_limits.max_cpu_ms_per_call.max(1),
+            request
+                .plugin
+                .manifest
+                .resource_limits
+                .max_cpu_ms_per_call
+                .max(1),
         );
         let status = loop {
             if let Some(status) = child
@@ -925,7 +926,9 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> Result<Vec<u8>, HostErro
         .take(u64::try_from(limit).unwrap_or(u64::MAX) + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
-        return Err(HostError::Execution("runtime output exceeded capture limit".into()));
+        return Err(HostError::Execution(
+            "runtime output exceeded capture limit".into(),
+        ));
     }
     Ok(bytes)
 }

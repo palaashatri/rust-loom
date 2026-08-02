@@ -236,7 +236,6 @@ pub fn load_video_project(bytes: &[u8]) -> Result<VideoProject, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
-
 /// One resolved timeline segment ready for a decoder/render backend.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderSegment {
@@ -332,7 +331,9 @@ impl Clip {
     /// Trims the source in point, moving the timeline start to preserve the out point.
     pub fn trim_in(&mut self, source_in: f64) -> Result<(), TimelineError> {
         if !source_in.is_finite() || source_in < 0.0 || source_in >= self.out_point {
-            return Err(TimelineError::InvalidTiming("invalid source in point".into()));
+            return Err(TimelineError::InvalidTiming(
+                "invalid source in point".into(),
+            ));
         }
         let delta = source_in - self.in_point;
         self.in_point = source_in;
@@ -343,7 +344,9 @@ impl Clip {
     /// Trims the source out point.
     pub fn trim_out(&mut self, source_out: f64) -> Result<(), TimelineError> {
         if !source_out.is_finite() || source_out <= self.in_point {
-            return Err(TimelineError::InvalidTiming("invalid source out point".into()));
+            return Err(TimelineError::InvalidTiming(
+                "invalid source out point".into(),
+            ));
         }
         self.out_point = source_out;
         self.sync_duration()
@@ -431,14 +434,20 @@ impl VideoProject {
             .filter(|clip| clip.enabled)
             .map(Clip::end_time)
             .fold(0.0_f64, f64::max);
-        let captions = self.captions.iter().map(|caption| caption.end).fold(0.0, f64::max);
+        let captions = self
+            .captions
+            .iter()
+            .map(|caption| caption.end)
+            .fold(0.0, f64::max);
         clips.max(captions)
     }
 
     /// Adds a marker in sorted order.
     pub fn add_marker(&mut self, marker: TimelineMarker) -> Result<(), TimelineError> {
         if !marker.time.is_finite() || marker.time < 0.0 {
-            return Err(TimelineError::InvalidTiming("marker time is invalid".into()));
+            return Err(TimelineError::InvalidTiming(
+                "marker time is invalid".into(),
+            ));
         }
         if self.markers.iter().any(|existing| existing.id == marker.id) {
             return Err(TimelineError::InvalidTiming(format!(
@@ -447,7 +456,8 @@ impl VideoProject {
             )));
         }
         self.markers.push(marker);
-        self.markers.sort_by(|left, right| left.time.total_cmp(&right.time));
+        self.markers
+            .sort_by(|left, right| left.time.total_cmp(&right.time));
         Ok(())
     }
 
@@ -458,7 +468,9 @@ impl VideoProject {
             || caption.start < 0.0
             || caption.end <= caption.start
         {
-            return Err(TimelineError::InvalidTiming("caption range is invalid".into()));
+            return Err(TimelineError::InvalidTiming(
+                "caption range is invalid".into(),
+            ));
         }
         self.captions.push(caption);
         self.captions
@@ -709,5 +721,4 @@ mod tests {
         project.tracks[0].insert_clip(second).unwrap();
         assert_eq!(project.tracks[0].overlaps(), vec![("a".into(), "b".into())]);
     }
-
 }

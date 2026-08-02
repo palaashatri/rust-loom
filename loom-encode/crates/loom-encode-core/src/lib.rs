@@ -162,7 +162,6 @@ pub fn load_encode_queue(bytes: &[u8]) -> Result<EncodeQueue, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
-
 /// External transcoder backend discovered on the local machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncoderBackend {
@@ -258,7 +257,10 @@ pub fn discover_ffmpeg(candidates: &[std::path::PathBuf]) -> Result<EncoderBacke
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let version = stdout.lines().next().unwrap_or("ffmpeg").to_string();
-                return Ok(EncoderBackend { executable, version });
+                return Ok(EncoderBackend {
+                    executable,
+                    version,
+                });
             }
             Ok(output) => {
                 last_error = Some(EncodeError::ProcessFailed {
@@ -322,7 +324,9 @@ impl EncodeJob {
             ));
         }
         if self.preset.bitrate_kbps == 0 && self.preset.video_codec != "copy" {
-            return Err(EncodeError::InvalidJob("video bitrate must be non-zero".into()));
+            return Err(EncodeError::InvalidJob(
+                "video bitrate must be non-zero".into(),
+            ));
         }
         self.preset.ffmpeg_video_encoder()?;
         self.preset.ffmpeg_audio_encoder()?;
@@ -338,7 +342,9 @@ impl EncodeJob {
         self.validate()?;
         let input = std::path::PathBuf::from(&self.source_file);
         let output = std::path::PathBuf::from(&self.output_file);
-        if output.extension().and_then(|value| value.to_str()) != Some(self.preset.container.as_str()) {
+        if output.extension().and_then(|value| value.to_str())
+            != Some(self.preset.container.as_str())
+        {
             return Err(EncodeError::InvalidJob(format!(
                 "output extension must match preset container .{}",
                 self.preset.container
@@ -347,7 +353,11 @@ impl EncodeJob {
         let mut arguments = vec![
             "-hide_banner".into(),
             "-nostdin".into(),
-            if policy.overwrite { "-y".into() } else { "-n".into() },
+            if policy.overwrite {
+                "-y".into()
+            } else {
+                "-n".into()
+            },
             "-i".into(),
             input.to_string_lossy().into_owned(),
             "-map_metadata".into(),
@@ -475,18 +485,14 @@ where
     use std::thread;
 
     if !plan.input.is_file() {
-        let error = EncodeError::InvalidJob(format!(
-            "input does not exist: {}",
-            plan.input.display()
-        ));
+        let error =
+            EncodeError::InvalidJob(format!("input does not exist: {}", plan.input.display()));
         job.status = JobStatus::Failed(error.to_string());
         return Err(error);
     }
     if plan.output.exists() && plan.arguments.iter().any(|argument| argument == "-n") {
-        let error = EncodeError::InvalidJob(format!(
-            "output already exists: {}",
-            plan.output.display()
-        ));
+        let error =
+            EncodeError::InvalidJob(format!("output already exists: {}", plan.output.display()));
         job.status = JobStatus::Failed(error.to_string());
         return Err(error);
     }
@@ -598,12 +604,7 @@ mod tests {
 
     #[test]
     fn ffmpeg_plan_is_deterministic_and_safe() {
-        let job = EncodeJob::new(
-            "job",
-            "input.mov",
-            "output.mp4",
-            EncodePreset::h264_1080p(),
-        );
+        let job = EncodeJob::new("job", "input.mov", "output.mp4", EncodePreset::h264_1080p());
         let backend = EncoderBackend {
             executable: "/usr/bin/ffmpeg".into(),
             version: "ffmpeg version test".into(),
@@ -621,17 +622,15 @@ mod tests {
     fn invalid_encode_paths_and_extensions_are_rejected() {
         let same = EncodeJob::new("job", "same.mov", "same.mov", EncodePreset::h264_1080p());
         assert!(same.validate().is_err());
-        let bad_extension = EncodeJob::new(
-            "job",
-            "input.mov",
-            "output.mkv",
-            EncodePreset::h264_1080p(),
-        );
+        let bad_extension =
+            EncodeJob::new("job", "input.mov", "output.mkv", EncodePreset::h264_1080p());
         let backend = EncoderBackend {
             executable: "ffmpeg".into(),
             version: String::new(),
         };
-        assert!(bad_extension.plan(&backend, ExecutionPolicy::default()).is_err());
+        assert!(bad_extension
+            .plan(&backend, ExecutionPolicy::default())
+            .is_err());
     }
 
     #[test]
@@ -645,5 +644,4 @@ mod tests {
         assert_eq!(queue.recover_interrupted(), 1);
         assert!(matches!(queue.jobs[0].status, JobStatus::Queued));
     }
-
 }

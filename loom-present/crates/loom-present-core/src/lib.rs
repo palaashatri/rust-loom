@@ -191,7 +191,6 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     pdf.serialize()
 }
 
-
 /// Built-in transition between two slides.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TransitionKind {
@@ -325,7 +324,8 @@ impl PresentationSession {
         let Some(previous) = self.undo.pop() else {
             return false;
         };
-        self.redo.push(std::mem::replace(&mut self.document, previous));
+        self.redo
+            .push(std::mem::replace(&mut self.document, previous));
         true
     }
 
@@ -401,7 +401,11 @@ impl PresentationSession {
         let Some(slide) = self.document.active_slide() else {
             return false;
         };
-        let Some(index) = slide.elements.iter().position(|element| element.id == element_id) else {
+        let Some(index) = slide
+            .elements
+            .iter()
+            .position(|element| element.id == element_id)
+        else {
             return false;
         };
         self.checkpoint();
@@ -425,7 +429,11 @@ impl PresentationSession {
         let Some(slide) = self.document.active_slide() else {
             return false;
         };
-        if !slide.elements.iter().any(|element| element.id == element_id) {
+        if !slide
+            .elements
+            .iter()
+            .any(|element| element.id == element_id)
+        {
             return false;
         }
         self.checkpoint();
@@ -446,7 +454,12 @@ impl PresentationSession {
 
     /// Sets the outgoing transition for a slide.
     pub fn set_transition(&mut self, slide_id: &str, transition: TransitionKind) -> bool {
-        if !self.document.slides.iter().any(|slide| slide.id == slide_id) {
+        if !self
+            .document
+            .slides
+            .iter()
+            .any(|slide| slide.id == slide_id)
+        {
             return false;
         }
         self.transitions.insert(slide_id.to_string(), transition);
@@ -644,5 +657,4 @@ mod tests {
             .iter()
             .any(|issue| issue.message.contains("duplicate element")));
     }
-
 }

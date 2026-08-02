@@ -59,7 +59,10 @@ fn main() -> Result<(), String> {
             }
             for track in &project.tracks {
                 for (left, right) in track.overlaps() {
-                    eprintln!("warning: track {} clips {left} and {right} overlap", track.id);
+                    eprintln!(
+                        "warning: track {} clips {left} and {right} overlap",
+                        track.id
+                    );
                 }
             }
         }

@@ -1162,7 +1162,6 @@ pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
     Ok(sheet)
 }
 
-
 /// Inclusive rectangular cell range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellRange {
@@ -1265,8 +1264,12 @@ impl ValidationRule {
                 }
                 _ => false,
             },
-            ValidationRule::List(options) => options.iter().any(|option| option == &value.display()),
-            ValidationRule::Required => !matches!(value, Value::Empty) && !value.display().is_empty(),
+            ValidationRule::List(options) => {
+                options.iter().any(|option| option == &value.display())
+            }
+            ValidationRule::Required => {
+                !matches!(value, Value::Empty) && !value.display().is_empty()
+            }
         }
     }
 }
@@ -1482,22 +1485,38 @@ impl SheetModel {
         let mut rows: Vec<u32> = (range.start.row..=range.end.row).collect();
         rows.sort_by(|left, right| {
             let left_value = values
-                .get(&CellRef { row: *left, col: sort_column })
+                .get(&CellRef {
+                    row: *left,
+                    col: sort_column,
+                })
                 .cloned()
                 .unwrap_or(Value::Empty);
             let right_value = values
-                .get(&CellRef { row: *right, col: sort_column })
+                .get(&CellRef {
+                    row: *right,
+                    col: sort_column,
+                })
                 .cloned()
                 .unwrap_or(Value::Empty);
             let ordering = compare_values(&left_value, &right_value);
-            if ascending { ordering } else { ordering.reverse() }
+            if ascending {
+                ordering
+            } else {
+                ordering.reverse()
+            }
         });
         let original = self.sheet.cells.clone();
         for (destination_offset, source_row) in rows.into_iter().enumerate() {
             let destination_row = range.start.row + destination_offset as u32;
             for col in range.start.col..=range.end.col {
-                let source = CellRef { row: source_row, col };
-                let destination = CellRef { row: destination_row, col };
+                let source = CellRef {
+                    row: source_row,
+                    col,
+                };
+                let destination = CellRef {
+                    row: destination_row,
+                    col,
+                };
                 match original.get(&source) {
                     Some(cell) => {
                         self.sheet.cells.insert(destination, cell.clone());
@@ -1567,7 +1586,10 @@ fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
         (Value::Empty, Value::Empty) => std::cmp::Ordering::Equal,
         (Value::Empty, _) => std::cmp::Ordering::Greater,
         (_, Value::Empty) => std::cmp::Ordering::Less,
-        _ => left.display().to_lowercase().cmp(&right.display().to_lowercase()),
+        _ => left
+            .display()
+            .to_lowercase()
+            .cmp(&right.display().to_lowercase()),
     }
 }
 
@@ -1593,11 +1615,7 @@ impl CalculationCache {
     ///
     /// Formula parsing for the graph is linear in the sheet's formula count,
     /// while evaluation is restricted to the affected subgraph.
-    pub fn recalculate(
-        &mut self,
-        sheet: &Sheet,
-        changed: &[CellRef],
-    ) -> HashSet<CellRef> {
+    pub fn recalculate(&mut self, sheet: &Sheet, changed: &[CellRef]) -> HashSet<CellRef> {
         let (dependencies, dependents) = dependency_graph(sheet);
         self.dependencies = dependencies;
         self.dependents = dependents;
@@ -1932,7 +1950,9 @@ mod tests {
             model.evaluate().get(&CellRef::parse("B1").unwrap()),
             Some(&Value::Number(30.0))
         );
-        assert!(model.set_validated(CellRef::parse("A1").unwrap(), "-1").is_err());
+        assert!(model
+            .set_validated(CellRef::parse("A1").unwrap(), "-1")
+            .is_err());
         assert_eq!(
             model.conditional_style_ids(CellRef::parse("A2").unwrap()),
             vec!["high"]
@@ -1975,5 +1995,4 @@ mod tests {
             Some(&Value::Number(12.0))
         );
     }
-
 }

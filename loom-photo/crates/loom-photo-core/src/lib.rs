@@ -162,7 +162,6 @@ pub fn load_photo(bytes: &[u8]) -> Result<PhotoDocument, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
-
 /// Maximum raster size accepted by the in-memory reference compositor.
 pub const MAX_REFERENCE_PIXELS: usize = 100_000_000;
 
@@ -203,7 +202,9 @@ impl RgbaImage {
         if self.pixels.len() != expected {
             return Err(format!(
                 "RGBA buffer length {} does not match {}x{}",
-                self.pixels.len(), self.width, self.height
+                self.pixels.len(),
+                self.width,
+                self.height
             ));
         }
         Ok(())
@@ -281,7 +282,8 @@ impl RgbaImage {
         for pixel in self.pixels.chunks_exact(4) {
             let alpha = pixel[3] as f32 / 255.0;
             for channel in 0..3 {
-                let value = pixel[channel] as f32 * alpha + background[channel] as f32 * (1.0 - alpha);
+                let value =
+                    pixel[channel] as f32 * alpha + background[channel] as f32 * (1.0 - alpha);
                 output.push(value.round().clamp(0.0, 255.0) as u8);
             }
         }
@@ -347,7 +349,12 @@ impl PhotoCanvas {
 
     /// Attaches an 8-bit mask to a layer; 0 hides and 255 reveals.
     pub fn set_layer_mask(&mut self, layer_id: &str, mask: Vec<u8>) -> Result<(), String> {
-        if !self.document.layers.iter().any(|layer| layer.id == layer_id) {
+        if !self
+            .document
+            .layers
+            .iter()
+            .any(|layer| layer.id == layer_id)
+        {
             return Err(format!("unknown layer {layer_id}"));
         }
         let expected = self.document.width as usize * self.document.height as usize;
@@ -411,7 +418,9 @@ fn blend_image(
         .zip(source.pixels.chunks_exact(4))
         .enumerate()
     {
-        let mask_alpha = mask.map(|mask| mask[pixel_index] as f32 / 255.0).unwrap_or(1.0);
+        let mask_alpha = mask
+            .map(|mask| mask[pixel_index] as f32 / 255.0)
+            .unwrap_or(1.0);
         let source_alpha = src[3] as f32 / 255.0 * opacity.clamp(0.0, 1.0) * mask_alpha;
         let destination_alpha = dst[3] as f32 / 255.0;
         let out_alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
@@ -457,7 +466,9 @@ fn apply_adjustment(
 ) {
     let normalized_name = adjustment_type.trim().to_ascii_lowercase();
     for (pixel_index, pixel) in image.pixels.chunks_exact_mut(4).enumerate() {
-        let mask_alpha = mask.map(|mask| mask[pixel_index] as f32 / 255.0).unwrap_or(1.0);
+        let mask_alpha = mask
+            .map(|mask| mask[pixel_index] as f32 / 255.0)
+            .unwrap_or(1.0);
         let strength = opacity.clamp(0.0, 1.0) * mask_alpha;
         if strength <= 0.0 {
             continue;
@@ -492,7 +503,8 @@ fn apply_adjustment(
             }
         }
         for channel in 0..3 {
-            pixel[channel] = (original[channel] + (adjusted[channel] - original[channel]) * strength)
+            pixel[channel] = (original[channel]
+                + (adjusted[channel] - original[channel]) * strength)
                 .round()
                 .clamp(0.0, 255.0) as u8;
         }
@@ -559,7 +571,10 @@ mod tests {
         doc.add_layer(Layer::new_adjustment("bright", "Bright", "brightness", 0.1));
         let mut canvas = PhotoCanvas::new(doc).expect("canvas");
         canvas
-            .set_layer_image("layer-bg", RgbaImage::solid(2, 1, [100, 100, 100, 255]).unwrap())
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(2, 1, [100, 100, 100, 255]).unwrap(),
+            )
             .unwrap();
         canvas
             .set_layer_image("top", RgbaImage::solid(2, 1, [200, 0, 0, 255]).unwrap())
@@ -576,7 +591,10 @@ mod tests {
         let doc = PhotoDocument::new("photo-mask", "Mask", 2, 1);
         let mut canvas = PhotoCanvas::new(doc).unwrap();
         canvas
-            .set_layer_image("layer-bg", RgbaImage::solid(2, 1, [255, 0, 0, 255]).unwrap())
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(2, 1, [255, 0, 0, 255]).unwrap(),
+            )
             .unwrap();
         canvas.set_layer_mask("layer-bg", vec![255, 0]).unwrap();
         let result = canvas.composite().unwrap();
@@ -595,5 +613,4 @@ mod tests {
         let resized = crop.resize_nearest(3, 2).unwrap();
         assert_eq!(resized.pixel(2, 1), Some([10, 20, 30, 255]));
     }
-
 }

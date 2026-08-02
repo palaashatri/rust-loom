@@ -39,7 +39,10 @@ fn main() -> Result<(), String> {
         }
         "plan" => {
             let in_path = args.get(2).ok_or("missing input path")?;
-            let index = args.get(3).and_then(|value| value.parse().ok()).unwrap_or(0usize);
+            let index = args
+                .get(3)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0usize);
             let candidates = args
                 .get(4)
                 .map(|path| vec![std::path::PathBuf::from(path)])
@@ -52,11 +55,18 @@ fn main() -> Result<(), String> {
                 .plan(&backend, ExecutionPolicy::default())
                 .map_err(|e| e.to_string())?;
             println!("backend: {}", backend.version);
-            println!("command: {} {}", plan.executable.display(), shell_join(&plan.arguments));
+            println!(
+                "command: {} {}",
+                plan.executable.display(),
+                shell_join(&plan.arguments)
+            );
         }
         "run" => {
             let in_path = args.get(2).ok_or("missing input path")?;
-            let index = args.get(3).and_then(|value| value.parse().ok()).unwrap_or(0usize);
+            let index = args
+                .get(3)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0usize);
             let candidates = args
                 .get(4)
                 .map(|path| vec![std::path::PathBuf::from(path)])
@@ -69,7 +79,10 @@ fn main() -> Result<(), String> {
             let bytes = std::fs::read(in_path).map_err(|e| format!("read error: {e}"))?;
             let mut queue = load_encode_queue(&bytes)?;
             let backend = discover_ffmpeg(&candidates).map_err(|e| e.to_string())?;
-            let job = queue.jobs.get_mut(index).ok_or("job index is out of bounds")?;
+            let job = queue
+                .jobs
+                .get_mut(index)
+                .ok_or("job index is out of bounds")?;
             let plan = job
                 .plan(&backend, ExecutionPolicy::default())
                 .map_err(|e| e.to_string())?;
@@ -114,7 +127,10 @@ fn shell_join(arguments: &[String]) -> String {
     arguments
         .iter()
         .map(|argument| {
-            if argument.chars().all(|character| character.is_ascii_alphanumeric() || "-._/:".contains(character)) {
+            if argument
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "-._/:".contains(character))
+            {
                 argument.clone()
             } else {
                 format!("\"{}\"", argument.replace('\"', "\\\""))

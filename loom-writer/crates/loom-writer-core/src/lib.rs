@@ -1210,7 +1210,6 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     pdf.serialize()
 }
 
-
 /// One text-search hit in a document block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchMatch {
@@ -1375,8 +1374,7 @@ impl WriterTable {
             for column in 0..columns {
                 output.push(' ');
                 output.push_str(
-                    &row
-                        .get(column)
+                    &row.get(column)
                         .map(String::as_str)
                         .unwrap_or("")
                         .replace('|', "\\|"),
@@ -1426,7 +1424,11 @@ impl WriterWorkspace {
 
     /// Adds a validated anchored comment.
     pub fn add_comment(&mut self, comment: CommentThread) -> Result<(), String> {
-        if self.comments.iter().any(|existing| existing.id == comment.id) {
+        if self
+            .comments
+            .iter()
+            .any(|existing| existing.id == comment.id)
+        {
             return Err(format!("duplicate comment id {}", comment.id));
         }
         let block = self
@@ -1462,7 +1464,11 @@ impl WriterWorkspace {
         next_text: &str,
     ) -> Result<(), String> {
         let revision_id = revision_id.into();
-        if self.revisions.iter().any(|revision| revision.id == revision_id) {
+        if self
+            .revisions
+            .iter()
+            .any(|revision| revision.id == revision_id)
+        {
             return Err(format!("duplicate revision id {revision_id}"));
         }
         let block = self
@@ -1583,13 +1589,17 @@ impl WriterDocument {
         let mut matches = Vec::new();
         for block in &self.blocks {
             if case_sensitive {
-                matches.extend(block.text.as_str().match_indices(query).map(|(start, value)| {
-                    SearchMatch {
-                        block_id: block.id,
-                        start,
-                        end: start + value.len(),
-                    }
-                }));
+                matches.extend(
+                    block
+                        .text
+                        .as_str()
+                        .match_indices(query)
+                        .map(|(start, value)| SearchMatch {
+                            block_id: block.id,
+                            start,
+                            end: start + value.len(),
+                        }),
+                );
             } else {
                 // Unicode lowercase can change byte length, so search by character
                 // windows and map matches back to original UTF-8 byte offsets.
@@ -1713,12 +1723,16 @@ impl WriterDocument {
                     });
                     lines_used = 0;
                 }
-                pages.last_mut().expect("at least one page").fragments.push(PageFragment {
-                    block_id: block.id,
-                    start,
-                    end,
-                    text: text[start..end].to_string(),
-                });
+                pages
+                    .last_mut()
+                    .expect("at least one page")
+                    .fragments
+                    .push(PageFragment {
+                        block_id: block.id,
+                        start,
+                        end,
+                        text: text[start..end].to_string(),
+                    });
                 lines_used += 1;
             }
             // Paragraph spacing consumes one reference line unless already at a page break.
@@ -1744,10 +1758,14 @@ fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
             last_break = Some(index + character.len_utf8());
         }
         if chars >= columns {
-            let end = last_break.filter(|break_at| *break_at > line_start).unwrap_or(index + character.len_utf8());
+            let end = last_break
+                .filter(|break_at| *break_at > line_start)
+                .unwrap_or(index + character.len_utf8());
             ranges.push((line_start, end));
             line_start = end;
-            chars = text[line_start..index + character.len_utf8()].chars().count();
+            chars = text[line_start..index + character.len_utf8()]
+                .chars()
+                .count();
             last_break = None;
         }
     }
@@ -2074,16 +2092,18 @@ mod tests {
         assert_eq!(doc.replace_all("loom", "Loom Suite", false), 1);
         assert!(doc.plain_text().contains("Loom Suite"));
         assert_eq!(doc.table_of_contents()[0].level, 1);
-        let pages = doc.paginate(&PageStyle {
-            width_pt: 180.0,
-            height_pt: 120.0,
-            margin_top_pt: 10.0,
-            margin_bottom_pt: 10.0,
-            margin_left_pt: 10.0,
-            margin_right_pt: 10.0,
-            body_font_size_pt: 10.0,
-            line_height: 1.0,
-        }).unwrap();
+        let pages = doc
+            .paginate(&PageStyle {
+                width_pt: 180.0,
+                height_pt: 120.0,
+                margin_top_pt: 10.0,
+                margin_bottom_pt: 10.0,
+                margin_left_pt: 10.0,
+                margin_right_pt: 10.0,
+                body_font_size_pt: 10.0,
+                line_height: 1.0,
+            })
+            .unwrap();
         assert!(!pages.is_empty());
         assert!(pages.iter().all(|page| !page.fragments.is_empty()));
     }
@@ -2108,15 +2128,23 @@ mod tests {
         workspace
             .revise_block("revision-1", "Editor", block_id, "Edited title")
             .unwrap();
-        assert_eq!(workspace.document.get(block_id).unwrap().text.as_str(), "Edited title");
+        assert_eq!(
+            workspace.document.get(block_id).unwrap().text.as_str(),
+            "Edited title"
+        );
         assert!(workspace.reject_revision("revision-1"));
         workspace.set_bookmark("intro", block_id).unwrap();
         let mut table = WriterTable::new("table-1", 2, 2);
         table.set(0, 0, "Name");
         table.set(1, 0, "Loom");
         let table_block = workspace.insert_table(table).unwrap();
-        assert!(workspace.document.get(table_block).unwrap().text.as_str().contains("Name"));
+        assert!(workspace
+            .document
+            .get(table_block)
+            .unwrap()
+            .text
+            .as_str()
+            .contains("Name"));
         assert!(workspace.validate().is_empty());
     }
-
 }

@@ -154,7 +154,6 @@ fn cmd_tocsv(path: &str, out: &str) -> Result<(), String> {
     Ok(())
 }
 
-
 fn cmd_recalc(path: &str, cell: &str, raw: &str) -> Result<(), String> {
     let csv = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut sheet = from_csv("input", &csv);

@@ -202,7 +202,6 @@ fn stats(args: &[String]) -> ExitCode {
     }
 }
 
-
 fn segment(args: &[String]) -> ExitCode {
     let [input_path, output_path] = args else {
         eprintln!("error: segment requires <image> <mask.pgm>");
@@ -217,7 +216,11 @@ fn segment(args: &[String]) -> ExitCode {
     };
     let mut context = RunContext::new();
     match ThresholdSegmentationProvider::new().run(&input, &mut context) {
-        Ok(ProviderOutput::SegmentationMask { width, height, mask }) => {
+        Ok(ProviderOutput::SegmentationMask {
+            width,
+            height,
+            mask,
+        }) => {
             let mut pgm = format!("P5\n{width} {height}\n255\n").into_bytes();
             pgm.extend_from_slice(&mask);
             if let Err(error) = std::fs::write(output_path, pgm) {

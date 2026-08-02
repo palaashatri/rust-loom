@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::error::VisionError;
 use crate::provider::{
-    image_to_luma_checked, Backend, BBox, CapabilityId, CapabilityProvider, InputType,
+    image_to_luma_checked, BBox, Backend, CapabilityId, CapabilityProvider, InputType,
     ProviderDescriptor, ProviderInput, ProviderOutput, RunContext,
 };
 
@@ -208,7 +208,6 @@ impl CapabilityProvider for ImageStatsProvider {
     }
 }
 
-
 /// CPU reference foreground segmentation using Otsu thresholding.
 pub struct ThresholdSegmentationProvider {
     descriptor: ProviderDescriptor,
@@ -220,7 +219,9 @@ impl ThresholdSegmentationProvider {
         let mut descriptor = ProviderDescriptor::new(CapabilityId::Segmentation);
         descriptor.name = "loom-reference-otsu-segmentation".into();
         descriptor.version = "0.1.0".into();
-        descriptor.description = "Deterministic foreground mask using grayscale conversion and Otsu thresholding.".into();
+        descriptor.description =
+            "Deterministic foreground mask using grayscale conversion and Otsu thresholding."
+                .into();
         descriptor.input_types = vec![InputType::Image];
         descriptor.output_schema = r#"{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"},"mask":{"type":"array","items":{"type":"integer"}}}}"#.into();
         descriptor.media_formats = ["png", "jpeg", "webp", "bmp", "tiff", "gray"]
@@ -288,7 +289,8 @@ impl DocumentLayoutProvider {
         descriptor.version = "0.1.0".into();
         descriptor.description = "Connected-component document region detection for high-contrast scans and screenshots.".into();
         descriptor.input_types = vec![InputType::Image];
-        descriptor.output_schema = r#"{"type":"object","properties":{"boxes":{"type":"array"}}}"#.into();
+        descriptor.output_schema =
+            r#"{"type":"object","properties":{"boxes":{"type":"array"}}}"#.into();
         descriptor.media_formats = ["png", "jpeg", "webp", "bmp", "tiff", "gray"]
             .map(String::from)
             .to_vec();
@@ -351,7 +353,9 @@ impl CapabilityProvider for DocumentLayoutProvider {
                     max_x = max_x.max(current_x);
                     min_y = min_y.min(current_y);
                     max_y = max_y.max(current_y);
-                    for (next_x, next_y) in neighbours(current_x, current_y, image_width, image_height) {
+                    for (next_x, next_y) in
+                        neighbours(current_x, current_y, image_width, image_height)
+                    {
                         let next_index = next_y * image_width + next_x;
                         if !visited[next_index] && luma[next_index] <= threshold {
                             visited[next_index] = true;
@@ -402,7 +406,8 @@ impl ImageEmbeddingProvider {
         let mut descriptor = ProviderDescriptor::new(CapabilityId::Embedding);
         descriptor.name = "loom-reference-luma-embedding".into();
         descriptor.version = "0.1.0".into();
-        descriptor.description = "L2-normalized 64-value luminance embedding for local similarity search.".into();
+        descriptor.description =
+            "L2-normalized 64-value luminance embedding for local similarity search.".into();
         descriptor.input_types = vec![InputType::Image];
         descriptor.output_schema = r#"{"type":"object","properties":{"values":{"type":"array","minItems":64,"maxItems":64}}}"#.into();
         descriptor.media_formats = ["png", "jpeg", "webp", "bmp", "tiff", "gray"]
@@ -480,7 +485,8 @@ impl AudioAnalysisProvider {
         let mut descriptor = ProviderDescriptor::new(CapabilityId::AudioAnalysis);
         descriptor.name = "loom-reference-audio-analysis".into();
         descriptor.version = "0.1.0".into();
-        descriptor.description = "Deterministic RMS, peak, and zero-crossing analysis for interleaved PCM.".into();
+        descriptor.description =
+            "Deterministic RMS, peak, and zero-crossing analysis for interleaved PCM.".into();
         descriptor.input_types = vec![InputType::Audio];
         descriptor.output_schema = r#"{"type":"object","properties":{"rms":{"type":"number"},"peak":{"type":"number"},"zero_crossing_rate":{"type":"number"}}}"#.into();
         descriptor.media_formats = ["pcm-f32"].map(String::from).to_vec();
@@ -522,7 +528,9 @@ impl CapabilityProvider for AudioAnalysisProvider {
             return Err(VisionError::UnsupportedInput);
         };
         if *sample_rate == 0 || *channels == 0 || samples.len() % *channels as usize != 0 {
-            return Err(VisionError::Internal("invalid interleaved audio buffer".into()));
+            return Err(VisionError::Internal(
+                "invalid interleaved audio buffer".into(),
+            ));
         }
         if samples.is_empty() {
             return Ok(ProviderOutput::AudioAnalysis {
@@ -541,7 +549,9 @@ impl CapabilityProvider for AudioAnalysisProvider {
                 ctx.set_progress(index as f32 / samples.len() as f32);
             }
             if !sample.is_finite() {
-                return Err(VisionError::Internal("audio contains non-finite samples".into()));
+                return Err(VisionError::Internal(
+                    "audio contains non-finite samples".into(),
+                ));
             }
             sum_squares += f64::from(sample) * f64::from(sample);
             peak = peak.max(sample.abs());
@@ -1012,5 +1022,4 @@ mod tests {
                     && (zero_crossing_rate - 1.0).abs() < 0.001
         ));
     }
-
 }

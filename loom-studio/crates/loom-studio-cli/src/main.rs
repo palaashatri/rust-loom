@@ -50,7 +50,10 @@ fn main() -> Result<(), String> {
             let audio = AudioBuffer::sine(48_000, 2, frequency, seconds, 0.25)?;
             std::fs::write(out_path, audio.to_wav_pcm16()?)
                 .map_err(|e| format!("write error: {e}"))?;
-            println!("Rendered oscillator: {out_path} ({:.3}s)", audio.duration_secs());
+            println!(
+                "Rendered oscillator: {out_path} ({:.3}s)",
+                audio.duration_secs()
+            );
         }
         "synth" => {
             let out_path = args.get(2).ok_or("missing output path")?;

@@ -52,7 +52,10 @@ fn main() -> Result<(), String> {
                 println!("valid presentation");
             } else {
                 for issue in &issues {
-                    println!("slide {:?} element {:?}: {}", issue.slide_index, issue.element_id, issue.message);
+                    println!(
+                        "slide {:?} element {:?}: {}",
+                        issue.slide_index, issue.element_id, issue.message
+                    );
                 }
                 return Err(format!("{} validation issue(s)", issues.len()));
             }
@@ -75,8 +78,13 @@ fn main() -> Result<(), String> {
             for element in scene.elements {
                 println!(
                     "{} {:?} {:.3},{:.3} {:.3}x{:.3}: {}",
-                    element.id, element.element_type, element.x, element.y,
-                    element.width, element.height, element.content
+                    element.id,
+                    element.element_type,
+                    element.x,
+                    element.y,
+                    element.width,
+                    element.height,
+                    element.content
                 );
             }
         }

@@ -163,7 +163,6 @@ pub fn load_motion(bytes: &[u8]) -> Result<CompositionDocument, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
-
 /// Sampled transform for one layer at one composition time.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerSample {
@@ -278,9 +277,7 @@ impl CompositionDocument {
 
     /// Samples the entire composition at one time.
     pub fn frame_at(&self, time_secs: f32) -> CompositionFrame {
-        let time_secs = time_secs
-            .max(0.0)
-            .min(self.duration_secs.max(0.0));
+        let time_secs = time_secs.max(0.0).min(self.duration_secs.max(0.0));
         let frame_index = if self.frame_rate > 0.0 && self.frame_rate.is_finite() {
             (time_secs * self.frame_rate).round() as u64
         } else {
@@ -289,7 +286,11 @@ impl CompositionDocument {
         CompositionFrame {
             time_secs,
             frame_index,
-            layers: self.layers.iter().map(|layer| layer.sample(time_secs)).collect(),
+            layers: self
+                .layers
+                .iter()
+                .map(|layer| layer.sample(time_secs))
+                .collect(),
         }
     }
 
@@ -372,7 +373,10 @@ impl CompositionDocument {
                 ("opacity", &layer.opacity_keys),
                 ("scale", &layer.scale_keys),
             ] {
-                if keys.iter().any(|key| !key.time_secs.is_finite() || !key.value.is_finite()) {
+                if keys
+                    .iter()
+                    .any(|key| !key.time_secs.is_finite() || !key.value.is_finite())
+                {
                     issues.push(MotionIssue {
                         layer_id: Some(layer.id.clone()),
                         message: format!("{property} track contains a non-finite keyframe"),
@@ -553,7 +557,13 @@ mod tests {
         let frame = doc.frame(60);
         assert!((frame.time_secs - 1.0).abs() < 0.001);
         assert_eq!(frame.frame_index, 60);
-        assert_eq!(doc.render_range(Some(590), Some(900)), FrameRange { start: 590, end: 600 });
+        assert_eq!(
+            doc.render_range(Some(590), Some(900)),
+            FrameRange {
+                start: 590,
+                end: 600
+            }
+        );
     }
 
     #[test]
@@ -561,12 +571,23 @@ mod tests {
         let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
         doc.frame_rate = 0.0;
         doc.layers[0].position_x_keys = vec![
-            Keyframe { time_secs: 1.0, value: 0.0, easing: "linear".into() },
-            Keyframe { time_secs: 0.5, value: 1.0, easing: "linear".into() },
+            Keyframe {
+                time_secs: 1.0,
+                value: 0.0,
+                easing: "linear".into(),
+            },
+            Keyframe {
+                time_secs: 0.5,
+                value: 1.0,
+                easing: "linear".into(),
+            },
         ];
         let issues = doc.validate();
-        assert!(issues.iter().any(|issue| issue.message.contains("frame rate")));
-        assert!(issues.iter().any(|issue| issue.message.contains("not strictly ordered")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.message.contains("frame rate")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.message.contains("not strictly ordered")));
     }
-
 }
