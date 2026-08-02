@@ -7,49 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: loom-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-staged-fix:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          persist-credentials: true
-      - name: Detect staged fix
-        id: fix
-        shell: bash
-        run: |
-          if [ -f .ci/fix.patch ]; then
-            echo 'present=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'present=false' >> "$GITHUB_OUTPUT"
-          fi
-      - name: Apply and commit fix
-        if: steps.fix.outputs.present == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git apply --check --whitespace=error-all .ci/fix.patch
-          git apply --whitespace=nowarn .ci/fix.patch
-          rm -rf .ci
-          git config user.name "Loom Engineering Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "fix: make shared hairline layout-safe"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
