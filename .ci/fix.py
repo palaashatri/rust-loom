@@ -3,8 +3,8 @@ from pathlib import Path
 replacements = {
     "loom-photo/crates/loom-photo-core/src/lib.rs": [
         (
-            """        for channel in 0..3 {\n            let value = (pixel[channel] * 255.0).round().clamp(0.0, 255.0) as u8;\n            rgb.push(value);\n        }""",
-            """        for channel in pixel.iter().take(3) {\n            let value = (*channel * 255.0).round().clamp(0.0, 255.0) as u8;\n            rgb.push(value);\n        }""",
+            """            for channel in 0..3 {\n                let value =\n                    pixel[channel] as f32 * alpha + background[channel] as f32 * (1.0 - alpha);\n                output.push(value.round().clamp(0.0, 255.0) as u8);\n            }""",
+            """            for (source, backdrop) in pixel.iter().take(3).zip(background.iter()) {\n                let value = *source as f32 * alpha + *backdrop as f32 * (1.0 - alpha);\n                output.push(value.round().clamp(0.0, 255.0) as u8);\n            }""",
         ),
     ],
     "loom-video/crates/loom-video-core/src/lib.rs": [
