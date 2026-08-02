@@ -341,8 +341,7 @@ fn run_gui(args: &Args) -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
     let recovered = if args.open.is_none() {
-        take_snapshot_recovery()
-            .and_then(|payload| loom_writer_core::load_document(&payload).ok())
+        take_snapshot_recovery().and_then(|payload| loom_writer_core::load_document(&payload).ok())
     } else {
         None
     };
@@ -401,7 +400,8 @@ fn run_gui(args: &Args) -> Result<(), String> {
                     .unwrap_or_else(|| SAVE_FILENAME.to_string());
                 match save_file(&p, &state.current.borrow()) {
                     Ok(()) => {
-                        if let Ok(bytes) = loom_writer_core::save_document(&state.current.borrow()) {
+                        if let Ok(bytes) = loom_writer_core::save_document(&state.current.borrow())
+                        {
                             let _ = checkpoint_snapshot_recovery(bytes);
                         }
                         app.set_status_left(SharedString::from(format!("saved {p}")));
@@ -579,18 +579,8 @@ mod tests {
         let second = text_document("ab");
         let third = text_document("abc");
 
-        history.record(
-            first.clone(),
-            second.clone(),
-            HistoryKind::Typing,
-            100,
-        );
-        history.record(
-            second.clone(),
-            third.clone(),
-            HistoryKind::Typing,
-            200,
-        );
+        history.record(first.clone(), second.clone(), HistoryKind::Typing, 100);
+        history.record(second.clone(), third.clone(), HistoryKind::Typing, 200);
 
         assert_eq!(history.undo_len(), 1);
         assert_eq!(history.undo(), Some(first));
@@ -604,18 +594,8 @@ mod tests {
         let second = text_document("ab");
         let third = text_document("new document");
 
-        history.record(
-            first.clone(),
-            second.clone(),
-            HistoryKind::Typing,
-            100,
-        );
-        history.record(
-            second,
-            third.clone(),
-            HistoryKind::DocumentAction,
-            200,
-        );
+        history.record(first.clone(), second.clone(), HistoryKind::Typing, 100);
+        history.record(second, third.clone(), HistoryKind::DocumentAction, 200);
 
         assert_eq!(history.undo_len(), 2);
         assert_eq!(history.undo(), Some(first.clone()));
