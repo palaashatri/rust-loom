@@ -7,47 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: loom-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-staged-fix:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: chatgpt/loom-ui-functional-audit-2
-          fetch-depth: 0
-          persist-credentials: true
-      - id: staged
-        run: |
-          if [ -f .ci/fix.py ]; then echo 'present=true' >> "$GITHUB_OUTPUT"; else echo 'present=false' >> "$GITHUB_OUTPUT"; fi
-      - name: Apply and format shared runtime fixes
-        if: steps.staged.outputs.present == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 .ci/fix.py
-          rustup toolchain install stable --profile minimal --component rustfmt
-          (cd loom-core && cargo +stable fmt --all)
-          (cd loom-plugin-sdk && cargo +stable fmt --all)
-          (cd loom-vision && cargo +stable fmt --all)
-          rm -rf .ci
-          git config user.name "Loom Engineering Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          git commit -m "fix: integrate production media and plugin runtimes"
-          git push origin "HEAD:chatgpt/loom-ui-functional-audit-2"
-
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -89,7 +55,10 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
-      - uses: Swatinem/rust-cache@v2
+          rustc --version
+          cargo --version
+      - name: Cache Cargo outputs
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.workspace }}
           shared-key: loom-${{ matrix.workspace }}
@@ -112,11 +81,14 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
-      - run: >-
+      - name: Build visual-QA image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
+      - name: Build applications and capture theme matrix
+        run: >-
           docker compose -f loom-bootstrap/docker/compose.yaml run --rm visual
           bash -lc "scripts/build-all.sh --release && xvfb-run -a -s '-screen 0 1280x800x24' scripts/visual-smoke-matrix.sh"
-      - if: always()
+      - name: Upload visual evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: loom-theme-matrix
