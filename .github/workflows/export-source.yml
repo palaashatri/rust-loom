@@ -1,0 +1,29 @@
+name: Export Loom source
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Create source archive
+        run: |
+          git status --short
+          tar --exclude=.git --exclude='**/target' -czf /tmp/rust-loom-source.tar.gz .
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-loom-source
+          path: /tmp/rust-loom-source.tar.gz
+          if-no-files-found: error
+          retention-days: 2
