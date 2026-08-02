@@ -1,0 +1,53 @@
+name: Apply native productisation tranche
+
+on:
+  push:
+    branches: [chatgpt/loom-ui-functional-audit-2]
+    paths:
+      - '.ci/apply_native_productisation.py'
+      - '.github/workflows/apply-native-productisation.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: loom-native-productisation
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Apply productisation changes
+        run: python3 .ci/apply_native_productisation.py
+      - name: Validate generated Python and workflow files
+        run: |
+          python3 -m py_compile \
+            loom-bootstrap/packaging/release.py \
+            loom-bootstrap/scripts/native-ui-matrix.py \
+            loom-bootstrap/scripts/audit-product-readiness.py \
+            loom-bootstrap/scripts/audit-product-ui.py
+          python3 loom-bootstrap/scripts/audit-product-ui.py
+          python3 loom-bootstrap/scripts/audit-product-readiness.py --minimum-ui 7.0 --minimum-functionality 6.0
+      - name: Format Rust workspaces
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          for workspace in loom-core loom-writer loom-sheets loom-present loom-photo loom-motion loom-video loom-studio loom-encode loom-vision loom-plugin-sdk; do
+            (cd "$workspace" && cargo +stable fmt --all)
+          done
+      - name: Commit ordinary source
+        run: |
+          rm -rf .ci .github/workflows/apply-native-productisation.yml
+          git config user.name 'Loom Engineering Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat(product): make Windows and macOS first-class targets'
+          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
