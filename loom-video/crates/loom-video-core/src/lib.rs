@@ -275,6 +275,19 @@ pub enum TimelineError {
     InvalidTiming(String),
 }
 
+impl std::fmt::Display for TimelineError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidTrack => write!(formatter, "track index is invalid"),
+            Self::ClipNotFound => write!(formatter, "clip was not found"),
+            Self::TrackLocked => write!(formatter, "track is locked"),
+            Self::InvalidTiming(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for TimelineError {}
+
 impl Clip {
     /// Effective timeline end.
     pub fn end_time(&self) -> f64 {
@@ -363,6 +376,15 @@ impl Clip {
 }
 
 impl Track {
+    /// Timeline end of the last enabled clip, or zero for an empty track.
+    pub fn duration(&self) -> f64 {
+        self.clips
+            .iter()
+            .filter(|clip| clip.enabled)
+            .map(Clip::end_time)
+            .fold(0.0, f64::max)
+    }
+
     /// Inserts a clip and sorts by timeline start.
     pub fn insert_clip(&mut self, clip: Clip) -> Result<(), TimelineError> {
         if self.locked {

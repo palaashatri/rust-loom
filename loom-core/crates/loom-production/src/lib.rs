@@ -8,6 +8,9 @@
 
 #![forbid(unsafe_code)]
 
+/// Deduplicating full-state recovery coordination for Loom applications.
+pub mod snapshot;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};

@@ -577,7 +577,7 @@ fn main() -> Result<(), String> {
                     {
                         session.checkpoint();
                         match session.project.split_clip(track_index, &id, playhead) {
-                            Ok(()) => app
+                            Ok((_left_id, _right_id)) => app
                                 .set_status_left(format!("Split clip at {:.2}s", playhead).into()),
                             Err(error) => {
                                 app.set_status_left(format!("Split failed: {error}").into())

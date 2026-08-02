@@ -251,7 +251,7 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
             </Component>'''
         )
         refs.append(f'<ComponentRef Id="{component_id}" />')
-    upgrade_code = uuid.uuid5(uuid.NAMESPACE_URL, "https://loom.local/creator-suite").upper()
+    upgrade_code = str(uuid.uuid5(uuid.NAMESPACE_URL, "https://loom.local/creator-suite")).upper()
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Loom Creator Suite" Manufacturer="Loom Project" Version="{version}"

@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 pub fn application_state_directory(application_id: &str) -> Result<PathBuf, ProductionError> {
     if application_id.is_empty()
         || application_id.len() > 160
-        || !application_id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+        || !application_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
     {
         return Err(ProductionError::InvalidData(
             "application id contains unsupported characters".into(),
@@ -70,8 +70,7 @@ impl SnapshotRecovery {
         let restored_payload = newest_operation
             .map(|record| record.payload.clone())
             .or(recovered.checkpoint);
-        let last_sequence = newest_operation
-            .map_or(checkpoint_sequence, |record| record.sequence);
+        let last_sequence = newest_operation.map_or(checkpoint_sequence, |record| record.sequence);
         Ok(Self {
             journal,
             last_payload: restored_payload.clone(),
@@ -132,10 +131,8 @@ impl SnapshotRecovery {
     }
 
     /// Delete all recovery data after a document is intentionally discarded.
-    pub fn clear(mut self) -> Result<(), ProductionError> {
+    pub fn clear(self) -> Result<(), ProductionError> {
         let directory = self.journal.directory().to_path_buf();
-        self.restored_payload = None;
-        self.last_payload = None;
         drop(self.journal);
         if directory.exists() {
             fs::remove_dir_all(directory)?;
@@ -158,7 +155,10 @@ mod tests {
             assert!(recovery.record("edit", b"two".to_vec()).expect("record"));
         }
         let mut recovery = SnapshotRecovery::open_at(temporary.path()).expect("reopen");
-        assert_eq!(recovery.take_restored_payload().as_deref(), Some(b"two".as_slice()));
+        assert_eq!(
+            recovery.take_restored_payload().as_deref(),
+            Some(b"two".as_slice())
+        );
         recovery
             .checkpoint("loom.test/1", b"two".to_vec())
             .expect("checkpoint");

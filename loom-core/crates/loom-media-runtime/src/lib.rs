@@ -517,6 +517,8 @@ impl RenderGraph {
             );
         }
         let mut filter = String::new();
+        let mut gpu_stages = Vec::new();
+        let mut cpu_stages = Vec::new();
         let (red, green, blue, alpha) = rgba_components(self.background_rgba);
         filter.push_str(&format!(
             "color=c=0x{red:02x}{green:02x}{blue:02x}@{:.6}:s={}x{}:r={:.6}[base_cpu]",
@@ -542,8 +544,6 @@ impl RenderGraph {
                 filter.push_str(";[base_cpu]null[base0]");
             }
         }
-        let mut gpu_stages = Vec::new();
-        let mut cpu_stages = Vec::new();
         let mut current_base = "base0".to_string();
         for (index, layer) in visible.iter().enumerate() {
             let source_label = format!("layer{index}");
