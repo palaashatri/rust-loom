@@ -36,6 +36,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 .ci/fix.py
+          python3 - <<'PY'
+          from pathlib import Path
+          for path in Path('.').rglob('*'):
+              if path.is_file() and path.suffix in {'.slint', '.py'} and '.git' not in path.parts:
+                  text = path.read_text()
+                  path.write_text(text.rstrip() + '\n')
+          PY
           rm -rf .ci
           git config user.name "Loom Engineering Bot"
           git config user.email "actions@users.noreply.github.com"
