@@ -47,6 +47,28 @@ file and must override it when they disagree.
 - **Plugin SDK:** manifest, package, permission, and host foundations exist;
   production sandboxing and broad application integration remain incomplete.
 
+## Current UI and functional audit
+
+- All eight apps share the graphite/copper token system, but only Present,
+  Photo, Motion, Video, Studio, and Encode now use the common application header.
+  Writer and Sheets retain their specialized document/grid chrome for now.
+- Open now reloads each media-app project's documented local save file instead
+  of exposing an unwired control. Native file-picker integration remains future
+  work.
+- Photo can add and persist an adjustment-layer record, but the value is not yet
+  rendered into pixels.
+- Present Undo/Redo is visibly disabled until a real presentation history stack
+  exists.
+- Photo, Video, and Studio export actions are visibly disabled until their real
+  render/media/audio engines exist.
+- Video and Studio transport controls no longer imply real playback or recording
+  when no decoder/audio engine is connected.
+- Encode no longer invents 75% progress or claims an encoder started. Progress is
+  derived from persisted job states and the start control remains disabled until
+  a transcoder backend is integrated.
+- CI now checks callback wiring, production panic patterns, all Cargo workspaces,
+  release builds, and distinct light/dark/high-contrast screenshots.
+
 ## Non-negotiable direction
 
 - Rust + Slint; no UI-framework rewrite.
