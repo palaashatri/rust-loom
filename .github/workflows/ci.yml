@@ -14,36 +14,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  contracts-and-build:
+  contracts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit UI/Rust contracts
+        run: python3 loom-bootstrap/scripts/audit-contracts.py
+
+  workspace:
+    name: ${{ matrix.workspace }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        workspace:
+          - loom-core
+          - loom-writer
+          - loom-sheets
+          - loom-present
+          - loom-photo
+          - loom-motion
+          - loom-video
+          - loom-studio
+          - loom-encode
+          - loom-vision
+          - loom-plugin-sdk
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build CI image
-        run: docker compose -f loom-bootstrap/docker/compose.yaml build ci
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libfontconfig1-dev libx11-dev libxkbcommon-dev libwayland-dev \
+            libgl1-mesa-dev libglu1-mesa-dev
 
-      - name: Audit UI/Rust contracts
-        run: >-
-          docker compose -f loom-bootstrap/docker/compose.yaml run --rm ci
-          python3 scripts/audit-contracts.py
+      - name: Select Rust stable with lint and format components
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version
+          cargo --version
 
-      - name: Format, lint, test, and release build every workspace
-        run: >-
-          docker compose -f loom-bootstrap/docker/compose.yaml run --rm ci
-          bash -lc "scripts/fmt-all.sh && scripts/clippy-all.sh && scripts/test-all.sh && scripts/build-all.sh --release"
-
-      - name: Upload quality logs
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Cache Cargo outputs
+        uses: Swatinem/rust-cache@v2
         with:
-          name: loom-quality-logs
-          if-no-files-found: warn
-          retention-days: 14
-          path: loom-bootstrap/.work/*.log
+          workspaces: ${{ matrix.workspace }}
+          shared-key: loom-${{ matrix.workspace }}
+
+      - name: Check formatting
+        working-directory: ${{ matrix.workspace }}
+        run: cargo fmt --all --check
+
+      - name: Lint
+        working-directory: ${{ matrix.workspace }}
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        working-directory: ${{ matrix.workspace }}
+        run: cargo test --workspace
+
+      - name: Build release
+        working-directory: ${{ matrix.workspace }}
+        run: cargo build --workspace --release
 
   visual-smoke:
-    needs: contracts-and-build
+    needs: [contracts, workspace]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
