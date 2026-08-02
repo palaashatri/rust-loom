@@ -1205,8 +1205,8 @@ export component RailButton inherits Rectangle {
 /// Hairline separator used between professional workspace regions.
 export component Hairline inherits Rectangle {
     in property <bool> vertical: false;
-    width: root.vertical ? 1px : 100%;
-    height: root.vertical ? 100% : 1px;
+    width: root.vertical ? 1px : parent.width;
+    height: root.vertical ? parent.height : 1px;
     background: Theme.palette().border;
 }
 

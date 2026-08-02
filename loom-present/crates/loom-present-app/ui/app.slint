@@ -235,7 +235,7 @@ export component PresentApp inherits Window {
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                             IconButton { icon: "close"; label: "Hide speaker notes"; clicked => { root.show-notes-drawer = false; } }
                         }
-                        TextEdit { text <=> root.slide-notes; placeholder-text: "Add presenter notes…"; edited => { root.notes-edited(self.text); } }
+                        TextEdit { text <=> root.slide-notes; placeholder-text: "Add presenter notes…"; edited(value) => { root.notes-edited(value); } }
                     }
                 }
             }
