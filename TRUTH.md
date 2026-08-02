@@ -80,3 +80,42 @@ file and must override it when they disagree.
 - Static mockups and fake progress never count as implemented features.
 - Keep `AGENTS.MD`, `README.md`, and `TRUTH.md` as the root-level project prose.
   Put durable technical details next to code, schemas, tests, and fixtures.
+
+## End-to-end implementation tranche (August 2026)
+
+The repository now contains executable reference implementations for the
+cross-suite foundations that were previously only described in specifications:
+
+- `loom-runtime`: deterministic settings, platform paths, atomic writes,
+  crash-recovery snapshots, bounded/redactable diagnostics, shortcut conflict
+  management, multi-format clipboard payloads, recent files, and autosave timing.
+- Writer: document search/replace, generated table of contents, deterministic
+  pagination, comments, tracked revisions, bookmarks, and table models.
+- Sheets: named ranges, validation, conditional-format predicates, row filters,
+  range sorting, dependency graphs, and incremental recalculation.
+- Present: bounded undo/redo sessions, slide duplication/reordering, element
+  transforms, transitions, normalized render scenes, and deck validation.
+- Photo: validated RGBA buffers, crop/resize, masks, blend modes, adjustment
+  layers, deterministic compositing, and PPM export.
+- Motion: ordered keyframes, easing/interpolation, frame sampling, layer
+  reordering, validation, and bounded render ranges.
+- Video: trim/split/speed operations, ripple moves/removal, markers, captions,
+  overlap detection, render plans, and documented EDL output.
+- Studio: validated PCM buffers, WAV export, oscillator/MIDI synthesis,
+  automation interpolation, region moves, project validation, and stereo mixing.
+- Encode: local FFmpeg discovery, deterministic command planning, progress
+  parsing, interruption recovery, real process execution, and truthful statuses.
+- Loom Vision: CPU reference QR, statistics, threshold segmentation, document
+  region detection, image embeddings, and audio analysis, all local and
+  cancellable where work is iterative.
+- Plugin SDK: defensive package installation, bounded WebAssembly binary
+  validation, capability/path checks, entry-export validation, and optional
+  local Wasmtime execution with time and output limits.
+
+These are functional, testable reference engines and APIs. They do **not** yet
+constitute complete commercial parity with mature office, image, motion, video,
+audio, transcoding, or ML products. Hardware-accelerated render graphs, full
+codec/container coverage, rich interchange compatibility, production OCR and
+learned vision models, full plugin ABI host functions, and exhaustive UI wiring
+remain subsequent engineering work. No placeholder or sample-only path should
+be represented as those capabilities.

@@ -1162,6 +1162,524 @@ pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
     Ok(sheet)
 }
 
+
+/// Inclusive rectangular cell range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CellRange {
+    /// Top-left cell.
+    pub start: CellRef,
+    /// Bottom-right cell.
+    pub end: CellRef,
+}
+
+impl CellRange {
+    /// Creates a normalized range.
+    pub fn new(a: CellRef, b: CellRef) -> Self {
+        Self {
+            start: CellRef {
+                row: a.row.min(b.row),
+                col: a.col.min(b.col),
+            },
+            end: CellRef {
+                row: a.row.max(b.row),
+                col: a.col.max(b.col),
+            },
+        }
+    }
+
+    /// Parses `A1:B4` or a single-cell `A1` range.
+    pub fn parse(input: &str) -> Option<Self> {
+        if let Some((left, right)) = input.split_once(':') {
+            Some(Self::new(CellRef::parse(left)?, CellRef::parse(right)?))
+        } else {
+            let cell = CellRef::parse(input)?;
+            Some(Self::new(cell, cell))
+        }
+    }
+
+    /// Whether a cell is inside the range.
+    pub fn contains(self, cell: CellRef) -> bool {
+        cell.row >= self.start.row
+            && cell.row <= self.end.row
+            && cell.col >= self.start.col
+            && cell.col <= self.end.col
+    }
+
+    /// Cells in row-major order.
+    pub fn cells(self) -> Vec<CellRef> {
+        let mut cells = Vec::new();
+        for row in self.start.row..=self.end.row {
+            for col in self.start.col..=self.end.col {
+                cells.push(CellRef { row, col });
+            }
+        }
+        cells
+    }
+
+    /// Renders A1 notation.
+    pub fn to_a1(self) -> String {
+        if self.start == self.end {
+            self.start.to_a1()
+        } else {
+            format!("{}:{}", self.start.to_a1(), self.end.to_a1())
+        }
+    }
+}
+
+/// Named range available to formulas and navigation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedRange {
+    /// Case-insensitive stable name.
+    pub name: String,
+    /// Target cells.
+    pub range: CellRange,
+}
+
+/// Cell validation rule.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationRule {
+    /// Any value is valid.
+    Any,
+    /// Number within optional inclusive bounds.
+    Number {
+        /// Minimum value.
+        min: Option<f64>,
+        /// Maximum value.
+        max: Option<f64>,
+    },
+    /// Text from a fixed set.
+    List(Vec<String>),
+    /// Non-empty value.
+    Required,
+}
+
+impl ValidationRule {
+    /// Checks a resolved value.
+    pub fn accepts(&self, value: &Value) -> bool {
+        match self {
+            ValidationRule::Any => true,
+            ValidationRule::Number { min, max } => match value {
+                Value::Number(number) => {
+                    min.map(|min| *number >= min).unwrap_or(true)
+                        && max.map(|max| *number <= max).unwrap_or(true)
+                }
+                _ => false,
+            },
+            ValidationRule::List(options) => options.iter().any(|option| option == &value.display()),
+            ValidationRule::Required => !matches!(value, Value::Empty) && !value.display().is_empty(),
+        }
+    }
+}
+
+/// Simple conditional-format comparison.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatCondition {
+    /// Numeric value is above threshold.
+    GreaterThan(f64),
+    /// Numeric value is below threshold.
+    LessThan(f64),
+    /// Display text contains substring, case-insensitive.
+    TextContains(String),
+    /// Cell contains any error.
+    IsError,
+}
+
+impl FormatCondition {
+    /// Evaluates a condition.
+    pub fn matches(&self, value: &Value) -> bool {
+        match self {
+            FormatCondition::GreaterThan(threshold) => {
+                matches!(value, Value::Number(number) if number > threshold)
+            }
+            FormatCondition::LessThan(threshold) => {
+                matches!(value, Value::Number(number) if number < threshold)
+            }
+            FormatCondition::TextContains(query) => value
+                .display()
+                .to_lowercase()
+                .contains(&query.to_lowercase()),
+            FormatCondition::IsError => matches!(value, Value::Error(_)),
+        }
+    }
+}
+
+/// Conditional-format rule carrying a semantic style id.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConditionalFormatRule {
+    /// Target range.
+    pub range: CellRange,
+    /// Predicate.
+    pub condition: FormatCondition,
+    /// Stable style identifier resolved by the UI.
+    pub style_id: String,
+}
+
+/// Row filter.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterPredicate {
+    /// Keep every row.
+    All,
+    /// Display value contains text.
+    Contains(String),
+    /// Numeric value is at least threshold.
+    NumberAtLeast(f64),
+    /// Resolved value is non-empty.
+    NonEmpty,
+}
+
+impl FilterPredicate {
+    fn matches(&self, value: &Value) -> bool {
+        match self {
+            FilterPredicate::All => true,
+            FilterPredicate::Contains(query) => value
+                .display()
+                .to_lowercase()
+                .contains(&query.to_lowercase()),
+            FilterPredicate::NumberAtLeast(threshold) => {
+                matches!(value, Value::Number(number) if number >= threshold)
+            }
+            FilterPredicate::NonEmpty => !matches!(value, Value::Empty),
+        }
+    }
+}
+
+/// Higher-level worksheet features layered over the formula engine.
+#[derive(Debug, Clone)]
+pub struct SheetModel {
+    /// Cell data.
+    pub sheet: Sheet,
+    /// Named ranges keyed by uppercase name.
+    pub named_ranges: BTreeMap<String, CellRange>,
+    /// Validation rules.
+    pub validations: Vec<(CellRange, ValidationRule)>,
+    /// Conditional formatting.
+    pub conditional_formats: Vec<ConditionalFormatRule>,
+    /// Hidden row indexes.
+    pub hidden_rows: HashSet<u32>,
+    /// Frozen row count.
+    pub frozen_rows: u32,
+    /// Frozen column count.
+    pub frozen_columns: u32,
+}
+
+impl SheetModel {
+    /// Wraps a sheet.
+    pub fn new(sheet: Sheet) -> Self {
+        Self {
+            sheet,
+            named_ranges: BTreeMap::new(),
+            validations: Vec::new(),
+            conditional_formats: Vec::new(),
+            hidden_rows: HashSet::new(),
+            frozen_rows: 0,
+            frozen_columns: 0,
+        }
+    }
+
+    /// Adds or replaces a named range.
+    pub fn set_named_range(&mut self, name: &str, range: CellRange) -> Result<(), String> {
+        if !valid_named_range(name) {
+            return Err(format!("invalid named range {name:?}"));
+        }
+        self.named_ranges.insert(name.to_ascii_uppercase(), range);
+        Ok(())
+    }
+
+    /// Returns a temporary sheet whose formulas have named ranges expanded to A1 syntax.
+    pub fn resolved_sheet(&self) -> Sheet {
+        let mut sheet = self.sheet.clone();
+        for cell in sheet.cells.values_mut() {
+            if cell.is_formula() {
+                cell.raw = expand_named_ranges(&cell.raw, &self.named_ranges);
+            }
+        }
+        sheet
+    }
+
+    /// Evaluates formulas with named ranges.
+    pub fn evaluate(&self) -> HashMap<CellRef, Value> {
+        evaluate(&self.resolved_sheet())
+    }
+
+    /// Sets one cell only when all matching validation rules accept it.
+    pub fn set_validated(&mut self, cell: CellRef, raw: &str) -> Result<(), String> {
+        let mut preview = self.sheet.clone();
+        preview.set_raw(cell, raw);
+        let values = evaluate(&preview);
+        let value = values.get(&cell).cloned().unwrap_or(Value::Empty);
+        for (range, rule) in &self.validations {
+            if range.contains(cell) && !rule.accepts(&value) {
+                return Err(format!(
+                    "value {:?} violates validation for {}",
+                    value,
+                    range.to_a1()
+                ));
+            }
+        }
+        self.sheet = preview;
+        Ok(())
+    }
+
+    /// Style ids matching a cell's resolved value.
+    pub fn conditional_style_ids(&self, cell: CellRef) -> Vec<&str> {
+        let values = self.evaluate();
+        let value = values.get(&cell).cloned().unwrap_or(Value::Empty);
+        self.conditional_formats
+            .iter()
+            .filter(|rule| rule.range.contains(cell) && rule.condition.matches(&value))
+            .map(|rule| rule.style_id.as_str())
+            .collect()
+    }
+
+    /// Filters rows in `range` by a column relative to the range start.
+    pub fn filter_rows(
+        &mut self,
+        range: CellRange,
+        relative_column: u32,
+        predicate: &FilterPredicate,
+    ) -> Result<Vec<u32>, String> {
+        let column = range
+            .start
+            .col
+            .checked_add(relative_column)
+            .ok_or_else(|| "filter column overflow".to_string())?;
+        if column > range.end.col {
+            return Err("filter column is outside the range".into());
+        }
+        let values = self.evaluate();
+        let mut hidden = Vec::new();
+        for row in range.start.row..=range.end.row {
+            let value = values
+                .get(&CellRef { row, col: column })
+                .cloned()
+                .unwrap_or(Value::Empty);
+            if predicate.matches(&value) {
+                self.hidden_rows.remove(&row);
+            } else {
+                self.hidden_rows.insert(row);
+                hidden.push(row);
+            }
+        }
+        Ok(hidden)
+    }
+
+    /// Sorts complete rows in a range by a relative column.
+    pub fn sort_rows(
+        &mut self,
+        range: CellRange,
+        relative_column: u32,
+        ascending: bool,
+    ) -> Result<(), String> {
+        let sort_column = range
+            .start
+            .col
+            .checked_add(relative_column)
+            .ok_or_else(|| "sort column overflow".to_string())?;
+        if sort_column > range.end.col {
+            return Err("sort column is outside the range".into());
+        }
+        let values = self.evaluate();
+        let mut rows: Vec<u32> = (range.start.row..=range.end.row).collect();
+        rows.sort_by(|left, right| {
+            let left_value = values
+                .get(&CellRef { row: *left, col: sort_column })
+                .cloned()
+                .unwrap_or(Value::Empty);
+            let right_value = values
+                .get(&CellRef { row: *right, col: sort_column })
+                .cloned()
+                .unwrap_or(Value::Empty);
+            let ordering = compare_values(&left_value, &right_value);
+            if ascending { ordering } else { ordering.reverse() }
+        });
+        let original = self.sheet.cells.clone();
+        for (destination_offset, source_row) in rows.into_iter().enumerate() {
+            let destination_row = range.start.row + destination_offset as u32;
+            for col in range.start.col..=range.end.col {
+                let source = CellRef { row: source_row, col };
+                let destination = CellRef { row: destination_row, col };
+                match original.get(&source) {
+                    Some(cell) => {
+                        self.sheet.cells.insert(destination, cell.clone());
+                    }
+                    None => {
+                        self.sheet.cells.remove(&destination);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn valid_named_range(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+        && CellRef::parse(name).is_none()
+}
+
+fn expand_named_ranges(formula: &str, ranges: &BTreeMap<String, CellRange>) -> String {
+    let mut output = String::with_capacity(formula.len());
+    let bytes = formula.as_bytes();
+    let mut index = 0;
+    let mut quoted = false;
+    while index < bytes.len() {
+        let character = bytes[index] as char;
+        if character == '"' {
+            quoted = !quoted;
+            output.push(character);
+            index += 1;
+            continue;
+        }
+        if !quoted && (character.is_ascii_alphabetic() || character == '_') {
+            let start = index;
+            index += 1;
+            while index < bytes.len() {
+                let next = bytes[index] as char;
+                if next.is_ascii_alphanumeric() || next == '_' {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
+            let token = &formula[start..index];
+            if let Some(range) = ranges.get(&token.to_ascii_uppercase()) {
+                output.push_str(&range.to_a1());
+            } else {
+                output.push_str(token);
+            }
+        } else {
+            output.push(character);
+            index += 1;
+        }
+    }
+    output
+}
+
+fn compare_values(left: &Value, right: &Value) -> std::cmp::Ordering {
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => left.total_cmp(right),
+        (Value::Bool(left), Value::Bool(right)) => left.cmp(right),
+        (Value::Empty, Value::Empty) => std::cmp::Ordering::Equal,
+        (Value::Empty, _) => std::cmp::Ordering::Greater,
+        (_, Value::Empty) => std::cmp::Ordering::Less,
+        _ => left.display().to_lowercase().cmp(&right.display().to_lowercase()),
+    }
+}
+
+/// Cached dependency graph and values for incremental recalculation.
+#[derive(Debug, Clone, Default)]
+pub struct CalculationCache {
+    /// Last resolved values.
+    pub values: HashMap<CellRef, Value>,
+    dependencies: HashMap<CellRef, HashSet<CellRef>>,
+    dependents: HashMap<CellRef, HashSet<CellRef>>,
+}
+
+impl CalculationCache {
+    /// Performs a full calculation and dependency-graph rebuild.
+    pub fn rebuild(&mut self, sheet: &Sheet) {
+        self.values = evaluate(sheet);
+        let (dependencies, dependents) = dependency_graph(sheet);
+        self.dependencies = dependencies;
+        self.dependents = dependents;
+    }
+
+    /// Recalculates changed cells and their transitive dependents.
+    ///
+    /// Formula parsing for the graph is linear in the sheet's formula count,
+    /// while evaluation is restricted to the affected subgraph.
+    pub fn recalculate(
+        &mut self,
+        sheet: &Sheet,
+        changed: &[CellRef],
+    ) -> HashSet<CellRef> {
+        let (dependencies, dependents) = dependency_graph(sheet);
+        self.dependencies = dependencies;
+        self.dependents = dependents;
+        let mut affected: HashSet<CellRef> = changed.iter().copied().collect();
+        let mut queue: Vec<CellRef> = changed.to_vec();
+        while let Some(cell) = queue.pop() {
+            if let Some(next) = self.dependents.get(&cell) {
+                for dependent in next {
+                    if affected.insert(*dependent) {
+                        queue.push(*dependent);
+                    }
+                }
+            }
+        }
+        for cell in &affected {
+            self.values.remove(cell);
+        }
+        let mut remaining = affected.clone();
+        let mut progress = true;
+        while progress && !remaining.is_empty() {
+            progress = false;
+            let ready: Vec<CellRef> = remaining
+                .iter()
+                .copied()
+                .filter(|cell| {
+                    self.dependencies
+                        .get(cell)
+                        .map(|deps| deps.iter().all(|dep| !remaining.contains(dep)))
+                        .unwrap_or(true)
+                })
+                .collect();
+            for cell in ready {
+                let value = match sheet.cells.get(&cell) {
+                    None => Value::Empty,
+                    Some(raw) if !raw.is_formula() => parse_literal(&raw.raw),
+                    Some(raw) => match parse_formula(raw.raw[1..].trim()) {
+                        Ok(formula) => {
+                            let lookup = |reference: CellRef| {
+                                self.values.get(&reference).cloned().unwrap_or(Value::Empty)
+                            };
+                            eval_expr(&formula.root, &lookup)
+                        }
+                        Err(error) => Value::Error(error),
+                    },
+                };
+                self.values.insert(cell, value);
+                remaining.remove(&cell);
+                progress = true;
+            }
+        }
+        for cell in remaining {
+            self.values.insert(cell, Value::Error(CalcError::Ref));
+        }
+        affected
+    }
+}
+
+fn dependency_graph(
+    sheet: &Sheet,
+) -> (
+    HashMap<CellRef, HashSet<CellRef>>,
+    HashMap<CellRef, HashSet<CellRef>>,
+) {
+    let mut dependencies = HashMap::new();
+    let mut dependents: HashMap<CellRef, HashSet<CellRef>> = HashMap::new();
+    for (cell_ref, cell) in &sheet.cells {
+        if !cell.is_formula() {
+            dependencies.insert(*cell_ref, HashSet::new());
+            continue;
+        }
+        let mut refs = HashSet::new();
+        if let Ok(formula) = parse_formula(cell.raw[1..].trim()) {
+            collect_refs(&formula.root, &mut refs);
+        }
+        for dependency in &refs {
+            dependents.entry(*dependency).or_default().insert(*cell_ref);
+        }
+        dependencies.insert(*cell_ref, refs);
+    }
+    (dependencies, dependents)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1387,4 +1905,75 @@ mod tests {
         assert_eq!(parse_literal("TRUE"), Value::Bool(true));
         assert_eq!(parse_literal("hello"), Value::Text("hello".to_string()));
     }
+
+    #[test]
+    fn named_ranges_validation_and_conditional_formatting_work() {
+        let mut sheet = Sheet::new("model");
+        sheet.set_str("A1", "10");
+        sheet.set_str("A2", "20");
+        sheet.set_str("B1", "=SUM(DATA)");
+        let mut model = SheetModel::new(sheet);
+        model
+            .set_named_range("DATA", CellRange::parse("A1:A2").unwrap())
+            .unwrap();
+        model.validations.push((
+            CellRange::parse("A1:A2").unwrap(),
+            ValidationRule::Number {
+                min: Some(0.0),
+                max: Some(100.0),
+            },
+        ));
+        model.conditional_formats.push(ConditionalFormatRule {
+            range: CellRange::parse("A1:A2").unwrap(),
+            condition: FormatCondition::GreaterThan(15.0),
+            style_id: "high".into(),
+        });
+        assert_eq!(
+            model.evaluate().get(&CellRef::parse("B1").unwrap()),
+            Some(&Value::Number(30.0))
+        );
+        assert!(model.set_validated(CellRef::parse("A1").unwrap(), "-1").is_err());
+        assert_eq!(
+            model.conditional_style_ids(CellRef::parse("A2").unwrap()),
+            vec!["high"]
+        );
+    }
+
+    #[test]
+    fn rows_sort_filter_and_ranges_are_deterministic() {
+        let mut sheet = Sheet::new("rows");
+        sheet.set_str("A1", "b");
+        sheet.set_str("B1", "2");
+        sheet.set_str("A2", "a");
+        sheet.set_str("B2", "1");
+        let mut model = SheetModel::new(sheet);
+        let range = CellRange::parse("A1:B2").unwrap();
+        model.sort_rows(range, 1, true).unwrap();
+        assert_eq!(model.sheet.raw(CellRef::parse("A1").unwrap()), Some("a"));
+        let hidden = model
+            .filter_rows(range, 0, &FilterPredicate::Contains("a".into()))
+            .unwrap();
+        assert_eq!(hidden, vec![1]);
+        assert_eq!(range.cells().len(), 4);
+    }
+
+    #[test]
+    fn calculation_cache_recalculates_transitive_dependents() {
+        let mut sheet = Sheet::new("incremental");
+        sheet.set_str("A1", "1");
+        sheet.set_str("B1", "=A1+1");
+        sheet.set_str("C1", "=B1+1");
+        sheet.set_str("Z1", "99");
+        let mut cache = CalculationCache::default();
+        cache.rebuild(&sheet);
+        sheet.set_str("A1", "10");
+        let affected = cache.recalculate(&sheet, &[CellRef::parse("A1").unwrap()]);
+        assert!(affected.contains(&CellRef::parse("C1").unwrap()));
+        assert!(!affected.contains(&CellRef::parse("Z1").unwrap()));
+        assert_eq!(
+            cache.values.get(&CellRef::parse("C1").unwrap()),
+            Some(&Value::Number(12.0))
+        );
+    }
+
 }

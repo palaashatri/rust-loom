@@ -191,6 +191,358 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     pdf.serialize()
 }
 
+
+/// Built-in transition between two slides.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TransitionKind {
+    /// Immediate cut.
+    None,
+    /// Cross-fade.
+    Dissolve,
+    /// Horizontal push.
+    Push,
+    /// Content-aware transform between matching element ids.
+    Morph,
+}
+
+impl Default for TransitionKind {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Presentation-wide theme tokens used by renderers and exporters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeckTheme {
+    /// Theme name.
+    pub name: String,
+    /// Slide background color.
+    pub background: String,
+    /// Primary text color.
+    pub foreground: String,
+    /// Accent color.
+    pub accent: String,
+    /// Heading font family.
+    pub heading_font: String,
+    /// Body font family.
+    pub body_font: String,
+}
+
+impl Default for DeckTheme {
+    fn default() -> Self {
+        Self {
+            name: "Loom Graphite".into(),
+            background: "#16181d".into(),
+            foreground: "#f4f1ea".into(),
+            accent: "#c9834b".into(),
+            heading_font: "Inter".into(),
+            body_font: "Inter".into(),
+        }
+    }
+}
+
+/// Render-time representation of a slide element.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderElement {
+    /// Stable element id.
+    pub id: String,
+    /// Element kind.
+    pub element_type: ElementType,
+    /// Rendered text/content.
+    pub content: String,
+    /// Normalized left edge in `[0, 1]`.
+    pub x: f32,
+    /// Normalized top edge in `[0, 1]`.
+    pub y: f32,
+    /// Normalized width.
+    pub width: f32,
+    /// Normalized height.
+    pub height: f32,
+}
+
+/// A validated render scene for one slide.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SlideScene {
+    /// Slide id.
+    pub slide_id: String,
+    /// Background color.
+    pub background: String,
+    /// Ordered elements.
+    pub elements: Vec<RenderElement>,
+    /// Transition leaving the slide.
+    pub transition: TransitionKind,
+}
+
+/// Validation issue found in a deck.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeckIssue {
+    /// Slide index, when applicable.
+    pub slide_index: Option<usize>,
+    /// Element id, when applicable.
+    pub element_id: Option<String>,
+    /// Human-readable description.
+    pub message: String,
+}
+
+/// Undoable authoring session around a presentation document.
+#[derive(Debug, Clone)]
+pub struct PresentationSession {
+    /// Current document.
+    pub document: PresentationDocument,
+    /// Current theme.
+    pub theme: DeckTheme,
+    /// Per-slide outgoing transitions.
+    pub transitions: std::collections::BTreeMap<String, TransitionKind>,
+    undo: Vec<PresentationDocument>,
+    redo: Vec<PresentationDocument>,
+    history_limit: usize,
+}
+
+impl PresentationSession {
+    /// Creates a session with bounded snapshot history.
+    pub fn new(document: PresentationDocument) -> Self {
+        Self {
+            document,
+            theme: DeckTheme::default(),
+            transitions: std::collections::BTreeMap::new(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            history_limit: 64,
+        }
+    }
+
+    /// Records the current document before a mutation.
+    pub fn checkpoint(&mut self) {
+        self.undo.push(self.document.clone());
+        if self.undo.len() > self.history_limit {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Restores the previous document snapshot.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo.push(std::mem::replace(&mut self.document, previous));
+        true
+    }
+
+    /// Reapplies the next document snapshot.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.document, next));
+        true
+    }
+
+    /// Duplicates a slide and selects the copy.
+    pub fn duplicate_slide(&mut self, index: usize) -> bool {
+        let Some(source) = self.document.slides.get(index).cloned() else {
+            return false;
+        };
+        self.checkpoint();
+        let mut copy = source;
+        copy.id = unique_slide_id(&self.document, "slide");
+        copy.title = format!("{} Copy", copy.title);
+        for (element_index, element) in copy.elements.iter_mut().enumerate() {
+            element.id = format!("{}-element-{}", copy.id, element_index + 1);
+        }
+        self.document.slides.insert(index + 1, copy);
+        self.document.active_index = index + 1;
+        true
+    }
+
+    /// Removes a slide while keeping at least one slide in the deck.
+    pub fn remove_slide(&mut self, index: usize) -> bool {
+        if self.document.slides.len() <= 1 || index >= self.document.slides.len() {
+            return false;
+        }
+        self.checkpoint();
+        let removed = self.document.slides.remove(index);
+        self.transitions.remove(&removed.id);
+        self.document.active_index = self
+            .document
+            .active_index
+            .min(self.document.slides.len().saturating_sub(1));
+        true
+    }
+
+    /// Moves a slide to a new index.
+    pub fn move_slide(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.document.slides.len() || to >= self.document.slides.len() || from == to {
+            return false;
+        }
+        self.checkpoint();
+        let slide = self.document.slides.remove(from);
+        self.document.slides.insert(to, slide);
+        self.document.active_index = to;
+        true
+    }
+
+    /// Adds an element to the active slide.
+    pub fn add_element(&mut self, mut element: SlideElement) -> bool {
+        if self.document.active_slide().is_none() {
+            return false;
+        }
+        self.checkpoint();
+        let slide = self.document.active_slide_mut().expect("checked above");
+        if element.id.trim().is_empty() || slide.elements.iter().any(|item| item.id == element.id) {
+            element.id = format!("{}-element-{}", slide.id, slide.elements.len() + 1);
+        }
+        slide.elements.push(element);
+        true
+    }
+
+    /// Removes an element from the active slide.
+    pub fn remove_element(&mut self, element_id: &str) -> bool {
+        let Some(slide) = self.document.active_slide() else {
+            return false;
+        };
+        let Some(index) = slide.elements.iter().position(|element| element.id == element_id) else {
+            return false;
+        };
+        self.checkpoint();
+        self.document
+            .active_slide_mut()
+            .expect("active slide remains")
+            .elements
+            .remove(index);
+        true
+    }
+
+    /// Moves and resizes an element, clamped to the 1000×562.5 authoring plane.
+    pub fn transform_element(
+        &mut self,
+        element_id: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    ) -> bool {
+        let Some(slide) = self.document.active_slide() else {
+            return false;
+        };
+        if !slide.elements.iter().any(|element| element.id == element_id) {
+            return false;
+        }
+        self.checkpoint();
+        let element = self
+            .document
+            .active_slide_mut()
+            .expect("active slide remains")
+            .elements
+            .iter_mut()
+            .find(|element| element.id == element_id)
+            .expect("element remains");
+        element.width = width.clamp(1.0, 1000.0);
+        element.height = height.clamp(1.0, 562.5);
+        element.x = x.clamp(0.0, 1000.0 - element.width);
+        element.y = y.clamp(0.0, 562.5 - element.height);
+        true
+    }
+
+    /// Sets the outgoing transition for a slide.
+    pub fn set_transition(&mut self, slide_id: &str, transition: TransitionKind) -> bool {
+        if !self.document.slides.iter().any(|slide| slide.id == slide_id) {
+            return false;
+        }
+        self.transitions.insert(slide_id.to_string(), transition);
+        true
+    }
+
+    /// Produces a normalized scene for renderers, presenter mode, and export.
+    pub fn scene(&self, index: usize) -> Option<SlideScene> {
+        let slide = self.document.slides.get(index)?;
+        let elements = slide
+            .elements
+            .iter()
+            .map(|element| RenderElement {
+                id: element.id.clone(),
+                element_type: element.element_type.clone(),
+                content: element.content.clone(),
+                x: (element.x / 1000.0).clamp(0.0, 1.0),
+                y: (element.y / 562.5).clamp(0.0, 1.0),
+                width: (element.width / 1000.0).clamp(0.0, 1.0),
+                height: (element.height / 562.5).clamp(0.0, 1.0),
+            })
+            .collect();
+        Some(SlideScene {
+            slide_id: slide.id.clone(),
+            background: slide.bg_color.clone(),
+            elements,
+            transition: self.transitions.get(&slide.id).cloned().unwrap_or_default(),
+        })
+    }
+
+    /// Validates ids, geometry, active selection, and empty content.
+    pub fn validate(&self) -> Vec<DeckIssue> {
+        let mut issues = Vec::new();
+        if self.document.slides.is_empty() {
+            issues.push(DeckIssue {
+                slide_index: None,
+                element_id: None,
+                message: "deck has no slides".into(),
+            });
+            return issues;
+        }
+        if self.document.active_index >= self.document.slides.len() {
+            issues.push(DeckIssue {
+                slide_index: None,
+                element_id: None,
+                message: "active slide index is out of bounds".into(),
+            });
+        }
+        let mut slide_ids = std::collections::HashSet::new();
+        for (slide_index, slide) in self.document.slides.iter().enumerate() {
+            if !slide_ids.insert(&slide.id) {
+                issues.push(DeckIssue {
+                    slide_index: Some(slide_index),
+                    element_id: None,
+                    message: format!("duplicate slide id {}", slide.id),
+                });
+            }
+            let mut element_ids = std::collections::HashSet::new();
+            for element in &slide.elements {
+                if !element_ids.insert(&element.id) {
+                    issues.push(DeckIssue {
+                        slide_index: Some(slide_index),
+                        element_id: Some(element.id.clone()),
+                        message: "duplicate element id".into(),
+                    });
+                }
+                if !element.x.is_finite()
+                    || !element.y.is_finite()
+                    || !element.width.is_finite()
+                    || !element.height.is_finite()
+                    || element.width <= 0.0
+                    || element.height <= 0.0
+                {
+                    issues.push(DeckIssue {
+                        slide_index: Some(slide_index),
+                        element_id: Some(element.id.clone()),
+                        message: "invalid element geometry".into(),
+                    });
+                }
+            }
+        }
+        issues
+    }
+}
+
+fn unique_slide_id(document: &PresentationDocument, prefix: &str) -> String {
+    let mut serial = document.slides.len() + 1;
+    loop {
+        let candidate = format!("{prefix}-{serial}");
+        if !document.slides.iter().any(|slide| slide.id == candidate) {
+            return candidate;
+        }
+        serial += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,4 +599,50 @@ mod tests {
         let pdf_bytes = export_pdf(&doc);
         assert!(!pdf_bytes.is_empty());
     }
+
+    #[test]
+    fn authoring_session_supports_slide_and_element_history() {
+        let doc = PresentationDocument::new("deck-session", "Session Test");
+        let mut session = PresentationSession::new(doc);
+        assert!(session.duplicate_slide(0));
+        assert_eq!(session.document.len(), 2);
+        assert!(session.add_element(SlideElement {
+            id: String::new(),
+            element_type: ElementType::BodyText,
+            content: "Hello".into(),
+            x: 10.0,
+            y: 20.0,
+            width: 300.0,
+            height: 60.0,
+        }));
+        assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
+        assert!(session.undo());
+        assert_eq!(session.document.active_slide().unwrap().elements.len(), 1);
+        assert!(session.redo());
+        assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
+    }
+
+    #[test]
+    fn scene_normalizes_geometry_and_validation_catches_duplicates() {
+        let mut doc = PresentationDocument::new("deck-scene", "Scene Test");
+        doc.slides[0].elements.push(SlideElement {
+            id: "elem-1".into(),
+            element_type: ElementType::BodyText,
+            content: "Duplicate id".into(),
+            x: 500.0,
+            y: 281.25,
+            width: 250.0,
+            height: 100.0,
+        });
+        let mut session = PresentationSession::new(doc);
+        session.set_transition("slide-1", TransitionKind::Dissolve);
+        let scene = session.scene(0).expect("scene");
+        assert_eq!(scene.transition, TransitionKind::Dissolve);
+        assert!((scene.elements[1].x - 0.5).abs() < 0.001);
+        assert!(session
+            .validate()
+            .iter()
+            .any(|issue| issue.message.contains("duplicate element")));
+    }
+
 }

@@ -5,6 +5,7 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WorkspaceMode {
@@ -160,6 +161,412 @@ pub fn load_studio_project(bytes: &[u8]) -> Result<StudioProject, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
+
+/// Interleaved floating-point PCM buffer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioBuffer {
+    /// Sample rate in hertz.
+    pub sample_rate: u32,
+    /// Channel count.
+    pub channels: u16,
+    /// Interleaved samples in `[-1, 1]`.
+    pub samples: Vec<f32>,
+}
+
+impl AudioBuffer {
+    /// Creates silence with a fixed frame count.
+    pub fn silence(sample_rate: u32, channels: u16, frames: u64) -> Result<Self, String> {
+        if sample_rate == 0 || channels == 0 || channels > 32 {
+            return Err("sample rate and channel count must be valid".into());
+        }
+        let sample_count = (frames as usize)
+            .checked_mul(channels as usize)
+            .ok_or_else(|| "audio buffer size overflow".to_string())?;
+        Ok(Self {
+            sample_rate,
+            channels,
+            samples: vec![0.0; sample_count],
+        })
+    }
+
+    /// Validates channel alignment and finite samples.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.sample_rate == 0 || self.channels == 0 || self.channels > 32 {
+            return Err("invalid audio format".into());
+        }
+        if self.samples.len() % self.channels as usize != 0 {
+            return Err("interleaved sample count is not channel-aligned".into());
+        }
+        if self.samples.iter().any(|sample| !sample.is_finite()) {
+            return Err("audio buffer contains non-finite samples".into());
+        }
+        Ok(())
+    }
+
+    /// Number of sample frames.
+    pub fn frames(&self) -> u64 {
+        (self.samples.len() / self.channels.max(1) as usize) as u64
+    }
+
+    /// Duration in seconds.
+    pub fn duration_secs(&self) -> f64 {
+        self.frames() as f64 / self.sample_rate.max(1) as f64
+    }
+
+    /// Generates a sine wave for local instruments and tests.
+    pub fn sine(
+        sample_rate: u32,
+        channels: u16,
+        frequency_hz: f32,
+        duration_secs: f32,
+        amplitude: f32,
+    ) -> Result<Self, String> {
+        if !frequency_hz.is_finite()
+            || frequency_hz <= 0.0
+            || !duration_secs.is_finite()
+            || duration_secs < 0.0
+        {
+            return Err("invalid oscillator parameters".into());
+        }
+        let frames = (sample_rate as f32 * duration_secs).round() as u64;
+        let mut buffer = Self::silence(sample_rate, channels, frames)?;
+        let amplitude = amplitude.clamp(0.0, 1.0);
+        for frame in 0..frames as usize {
+            let phase = std::f32::consts::TAU * frequency_hz * frame as f32 / sample_rate as f32;
+            let value = phase.sin() * amplitude;
+            for channel in 0..channels as usize {
+                buffer.samples[frame * channels as usize + channel] = value;
+            }
+        }
+        Ok(buffer)
+    }
+
+    /// Encodes signed 16-bit PCM WAV bytes.
+    pub fn to_wav_pcm16(&self) -> Result<Vec<u8>, String> {
+        self.validate()?;
+        let data_len = self
+            .samples
+            .len()
+            .checked_mul(2)
+            .ok_or_else(|| "WAV data length overflow".to_string())?;
+        let riff_size = 36usize
+            .checked_add(data_len)
+            .ok_or_else(|| "WAV RIFF size overflow".to_string())?;
+        if riff_size > u32::MAX as usize || data_len > u32::MAX as usize {
+            return Err("WAV output exceeds the 4 GiB RIFF limit".into());
+        }
+        let byte_rate = self
+            .sample_rate
+            .checked_mul(self.channels as u32)
+            .and_then(|value| value.checked_mul(2))
+            .ok_or_else(|| "WAV byte rate overflow".to_string())?;
+        let block_align = self.channels.checked_mul(2).ok_or_else(|| "WAV block align overflow".to_string())?;
+        let mut output = Vec::with_capacity(riff_size + 8);
+        output.extend_from_slice(b"RIFF");
+        output.extend_from_slice(&(riff_size as u32).to_le_bytes());
+        output.extend_from_slice(b"WAVEfmt ");
+        output.extend_from_slice(&16u32.to_le_bytes());
+        output.extend_from_slice(&1u16.to_le_bytes());
+        output.extend_from_slice(&self.channels.to_le_bytes());
+        output.extend_from_slice(&self.sample_rate.to_le_bytes());
+        output.extend_from_slice(&byte_rate.to_le_bytes());
+        output.extend_from_slice(&block_align.to_le_bytes());
+        output.extend_from_slice(&16u16.to_le_bytes());
+        output.extend_from_slice(b"data");
+        output.extend_from_slice(&(data_len as u32).to_le_bytes());
+        for sample in &self.samples {
+            let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+            output.extend_from_slice(&value.to_le_bytes());
+        }
+        Ok(output)
+    }
+}
+
+/// MIDI note used by the built-in deterministic reference synthesizer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MidiNote {
+    /// MIDI key in `[0, 127]`.
+    pub key: u8,
+    /// Start time in seconds.
+    pub start_secs: f64,
+    /// Duration in seconds.
+    pub duration_secs: f64,
+    /// Velocity in `[0, 1]`.
+    pub velocity: f32,
+}
+
+/// Simple volume automation point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationPoint {
+    /// Time in seconds.
+    pub time_secs: f64,
+    /// Parameter value.
+    pub value: f32,
+}
+
+/// Sorted automation lane with linear interpolation.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AutomationLane {
+    /// Ordered points.
+    pub points: Vec<AutomationPoint>,
+}
+
+impl AutomationLane {
+    /// Inserts/replaces a point.
+    pub fn set(&mut self, point: AutomationPoint) {
+        self.points
+            .retain(|existing| (existing.time_secs - point.time_secs).abs() > f64::EPSILON);
+        self.points.push(point);
+        self.points.sort_by(|left, right| left.time_secs.total_cmp(&right.time_secs));
+    }
+
+    /// Samples the lane.
+    pub fn sample(&self, time_secs: f64, default: f32) -> f32 {
+        let Some(first) = self.points.first() else {
+            return default;
+        };
+        if time_secs <= first.time_secs {
+            return first.value;
+        }
+        let Some(last) = self.points.last() else {
+            return default;
+        };
+        if time_secs >= last.time_secs {
+            return last.value;
+        }
+        for pair in self.points.windows(2) {
+            if time_secs >= pair[0].time_secs && time_secs <= pair[1].time_secs {
+                let span = pair[1].time_secs - pair[0].time_secs;
+                let progress = if span <= f64::EPSILON {
+                    1.0
+                } else {
+                    ((time_secs - pair[0].time_secs) / span).clamp(0.0, 1.0) as f32
+                };
+                return pair[0].value + (pair[1].value - pair[0].value) * progress;
+            }
+        }
+        last.value
+    }
+}
+
+/// Host-managed audio assets keyed by region name/path.
+#[derive(Debug, Clone, Default)]
+pub struct AudioAssetStore {
+    assets: BTreeMap<String, AudioBuffer>,
+}
+
+impl AudioAssetStore {
+    /// Adds a validated audio buffer.
+    pub fn insert(&mut self, name: impl Into<String>, buffer: AudioBuffer) -> Result<(), String> {
+        buffer.validate()?;
+        self.assets.insert(name.into(), buffer);
+        Ok(())
+    }
+
+    /// Retrieves an asset.
+    pub fn get(&self, name: &str) -> Option<&AudioBuffer> {
+        self.assets.get(name)
+    }
+}
+
+/// Mix result and non-fatal warnings.
+#[derive(Debug, Clone)]
+pub struct MixResult {
+    /// Rendered interleaved stereo buffer.
+    pub audio: AudioBuffer,
+    /// Missing or incompatible assets skipped by the renderer.
+    pub warnings: Vec<String>,
+}
+
+impl StudioProject {
+    /// End sample across every region.
+    pub fn duration_samples(&self) -> u64 {
+        self.tracks
+            .iter()
+            .flat_map(|track| track.regions.iter())
+            .map(|region| region.start_sample.saturating_add(region.length_samples))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Moves a region between tracks.
+    pub fn move_region(
+        &mut self,
+        from_track: usize,
+        to_track: usize,
+        region_id: &str,
+        start_sample: u64,
+    ) -> bool {
+        if from_track >= self.tracks.len() || to_track >= self.tracks.len() {
+            return false;
+        }
+        let Some(index) = self.tracks[from_track]
+            .regions
+            .iter()
+            .position(|region| region.id == region_id)
+        else {
+            return false;
+        };
+        let mut region = self.tracks[from_track].regions.remove(index);
+        region.start_sample = start_sample;
+        self.tracks[to_track].regions.push(region);
+        self.tracks[to_track]
+            .regions
+            .sort_by_key(|region| region.start_sample);
+        true
+    }
+
+    /// Deletes a region.
+    pub fn remove_region(&mut self, track_index: usize, region_id: &str) -> bool {
+        let Some(track) = self.tracks.get_mut(track_index) else {
+            return false;
+        };
+        let before = track.regions.len();
+        track.regions.retain(|region| region.id != region_id);
+        before != track.regions.len()
+    }
+
+    /// Validates project timing, track ids, and mixer parameters.
+    pub fn validate(&self) -> Vec<String> {
+        let mut issues = Vec::new();
+        if self.sample_rate == 0 {
+            issues.push("sample rate must be non-zero".into());
+        }
+        if !self.bpm.is_finite() || self.bpm <= 0.0 {
+            issues.push("tempo must be finite and positive".into());
+        }
+        if !self.tracks.is_empty() && self.active_track_index >= self.tracks.len() {
+            issues.push("active track index is out of bounds".into());
+        }
+        let mut track_ids = std::collections::HashSet::new();
+        let mut region_ids = std::collections::HashSet::new();
+        for track in &self.tracks {
+            if !track_ids.insert(&track.id) {
+                issues.push(format!("duplicate track id {}", track.id));
+            }
+            if !track.volume_db.is_finite() || !track.pan.is_finite() || !(-1.0..=1.0).contains(&track.pan) {
+                issues.push(format!("track {} has invalid mixer values", track.id));
+            }
+            for region in &track.regions {
+                if !region_ids.insert(&region.id) {
+                    issues.push(format!("duplicate region id {}", region.id));
+                }
+                if region.length_samples == 0 {
+                    issues.push(format!("region {} is empty", region.id));
+                }
+            }
+        }
+        issues
+    }
+
+    /// Mixes audio regions into a stereo floating-point buffer.
+    pub fn mix(&self, assets: &AudioAssetStore) -> Result<MixResult, String> {
+        if self.sample_rate == 0 {
+            return Err("project sample rate must be non-zero".into());
+        }
+        let mut output = AudioBuffer::silence(self.sample_rate, 2, self.duration_samples())?;
+        let solo_active = self.tracks.iter().any(|track| track.solo);
+        let mut warnings = Vec::new();
+        for track in &self.tracks {
+            if track.mute || (solo_active && !track.solo) {
+                continue;
+            }
+            let gain = 10.0_f32.powf(track.volume_db / 20.0);
+            let pan = track.pan.clamp(-1.0, 1.0);
+            let left_gain = gain * ((1.0 - pan) * 0.5).sqrt();
+            let right_gain = gain * ((1.0 + pan) * 0.5).sqrt();
+            for region in &track.regions {
+                let Some(asset) = assets.get(&region.name) else {
+                    warnings.push(format!("missing audio asset {}", region.name));
+                    continue;
+                };
+                if asset.sample_rate != self.sample_rate || !matches!(asset.channels, 1 | 2) {
+                    warnings.push(format!(
+                        "asset {} has unsupported format {} Hz / {} channels",
+                        region.name, asset.sample_rate, asset.channels
+                    ));
+                    continue;
+                }
+                let available_frames = asset.frames().min(region.length_samples);
+                for frame in 0..available_frames as usize {
+                    let destination_frame = region.start_sample as usize + frame;
+                    if destination_frame >= output.frames() as usize {
+                        break;
+                    }
+                    let (left, right) = if asset.channels == 1 {
+                        let sample = asset.samples[frame];
+                        (sample, sample)
+                    } else {
+                        (asset.samples[frame * 2], asset.samples[frame * 2 + 1])
+                    };
+                    output.samples[destination_frame * 2] += left * left_gain;
+                    output.samples[destination_frame * 2 + 1] += right * right_gain;
+                }
+            }
+        }
+        for sample in &mut output.samples {
+            *sample = sample.clamp(-1.0, 1.0);
+        }
+        Ok(MixResult { audio: output, warnings })
+    }
+}
+
+/// Synthesizes MIDI notes with a short click-free envelope.
+pub fn synthesize_notes(
+    sample_rate: u32,
+    notes: &[MidiNote],
+    tail_secs: f64,
+) -> Result<AudioBuffer, String> {
+    if sample_rate == 0 || !tail_secs.is_finite() || tail_secs < 0.0 {
+        return Err("invalid synthesizer format".into());
+    }
+    let end = notes
+        .iter()
+        .map(|note| note.start_secs + note.duration_secs)
+        .fold(0.0_f64, f64::max)
+        + tail_secs;
+    let frames = (end.max(0.0) * sample_rate as f64).ceil() as u64;
+    let mut output = AudioBuffer::silence(sample_rate, 2, frames)?;
+    for note in notes {
+        if note.key > 127
+            || !note.start_secs.is_finite()
+            || !note.duration_secs.is_finite()
+            || note.start_secs < 0.0
+            || note.duration_secs <= 0.0
+        {
+            return Err("invalid MIDI note".into());
+        }
+        let frequency = 440.0_f64 * 2.0_f64.powf((note.key as f64 - 69.0) / 12.0);
+        let start_frame = (note.start_secs * sample_rate as f64).round() as usize;
+        let note_frames = (note.duration_secs * sample_rate as f64).round() as usize;
+        let attack = (0.005 * sample_rate as f64).round() as usize;
+        let release = (0.02 * sample_rate as f64).round() as usize;
+        for local_frame in 0..note_frames {
+            let destination = start_frame + local_frame;
+            if destination >= output.frames() as usize {
+                break;
+            }
+            let attack_gain = if attack == 0 {
+                1.0
+            } else {
+                (local_frame as f32 / attack as f32).min(1.0)
+            };
+            let frames_remaining = note_frames.saturating_sub(local_frame + 1);
+            let release_gain = if release == 0 {
+                1.0
+            } else {
+                (frames_remaining as f32 / release as f32).min(1.0)
+            };
+            let envelope = attack_gain.min(release_gain);
+            let phase = std::f64::consts::TAU * frequency * local_frame as f64 / sample_rate as f64;
+            let sample = phase.sin() as f32 * note.velocity.clamp(0.0, 1.0) * envelope * 0.25;
+            output.samples[destination * 2] += sample;
+            output.samples[destination * 2 + 1] += sample;
+        }
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,4 +618,68 @@ mod tests {
         assert_eq!(loaded.mode, WorkspaceMode::Pro);
         assert_eq!(loaded.tracks.len(), 3);
     }
+
+    #[test]
+    fn audio_buffer_synth_and_wav_are_valid() {
+        let audio = AudioBuffer::sine(48_000, 2, 440.0, 0.1, 0.5).unwrap();
+        assert_eq!(audio.frames(), 4_800);
+        let wav = audio.to_wav_pcm16().unwrap();
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+    }
+
+    #[test]
+    fn project_mixer_honors_regions_gain_and_pan() {
+        let mut project = StudioProject::new("mix", "Mix");
+        project.tracks.clear();
+        let mut track = StudioTrack::new("t", "Tone", TrackKind::Audio);
+        track.pan = -1.0;
+        track.regions.push(AudioRegion {
+            id: "r".into(),
+            name: "tone".into(),
+            start_sample: 10,
+            length_samples: 100,
+        });
+        project.tracks.push(track);
+        let mut assets = AudioAssetStore::default();
+        assets
+            .insert("tone", AudioBuffer::sine(48_000, 1, 440.0, 0.01, 0.5).unwrap())
+            .unwrap();
+        let mix = project.mix(&assets).unwrap();
+        assert!(mix.warnings.is_empty());
+        assert!(mix.audio.samples.iter().any(|sample| sample.abs() > 0.0));
+        let right_energy: f32 = mix.audio.samples.iter().skip(1).step_by(2).map(|s| s.abs()).sum();
+        let left_energy: f32 = mix.audio.samples.iter().step_by(2).map(|s| s.abs()).sum();
+        assert!(left_energy > right_energy);
+    }
+
+    #[test]
+    fn midi_reference_synth_and_automation_work() {
+        let audio = synthesize_notes(
+            48_000,
+            &[MidiNote {
+                key: 69,
+                start_secs: 0.0,
+                duration_secs: 0.05,
+                velocity: 1.0,
+            }],
+            0.01,
+        )
+        .unwrap();
+        assert!(audio.samples.iter().any(|sample| sample.abs() > 0.0));
+        let mut lane = AutomationLane::default();
+        lane.set(AutomationPoint { time_secs: 1.0, value: 1.0 });
+        lane.set(AutomationPoint { time_secs: 0.0, value: 0.0 });
+        assert!((lane.sample(0.5, 0.0) - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn move_remove_and_validate_regions() {
+        let mut project = StudioProject::new("regions", "Regions");
+        assert!(project.move_region(0, 1, "r1", 123));
+        assert_eq!(project.tracks[1].regions[0].start_sample, 123);
+        assert!(project.remove_region(1, "r1"));
+        assert!(project.validate().is_empty());
+    }
+
 }

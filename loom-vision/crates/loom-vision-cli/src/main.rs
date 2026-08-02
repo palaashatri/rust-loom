@@ -16,7 +16,10 @@ use std::time::Instant;
 
 use loom_vision_core::model_pack::validate_pack;
 use loom_vision_core::provider::{CapabilityProvider, ProviderInput, ProviderOutput, RunContext};
-use loom_vision_core::reference::{ImageStatsProvider, QrCodeProvider, NO_QR_CODE_MESSAGE};
+use loom_vision_core::reference::{
+    AudioAnalysisProvider, DocumentLayoutProvider, ImageEmbeddingProvider, ImageStatsProvider,
+    QrCodeProvider, ThresholdSegmentationProvider, NO_QR_CODE_MESSAGE,
+};
 use loom_vision_core::VisionError;
 
 const USAGE: &str = "\
@@ -26,6 +29,10 @@ Commands:
   inspect-pack <dir>    Validate a model pack directory and print its summary
   qr <image>            Decode a QR code from an image file
   stats <image>         Compute mean luma, std luma, and contrast of an image
+  segment <image> <pgm> Write a deterministic foreground mask as PGM
+  layout <image>        Print connected document regions
+  embed <image>         Print the 64-value local image embedding
+  audio <pcm16le> <rate> <channels>  Analyse raw signed PCM16 audio
   bench <image>         Run QR decoding 20 times; print min/median/max ms
   help                  Show this help
 
@@ -42,6 +49,10 @@ fn main() -> ExitCode {
         "inspect-pack" => inspect_pack(&args[1..]),
         "qr" => qr(&args[1..]),
         "stats" => stats(&args[1..]),
+        "segment" => segment(&args[1..]),
+        "layout" => layout(&args[1..]),
+        "embed" => embed(&args[1..]),
+        "audio" => audio(&args[1..]),
         "bench" => bench(&args[1..]),
         "help" | "-h" | "--help" => {
             print!("{USAGE}");
@@ -186,6 +197,182 @@ fn stats(args: &[String]) -> ExitCode {
         }
         Ok(other) => {
             eprintln!("error: unexpected provider output: {other:?}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+
+fn segment(args: &[String]) -> ExitCode {
+    let [input_path, output_path] = args else {
+        eprintln!("error: segment requires <image> <mask.pgm>");
+        return ExitCode::from(2);
+    };
+    let input = match load_rgb_input(Path::new(input_path)) {
+        Ok(input) => input,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    let mut context = RunContext::new();
+    match ThresholdSegmentationProvider::new().run(&input, &mut context) {
+        Ok(ProviderOutput::SegmentationMask { width, height, mask }) => {
+            let mut pgm = format!("P5\n{width} {height}\n255\n").into_bytes();
+            pgm.extend_from_slice(&mask);
+            if let Err(error) = std::fs::write(output_path, pgm) {
+                eprintln!("error: failed to write {output_path}: {error}");
+                return ExitCode::from(1);
+            }
+            println!("wrote {output_path} ({width}x{height})");
+            ExitCode::SUCCESS
+        }
+        Ok(other) => {
+            eprintln!("error: unexpected provider output: {other:?}");
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn layout(args: &[String]) -> ExitCode {
+    let path = match one_arg(args) {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let input = match load_rgb_input(&path) {
+        Ok(input) => input,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    let mut context = RunContext::new();
+    match DocumentLayoutProvider::new().run(&input, &mut context) {
+        Ok(ProviderOutput::DetectionResult { boxes }) => {
+            println!("regions: {}", boxes.len());
+            for (index, region) in boxes.iter().enumerate() {
+                println!(
+                    "{}\t{}\t{:.0},{:.0} {:.0}x{:.0}\t{:.3}",
+                    index + 1,
+                    region.label,
+                    region.x,
+                    region.y,
+                    region.w,
+                    region.h,
+                    region.confidence
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(other) => {
+            eprintln!("error: unexpected provider output: {other:?}");
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn embed(args: &[String]) -> ExitCode {
+    let path = match one_arg(args) {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let input = match load_rgb_input(&path) {
+        Ok(input) => input,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(1);
+        }
+    };
+    let mut context = RunContext::new();
+    match ImageEmbeddingProvider::new().run(&input, &mut context) {
+        Ok(ProviderOutput::Embedding { values }) => {
+            println!("dimensions: {}", values.len());
+            println!(
+                "{}",
+                values
+                    .iter()
+                    .map(|value| format!("{value:.6}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(other) => {
+            eprintln!("error: unexpected provider output: {other:?}");
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn audio(args: &[String]) -> ExitCode {
+    let [path, sample_rate, channels] = args else {
+        eprintln!("error: audio requires <pcm16le> <sample-rate> <channels>");
+        return ExitCode::from(2);
+    };
+    let sample_rate = match sample_rate.parse::<u32>() {
+        Ok(value) if value > 0 => value,
+        _ => {
+            eprintln!("error: sample rate must be a positive integer");
+            return ExitCode::from(2);
+        }
+    };
+    let channels = match channels.parse::<u16>() {
+        Ok(value) if value > 0 => value,
+        _ => {
+            eprintln!("error: channels must be a positive integer");
+            return ExitCode::from(2);
+        }
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("error: failed to read {path}: {error}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes.len() % 2 != 0 {
+        eprintln!("error: PCM16 input has an odd byte count");
+        return ExitCode::from(1);
+    }
+    let samples = bytes
+        .chunks_exact(2)
+        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]) as f32 / 32768.0)
+        .collect::<Vec<_>>();
+    let input = ProviderInput::Audio {
+        sample_rate,
+        channels,
+        samples,
+    };
+    let mut context = RunContext::new();
+    match AudioAnalysisProvider::new().run(&input, &mut context) {
+        Ok(ProviderOutput::AudioAnalysis {
+            rms,
+            peak,
+            zero_crossing_rate,
+        }) => {
+            println!("rms: {rms:.6}");
+            println!("peak: {peak:.6}");
+            println!("zero crossing rate: {zero_crossing_rate:.6}");
+            ExitCode::SUCCESS
+        }
+        Ok(other) => {
+            eprintln!("error: unexpected provider output: {other:?}");
+            ExitCode::from(1)
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
             ExitCode::from(1)
         }
     }

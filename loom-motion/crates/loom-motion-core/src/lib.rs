@@ -51,12 +51,17 @@ impl MotionLayer {
             value: val,
             easing: "ease-in-out".to_string(),
         };
-        match property {
-            "x" => self.position_x_keys.push(kf),
-            "y" => self.position_y_keys.push(kf),
-            "opacity" => self.opacity_keys.push(kf),
-            "scale" => self.scale_keys.push(kf),
-            _ => {}
+        let keys = match property {
+            "x" => Some(&mut self.position_x_keys),
+            "y" => Some(&mut self.position_y_keys),
+            "opacity" => Some(&mut self.opacity_keys),
+            "scale" => Some(&mut self.scale_keys),
+            _ => None,
+        };
+        if let Some(keys) = keys {
+            keys.retain(|existing| (existing.time_secs - time).abs() > f32::EPSILON);
+            keys.push(kf);
+            keys.sort_by(|left, right| left.time_secs.total_cmp(&right.time_secs));
         }
     }
 }
@@ -158,6 +163,286 @@ pub fn load_motion(bytes: &[u8]) -> Result<CompositionDocument, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
+
+/// Sampled transform for one layer at one composition time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerSample {
+    /// Layer id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// X position in composition pixels.
+    pub x: f32,
+    /// Y position in composition pixels.
+    pub y: f32,
+    /// Opacity in `[0, 1]`.
+    pub opacity: f32,
+    /// Uniform scale, where `1` is original size.
+    pub scale: f32,
+    /// Whether the layer is active at this time.
+    pub visible: bool,
+}
+
+/// Deterministic scene state for one composition frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositionFrame {
+    /// Requested time in seconds, clamped to the composition duration.
+    pub time_secs: f32,
+    /// Zero-based frame index.
+    pub frame_index: u64,
+    /// Sampled layers in document order.
+    pub layers: Vec<LayerSample>,
+}
+
+/// Validation issue in a motion document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MotionIssue {
+    /// Layer id, when the issue belongs to a layer.
+    pub layer_id: Option<String>,
+    /// Human-readable description.
+    pub message: String,
+}
+
+/// Render range for a composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameRange {
+    /// Inclusive first frame.
+    pub start: u64,
+    /// Exclusive end frame.
+    pub end: u64,
+}
+
+impl FrameRange {
+    /// Number of frames in the range.
+    pub fn len(self) -> u64 {
+        self.end.saturating_sub(self.start)
+    }
+
+    /// Whether no frames are selected.
+    pub fn is_empty(self) -> bool {
+        self.start >= self.end
+    }
+}
+
+impl MotionLayer {
+    /// Removes a keyframe at the exact timestamp from a property track.
+    pub fn remove_keyframe(&mut self, property: &str, time: f32) -> bool {
+        let keys = match property {
+            "x" => Some(&mut self.position_x_keys),
+            "y" => Some(&mut self.position_y_keys),
+            "opacity" => Some(&mut self.opacity_keys),
+            "scale" => Some(&mut self.scale_keys),
+            _ => None,
+        };
+        let Some(keys) = keys else {
+            return false;
+        };
+        let before = keys.len();
+        keys.retain(|key| (key.time_secs - time).abs() > f32::EPSILON);
+        before != keys.len()
+    }
+
+    /// Samples all animated properties at absolute composition time.
+    pub fn sample(&self, time_secs: f32) -> LayerSample {
+        let local_time = time_secs - self.start_time;
+        let visible = local_time >= 0.0 && local_time <= self.duration.max(0.0);
+        LayerSample {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            x: sample_keys(&self.position_x_keys, local_time, 0.0),
+            y: sample_keys(&self.position_y_keys, local_time, 0.0),
+            opacity: sample_keys(&self.opacity_keys, local_time, 1.0).clamp(0.0, 1.0),
+            scale: sample_keys(&self.scale_keys, local_time, 1.0).max(0.0),
+            visible,
+        }
+    }
+}
+
+impl CompositionDocument {
+    /// Number of output frames using round-to-nearest duration semantics.
+    pub fn duration_frames(&self) -> u64 {
+        if !self.duration_secs.is_finite() || !self.frame_rate.is_finite() {
+            return 0;
+        }
+        (self.duration_secs.max(0.0) * self.frame_rate.max(0.0)).round() as u64
+    }
+
+    /// Converts a frame index to seconds.
+    pub fn frame_time(&self, frame_index: u64) -> f32 {
+        if self.frame_rate <= 0.0 || !self.frame_rate.is_finite() {
+            0.0
+        } else {
+            frame_index as f32 / self.frame_rate
+        }
+    }
+
+    /// Samples the entire composition at one time.
+    pub fn frame_at(&self, time_secs: f32) -> CompositionFrame {
+        let time_secs = time_secs
+            .max(0.0)
+            .min(self.duration_secs.max(0.0));
+        let frame_index = if self.frame_rate > 0.0 && self.frame_rate.is_finite() {
+            (time_secs * self.frame_rate).round() as u64
+        } else {
+            0
+        };
+        CompositionFrame {
+            time_secs,
+            frame_index,
+            layers: self.layers.iter().map(|layer| layer.sample(time_secs)).collect(),
+        }
+    }
+
+    /// Samples a frame by index.
+    pub fn frame(&self, frame_index: u64) -> CompositionFrame {
+        self.frame_at(self.frame_time(frame_index))
+    }
+
+    /// Reorders one layer.
+    pub fn move_layer(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.layers.len() || to >= self.layers.len() || from == to {
+            return false;
+        }
+        let layer = self.layers.remove(from);
+        self.layers.insert(to, layer);
+        self.active_layer_index = to;
+        true
+    }
+
+    /// Removes a layer while preserving a valid active index.
+    pub fn remove_layer(&mut self, index: usize) -> bool {
+        if index >= self.layers.len() {
+            return false;
+        }
+        self.layers.remove(index);
+        self.active_layer_index = self
+            .active_layer_index
+            .min(self.layers.len().saturating_sub(1));
+        true
+    }
+
+    /// Validates timing, ids, dimensions, and keyframe values.
+    pub fn validate(&self) -> Vec<MotionIssue> {
+        let mut issues = Vec::new();
+        if self.width == 0 || self.height == 0 {
+            issues.push(MotionIssue {
+                layer_id: None,
+                message: "composition dimensions must be non-zero".into(),
+            });
+        }
+        if !self.frame_rate.is_finite() || self.frame_rate <= 0.0 {
+            issues.push(MotionIssue {
+                layer_id: None,
+                message: "frame rate must be finite and positive".into(),
+            });
+        }
+        if !self.duration_secs.is_finite() || self.duration_secs <= 0.0 {
+            issues.push(MotionIssue {
+                layer_id: None,
+                message: "duration must be finite and positive".into(),
+            });
+        }
+        if !self.layers.is_empty() && self.active_layer_index >= self.layers.len() {
+            issues.push(MotionIssue {
+                layer_id: None,
+                message: "active layer index is out of bounds".into(),
+            });
+        }
+        let mut ids = std::collections::HashSet::new();
+        for layer in &self.layers {
+            if !ids.insert(&layer.id) {
+                issues.push(MotionIssue {
+                    layer_id: Some(layer.id.clone()),
+                    message: "duplicate layer id".into(),
+                });
+            }
+            if !layer.start_time.is_finite()
+                || !layer.duration.is_finite()
+                || layer.start_time < 0.0
+                || layer.duration < 0.0
+            {
+                issues.push(MotionIssue {
+                    layer_id: Some(layer.id.clone()),
+                    message: "invalid layer timing".into(),
+                });
+            }
+            for (property, keys) in [
+                ("x", &layer.position_x_keys),
+                ("y", &layer.position_y_keys),
+                ("opacity", &layer.opacity_keys),
+                ("scale", &layer.scale_keys),
+            ] {
+                if keys.iter().any(|key| !key.time_secs.is_finite() || !key.value.is_finite()) {
+                    issues.push(MotionIssue {
+                        layer_id: Some(layer.id.clone()),
+                        message: format!("{property} track contains a non-finite keyframe"),
+                    });
+                }
+                if keys
+                    .windows(2)
+                    .any(|pair| pair[0].time_secs >= pair[1].time_secs)
+                {
+                    issues.push(MotionIssue {
+                        layer_id: Some(layer.id.clone()),
+                        message: format!("{property} keyframes are not strictly ordered"),
+                    });
+                }
+            }
+        }
+        issues
+    }
+
+    /// Resolves a bounded render range.
+    pub fn render_range(&self, start: Option<u64>, end: Option<u64>) -> FrameRange {
+        let duration = self.duration_frames();
+        let start = start.unwrap_or(0).min(duration);
+        let end = end.unwrap_or(duration).min(duration).max(start);
+        FrameRange { start, end }
+    }
+}
+
+fn sample_keys(keys: &[Keyframe], time: f32, default: f32) -> f32 {
+    let Some(first) = keys.first() else {
+        return default;
+    };
+    if time <= first.time_secs {
+        return first.value;
+    }
+    let Some(last) = keys.last() else {
+        return default;
+    };
+    if time >= last.time_secs {
+        return last.value;
+    }
+    for pair in keys.windows(2) {
+        let left = &pair[0];
+        let right = &pair[1];
+        if time >= left.time_secs && time <= right.time_secs {
+            let duration = right.time_secs - left.time_secs;
+            if duration <= f32::EPSILON {
+                return right.value;
+            }
+            let progress = ((time - left.time_secs) / duration).clamp(0.0, 1.0);
+            let eased = easing_progress(&left.easing, progress);
+            return left.value + (right.value - left.value) * eased;
+        }
+    }
+    last.value
+}
+
+fn easing_progress(name: &str, progress: f32) -> f32 {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "linear" => progress,
+        "ease-in" => progress * progress,
+        "ease-out" => 1.0 - (1.0 - progress) * (1.0 - progress),
+        "hold" | "step" => 0.0,
+        _ => {
+            // Smoothstep: deterministic ease-in-out without an external spline crate.
+            progress * progress * (3.0 - 2.0 * progress)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,4 +532,41 @@ mod tests {
         assert_eq!(loaded.name, "Title Lower Third");
         assert_eq!(loaded.len(), 2);
     }
+
+    #[test]
+    fn keyframes_are_sorted_replaced_and_sampled() {
+        let mut layer = MotionLayer::new("layer", "Layer", "Text");
+        layer.add_keyframe("x", 2.0, 200.0);
+        layer.add_keyframe("x", 0.0, 0.0);
+        layer.add_keyframe("x", 2.0, 300.0);
+        assert_eq!(layer.position_x_keys.len(), 2);
+        assert_eq!(layer.position_x_keys[0].time_secs, 0.0);
+        assert!((layer.sample(1.0).x - 150.0).abs() < 0.001);
+        assert!(layer.remove_keyframe("x", 2.0));
+        assert_eq!(layer.sample(10.0).x, 0.0);
+    }
+
+    #[test]
+    fn composition_frame_and_render_range_are_bounded() {
+        let doc = CompositionDocument::new("comp-frame", "Frame Test");
+        assert_eq!(doc.duration_frames(), 600);
+        let frame = doc.frame(60);
+        assert!((frame.time_secs - 1.0).abs() < 0.001);
+        assert_eq!(frame.frame_index, 60);
+        assert_eq!(doc.render_range(Some(590), Some(900)), FrameRange { start: 590, end: 600 });
+    }
+
+    #[test]
+    fn motion_validation_reports_bad_documents() {
+        let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
+        doc.frame_rate = 0.0;
+        doc.layers[0].position_x_keys = vec![
+            Keyframe { time_secs: 1.0, value: 0.0, easing: "linear".into() },
+            Keyframe { time_secs: 0.5, value: 1.0, easing: "linear".into() },
+        ];
+        let issues = doc.validate();
+        assert!(issues.iter().any(|issue| issue.message.contains("frame rate")));
+        assert!(issues.iter().any(|issue| issue.message.contains("not strictly ordered")));
+    }
+
 }

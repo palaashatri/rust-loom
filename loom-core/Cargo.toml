@@ -12,6 +12,7 @@ members = [
     "crates/loom-test-support",
     "crates/loom-pdf",
     "crates/loom-ui",
+    "crates/loom-runtime",
 ]
 
 [workspace.package]

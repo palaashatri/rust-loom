@@ -5,6 +5,7 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum LayerKind {
@@ -161,6 +162,343 @@ pub fn load_photo(bytes: &[u8]) -> Result<PhotoDocument, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
+
+/// Maximum raster size accepted by the in-memory reference compositor.
+pub const MAX_REFERENCE_PIXELS: usize = 100_000_000;
+
+/// A validated row-major RGBA8 image.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RgbaImage {
+    /// Image width.
+    pub width: u32,
+    /// Image height.
+    pub height: u32,
+    /// Row-major RGBA bytes.
+    pub pixels: Vec<u8>,
+}
+
+impl RgbaImage {
+    /// Creates a transparent image.
+    pub fn transparent(width: u32, height: u32) -> Result<Self, String> {
+        let bytes = image_byte_len(width, height)?;
+        Ok(Self {
+            width,
+            height,
+            pixels: vec![0; bytes],
+        })
+    }
+
+    /// Creates an image filled with one RGBA color.
+    pub fn solid(width: u32, height: u32, rgba: [u8; 4]) -> Result<Self, String> {
+        let mut image = Self::transparent(width, height)?;
+        for pixel in image.pixels.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&rgba);
+        }
+        Ok(image)
+    }
+
+    /// Validates dimensions and buffer length.
+    pub fn validate(&self) -> Result<(), String> {
+        let expected = image_byte_len(self.width, self.height)?;
+        if self.pixels.len() != expected {
+            return Err(format!(
+                "RGBA buffer length {} does not match {}x{}",
+                self.pixels.len(), self.width, self.height
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reads a pixel.
+    pub fn pixel(&self, x: u32, y: u32) -> Option<[u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let index = ((y as usize * self.width as usize) + x as usize) * 4;
+        Some([
+            self.pixels[index],
+            self.pixels[index + 1],
+            self.pixels[index + 2],
+            self.pixels[index + 3],
+        ])
+    }
+
+    /// Writes a pixel.
+    pub fn set_pixel(&mut self, x: u32, y: u32, rgba: [u8; 4]) -> bool {
+        if x >= self.width || y >= self.height {
+            return false;
+        }
+        let index = ((y as usize * self.width as usize) + x as usize) * 4;
+        self.pixels[index..index + 4].copy_from_slice(&rgba);
+        true
+    }
+
+    /// Crops an axis-aligned rectangle.
+    pub fn crop(&self, x: u32, y: u32, width: u32, height: u32) -> Result<Self, String> {
+        if width == 0
+            || height == 0
+            || x.checked_add(width).is_none()
+            || y.checked_add(height).is_none()
+            || x + width > self.width
+            || y + height > self.height
+        {
+            return Err("crop rectangle is outside the image".into());
+        }
+        let mut output = Self::transparent(width, height)?;
+        for row in 0..height {
+            let src_start = (((y + row) * self.width + x) as usize) * 4;
+            let dst_start = (row as usize * width as usize) * 4;
+            let row_bytes = width as usize * 4;
+            output.pixels[dst_start..dst_start + row_bytes]
+                .copy_from_slice(&self.pixels[src_start..src_start + row_bytes]);
+        }
+        Ok(output)
+    }
+
+    /// Nearest-neighbour resize used by deterministic previews and tests.
+    pub fn resize_nearest(&self, width: u32, height: u32) -> Result<Self, String> {
+        if width == 0 || height == 0 {
+            return Err("resize dimensions must be non-zero".into());
+        }
+        let mut output = Self::transparent(width, height)?;
+        for y in 0..height {
+            let source_y = ((u64::from(y) * u64::from(self.height)) / u64::from(height)) as u32;
+            for x in 0..width {
+                let source_x = ((u64::from(x) * u64::from(self.width)) / u64::from(width)) as u32;
+                let pixel = self
+                    .pixel(source_x.min(self.width - 1), source_y.min(self.height - 1))
+                    .expect("source coordinate is clamped");
+                output.set_pixel(x, y, pixel);
+            }
+        }
+        Ok(output)
+    }
+
+    /// Encodes a portable pixmap (P6), flattening alpha against `background`.
+    pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
+        let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
+        output.reserve(self.width as usize * self.height as usize * 3);
+        for pixel in self.pixels.chunks_exact(4) {
+            let alpha = pixel[3] as f32 / 255.0;
+            for channel in 0..3 {
+                let value = pixel[channel] as f32 * alpha + background[channel] as f32 * (1.0 - alpha);
+                output.push(value.round().clamp(0.0, 255.0) as u8);
+            }
+        }
+        output
+    }
+}
+
+fn image_byte_len(width: u32, height: u32) -> Result<usize, String> {
+    if width == 0 || height == 0 {
+        return Err("image dimensions must be non-zero".into());
+    }
+    let pixels = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| "image dimensions overflow".to_string())?;
+    if pixels > MAX_REFERENCE_PIXELS {
+        return Err(format!(
+            "image has {pixels} pixels; reference compositor limit is {MAX_REFERENCE_PIXELS}"
+        ));
+    }
+    pixels
+        .checked_mul(4)
+        .ok_or_else(|| "image byte length overflow".to_string())
+}
+
+/// Pixel and mask content associated with a metadata-only [`PhotoDocument`].
+#[derive(Debug, Clone)]
+pub struct PhotoCanvas {
+    /// Nondestructive document metadata.
+    pub document: PhotoDocument,
+    layer_images: BTreeMap<String, RgbaImage>,
+    layer_masks: BTreeMap<String, Vec<u8>>,
+}
+
+impl PhotoCanvas {
+    /// Creates an empty canvas for an existing document.
+    pub fn new(document: PhotoDocument) -> Result<Self, String> {
+        image_byte_len(document.width, document.height)?;
+        Ok(Self {
+            document,
+            layer_images: BTreeMap::new(),
+            layer_masks: BTreeMap::new(),
+        })
+    }
+
+    /// Attaches pixels to a pixel layer.
+    pub fn set_layer_image(&mut self, layer_id: &str, image: RgbaImage) -> Result<(), String> {
+        image.validate()?;
+        if image.width != self.document.width || image.height != self.document.height {
+            return Err("layer image dimensions must match the document".into());
+        }
+        let layer = self
+            .document
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| format!("unknown layer {layer_id}"))?;
+        if layer.kind != LayerKind::Pixel {
+            return Err(format!("layer {layer_id} is not a pixel layer"));
+        }
+        self.layer_images.insert(layer_id.to_string(), image);
+        Ok(())
+    }
+
+    /// Attaches an 8-bit mask to a layer; 0 hides and 255 reveals.
+    pub fn set_layer_mask(&mut self, layer_id: &str, mask: Vec<u8>) -> Result<(), String> {
+        if !self.document.layers.iter().any(|layer| layer.id == layer_id) {
+            return Err(format!("unknown layer {layer_id}"));
+        }
+        let expected = self.document.width as usize * self.document.height as usize;
+        if mask.len() != expected {
+            return Err(format!(
+                "mask length {} does not match document pixel count {expected}",
+                mask.len()
+            ));
+        }
+        self.layer_masks.insert(layer_id.to_string(), mask);
+        Ok(())
+    }
+
+    /// Returns attached pixels for a layer.
+    pub fn layer_image(&self, layer_id: &str) -> Option<&RgbaImage> {
+        self.layer_images.get(layer_id)
+    }
+
+    /// Composites all visible layers bottom-to-top.
+    pub fn composite(&self) -> Result<RgbaImage, String> {
+        let mut output = RgbaImage::transparent(self.document.width, self.document.height)?;
+        for layer in &self.document.layers {
+            if !layer.visible || layer.opacity <= 0.0 {
+                continue;
+            }
+            match layer.kind {
+                LayerKind::Pixel => {
+                    let Some(source) = self.layer_images.get(&layer.id) else {
+                        continue;
+                    };
+                    let mask = self.layer_masks.get(&layer.id);
+                    blend_image(&mut output, source, mask, layer.opacity, &layer.blend_mode);
+                }
+                LayerKind::Adjustment => apply_adjustment(
+                    &mut output,
+                    layer.adjustment_type.as_deref().unwrap_or("brightness"),
+                    layer.adjustment_value,
+                    layer.opacity,
+                    self.layer_masks.get(&layer.id),
+                ),
+                LayerKind::Text | LayerKind::Vector => {
+                    // Text and vector layers are represented by the document model; a
+                    // future vector renderer rasterizes them before this compositor.
+                }
+            }
+        }
+        Ok(output)
+    }
+}
+
+fn blend_image(
+    destination: &mut RgbaImage,
+    source: &RgbaImage,
+    mask: Option<&Vec<u8>>,
+    opacity: f32,
+    mode: &BlendMode,
+) {
+    for (pixel_index, (dst, src)) in destination
+        .pixels
+        .chunks_exact_mut(4)
+        .zip(source.pixels.chunks_exact(4))
+        .enumerate()
+    {
+        let mask_alpha = mask.map(|mask| mask[pixel_index] as f32 / 255.0).unwrap_or(1.0);
+        let source_alpha = src[3] as f32 / 255.0 * opacity.clamp(0.0, 1.0) * mask_alpha;
+        let destination_alpha = dst[3] as f32 / 255.0;
+        let out_alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
+        if out_alpha <= f32::EPSILON {
+            dst.copy_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+        for channel in 0..3 {
+            let source_channel = src[channel] as f32 / 255.0;
+            let destination_channel = dst[channel] as f32 / 255.0;
+            let blended = blend_channel(source_channel, destination_channel, mode);
+            let premultiplied = blended * source_alpha
+                + destination_channel * destination_alpha * (1.0 - source_alpha);
+            dst[channel] = (premultiplied / out_alpha * 255.0)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+        }
+        dst[3] = (out_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+fn blend_channel(source: f32, destination: f32, mode: &BlendMode) -> f32 {
+    match mode {
+        BlendMode::Normal => source,
+        BlendMode::Multiply => source * destination,
+        BlendMode::Screen => 1.0 - (1.0 - source) * (1.0 - destination),
+        BlendMode::Overlay => {
+            if destination <= 0.5 {
+                2.0 * source * destination
+            } else {
+                1.0 - 2.0 * (1.0 - source) * (1.0 - destination)
+            }
+        }
+    }
+}
+
+fn apply_adjustment(
+    image: &mut RgbaImage,
+    adjustment_type: &str,
+    value: f32,
+    opacity: f32,
+    mask: Option<&Vec<u8>>,
+) {
+    let normalized_name = adjustment_type.trim().to_ascii_lowercase();
+    for (pixel_index, pixel) in image.pixels.chunks_exact_mut(4).enumerate() {
+        let mask_alpha = mask.map(|mask| mask[pixel_index] as f32 / 255.0).unwrap_or(1.0);
+        let strength = opacity.clamp(0.0, 1.0) * mask_alpha;
+        if strength <= 0.0 {
+            continue;
+        }
+        let original = [pixel[0] as f32, pixel[1] as f32, pixel[2] as f32];
+        let mut adjusted = original;
+        match normalized_name.as_str() {
+            "exposure" => {
+                let multiplier = 2.0_f32.powf(value.clamp(-8.0, 8.0));
+                for channel in &mut adjusted {
+                    *channel *= multiplier;
+                }
+            }
+            "contrast" => {
+                let factor = 1.0 + value.clamp(-1.0, 4.0);
+                for channel in &mut adjusted {
+                    *channel = ((*channel / 255.0 - 0.5) * factor + 0.5) * 255.0;
+                }
+            }
+            "saturation" => {
+                let luma = 0.299 * original[0] + 0.587 * original[1] + 0.114 * original[2];
+                let factor = 1.0 + value.clamp(-1.0, 4.0);
+                for channel in &mut adjusted {
+                    *channel = luma + (*channel - luma) * factor;
+                }
+            }
+            _ => {
+                let offset = value.clamp(-1.0, 1.0) * 255.0;
+                for channel in &mut adjusted {
+                    *channel += offset;
+                }
+            }
+        }
+        for channel in 0..3 {
+            pixel[channel] = (original[channel] + (adjusted[channel] - original[channel]) * strength)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,4 +549,51 @@ mod tests {
         assert_eq!(loaded.name, "Landscape Composite");
         assert_eq!(loaded.len(), 2);
     }
+
+    #[test]
+    fn reference_compositor_blends_pixels_and_adjustments() {
+        let mut doc = PhotoDocument::new("photo-small", "Composite", 2, 1);
+        doc.layers[0].opacity = 1.0;
+        doc.add_layer(Layer::new_pixel("top", "Top"));
+        doc.layers[1].opacity = 0.5;
+        doc.add_layer(Layer::new_adjustment("bright", "Bright", "brightness", 0.1));
+        let mut canvas = PhotoCanvas::new(doc).expect("canvas");
+        canvas
+            .set_layer_image("layer-bg", RgbaImage::solid(2, 1, [100, 100, 100, 255]).unwrap())
+            .unwrap();
+        canvas
+            .set_layer_image("top", RgbaImage::solid(2, 1, [200, 0, 0, 255]).unwrap())
+            .unwrap();
+        let result = canvas.composite().expect("composite");
+        let pixel = result.pixel(0, 0).unwrap();
+        assert!(pixel[0] > 150);
+        assert!(pixel[1] > 50);
+        assert_eq!(pixel[3], 255);
+    }
+
+    #[test]
+    fn masks_and_ppm_export_are_deterministic() {
+        let doc = PhotoDocument::new("photo-mask", "Mask", 2, 1);
+        let mut canvas = PhotoCanvas::new(doc).unwrap();
+        canvas
+            .set_layer_image("layer-bg", RgbaImage::solid(2, 1, [255, 0, 0, 255]).unwrap())
+            .unwrap();
+        canvas.set_layer_mask("layer-bg", vec![255, 0]).unwrap();
+        let result = canvas.composite().unwrap();
+        assert_eq!(result.pixel(0, 0), Some([255, 0, 0, 255]));
+        assert_eq!(result.pixel(1, 0), Some([0, 0, 0, 0]));
+        let ppm = result.to_ppm([255, 255, 255]);
+        assert!(ppm.starts_with(b"P6\n2 1\n255\n"));
+    }
+
+    #[test]
+    fn crop_and_resize_preserve_expected_pixels() {
+        let mut image = RgbaImage::solid(2, 2, [0, 0, 0, 255]).unwrap();
+        image.set_pixel(1, 1, [10, 20, 30, 255]);
+        let crop = image.crop(1, 1, 1, 1).unwrap();
+        assert_eq!(crop.pixel(0, 0), Some([10, 20, 30, 255]));
+        let resized = crop.resize_nearest(3, 2).unwrap();
+        assert_eq!(resized.pixel(2, 1), Some([10, 20, 30, 255]));
+    }
+
 }

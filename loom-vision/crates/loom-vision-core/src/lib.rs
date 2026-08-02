@@ -17,8 +17,9 @@
 //!   [`CapabilityRegistry`] routing.
 //! * [`model_pack`] — model-pack manifest parsing, validation (checksums,
 //!   path-traversal and archive-bomb guards), and safe installation.
-//! * [`reference`] — deterministic CPU reference providers (QR decoding and
-//!   image statistics).
+//! * [`reference`] — deterministic CPU reference providers for QR decoding,
+//!   image statistics, threshold segmentation, document layout, compact image
+//!   embeddings, and audio analysis.
 //! * [`error`] — the shared [`VisionError`] type.
 //!
 //! ## Example
@@ -63,7 +64,10 @@ pub use provider::{
     image_to_luma, image_to_luma_checked, BBox, Backend, CapabilityId, CapabilityProvider,
     InputType, LumaImage, ProviderDescriptor, ProviderInput, ProviderOutput, RunContext,
 };
-pub use reference::{ImageStatsProvider, QrCodeProvider, NO_QR_CODE_MESSAGE};
+pub use reference::{
+    AudioAnalysisProvider, DocumentLayoutProvider, ImageEmbeddingProvider, ImageStatsProvider,
+    QrCodeProvider, ThresholdSegmentationProvider, NO_QR_CODE_MESSAGE,
+};
 pub use registry::{CapabilityRegistry, ProviderRegistry};
 
 /// Current model-pack manifest format version.

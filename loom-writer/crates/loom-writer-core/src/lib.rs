@@ -1210,6 +1210,553 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     pdf.serialize()
 }
 
+
+/// One text-search hit in a document block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchMatch {
+    /// Stable block id.
+    pub block_id: u64,
+    /// UTF-8 byte offset of the match start.
+    pub start: usize,
+    /// UTF-8 byte offset immediately after the match.
+    pub end: usize,
+}
+
+/// One generated table-of-contents entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableOfContentsEntry {
+    /// Heading block id.
+    pub block_id: u64,
+    /// Heading depth from 1 to 6.
+    pub level: u8,
+    /// Heading text.
+    pub title: String,
+}
+
+/// Approximate page geometry used by the deterministic reference paginator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageStyle {
+    /// Page width in points.
+    pub width_pt: f32,
+    /// Page height in points.
+    pub height_pt: f32,
+    /// Top margin in points.
+    pub margin_top_pt: f32,
+    /// Bottom margin in points.
+    pub margin_bottom_pt: f32,
+    /// Left margin in points.
+    pub margin_left_pt: f32,
+    /// Right margin in points.
+    pub margin_right_pt: f32,
+    /// Body font size in points.
+    pub body_font_size_pt: f32,
+    /// Line-height multiplier.
+    pub line_height: f32,
+}
+
+impl Default for PageStyle {
+    fn default() -> Self {
+        Self {
+            width_pt: 595.0,
+            height_pt: 842.0,
+            margin_top_pt: 72.0,
+            margin_bottom_pt: 72.0,
+            margin_left_pt: 72.0,
+            margin_right_pt: 72.0,
+            body_font_size_pt: 11.0,
+            line_height: 1.35,
+        }
+    }
+}
+
+/// One block fragment assigned to a page by the reference paginator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageFragment {
+    /// Source block id.
+    pub block_id: u64,
+    /// First UTF-8 byte in the source block.
+    pub start: usize,
+    /// Exclusive last UTF-8 byte.
+    pub end: usize,
+    /// Laid-out text.
+    pub text: String,
+}
+
+/// One deterministic page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentPage {
+    /// Zero-based page index.
+    pub index: usize,
+    /// Ordered block fragments.
+    pub fragments: Vec<PageFragment>,
+}
+
+/// Anchored comment thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentThread {
+    /// Stable comment id.
+    pub id: String,
+    /// Author display name.
+    pub author: String,
+    /// Source block id.
+    pub block_id: u64,
+    /// UTF-8 byte range start.
+    pub start: usize,
+    /// UTF-8 byte range end.
+    pub end: usize,
+    /// Comment body.
+    pub body: String,
+    /// Whether the thread is resolved.
+    pub resolved: bool,
+}
+
+/// Tracked text replacement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Revision {
+    /// Stable revision id.
+    pub id: String,
+    /// Author display name.
+    pub author: String,
+    /// Affected block.
+    pub block_id: u64,
+    /// Previous text.
+    pub before: String,
+    /// Current text.
+    pub after: String,
+}
+
+/// A simple table model used by Writer tables and mail-merge previews.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriterTable {
+    /// Stable table id.
+    pub id: String,
+    /// Row-major cells.
+    pub rows: Vec<Vec<String>>,
+    /// Whether the first row is a header.
+    pub header_row: bool,
+}
+
+impl WriterTable {
+    /// Creates a rectangular empty table.
+    pub fn new(id: impl Into<String>, rows: usize, columns: usize) -> Self {
+        Self {
+            id: id.into(),
+            rows: vec![vec![String::new(); columns]; rows],
+            header_row: rows > 0,
+        }
+    }
+
+    /// Column count.
+    pub fn columns(&self) -> usize {
+        self.rows.iter().map(Vec::len).max().unwrap_or(0)
+    }
+
+    /// Updates one cell.
+    pub fn set(&mut self, row: usize, column: usize, value: impl Into<String>) -> bool {
+        let Some(row) = self.rows.get_mut(row) else {
+            return false;
+        };
+        let Some(cell) = row.get_mut(column) else {
+            return false;
+        };
+        *cell = value.into();
+        true
+    }
+
+    /// Exports a Markdown table.
+    pub fn to_markdown(&self) -> String {
+        let columns = self.columns();
+        if self.rows.is_empty() || columns == 0 {
+            return String::new();
+        }
+        let mut output = String::new();
+        for (row_index, row) in self.rows.iter().enumerate() {
+            output.push('|');
+            for column in 0..columns {
+                output.push(' ');
+                output.push_str(
+                    &row
+                        .get(column)
+                        .map(String::as_str)
+                        .unwrap_or("")
+                        .replace('|', "\\|"),
+                );
+                output.push_str(" |");
+            }
+            output.push('\n');
+            if row_index == 0 {
+                output.push('|');
+                for _ in 0..columns {
+                    output.push_str(" --- |");
+                }
+                output.push('\n');
+            }
+        }
+        output
+    }
+}
+
+/// Higher-level authoring state that remains separate from the stable `.loomdoc`
+/// block payload until the extended package schema is finalized.
+#[derive(Debug, Clone)]
+pub struct WriterWorkspace {
+    /// Current document.
+    pub document: WriterDocument,
+    /// Comment threads.
+    pub comments: Vec<CommentThread>,
+    /// Pending tracked changes.
+    pub revisions: Vec<Revision>,
+    /// Named bookmarks to block ids.
+    pub bookmarks: std::collections::BTreeMap<String, u64>,
+    /// Embedded table models keyed by id.
+    pub tables: std::collections::BTreeMap<String, WriterTable>,
+}
+
+impl WriterWorkspace {
+    /// Creates an authoring workspace.
+    pub fn new(document: WriterDocument) -> Self {
+        Self {
+            document,
+            comments: Vec::new(),
+            revisions: Vec::new(),
+            bookmarks: std::collections::BTreeMap::new(),
+            tables: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Adds a validated anchored comment.
+    pub fn add_comment(&mut self, comment: CommentThread) -> Result<(), String> {
+        if self.comments.iter().any(|existing| existing.id == comment.id) {
+            return Err(format!("duplicate comment id {}", comment.id));
+        }
+        let block = self
+            .document
+            .get(comment.block_id)
+            .ok_or_else(|| format!("unknown block {}", comment.block_id))?;
+        if comment.start > comment.end
+            || comment.end > block.text.len_bytes()
+            || !block.text.as_str().is_char_boundary(comment.start)
+            || !block.text.as_str().is_char_boundary(comment.end)
+        {
+            return Err("comment range is not a valid UTF-8 block range".into());
+        }
+        self.comments.push(comment);
+        Ok(())
+    }
+
+    /// Resolves or reopens a comment.
+    pub fn set_comment_resolved(&mut self, id: &str, resolved: bool) -> bool {
+        let Some(comment) = self.comments.iter_mut().find(|comment| comment.id == id) else {
+            return false;
+        };
+        comment.resolved = resolved;
+        true
+    }
+
+    /// Applies a text edit and records it as a pending revision.
+    pub fn revise_block(
+        &mut self,
+        revision_id: impl Into<String>,
+        author: impl Into<String>,
+        block_id: u64,
+        next_text: &str,
+    ) -> Result<(), String> {
+        let revision_id = revision_id.into();
+        if self.revisions.iter().any(|revision| revision.id == revision_id) {
+            return Err(format!("duplicate revision id {revision_id}"));
+        }
+        let block = self
+            .document
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == block_id)
+            .ok_or_else(|| format!("unknown block {block_id}"))?;
+        let before = block.text.as_str().to_string();
+        if before == next_text {
+            return Ok(());
+        }
+        block.runs = remap_style_runs(&before, next_text, &block.runs);
+        block.text = Text::from_str(next_text);
+        self.revisions.push(Revision {
+            id: revision_id,
+            author: author.into(),
+            block_id,
+            before,
+            after: next_text.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Accepts a revision, retaining the edited text.
+    pub fn accept_revision(&mut self, id: &str) -> bool {
+        let before = self.revisions.len();
+        self.revisions.retain(|revision| revision.id != id);
+        before != self.revisions.len()
+    }
+
+    /// Rejects a revision and restores its previous text.
+    pub fn reject_revision(&mut self, id: &str) -> bool {
+        let Some(index) = self.revisions.iter().position(|revision| revision.id == id) else {
+            return false;
+        };
+        let revision = self.revisions.remove(index);
+        let Some(block) = self
+            .document
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == revision.block_id)
+        else {
+            return false;
+        };
+        block.runs = remap_style_runs(block.text.as_str(), &revision.before, &block.runs);
+        block.text = Text::from_str(&revision.before);
+        true
+    }
+
+    /// Inserts a table placeholder block and stores its model.
+    pub fn insert_table(&mut self, table: WriterTable) -> Result<u64, String> {
+        if table.id.trim().is_empty() || self.tables.contains_key(&table.id) {
+            return Err("table id must be non-empty and unique".into());
+        }
+        let block_id = self.document.next_id();
+        self.document.push(RichBlock::new(
+            block_id,
+            &format!("table:{}", table.id),
+            &table.to_markdown(),
+        ));
+        self.tables.insert(table.id.clone(), table);
+        Ok(block_id)
+    }
+
+    /// Adds or updates a bookmark.
+    pub fn set_bookmark(&mut self, name: &str, block_id: u64) -> Result<(), String> {
+        if name.trim().is_empty() || self.document.get(block_id).is_none() {
+            return Err("bookmark name or target is invalid".into());
+        }
+        self.bookmarks.insert(name.to_string(), block_id);
+        Ok(())
+    }
+
+    /// Reports dangling anchors and duplicate ids.
+    pub fn validate(&self) -> Vec<String> {
+        let mut issues = Vec::new();
+        let mut block_ids = std::collections::HashSet::new();
+        for block in &self.document.blocks {
+            if !block_ids.insert(block.id) {
+                issues.push(format!("duplicate block id {}", block.id));
+            }
+            for run in &block.runs {
+                if run.start > run.end
+                    || run.end > block.text.len_bytes()
+                    || !block.text.as_str().is_char_boundary(run.start)
+                    || !block.text.as_str().is_char_boundary(run.end)
+                {
+                    issues.push(format!("block {} has an invalid style run", block.id));
+                }
+            }
+        }
+        for comment in &self.comments {
+            if self.document.get(comment.block_id).is_none() {
+                issues.push(format!("comment {} targets a missing block", comment.id));
+            }
+        }
+        for (name, block_id) in &self.bookmarks {
+            if self.document.get(*block_id).is_none() {
+                issues.push(format!("bookmark {name} targets a missing block"));
+            }
+        }
+        issues
+    }
+}
+
+impl WriterDocument {
+    /// Finds literal text in every block.
+    pub fn find_all(&self, query: &str, case_sensitive: bool) -> Vec<SearchMatch> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let needle = if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+        let mut matches = Vec::new();
+        for block in &self.blocks {
+            if case_sensitive {
+                matches.extend(block.text.as_str().match_indices(query).map(|(start, value)| {
+                    SearchMatch {
+                        block_id: block.id,
+                        start,
+                        end: start + value.len(),
+                    }
+                }));
+            } else {
+                // Unicode lowercase can change byte length, so search by character
+                // windows and map matches back to original UTF-8 byte offsets.
+                let original = block.text.as_str();
+                let boundaries: Vec<usize> = original
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(original.len()))
+                    .collect();
+                for start_char in 0..boundaries.len().saturating_sub(1) {
+                    for end_char in start_char + 1..boundaries.len() {
+                        let candidate = &original[boundaries[start_char]..boundaries[end_char]];
+                        let lowered = candidate.to_lowercase();
+                        if lowered == needle {
+                            matches.push(SearchMatch {
+                                block_id: block.id,
+                                start: boundaries[start_char],
+                                end: boundaries[end_char],
+                            });
+                            break;
+                        }
+                        if lowered.len() > needle.len().saturating_mul(4).max(needle.len() + 8) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        matches
+    }
+
+    /// Replaces literal text in every block while remapping style runs.
+    pub fn replace_all(&mut self, query: &str, replacement: &str, case_sensitive: bool) -> usize {
+        if query.is_empty() {
+            return 0;
+        }
+        let mut replacements = 0;
+        for block in &mut self.blocks {
+            let before = block.text.as_str().to_string();
+            let after = if case_sensitive {
+                replacements += before.matches(query).count();
+                before.replace(query, replacement)
+            } else {
+                let hits: Vec<SearchMatch> = WriterDocument {
+                    id: String::new(),
+                    title: String::new(),
+                    blocks: vec![block.clone()],
+                }
+                .find_all(query, false);
+                if hits.is_empty() {
+                    continue;
+                }
+                replacements += hits.len();
+                let mut output = before.clone();
+                for hit in hits.iter().rev() {
+                    output.replace_range(hit.start..hit.end, replacement);
+                }
+                output
+            };
+            if after != before {
+                block.runs = remap_style_runs(&before, &after, &block.runs);
+                block.text = Text::from_str(&after);
+            }
+        }
+        replacements
+    }
+
+    /// Generates a table of contents from heading blocks.
+    pub fn table_of_contents(&self) -> Vec<TableOfContentsEntry> {
+        self.blocks
+            .iter()
+            .filter_map(|block| {
+                let level = block.kind.strip_prefix("heading")?.parse::<u8>().ok()?;
+                if !(1..=6).contains(&level) {
+                    return None;
+                }
+                Some(TableOfContentsEntry {
+                    block_id: block.id,
+                    level,
+                    title: block.text.as_str().to_string(),
+                })
+            })
+            .collect()
+    }
+
+    /// Deterministically paginates text using conservative font metrics.
+    ///
+    /// This is a reference CPU layout used for previews and tests. The future
+    /// shaping engine can replace it while preserving this page-fragment API.
+    pub fn paginate(&self, style: &PageStyle) -> Result<Vec<DocumentPage>, String> {
+        if !style.width_pt.is_finite()
+            || !style.height_pt.is_finite()
+            || !style.body_font_size_pt.is_finite()
+            || !style.line_height.is_finite()
+            || style.width_pt <= style.margin_left_pt + style.margin_right_pt
+            || style.height_pt <= style.margin_top_pt + style.margin_bottom_pt
+            || style.body_font_size_pt <= 0.0
+            || style.line_height <= 0.0
+        {
+            return Err("page style has invalid geometry".into());
+        }
+        let usable_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
+        let average_glyph_width = style.body_font_size_pt * 0.52;
+        let columns = (usable_width / average_glyph_width).floor().max(1.0) as usize;
+        let line_height = style.body_font_size_pt * style.line_height;
+        let lines_per_page = (usable_height / line_height).floor().max(1.0) as usize;
+        let mut pages = vec![DocumentPage {
+            index: 0,
+            fragments: Vec::new(),
+        }];
+        let mut lines_used = 0usize;
+        for block in &self.blocks {
+            let text = block.text.as_str();
+            let ranges = wrap_utf8_ranges(text, columns);
+            for (start, end) in ranges {
+                if lines_used == lines_per_page {
+                    pages.push(DocumentPage {
+                        index: pages.len(),
+                        fragments: Vec::new(),
+                    });
+                    lines_used = 0;
+                }
+                pages.last_mut().expect("at least one page").fragments.push(PageFragment {
+                    block_id: block.id,
+                    start,
+                    end,
+                    text: text[start..end].to_string(),
+                });
+                lines_used += 1;
+            }
+            // Paragraph spacing consumes one reference line unless already at a page break.
+            if lines_used > 0 && lines_used < lines_per_page {
+                lines_used += 1;
+            }
+        }
+        Ok(pages)
+    }
+}
+
+fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
+    if text.is_empty() {
+        return vec![(0, 0)];
+    }
+    let mut ranges = Vec::new();
+    let mut line_start = 0usize;
+    let mut last_break = None;
+    let mut chars = 0usize;
+    for (index, character) in text.char_indices() {
+        chars += 1;
+        if character.is_whitespace() {
+            last_break = Some(index + character.len_utf8());
+        }
+        if chars >= columns {
+            let end = last_break.filter(|break_at| *break_at > line_start).unwrap_or(index + character.len_utf8());
+            ranges.push((line_start, end));
+            line_start = end;
+            chars = text[line_start..index + character.len_utf8()].chars().count();
+            last_break = None;
+        }
+    }
+    if line_start < text.len() {
+        ranges.push((line_start, text.len()));
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1518,4 +2065,58 @@ mod tests {
         assert!(d.is_empty());
         assert_eq!(d.editor_text(), "");
     }
+
+    #[test]
+    fn search_replace_toc_and_pagination_are_functional() {
+        let mut doc = demo_doc();
+        doc.blocks[0].kind = "heading1".into();
+        assert_eq!(doc.find_all("loom", false).len(), 1);
+        assert_eq!(doc.replace_all("loom", "Loom Suite", false), 1);
+        assert!(doc.plain_text().contains("Loom Suite"));
+        assert_eq!(doc.table_of_contents()[0].level, 1);
+        let pages = doc.paginate(&PageStyle {
+            width_pt: 180.0,
+            height_pt: 120.0,
+            margin_top_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+            margin_right_pt: 10.0,
+            body_font_size_pt: 10.0,
+            line_height: 1.0,
+        }).unwrap();
+        assert!(!pages.is_empty());
+        assert!(pages.iter().all(|page| !page.fragments.is_empty()));
+    }
+
+    #[test]
+    fn comments_revisions_bookmarks_and_tables_are_editable() {
+        let doc = demo_doc();
+        let block_id = doc.blocks[0].id;
+        let mut workspace = WriterWorkspace::new(doc);
+        workspace
+            .add_comment(CommentThread {
+                id: "comment-1".into(),
+                author: "Author".into(),
+                block_id,
+                start: 0,
+                end: 4,
+                body: "Clarify".into(),
+                resolved: false,
+            })
+            .unwrap();
+        assert!(workspace.set_comment_resolved("comment-1", true));
+        workspace
+            .revise_block("revision-1", "Editor", block_id, "Edited title")
+            .unwrap();
+        assert_eq!(workspace.document.get(block_id).unwrap().text.as_str(), "Edited title");
+        assert!(workspace.reject_revision("revision-1"));
+        workspace.set_bookmark("intro", block_id).unwrap();
+        let mut table = WriterTable::new("table-1", 2, 2);
+        table.set(0, 0, "Name");
+        table.set(1, 0, "Loom");
+        let table_block = workspace.insert_table(table).unwrap();
+        assert!(workspace.document.get(table_block).unwrap().text.as_str().contains("Name"));
+        assert!(workspace.validate().is_empty());
+    }
+
 }
