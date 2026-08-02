@@ -1,6 +1,6 @@
 import {
     AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton, StatusBar,
-    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, RailButton, Slider,
+    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
     SegmentedControl, Field, MetricChip, CanvasBackdrop
 } from "components.slint";
 import { Icon } from "icons.slint";
@@ -122,20 +122,6 @@ export component PresentApp inherits Window {
         if !root.is-preview-mode : HorizontalLayout {
             spacing: 0px;
             vertical-stretch: 1;
-            Rectangle {
-                width: 66px;
-                background: Theme.palette().surface;
-                VerticalLayout {
-                    spacing: 6px;
-                    padding-top: 10px;
-                    RailButton { text: "Slides"; icon: "slide"; checked: true; }
-                    RailButton { text: "Layouts"; icon: "grid"; }
-                    RailButton { text: "Elements"; icon: "plus-circle"; }
-                    RailButton { text: "Media"; icon: "image"; }
-                    RailButton { text: "Charts"; icon: "table"; }
-                }
-            }
-            Rectangle { width: 1px; background: Theme.palette().border; }
             SidebarSurface {
                 width: 238px;
                 title: "Slides";
@@ -213,12 +199,6 @@ export component PresentApp inherits Window {
                                 border-width: root.active-element-index == 1 ? 2px : 0px;
                                 border-color: Theme.palette().accent;
                                 Text { text: root.slide-body; font-size: 18px; color: Theme.palette().paper-muted; wrap: word-wrap; }
-                            }
-                            HorizontalLayout {
-                                spacing: 12px;
-                                Rectangle { width: 30%; height: 66px; border-radius: 8px; background: Theme.palette().content-accent-soft; Text { text: "42%"; color: Theme.palette().content-accent; font-size: 25px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } }
-                                Rectangle { width: 30%; height: 66px; border-radius: 8px; background: Theme.palette().content-cool-soft; Text { text: "Local"; color: Theme.palette().content-cool; font-size: 18px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; } }
-                                Rectangle { horizontal-stretch: 1; height: 66px; border-radius: 8px; background: Theme.palette().content-accent-soft; Text { text: "Loom"; color: Theme.palette().paper-ink; font-size: 18px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; } }
                             }
                         }
                     }

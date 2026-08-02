@@ -1,6 +1,6 @@
 import {
     AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton, StatusBar,
-    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, RailButton, Slider,
+    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
     Field, MetricChip, CanvasBackdrop, TransportButton, StatusPill
 } from "components.slint";
 import { Icon } from "icons.slint";
@@ -84,9 +84,6 @@ export component VideoApp inherits Window {
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { icon: "cursor"; text: "Select"; checked: root.active-nle-tool == "Select"; clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); } }
-            ToolButton { icon: "scissors"; text: "Blade"; checked: root.active-nle-tool == "Blade"; clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); } }
-            ToolButton { icon: "timeline"; text: "Snap"; checked: root.snap-enabled; clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             MetricChip { label: "Duration"; value: Math.round(root.timeline-duration * 10) / 10 + " s"; }
             PrimaryButton { text: root.exporting ? "Exporting…" : "Export"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
@@ -95,19 +92,6 @@ export component VideoApp inherits Window {
         HorizontalLayout {
             spacing: 0px;
             vertical-stretch: 1;
-            Rectangle {
-                width: 66px;
-                background: Theme.palette().surface;
-                VerticalLayout {
-                    spacing: 6px; padding-top: 10px;
-                    RailButton { text: "Media"; icon: "video"; checked: true; }
-                    RailButton { text: "Titles"; icon: "text"; }
-                    RailButton { text: "Audio"; icon: "audio"; }
-                    RailButton { text: "Effects"; icon: "wand"; }
-                    RailButton { text: "Color"; icon: "image"; }
-                }
-            }
-            Rectangle { width: 1px; background: Theme.palette().border; }
             SidebarSurface {
                 width: 258px;
                 title: "Media";

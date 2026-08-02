@@ -1,4 +1,4 @@
-import { AppHeader, WorkspaceToolbar, SidebarSurface, InspectorSurface, WorkspaceRow, ToolButton, IconButton, PrimaryButton, TransportButton, StatusBar, Slider, SegmentedControl, Field, StatusPill, MetricChip, PaneTabs } from "components.slint";
+import { AppHeader, WorkspaceToolbar, SidebarSurface, InspectorSurface, WorkspaceRow, ToolButton, IconButton, PrimaryButton, TransportButton, StatusBar, Slider, SegmentedControl, Field, StatusPill, MetricChip } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -240,7 +240,12 @@ export component StudioApp inherits Window {
                 VerticalLayout {
                     spacing: 12px;
                     padding: 12px;
-                    PaneTabs { items: ["Channel", "I/O", "Bounce"]; current: 0; }
+                    Text {
+                        text: "CHANNEL STRIP";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink-secondary;
+                    }
                     if root.active-track-index < root.track-labels.length : VerticalLayout {
                         spacing: 9px;
                         Text { text: "Channel strip"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }

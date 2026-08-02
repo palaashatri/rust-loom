@@ -1,7 +1,7 @@
 import {
     AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton,
     StatusBar, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs,
-    RailButton, Slider, SegmentedControl, Field, MetricChip, CanvasBackdrop
+    Slider, SegmentedControl, Field, MetricChip, CanvasBackdrop
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
@@ -87,24 +87,6 @@ export component PhotoApp inherits Window {
         HorizontalLayout {
             spacing: 0px;
             vertical-stretch: 1;
-
-            Rectangle {
-                width: 66px;
-                background: Theme.palette().surface;
-                border-width: 0px;
-                VerticalLayout {
-                    spacing: 6px;
-                    padding-top: 10px;
-                    alignment: start;
-                    RailButton { text: "Move"; icon: "cursor"; checked: root.active-tool == 0; clicked => { root.active-tool = 0; root.select-tool("move"); } }
-                    RailButton { text: "Select"; icon: "scale"; checked: root.active-tool == 1; clicked => { root.active-tool = 1; root.select-tool("select"); } }
-                    RailButton { text: "Brush"; icon: "brush"; checked: root.active-tool == 2; clicked => { root.active-tool = 2; root.select-tool("brush"); } }
-                    RailButton { text: "Heal"; icon: "wand"; checked: root.active-tool == 3; clicked => { root.active-tool = 3; root.select-tool("heal"); } }
-                    RailButton { text: "Crop"; icon: "scale"; checked: root.active-tool == 4; clicked => { root.active-tool = 4; root.select-tool("crop"); } }
-                    RailButton { text: "Text"; icon: "text"; checked: root.active-tool == 5; clicked => { root.active-tool = 5; root.select-tool("text"); } }
-                }
-            }
-            Rectangle { width: 1px; background: Theme.palette().border; }
 
             SidebarSurface {
                 width: 244px;
