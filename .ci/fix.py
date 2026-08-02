@@ -9,8 +9,8 @@ replacements = {
     ],
     "loom-video/crates/loom-video-core/src/lib.rs": [
         (
-            "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct TimelineClip",
-            "#[derive(Debug, Clone, PartialEq)]\npub struct TimelineClip",
+            "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct TimelineExportPlan",
+            "#[derive(Debug, Clone, PartialEq)]\npub struct TimelineExportPlan",
         ),
     ],
     "loom-studio/crates/loom-studio-core/src/lib.rs": [
