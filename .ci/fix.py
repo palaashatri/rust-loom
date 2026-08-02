@@ -62,14 +62,23 @@ text = replace_once(
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
     state.syncing_editor.set(true);
-    apply_document(app, &state.current.borrow());
+    let current = state.current.borrow();
+    apply_document(app, &current);
+    if let Ok(bytes) = loom_writer_core::save_document(&current) {
+        let _ = record_snapshot_recovery("writer state", bytes);
+    }
     state.syncing_editor.set(false);
 }''',
     '''fn apply_state(app: &WriterApp, state: &GuiState) {
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
     state.syncing_editor.set(true);
-    apply_document(app, &state.current.borrow());
+    let current = state.current.borrow();
+    apply_document(app, &current);
+    if let Ok(bytes) = loom_writer_core::save_document(&current) {
+        let _ = record_snapshot_recovery("writer state", bytes);
+    }
+    drop(current);
     let history = state.history.borrow();
     app.set_can_undo(!history.undo.is_empty());
     app.set_can_redo(!history.redo.is_empty());
