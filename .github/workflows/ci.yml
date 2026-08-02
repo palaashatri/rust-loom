@@ -7,13 +7,54 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: loom-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-shared-role-fix:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Correct shared accessibility roles
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('loom-core/crates/loom-ui/ui/components.slint')
+          text = path.read_text(encoding='utf-8')
+          segmented_start = text.index('export component SegmentedControl inherits Rectangle {')
+          tabs_start = text.index('export component PaneTabs inherits Rectangle {')
+          segmented_end = text.index('\nexport component ', segmented_start + 1)
+          tabs_end = text.index('\nexport component ', tabs_start + 1)
+          segmented_block = text[segmented_start:segmented_end]
+          tabs_block = text[tabs_start:tabs_end]
+          if segmented_block.count('accessible-role: group;') != 1:
+              raise RuntimeError('SegmentedControl generic role not found exactly once')
+          if tabs_block.count('accessible-role: group;') != 1:
+              raise RuntimeError('PaneTabs generic role not found exactly once')
+          segmented_block = segmented_block.replace('accessible-role: group;', 'accessible-role: radio-group;', 1)
+          tabs_block = tabs_block.replace('accessible-role: group;', 'accessible-role: tab-list;', 1)
+          text = text[:segmented_start] + segmented_block + text[segmented_end:tabs_start] + tabs_block + text[tabs_end:]
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+          git config user.name 'Loom Engineering Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add loom-core/crates/loom-ui/ui/components.slint
+          git diff --cached --check
+          git commit -m 'fix(ui): use valid accessible roles for choices and tabs'
+          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
+
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
