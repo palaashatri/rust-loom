@@ -17,6 +17,8 @@ const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "presentation.loomdeck";
 const EXPORT_FILENAME: &str = "presentation.pdf";
 
+loom_production::define_snapshot_recovery!(PRESENT_RECOVERY, "org.loom.present", "loom.present/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -222,6 +224,9 @@ fn refresh(app: &PresentApp, state: &GuiState) {
         }
     )));
     app.set_status_right("Local deck engine".into());
+    if let Ok(bytes) = save_presentation_session(&session) {
+        let _ = record_snapshot_recovery("presentation state", bytes);
+    }
 }
 
 fn apply_theme(app: &PresentApp, theme: &str) {
@@ -261,8 +266,17 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let recovered = initialize_snapshot_recovery()?;
+    let initial = if args.open.is_some() {
+        initial_session(&args)?
+    } else {
+        recovered
+            .as_deref()
+            .and_then(|bytes| load_presentation_session(bytes).ok())
+            .unwrap_or(initial_session(&args)?)
+    };
     let state = Rc::new(GuiState {
-        session: RefCell::new(initial_session(&args)?),
+        session: RefCell::new(initial),
         selected_element: Cell::new(0),
     });
 
@@ -302,10 +316,14 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                match save_presentation_session(&state.session.borrow()).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, bytes).map_err(|error| error.to_string())
-                }) {
-                    Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
+                match save_presentation_session(&state.session.borrow()) {
+                    Ok(bytes) => match std::fs::write(SAVE_FILENAME, &bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                    {
+                        Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
+                        Err(error) => set_status(&app, format!("Save/checkpoint failed: {error}")),
+                    },
                     Err(error) => set_status(&app, format!("Save failed: {error}")),
                 }
             }

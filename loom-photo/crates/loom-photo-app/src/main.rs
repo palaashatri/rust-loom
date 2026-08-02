@@ -20,6 +20,8 @@ const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "image.loomphoto";
 const DEFAULT_EXPORT_FILENAME: &str = "loom-photo-export.png";
 
+loom_production::define_snapshot_recovery!(PHOTO_RECOVERY, "org.loom.photo", "loom.photo/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -192,7 +194,10 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
         document.layers.len(),
         session.canvas.pixel_payload_count()
     )));
-    app.set_status_right("Local CPU compositor".into());
+    app.set_status_right("Local compositor".into());
+    if let Ok(bytes) = save_photo_canvas(&session.canvas) {
+        let _ = record_snapshot_recovery("photo state", bytes);
+    }
     Ok(())
 }
 
@@ -277,8 +282,17 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let recovered = initialize_snapshot_recovery()?;
+    let initial = if args.open.is_some() {
+        initial_canvas(&args)?
+    } else {
+        recovered
+            .as_deref()
+            .and_then(|bytes| load_photo_canvas(bytes).ok())
+            .unwrap_or(initial_canvas(&args)?)
+    };
     let state = Rc::new(GuiState {
-        session: RefCell::new(PhotoSession::new(initial_canvas(&args)?)),
+        session: RefCell::new(PhotoSession::new(initial)),
     });
 
     macro_rules! mutate_and_refresh {
@@ -331,10 +345,14 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                match save_photo_canvas(&state.session.borrow().canvas).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, bytes).map_err(|error| error.to_string())
-                }) {
-                    Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
+                match save_photo_canvas(&state.session.borrow().canvas) {
+                    Ok(bytes) => match std::fs::write(SAVE_FILENAME, &bytes)
+                        .map_err(|error| error.to_string())
+                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                    {
+                        Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
+                        Err(error) => set_status(&app, format!("Save/checkpoint failed: {error}")),
+                    },
                     Err(error) => set_status(&app, format!("Save failed: {error}")),
                 }
             }

@@ -26,6 +26,8 @@ const GRID_ROWS: usize = 6;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
 
+loom_production::define_snapshot_recovery!(SHEETS_RECOVERY, "org.loom.sheets", "loom.sheets/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -208,6 +210,7 @@ fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
         formulas
     )));
     app.set_status_right("Offline".into());
+    let _ = record_snapshot_recovery("sheets state", sheet_to_json(sheet).into_bytes());
 }
 
 fn update_selection(
@@ -292,11 +295,17 @@ fn run_gui(args: &Args) -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
+    let recovered = initialize_snapshot_recovery()?;
+    let initial_sheet = match &args.open {
+        Some(path) => load_sheet(path)?,
+        None => recovered
+            .as_deref()
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .and_then(|json| sheet_from_json(json).ok())
+            .unwrap_or_else(sample_sheet),
+    };
     let state = Rc::new(GuiState {
-        current: RefCell::new(match &args.open {
-            Some(p) => load_sheet(p)?,
-            None => sample_sheet(),
-        }),
+        current: RefCell::new(initial_sheet),
         save_path: RefCell::new(args.open.clone()),
         undo_stack: RefCell::new(Vec::new()),
         redo_stack: RefCell::new(Vec::new()),
@@ -456,7 +465,17 @@ fn run_gui(args: &Args) -> Result<(), String> {
                     .clone()
                     .unwrap_or_else(|| SAVE_FILENAME.to_string());
                 match save_sheet(&p, &state.current.borrow()) {
-                    Ok(()) => app.set_status_left(SharedString::from(format!("saved {p}"))),
+                    Ok(()) => {
+                        let checkpoint = checkpoint_snapshot_recovery(
+                            sheet_to_json(&state.current.borrow()).into_bytes(),
+                        );
+                        match checkpoint {
+                            Ok(()) => app.set_status_left(SharedString::from(format!("saved {p}"))),
+                            Err(error) => app.set_status_left(SharedString::from(format!(
+                                "saved {p}, but recovery checkpoint failed: {error}"
+                            ))),
+                        }
+                    }
                     Err(e) => {
                         app.set_status_left(SharedString::from(format!("save failed: {e}")));
                     }

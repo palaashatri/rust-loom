@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 loom-sheets-core = { path = "../loom-sheets-core" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
 loom-package = { workspace = true }
 loom-ui = { path = "../../../loom-core/crates/loom-ui" }
 loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }

@@ -23,6 +23,8 @@ const HISTORY_MAX_ENTRIES: usize = 128;
 const HISTORY_MAX_BYTES: usize = 8 * 1024 * 1024;
 const TYPING_COALESCE_WINDOW_MS: u64 = 750;
 
+loom_production::define_snapshot_recovery!(WRITER_RECOVERY, "org.loom.writer", "loom.writer/1");
+
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
@@ -271,7 +273,11 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
     state.syncing_editor.set(true);
-    apply_document(app, &state.current.borrow());
+    let current = state.current.borrow();
+    apply_document(app, &current);
+    if let Ok(bytes) = loom_writer_core::save_document(&current) {
+        let _ = record_snapshot_recovery("writer state", bytes);
+    }
     state.syncing_editor.set(false);
 }
 
@@ -327,11 +333,16 @@ fn run_gui(args: &Args) -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
 
+    let recovered = initialize_snapshot_recovery()?;
+    let initial_document = match &args.open {
+        Some(path) => load_file(path)?,
+        None => recovered
+            .as_deref()
+            .and_then(|bytes| loom_writer_core::load_document(bytes).ok())
+            .unwrap_or_else(sample_document),
+    };
     let state = Rc::new(GuiState {
-        current: RefCell::new(match &args.open {
-            Some(p) => load_file(p)?,
-            None => sample_document(),
-        }),
+        current: RefCell::new(initial_document),
         save_path: RefCell::new(args.open.clone()),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
@@ -377,7 +388,17 @@ fn run_gui(args: &Args) -> Result<(), String> {
                     .clone()
                     .unwrap_or_else(|| SAVE_FILENAME.to_string());
                 match save_file(&p, &state.current.borrow()) {
-                    Ok(()) => app.set_status_left(SharedString::from(format!("saved {p}"))),
+                    Ok(()) => {
+                        let checkpoint = loom_writer_core::save_document(&state.current.borrow())
+                            .map_err(|error| error.to_string())
+                            .and_then(checkpoint_snapshot_recovery);
+                        match checkpoint {
+                            Ok(()) => app.set_status_left(SharedString::from(format!("saved {p}"))),
+                            Err(error) => app.set_status_left(SharedString::from(format!(
+                                "saved {p}, but recovery checkpoint failed: {error}"
+                            ))),
+                        }
+                    }
                     Err(e) => {
                         app.set_status_left(SharedString::from(format!("save failed: {e}")));
                     }

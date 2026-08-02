@@ -141,6 +141,57 @@ impl SnapshotRecovery {
     }
 }
 
+/// Define one thread-local recovery slot for a desktop application.
+///
+/// The generated helpers are intentionally private to the invoking binary:
+/// `initialize_snapshot_recovery`, `record_snapshot_recovery`, and
+/// `checkpoint_snapshot_recovery`. Headless render paths that never initialize
+/// the slot safely treat recording as a no-op.
+#[macro_export]
+macro_rules! define_snapshot_recovery {
+    ($slot:ident, $application_id:literal, $schema:literal) => {
+        std::thread_local! {
+            static $slot: std::cell::RefCell<Option<$crate::snapshot::SnapshotRecovery>> =
+                std::cell::RefCell::new(None);
+        }
+
+        fn initialize_snapshot_recovery() -> Result<Option<Vec<u8>>, String> {
+            let mut recovery = $crate::snapshot::SnapshotRecovery::open($application_id)
+                .map_err(|error| error.to_string())?;
+            let restored = recovery.take_restored_payload();
+            $slot.with(|slot| {
+                *slot.borrow_mut() = Some(recovery);
+            });
+            Ok(restored)
+        }
+
+        fn record_snapshot_recovery(label: &str, payload: Vec<u8>) -> Result<(), String> {
+            $slot.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                match slot.as_mut() {
+                    Some(recovery) => recovery
+                        .record(label, payload)
+                        .map(|_| ())
+                        .map_err(|error| error.to_string()),
+                    None => Ok(()),
+                }
+            })
+        }
+
+        fn checkpoint_snapshot_recovery(payload: Vec<u8>) -> Result<(), String> {
+            $slot.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                match slot.as_mut() {
+                    Some(recovery) => recovery
+                        .checkpoint($schema, payload)
+                        .map_err(|error| error.to_string()),
+                    None => Ok(()),
+                }
+            })
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
