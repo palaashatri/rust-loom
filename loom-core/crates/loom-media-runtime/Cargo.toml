@@ -1,0 +1,14 @@
+[package]
+name = "loom-media-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GPU-aware FFmpeg compositing, low-latency preview decoding, and audio/video synchronization for Loom."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
