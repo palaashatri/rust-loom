@@ -33,19 +33,11 @@ jobs:
           from pathlib import Path
           path = Path('loom-core/crates/loom-ui/ui/components.slint')
           text = path.read_text(encoding='utf-8')
-          segmented_start = text.index('export component SegmentedControl inherits Rectangle {')
-          tabs_start = text.index('export component PaneTabs inherits Rectangle {')
-          segmented_end = text.index('\nexport component ', segmented_start + 1)
-          tabs_end = text.index('\nexport component ', tabs_start + 1)
-          segmented_block = text[segmented_start:segmented_end]
-          tabs_block = text[tabs_start:tabs_end]
-          if segmented_block.count('accessible-role: group;') != 1:
-              raise RuntimeError('SegmentedControl generic role not found exactly once')
-          if tabs_block.count('accessible-role: group;') != 1:
-              raise RuntimeError('PaneTabs generic role not found exactly once')
-          segmented_block = segmented_block.replace('accessible-role: group;', 'accessible-role: radio-group;', 1)
-          tabs_block = tabs_block.replace('accessible-role: group;', 'accessible-role: tab-list;', 1)
-          text = text[:segmented_start] + segmented_block + text[segmented_end:tabs_start] + tabs_block + text[tabs_end:]
+          marker = 'accessible-role: group;'
+          if text.count(marker) != 2:
+              raise RuntimeError(f'expected exactly two generic group roles, found {text.count(marker)}')
+          text = text.replace(marker, 'accessible-role: radio-group;', 1)
+          text = text.replace(marker, 'accessible-role: tab-list;', 1)
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
           git config user.name 'Loom Engineering Bot'
