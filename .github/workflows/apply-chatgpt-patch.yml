@@ -19,7 +19,7 @@ jobs:
 
       - name: Apply reviewed source patch
         run: |
-          base64 -d .ci/loom-ui-functional.patch.gz.b64 | gzip -d > /tmp/loom-ui-functional.patch
+          gzip -d < .ci/loom-ui-functional.patch.gz.b64 > /tmp/loom-ui-functional.patch
           git apply --check --binary /tmp/loom-ui-functional.patch
           git apply --binary /tmp/loom-ui-functional.patch
           git rm .ci/loom-ui-functional.patch.gz.b64 .github/workflows/apply-chatgpt-patch.yml
