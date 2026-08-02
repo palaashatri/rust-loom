@@ -278,7 +278,7 @@ export component SegmentedControl inherits Rectangle {
     background: Theme.palette().surface-sunken;
     border-width: 1px;
     border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border;
-    accessible-role: group;
+    accessible-role: radio-group;
     accessible-label: root.label;
 
     focus-scope := FocusScope {
@@ -1100,7 +1100,7 @@ export component PaneTabs inherits Rectangle {
     in-out property <int> current: 0;
     callback selected(int);
     height: 36px; background: Theme.palette().panel;
-    accessible-role: group;
+    accessible-role: tab-list;
     accessible-label: root.label;
     focus-scope := FocusScope {
         key-pressed(event) => {
