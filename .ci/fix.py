@@ -12,8 +12,8 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 replace_once(
     "loom-photo/crates/loom-photo-core/src/lib.rs",
-    """            for channel in 0..3 {\n                let value =\n                    pixel[channel] as f32 * alpha + background[channel] as f32 * (1.0 - alpha);\n                output.push(value.round().clamp(0.0, 255.0) as u8);\n            }""",
-    """            for (source, backdrop) in pixel.iter().take(3).zip(background.iter()) {\n                let value = *source as f32 * alpha + *backdrop as f32 * (1.0 - alpha);\n                output.push(value.round().clamp(0.0, 255.0) as u8);\n            }""",
+    """        for channel in 0..3 {\n            let value = pixel[channel] as f32 * alpha + 255.0 * (1.0 - alpha);\n            rgb.push(value.round().clamp(0.0, 255.0) as u8);\n        }""",
+    """        for source in pixel.iter().take(3) {\n            let value = *source as f32 * alpha + 255.0 * (1.0 - alpha);\n            rgb.push(value.round().clamp(0.0, 255.0) as u8);\n        }""",
 )
 
 for path in (
