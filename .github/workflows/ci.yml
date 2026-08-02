@@ -7,52 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: loom-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-motion-grid-fix:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: chatgpt/loom-ui-functional-audit-2
-          fetch-depth: 0
-          persist-credentials: true
-      - name: Correct Motion graph coordinates
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('loom-motion/crates/loom-motion-app/ui/app.slint')
-          text = path.read_text(encoding='utf-8')
-          replacements = {
-              'x: 25%;': 'x: parent.width * 0.25;',
-              'x: 50%;': 'x: parent.width * 0.50;',
-              'x: 75%;': 'x: parent.width * 0.75;',
-              'y: 33%;': 'y: parent.height * 0.33;',
-              'y: 66%;': 'y: parent.height * 0.66;',
-          }
-          for old, new in replacements.items():
-              if text.count(old) != 1:
-                  raise RuntimeError(f'expected one Motion graph coordinate {old}, found {text.count(old)}')
-              text = text.replace(old, new, 1)
-          path.write_text(text, encoding='utf-8', newline='\n')
-          PY
-          git config user.name 'Loom Engineering Bot'
-          git config user.email 'actions@users.noreply.github.com'
-          git add loom-motion/crates/loom-motion-app/ui/app.slint
-          git diff --cached --check
-          git commit -m 'fix(motion): use length expressions for graph guides'
-          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
-
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
