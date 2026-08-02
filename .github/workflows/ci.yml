@@ -45,6 +45,7 @@ jobs:
           cat .ci/loom-tranche-1.part-* | base64 -d | xz -dc > /tmp/loom-tranche.patch
           git apply --check --whitespace=error-all /tmp/loom-tranche.patch
           git apply --binary --whitespace=nowarn /tmp/loom-tranche.patch
+          sed -i 's/if index as usize </if (index as usize) </' loom-photo/crates/loom-photo-app/src/main.rs
 
       - name: Canonical formatting and dependency locks
         if: steps.payload.outputs.present == 'true'
