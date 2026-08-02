@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -59,13 +59,17 @@ impl std::fmt::Display for LifecycleError {
             Self::Host(error) => write!(formatter, "plugin host error: {error}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::InvalidData(message) => write!(formatter, "invalid data: {message}"),
-            Self::Signature(message) => write!(formatter, "signature verification failed: {message}"),
+            Self::Signature(message) => {
+                write!(formatter, "signature verification failed: {message}")
+            }
             Self::Untrusted(message) => write!(formatter, "untrusted signer: {message}"),
             Self::Transaction(message) => write!(formatter, "plugin transaction failed: {message}"),
             Self::InvalidUi(message) => write!(formatter, "invalid UI extension: {message}"),
             Self::Migration(message) => write!(formatter, "migration failed: {message}"),
             Self::BridgeTimeout => write!(formatter, "native plugin bridge timed out"),
-            Self::BridgeProtocol(message) => write!(formatter, "native plugin bridge protocol error: {message}"),
+            Self::BridgeProtocol(message) => {
+                write!(formatter, "native plugin bridge protocol error: {message}")
+            }
         }
     }
 }
@@ -109,14 +113,15 @@ pub struct TrustKey {
 
 impl TrustKey {
     fn verifying_key(&self) -> Result<VerifyingKey, LifecycleError> {
-        let bytes = BASE64
-            .decode(&self.public_key_base64)
-            .map_err(|error| LifecycleError::InvalidData(format!("invalid public key encoding: {error}")))?;
-        let bytes: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| LifecycleError::InvalidData("Ed25519 public key must contain 32 bytes".into()))?;
-        VerifyingKey::from_bytes(&bytes)
-            .map_err(|error| LifecycleError::InvalidData(format!("invalid Ed25519 public key: {error}")))
+        let bytes = BASE64.decode(&self.public_key_base64).map_err(|error| {
+            LifecycleError::InvalidData(format!("invalid public key encoding: {error}"))
+        })?;
+        let bytes: [u8; 32] = bytes.try_into().map_err(|_| {
+            LifecycleError::InvalidData("Ed25519 public key must contain 32 bytes".into())
+        })?;
+        VerifyingKey::from_bytes(&bytes).map_err(|error| {
+            LifecycleError::InvalidData(format!("invalid Ed25519 public key: {error}"))
+        })
     }
 }
 
@@ -189,7 +194,11 @@ impl TrustStore {
     }
 
     /// Mark a key as revoked while preserving audit history.
-    pub fn revoke(&mut self, key_id: &str, reason: impl Into<String>) -> Result<(), LifecycleError> {
+    pub fn revoke(
+        &mut self,
+        key_id: &str,
+        reason: impl Into<String>,
+    ) -> Result<(), LifecycleError> {
         let key = self
             .keys
             .get_mut(key_id)
@@ -208,7 +217,9 @@ impl TrustStore {
         if key.revoked {
             return Err(LifecycleError::Untrusted(format!(
                 "key {key_id} is revoked: {}",
-                key.revocation_reason.as_deref().unwrap_or("no reason supplied")
+                key.revocation_reason
+                    .as_deref()
+                    .unwrap_or("no reason supplied")
             )));
         }
         Ok(key)
@@ -295,9 +306,7 @@ fn package_manifest(package: &[u8]) -> Result<PluginManifest, LifecycleError> {
         ));
     }
     let mut bytes = Vec::with_capacity(entry.size() as usize);
-    entry
-        .take(MAX_MANIFEST_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    entry.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_MANIFEST_BYTES {
         return Err(LifecycleError::InvalidData(
             "plugin manifest exceeds size limit".into(),
@@ -403,15 +412,11 @@ impl LifecycleManager {
                 verified.manifest.version, current.version
             )));
         }
-        let transaction_root = self
-            .store
-            .dir()
-            .join(TRANSACTION_DIRECTORY)
-            .join(format!(
-                "{}-{}",
-                sanitize_identifier(&verified.manifest.plugin_id),
-                unix_time_millis()
-            ));
+        let transaction_root = self.store.dir().join(TRANSACTION_DIRECTORY).join(format!(
+            "{}-{}",
+            sanitize_identifier(&verified.manifest.plugin_id),
+            unix_time_millis()
+        ));
         fs::create_dir_all(&transaction_root)?;
         let staged_package = transaction_root.join("package.loomplugin");
         atomic_write(&staged_package, package)?;
@@ -503,9 +508,9 @@ impl LifecycleManager {
             return Err(LifecycleError::Host(error));
         }
         fs::remove_dir_all(&failed_root)?;
-        self.store
-            .get(plugin_id)
-            .ok_or_else(|| LifecycleError::Transaction("rollback restored no readable plugin".into()))
+        self.store.get(plugin_id).ok_or_else(|| {
+            LifecycleError::Transaction("rollback restored no readable plugin".into())
+        })
     }
 
     /// Remove rollback backups older than the newest `keep` entries.
@@ -619,12 +624,6 @@ impl UiExtensionManifest {
                     panel.id
                 )));
             }
-            if !matches!(
-                panel.surface,
-                PanelSurface::Inspector | PanelSurface::Sidebar | PanelSurface::Utility
-            ) {
-                return Err(LifecycleError::InvalidUi("unsupported panel surface".into()));
-            }
             if !ids.insert(panel.id.clone()) {
                 return Err(LifecycleError::InvalidUi(format!(
                     "duplicate contribution id {}",
@@ -732,9 +731,7 @@ pub struct UiControl {
 
 impl UiControl {
     fn validate(&self) -> Result<(), LifecycleError> {
-        if self.options.len() > 256
-            || self.options.iter().any(|option| option.trim().is_empty())
-        {
+        if self.options.len() > 256 || self.options.iter().any(|option| option.trim().is_empty()) {
             return Err(LifecycleError::InvalidUi(format!(
                 "control {} has invalid options",
                 self.id
@@ -800,9 +797,7 @@ pub struct MenuContribution {
 }
 
 fn validate_contribution_id(plugin_id: &str, contribution_id: &str) -> Result<(), LifecycleError> {
-    if !is_identifier(contribution_id)
-        || !contribution_id.starts_with(&format!("{plugin_id}."))
-    {
+    if !is_identifier(contribution_id) || !contribution_id.starts_with(&format!("{plugin_id}.")) {
         return Err(LifecycleError::InvalidUi(format!(
             "contribution id {contribution_id:?} must be namespaced by {plugin_id}."
         )));
@@ -813,9 +808,9 @@ fn validate_contribution_id(plugin_id: &str, contribution_id: &str) -> Result<()
 fn is_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 160
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
 }
 
 /// Declarative compatibility migration between plugin state versions.
@@ -834,8 +829,7 @@ impl MigrationPlan {
     pub fn apply(&self, state: &mut Value) -> Result<(), LifecycleError> {
         if self.from_version.trim().is_empty()
             || self.to_version.trim().is_empty()
-            || compare_versions(&self.to_version, &self.from_version)
-                != std::cmp::Ordering::Greater
+            || compare_versions(&self.to_version, &self.from_version) != std::cmp::Ordering::Greater
         {
             return Err(LifecycleError::Migration(
                 "destination version must be newer than source version".into(),
@@ -945,7 +939,9 @@ fn take_path(root: &mut Value, path: &str) -> Result<Option<Value>, LifecycleErr
         };
         current = next;
     }
-    Ok(current.as_object_mut().and_then(|object| object.remove(*last)))
+    Ok(current
+        .as_object_mut()
+        .and_then(|object| object.remove(*last)))
 }
 
 fn set_path(
@@ -965,16 +961,16 @@ fn set_path(
                 "path parent {part:?} is not an object"
             )));
         }
-        let object = current.as_object_mut().ok_or_else(|| {
-            LifecycleError::Migration("migration root is not an object".into())
-        })?;
+        let object = current
+            .as_object_mut()
+            .ok_or_else(|| LifecycleError::Migration("migration root is not an object".into()))?;
         current = object
             .entry((*part).to_string())
             .or_insert_with(|| Value::Object(Default::default()));
     }
-    let object = current
-        .as_object_mut()
-        .ok_or_else(|| LifecycleError::Migration("migration target parent is not an object".into()))?;
+    let object = current.as_object_mut().ok_or_else(|| {
+        LifecycleError::Migration("migration target parent is not an object".into())
+    })?;
     if only_when_missing && object.contains_key(*last) {
         return Ok(());
     }
@@ -1291,18 +1287,25 @@ mod tests {
             "manifest_version": 1,
             "plugin_id": id,
             "name": "Test Plugin",
-            "version": version,
-            "vendor": "Loom Tests",
             "description": "test",
+            "version": version,
+            "author": "Loom Tests",
+            "license": "MIT",
+            "entry": {
+                "kind": "command",
+                "wasm_module": "module.wasm",
+                "function": "run"
+            },
+            "capabilities": [],
+            "permissions": [],
             "api_min_version": "0.1.0",
             "api_max_version": "0.9.0",
-            "capabilities": ["command"],
-            "permissions": [],
-            "entry": { "wasm_module": "module.wasm", "function": "run" },
             "resource_limits": {
                 "max_memory_bytes": 1048576,
-                "max_fuel": 100000,
-                "timeout_ms": 1000
+                "max_fs_bytes": 1048576,
+                "max_fs_entries": 100,
+                "max_cpu_ms_per_call": 1000,
+                "network": false
             }
         });
         let cursor = Cursor::new(Vec::new());
@@ -1317,9 +1320,7 @@ mod tests {
         writer
             .start_file("module.wasm", options)
             .expect("wasm entry");
-        writer
-            .write_all(b"\0asm\x01\0\0\0")
-            .expect("wasm");
+        writer.write_all(b"\0asm\x01\0\0\0").expect("wasm");
         writer.finish().expect("zip").into_inner()
     }
 
@@ -1352,10 +1353,10 @@ mod tests {
 
     #[test]
     fn signed_package_verification_rejects_tampering_and_revocation() {
-        let package = plugin_package("example.test", "1.0.0");
+        let package = plugin_package("example-test", "1.0.0");
         let (mut trust, envelope) = signed(&package);
         let verified = verify_signed_package(&package, &envelope, &trust).expect("verified");
-        assert_eq!(verified.manifest.plugin_id, "example.test");
+        assert_eq!(verified.manifest.plugin_id, "example-test");
         let mut tampered = package.clone();
         tampered.push(0);
         assert!(verify_signed_package(&tampered, &envelope, &trust).is_err());
@@ -1370,19 +1371,22 @@ mod tests {
     fn lifecycle_install_update_and_rollback_are_transactional() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let manager = LifecycleManager::open(temporary.path()).expect("manager");
-        let package_one = plugin_package("example.test", "1.0.0");
+        let package_one = plugin_package("example-test", "1.0.0");
         let (trust, envelope_one) = signed(&package_one);
         manager.save_trust_store(&trust).expect("save trust");
         manager
             .install_signed(&package_one, &envelope_one)
             .expect("install");
-        let package_two = plugin_package("example.test", "2.0.0");
+        let package_two = plugin_package("example-test", "2.0.0");
         let (_, envelope_two) = signed(&package_two);
         manager
             .update_signed(&package_two, &envelope_two)
             .expect("update");
-        assert_eq!(manager.store().get("example.test").unwrap().version, "2.0.0");
-        let restored = manager.rollback("example.test").expect("rollback");
+        assert_eq!(
+            manager.store().get("example-test").unwrap().version,
+            "2.0.0"
+        );
+        let restored = manager.rollback("example-test").expect("rollback");
         assert_eq!(restored.version, "1.0.0");
     }
 
@@ -1390,7 +1394,7 @@ mod tests {
     fn declarative_ui_rejects_unnamespaced_and_invalid_numeric_controls() {
         let manifest = UiExtensionManifest {
             schema_version: 1,
-            plugin_id: "example.test".into(),
+            plugin_id: "example-test".into(),
             commands: vec![CommandContribution {
                 id: "wrong.command".into(),
                 title: "Run".into(),

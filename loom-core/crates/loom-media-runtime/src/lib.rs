@@ -16,7 +16,6 @@ use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 /// Error returned by rendering and preview operations.
@@ -45,7 +44,11 @@ impl std::fmt::Display for MediaRuntimeError {
             Self::Unavailable(message) => write!(formatter, "media runtime unavailable: {message}"),
             Self::Invalid(message) => write!(formatter, "invalid media operation: {message}"),
             Self::Process(message) => write!(formatter, "media worker failed: {message}"),
-            Self::MissingOutput(path) => write!(formatter, "media worker produced no output at {}", path.display()),
+            Self::MissingOutput(path) => write!(
+                formatter,
+                "media worker produced no output at {}",
+                path.display()
+            ),
             Self::EndOfStream => write!(formatter, "end of media stream"),
             Self::Poisoned => write!(formatter, "media queue state is poisoned"),
         }
@@ -82,19 +85,6 @@ pub enum GpuBackend {
     D3d11,
     /// Apple VideoToolbox hardware decode/encode with CPU composition.
     VideoToolbox,
-}
-
-impl GpuBackend {
-    fn hardware_name(self) -> Option<&'static str> {
-        match self {
-            Self::Cpu => None,
-            Self::Vulkan => Some("vulkan"),
-            Self::Cuda => Some("cuda"),
-            Self::Vaapi => Some("vaapi"),
-            Self::D3d11 => Some("d3d11va"),
-            Self::VideoToolbox => Some("videotoolbox"),
-        }
-    }
 }
 
 /// Local FFmpeg capabilities relevant to Loom rendering.
@@ -148,27 +138,17 @@ impl MediaCapabilities {
     pub fn supported_backends(&self) -> Vec<GpuBackend> {
         let mut backends = vec![GpuBackend::Cpu];
         if self.hardware_accelerators.contains("vulkan")
-            && (self.filters.contains("overlay_vulkan")
-                || self.filters.contains("libplacebo"))
+            && (self.filters.contains("overlay_vulkan") || self.filters.contains("libplacebo"))
         {
             backends.push(GpuBackend::Vulkan);
         }
-        if self.hardware_accelerators.contains("cuda")
-            && self.filters.contains("overlay_cuda")
-        {
+        if self.hardware_accelerators.contains("cuda") && self.filters.contains("overlay_cuda") {
             backends.push(GpuBackend::Cuda);
         }
         if self.hardware_accelerators.contains("vaapi")
-            && (self.filters.contains("overlay_vaapi")
-                || self.filters.contains("scale_vaapi"))
+            && (self.filters.contains("overlay_vaapi") || self.filters.contains("scale_vaapi"))
         {
             backends.push(GpuBackend::Vaapi);
-        }
-        if self.hardware_accelerators.contains("d3d11va") {
-            backends.push(GpuBackend::D3d11);
-        }
-        if self.hardware_accelerators.contains("videotoolbox") {
-            backends.push(GpuBackend::VideoToolbox);
         }
         backends
     }
@@ -237,15 +217,15 @@ fn command_names(
 }
 
 fn canonical_executable(path: &Path) -> Result<PathBuf, MediaRuntimeError> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| {
-        MediaRuntimeError::Unavailable(format!("cannot inspect {}: {error}", path.display()))
+    let canonical = fs::canonicalize(path).map_err(|error| {
+        MediaRuntimeError::Unavailable(format!("cannot resolve {}: {error}", path.display()))
     })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if !fs::metadata(&canonical)?.is_file() {
         return Err(MediaRuntimeError::Unavailable(
-            "FFmpeg path must be a regular non-symlink file".into(),
+            "FFmpeg path must resolve to a regular file".into(),
         ));
     }
-    Ok(fs::canonicalize(path)?)
+    Ok(canonical)
 }
 
 /// Two-dimensional transform applied before compositing.
@@ -331,28 +311,26 @@ pub enum Effect {
 impl Effect {
     fn validate(&self) -> Result<(), MediaRuntimeError> {
         match self {
-            Self::Exposure(value) if !(-10.0..=10.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("exposure is outside -10..10 stops".into()))
-            }
-            Self::Contrast(value) if !(0.0..=4.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("contrast is outside 0..4".into()))
-            }
-            Self::Saturation(value) if !(0.0..=4.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("saturation is outside 0..4".into()))
-            }
-            Self::Gamma(value) if !(0.1..=10.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("gamma is outside 0.1..10".into()))
-            }
-            Self::GaussianBlur(value) if !(0.0..=100.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("blur radius is outside 0..100".into()))
-            }
-            Self::Sharpen(value) if !(0.0..=5.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("sharpen amount is outside 0..5".into()))
-            }
+            Self::Exposure(value) if !(-10.0..=10.0).contains(value) => Err(
+                MediaRuntimeError::Invalid("exposure is outside -10..10 stops".into()),
+            ),
+            Self::Contrast(value) if !(0.0..=4.0).contains(value) => Err(
+                MediaRuntimeError::Invalid("contrast is outside 0..4".into()),
+            ),
+            Self::Saturation(value) if !(0.0..=4.0).contains(value) => Err(
+                MediaRuntimeError::Invalid("saturation is outside 0..4".into()),
+            ),
+            Self::Gamma(value) if !(0.1..=10.0).contains(value) => Err(MediaRuntimeError::Invalid(
+                "gamma is outside 0.1..10".into(),
+            )),
+            Self::GaussianBlur(value) if !(0.0..=100.0).contains(value) => Err(
+                MediaRuntimeError::Invalid("blur radius is outside 0..100".into()),
+            ),
+            Self::Sharpen(value) if !(0.0..=5.0).contains(value) => Err(
+                MediaRuntimeError::Invalid("sharpen amount is outside 0..5".into()),
+            ),
             Self::ChromaKey {
-                similarity,
-                blend,
-                ..
+                similarity, blend, ..
             } if !(0.0..=1.0).contains(similarity) || !(0.0..=1.0).contains(blend) => {
                 Err(MediaRuntimeError::Invalid(
                     "chroma-key similarity and blend must be in 0..=1".into(),
@@ -362,9 +340,9 @@ impl Effect {
                 "LUT file does not exist: {}",
                 path.display()
             ))),
-            Self::Opacity(value) if !(0.0..=1.0).contains(value) => {
-                Err(MediaRuntimeError::Invalid("opacity must be in 0..=1".into()))
-            }
+            Self::Opacity(value) if !(0.0..=1.0).contains(value) => Err(
+                MediaRuntimeError::Invalid("opacity must be in 0..=1".into()),
+            ),
             _ => Ok(()),
         }
     }
@@ -449,9 +427,7 @@ impl RenderOutput {
                 "render dimensions must be within 1..32768".into(),
             ));
         }
-        if !self.frames_per_second.is_finite()
-            || !(1.0..=240.0).contains(&self.frames_per_second)
-        {
+        if !self.frames_per_second.is_finite() || !(1.0..=240.0).contains(&self.frames_per_second) {
             return Err(MediaRuntimeError::Invalid(
                 "frame rate must be within 1..240".into(),
             ));
@@ -534,17 +510,38 @@ impl RenderGraph {
                 arguments.push(format_decimal(duration));
             }
             arguments.push("-i".into());
-            arguments.push(fs::canonicalize(&layer.source)?.to_string_lossy().into_owned());
+            arguments.push(
+                fs::canonicalize(&layer.source)?
+                    .to_string_lossy()
+                    .into_owned(),
+            );
         }
         let mut filter = String::new();
         let (red, green, blue, alpha) = rgba_components(self.background_rgba);
         filter.push_str(&format!(
-            "color=c=0x{red:02x}{green:02x}{blue:02x}@{:.6}:s={}x{}:r={:.6}[base0]",
+            "color=c=0x{red:02x}{green:02x}{blue:02x}@{:.6}:s={}x{}:r={:.6}[base_cpu]",
             f64::from(alpha) / 255.0,
             self.output.width,
             self.output.height,
             self.output.frames_per_second
         ));
+        match backend {
+            GpuBackend::Vulkan | GpuBackend::D3d11 => {
+                filter.push_str(";[base_cpu]format=rgba,hwupload[base0]");
+                gpu_stages.push("base_hwupload".into());
+            }
+            GpuBackend::Cuda => {
+                filter.push_str(";[base_cpu]format=rgba,hwupload_cuda[base0]");
+                gpu_stages.push("base_hwupload_cuda".into());
+            }
+            GpuBackend::Vaapi => {
+                filter.push_str(";[base_cpu]format=nv12,hwupload[base0]");
+                gpu_stages.push("base_hwupload_vaapi".into());
+            }
+            GpuBackend::VideoToolbox | GpuBackend::Cpu => {
+                filter.push_str(";[base_cpu]null[base0]");
+            }
+        }
         let mut gpu_stages = Vec::new();
         let mut cpu_stages = Vec::new();
         let mut current_base = "base0".to_string();
@@ -574,10 +571,22 @@ impl RenderGraph {
             ));
             current_base = output_label;
         }
+        let map_label = if backend != GpuBackend::Cpu
+            && !hardware_encoder_compatible(backend, &self.output.codec)
+        {
+            let final_label = "final_cpu";
+            filter.push_str(&format!(
+                ";[{current_base}]hwdownload,format=rgba[{final_label}]"
+            ));
+            cpu_stages.push("hwdownload".into());
+            final_label.to_string()
+        } else {
+            current_base
+        };
         arguments.push("-filter_complex".into());
         arguments.push(filter);
         arguments.push("-map".into());
-        arguments.push(format!("[{current_base}]"));
+        arguments.push(format!("[{map_label}]"));
         if let Some(duration) = self.output.duration_seconds {
             arguments.push("-t".into());
             arguments.push(format_decimal(duration));
@@ -715,7 +724,9 @@ fn compile_layer_chain(
             stages.push(StageKind::Cpu("scale".into()));
         }
         GpuBackend::VideoToolbox | GpuBackend::Cpu => {
-            filters.push(format!("scale={scaled_width}:{scaled_height}:flags=lanczos"));
+            filters.push(format!(
+                "scale={scaled_width}:{scaled_height}:flags=lanczos"
+            ));
             stages.push(StageKind::Cpu("scale".into()));
         }
     }
@@ -761,7 +772,10 @@ fn compile_effect(effect: &Effect) -> Result<(String, StageKind), MediaRuntimeEr
             StageKind::Cpu("chromakey".into()),
         ),
         Effect::Lut3d(path) => (
-            format!("lut3d=file={}", escape_filter_path(&fs::canonicalize(path)?)),
+            format!(
+                "lut3d=file={}",
+                escape_filter_path(&fs::canonicalize(path)?)
+            ),
             StageKind::Cpu("lut3d".into()),
         ),
         Effect::Opacity(value) => (
@@ -787,6 +801,18 @@ fn overlay_filter(backend: GpuBackend, x: f64, y: f64) -> Result<String, MediaRu
             format!("overlay=x={x}:y={y}:format=auto")
         }
     })
+}
+
+fn hardware_encoder_compatible(backend: GpuBackend, codec: &str) -> bool {
+    let codec = codec.to_ascii_lowercase();
+    match backend {
+        GpuBackend::Cuda => codec.ends_with("_nvenc"),
+        GpuBackend::Vaapi => codec.ends_with("_vaapi"),
+        GpuBackend::Vulkan => codec.ends_with("_vulkan"),
+        GpuBackend::D3d11 => codec.contains("d3d11") || codec.contains("mf"),
+        GpuBackend::VideoToolbox => codec.ends_with("_videotoolbox"),
+        GpuBackend::Cpu => true,
+    }
 }
 
 fn rgba_components(rgba: u32) -> (u8, u8, u8, u8) {
@@ -843,7 +869,11 @@ impl CompiledRender {
     where
         F: FnMut(RenderProgress),
     {
-        if let Some(parent) = self.output.parent() {
+        if let Some(parent) = self
+            .output
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
             fs::create_dir_all(parent)?;
         }
         let mut arguments = self.arguments.clone();
@@ -971,9 +1001,15 @@ impl PreviewConfiguration {
     pub fn video_frame_bytes(&self) -> Result<usize, MediaRuntimeError> {
         let pixels = usize::try_from(self.width)
             .ok()
-            .and_then(|width| usize::try_from(self.height).ok().and_then(|height| width.checked_mul(height)))
+            .and_then(|width| {
+                usize::try_from(self.height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
             .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or_else(|| MediaRuntimeError::Invalid("preview frame size overflows usize".into()))?;
+            .ok_or_else(|| {
+                MediaRuntimeError::Invalid("preview frame size overflows usize".into())
+            })?;
         Ok(pixels)
     }
 }
@@ -1217,9 +1253,7 @@ impl AvSyncController {
             return SyncAction::Discontinuity;
         }
         if drift > duration_to_signed(self.video_tolerance) {
-            return SyncAction::HoldVideo(Duration::from_nanos(
-                drift.unsigned_abs().as_nanos().min(u64::MAX as u128) as u64,
-            ));
+            return SyncAction::HoldVideo(drift.unsigned_abs());
         }
         if drift < -duration_to_signed(self.video_tolerance) {
             return SyncAction::DropVideo;
@@ -1235,8 +1269,8 @@ impl AvSyncController {
             return SyncAction::Discontinuity;
         }
         let seconds = drift.as_secs_f64();
-        let correction = (-seconds * 0.05)
-            .clamp(-self.max_resample_fraction, self.max_resample_fraction);
+        let correction =
+            (-seconds * 0.05).clamp(-self.max_resample_fraction, self.max_resample_fraction);
         if correction.abs() < 0.000_01 {
             SyncAction::Present
         } else {
@@ -1279,62 +1313,6 @@ fn duration_to_nanos(duration: Duration) -> i128 {
     duration.as_nanos().min(i128::MAX as u128) as i128
 }
 
-impl PartialOrd<SignedDuration> for i128 {
-    fn partial_cmp(&self, other: &SignedDuration) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other.0)
-    }
-}
-
-impl PartialEq<SignedDuration> for i128 {
-    fn eq(&self, other: &SignedDuration) -> bool {
-        *self == other.0
-    }
-}
-
-impl std::ops::Sub<SignedDuration> for SignedDuration {
-    type Output = SignedDuration;
-
-    fn sub(self, rhs: SignedDuration) -> Self::Output {
-        SignedDuration(self.0 - rhs.0)
-    }
-}
-
-impl std::ops::Add<SignedDuration> for SignedDuration {
-    type Output = SignedDuration;
-
-    fn add(self, rhs: SignedDuration) -> Self::Output {
-        SignedDuration(self.0 + rhs.0)
-    }
-}
-
-impl std::ops::Mul<f64> for SignedDuration {
-    type Output = f64;
-
-    fn mul(self, rhs: f64) -> Self::Output {
-        self.as_secs_f64() * rhs
-    }
-}
-
-impl std::ops::Neg for &SignedDuration {
-    type Output = SignedDuration;
-
-    fn neg(self) -> Self::Output {
-        SignedDuration(-self.0)
-    }
-}
-
-impl std::cmp::PartialOrd<i128> for SignedDuration {
-    fn partial_cmp(&self, other: &i128) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(other)
-    }
-}
-
-impl std::cmp::PartialEq<i128> for SignedDuration {
-    fn eq(&self, other: &i128) -> bool {
-        self.0 == *other
-    }
-}
-
 /// Running low-latency preview decoder pair.
 #[derive(Debug)]
 pub struct PreviewSession {
@@ -1362,11 +1340,8 @@ impl PreviewSession {
     ) -> Result<Self, MediaRuntimeError> {
         configuration.validate()?;
         let source = fs::canonicalize(&configuration.source)?;
-        let (mut video_child, video_stdout) = spawn_video_decoder(
-            &capabilities.ffmpeg,
-            &source,
-            &configuration,
-        )?;
+        let (mut video_child, video_stdout) =
+            spawn_video_decoder(&capabilities.ffmpeg, &source, &configuration)?;
         let audio_result = spawn_audio_decoder(&capabilities.ffmpeg, &source, &configuration);
         let (audio_child, audio_stdout) = match audio_result {
             Ok(pair) => pair,
@@ -1462,16 +1437,10 @@ impl PreviewSession {
         self.stop_workers();
         self.configuration.start_seconds = seconds;
         let source = fs::canonicalize(&self.configuration.source)?;
-        let (video_child, video_stdout) = spawn_video_decoder(
-            &self.capabilities.ffmpeg,
-            &source,
-            &self.configuration,
-        )?;
-        let audio_result = spawn_audio_decoder(
-            &self.capabilities.ffmpeg,
-            &source,
-            &self.configuration,
-        );
+        let (video_child, video_stdout) =
+            spawn_video_decoder(&self.capabilities.ffmpeg, &source, &self.configuration)?;
+        let audio_result =
+            spawn_audio_decoder(&self.capabilities.ffmpeg, &source, &self.configuration);
         let (audio_child, audio_stdout) = match audio_result {
             Ok(pair) => pair,
             Err(error) => {
@@ -1516,29 +1485,30 @@ fn spawn_video_decoder(
     source: &Path,
     configuration: &PreviewConfiguration,
 ) -> Result<(Child, ChildStdout), MediaRuntimeError> {
+    let mut arguments = low_latency_input_arguments(configuration.start_seconds);
+    arguments.push("-i".into());
+    arguments.push(source.to_string_lossy().into_owned());
+    arguments.extend([
+        "-map".into(),
+        "0:v:0".into(),
+        "-an".into(),
+        "-sn".into(),
+        "-dn".into(),
+        "-vf".into(),
+        format!(
+            "scale={}:{}:flags=fast_bilinear,format=rgba",
+            configuration.width, configuration.height
+        ),
+        "-r".into(),
+        format_decimal(configuration.frames_per_second),
+        "-f".into(),
+        "rawvideo".into(),
+        "-pix_fmt".into(),
+        "rgba".into(),
+        "pipe:1".into(),
+    ]);
     let mut child = Command::new(ffmpeg)
-        .args(low_latency_input_arguments(configuration.start_seconds))
-        .arg("-i")
-        .arg(source)
-        .args([
-            "-map",
-            "0:v:0",
-            "-an",
-            "-sn",
-            "-dn",
-            "-vf",
-            &format!(
-                "scale={}:{}:flags=fast_bilinear,format=rgba",
-                configuration.width, configuration.height
-            ),
-            "-r",
-            &format_decimal(configuration.frames_per_second),
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgba",
-            "pipe:1",
-        ])
+        .args(&arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1555,26 +1525,27 @@ fn spawn_audio_decoder(
     source: &Path,
     configuration: &PreviewConfiguration,
 ) -> Result<(Child, ChildStdout), MediaRuntimeError> {
+    let mut arguments = low_latency_input_arguments(configuration.start_seconds);
+    arguments.push("-i".into());
+    arguments.push(source.to_string_lossy().into_owned());
+    arguments.extend([
+        "-map".into(),
+        "0:a:0?".into(),
+        "-vn".into(),
+        "-sn".into(),
+        "-dn".into(),
+        "-ac".into(),
+        configuration.channels.to_string(),
+        "-ar".into(),
+        configuration.sample_rate.to_string(),
+        "-f".into(),
+        "f32le".into(),
+        "-acodec".into(),
+        "pcm_f32le".into(),
+        "pipe:1".into(),
+    ]);
     let mut child = Command::new(ffmpeg)
-        .args(low_latency_input_arguments(configuration.start_seconds))
-        .arg("-i")
-        .arg(source)
-        .args([
-            "-map",
-            "0:a:0?",
-            "-vn",
-            "-sn",
-            "-dn",
-            "-ac",
-            &configuration.channels.to_string(),
-            "-ar",
-            &configuration.sample_rate.to_string(),
-            "-f",
-            "f32le",
-            "-acodec",
-            "pcm_f32le",
-            "pipe:1",
-        ])
+        .args(&arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1689,10 +1660,7 @@ mod tests {
                 bitrate: Some("12M".into()),
             },
         };
-        let capabilities = fake_capabilities(
-            &["overlay_cuda", "scale_cuda"],
-            &["cuda"],
-        );
+        let capabilities = fake_capabilities(&["overlay_cuda", "scale_cuda"], &["cuda"]);
         let compiled = graph
             .compile(&capabilities, GpuBackend::Cuda)
             .expect("compile");
@@ -1701,8 +1669,8 @@ mod tests {
         assert!(compiled.cpu_stages.contains(&"contrast".into()));
         assert!(compiled
             .arguments
-            .windows(2)
-            .any(|pair| pair == ["-filter_complex", pair[1].as_str()]));
+            .iter()
+            .any(|argument| argument == "-filter_complex"));
     }
 
     #[test]

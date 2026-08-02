@@ -195,10 +195,7 @@ impl RecoveryJournal {
         let metadata_bytes = serde_json::to_vec_pretty(&metadata)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
         atomic_write(&self.directory.join(CHECKPOINT_FILE), bytes)?;
-        atomic_write(
-            &self.directory.join(CHECKPOINT_META_FILE),
-            &metadata_bytes,
-        )?;
+        atomic_write(&self.directory.join(CHECKPOINT_META_FILE), &metadata_bytes)?;
         Ok(metadata)
     }
 
@@ -206,7 +203,8 @@ impl RecoveryJournal {
     pub fn recover(&self) -> Result<RecoveryState, ProductionError> {
         let metadata_path = self.directory.join(CHECKPOINT_META_FILE);
         let checkpoint_path = self.directory.join(CHECKPOINT_FILE);
-        let (checkpoint, checkpoint_metadata) = if metadata_path.exists() || checkpoint_path.exists()
+        let (checkpoint, checkpoint_metadata) = if metadata_path.exists()
+            || checkpoint_path.exists()
         {
             if !metadata_path.exists() || !checkpoint_path.exists() {
                 return Err(ProductionError::Integrity(
@@ -588,10 +586,7 @@ pub fn audit_accessibility(nodes: &[AccessibilityNode]) -> Vec<AccessibilityFind
                 "interactive node cannot receive keyboard focus",
             ));
         }
-        let ratio = contrast_ratio(
-            node.foreground_luminance,
-            node.background_luminance,
-        );
+        let ratio = contrast_ratio(node.foreground_luminance, node.background_luminance);
         if ratio < 4.5 {
             findings.push(finding(
                 node,
@@ -692,10 +687,14 @@ pub fn validate_release_matrix(targets: &[InstallerTarget]) -> Vec<String> {
         (OperatingSystem::Windows, Architecture::X86_64),
         (OperatingSystem::MacOs, Architecture::Aarch64),
     ] {
-        if !targets.iter().any(|target| {
-            (target.operating_system, target.architecture) == required
-        }) {
-            errors.push(format!("missing {:?}/{:?} release target", required.0, required.1));
+        if !targets
+            .iter()
+            .any(|target| (target.operating_system, target.architecture) == required)
+        {
+            errors.push(format!(
+                "missing {:?}/{:?} release target",
+                required.0, required.1
+            ));
         }
     }
     errors
@@ -709,8 +708,12 @@ mod tests {
     fn journal_recovers_after_checkpoint_and_rejects_tampering() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
-        journal.append("one", "Insert", b"first".to_vec()).expect("append");
-        journal.append("two", "Adjust", b"second".to_vec()).expect("append");
+        journal
+            .append("one", "Insert", b"first".to_vec())
+            .expect("append");
+        journal
+            .append("two", "Adjust", b"second".to_vec())
+            .expect("append");
         journal
             .checkpoint(1, "loom.test/1", b"checkpoint")
             .expect("checkpoint");
@@ -721,7 +724,10 @@ mod tests {
 
         let journal_path = temporary.path().join(JOURNAL_FILE);
         let mut bytes = fs::read(&journal_path).expect("read journal");
-        let position = bytes.iter().position(|byte| *byte == b's').expect("payload byte");
+        let position = bytes
+            .iter()
+            .position(|byte| *byte == b's')
+            .expect("payload byte");
         bytes[position] = b'x';
         fs::write(journal_path, bytes).expect("tamper");
         assert!(RecoveryJournal::open(temporary.path()).is_err());

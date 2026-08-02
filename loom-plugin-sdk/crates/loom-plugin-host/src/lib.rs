@@ -34,6 +34,9 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+/// Signed installation, update/rollback, UI extension, migration, and native bridge APIs.
+pub mod lifecycle;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Cursor, Read, Write};

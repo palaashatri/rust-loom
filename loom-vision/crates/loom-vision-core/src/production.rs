@@ -410,7 +410,10 @@ impl ProductionModelRelease {
                 || metric.lower_bound.is_some_and(|value| !value.is_finite())
                 || metric.upper_bound.is_some_and(|value| !value.is_finite())
             {
-                errors.push(format!("metric {} contains a non-finite value", metric.name));
+                errors.push(format!(
+                    "metric {} contains a non-finite value",
+                    metric.name
+                ));
             }
             if let (Some(lower), Some(upper)) = (metric.lower_bound, metric.upper_bound) {
                 if lower > metric.value || metric.value > upper {
@@ -524,7 +527,9 @@ mod tests {
         let errors = release.validate();
         assert!(errors.iter().any(|error| error.contains("redistributable")));
         assert!(errors.iter().any(|error| error.contains("no examples")));
-        assert!(errors.iter().any(|error| error.contains("evaluation metric")));
+        assert!(errors
+            .iter()
+            .any(|error| error.contains("evaluation metric")));
         assert!(errors.iter().any(|error| error.contains("benchmark")));
     }
 }

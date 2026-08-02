@@ -207,7 +207,7 @@ fn detect_inner(bytes: &[u8], file_name: Option<&str>) -> (Format, u8, String) {
     }
     if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
         let brand = &bytes[8..12];
-        let format = if matches!(brand, b"qt  ") {
+        let format = if brand == b"qt  " {
             Format::Mov
         } else {
             Format::Mp4
@@ -511,11 +511,15 @@ impl std::fmt::Display for InteropError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
-            Self::ToolUnavailable(tool) => write!(formatter, "required converter unavailable: {tool}"),
+            Self::ToolUnavailable(tool) => {
+                write!(formatter, "required converter unavailable: {tool}")
+            }
             Self::Unsupported(message) => write!(formatter, "unsupported conversion: {message}"),
             Self::Timeout => write!(formatter, "conversion timed out"),
             Self::Failed(message) => write!(formatter, "converter failed: {message}"),
-            Self::MissingOutput(path) => write!(formatter, "converter did not create {}", path.display()),
+            Self::MissingOutput(path) => {
+                write!(formatter, "converter did not create {}", path.display())
+            }
             Self::InvalidPath(message) => write!(formatter, "invalid path: {message}"),
         }
     }
@@ -755,16 +759,13 @@ mod tests {
             libreoffice: Some(PathBuf::from("/usr/bin/libreoffice")),
             ..Toolchain::default()
         };
-        let plan = plan_conversion(
-            &toolchain,
-            Format::Docx,
-            Format::Odt,
-            &source,
-            &destination,
-        )
-        .expect("plan");
+        let plan = plan_conversion(&toolchain, Format::Docx, Format::Odt, &source, &destination)
+            .expect("plan");
         assert_eq!(plan.program, PathBuf::from("/usr/bin/libreoffice"));
-        assert!(plan.arguments.iter().any(|argument| argument == "--headless"));
+        assert!(plan
+            .arguments
+            .iter()
+            .any(|argument| argument == "--headless"));
         assert_eq!(plan.destination, destination);
     }
 
