@@ -149,6 +149,9 @@ impl SnapshotRecovery {
 /// the slot safely treat recording as a no-op.
 #[macro_export]
 macro_rules! define_snapshot_recovery {
+    (application_id: $application_id:literal, schema: $schema:literal $(,)?) => {
+        $crate::define_snapshot_recovery!(LOOM_SNAPSHOT_RECOVERY, $application_id, $schema);
+    };
     ($slot:ident, $application_id:literal, $schema:literal) => {
         std::thread_local! {
             static $slot: std::cell::RefCell<Option<$crate::snapshot::SnapshotRecovery>> =
