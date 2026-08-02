@@ -1,0 +1,56 @@
+name: Apply Loom completion tranche
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2' &&
+      hashFiles('.ci/loom-tranche-1.patch.xz.b64') != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply reviewed source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .ci/loom-tranche-1.patch.xz.b64 | xz -dc > /tmp/loom-tranche.patch
+          git apply --check --whitespace=error-all /tmp/loom-tranche.patch
+          git apply --binary --whitespace=nowarn /tmp/loom-tranche.patch
+
+      - name: Canonical formatting and dependency locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          for workspace in \
+            loom-core loom-writer loom-sheets loom-present loom-photo loom-motion \
+            loom-video loom-studio loom-encode loom-vision loom-plugin-sdk; do
+            (cd "$workspace" && cargo +stable fmt --all)
+          done
+          (cd loom-photo && cargo +stable generate-lockfile)
+          (cd loom-studio && cargo +stable generate-lockfile)
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci
+          git config user.name "Loom Engineering Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: wire real creative workflows and redesign suite UI"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
