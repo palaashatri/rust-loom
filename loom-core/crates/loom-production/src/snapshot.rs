@@ -151,6 +151,10 @@ impl SnapshotRecovery {
 macro_rules! define_snapshot_recovery {
     (application_id: $application_id:literal, schema: $schema:literal $(,)?) => {
         $crate::define_snapshot_recovery!(LOOM_SNAPSHOT_RECOVERY, $application_id, $schema);
+
+        fn take_snapshot_recovery() -> Option<Vec<u8>> {
+            initialize_snapshot_recovery().ok().flatten()
+        }
     };
     ($slot:ident, $application_id:literal, $schema:literal) => {
         std::thread_local! {
