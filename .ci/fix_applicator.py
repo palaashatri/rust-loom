@@ -49,4 +49,11 @@ if count != 1:
     raise RuntimeError(f"expected one Field patch definition, found {count}")
 text = text.replace(old_field_patch, new_field_patch, 1)
 
+old_forbidden = '("coming soon", "placeholder", "fake progress", "model preview")'
+new_forbidden = '"coming soon", "placeholder ui", "placeholder control", "fake progress", "model preview"'
+count = text.count(old_forbidden)
+if count != 2:
+    raise RuntimeError(f"expected two prototype-language criteria, found {count}")
+text = text.replace(old_forbidden, f"({new_forbidden})")
+
 path.write_text(text, encoding="utf-8", newline="\n")
