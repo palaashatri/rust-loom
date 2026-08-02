@@ -206,21 +206,21 @@ export component StudioApp inherits Window {
                                 }
                                 Rectangle {
                                     horizontal-stretch: 1;
-                                    background: Math.mod(index, 2) == 0 ? #12151a : #101216;
+                                    background: Math.mod(index, 2) == 0 ? Theme.palette().media-stage : Theme.palette().media-stage;
                                     if root.track-region-counts[index] > 0 : Rectangle {
                                         x: parent.width * root.track-region-starts[index] / Math.max(0.01, root.duration-seconds);
                                         width: Math.max(54px, parent.width * root.track-region-durations[index] / Math.max(0.01, root.duration-seconds));
                                         y: 8px;
                                         height: parent.height - 16px;
                                         border-radius: 7px;
-                                        background: index == root.active-track-index ? #8f4b31 : #32536a;
+                                        background: index == root.active-track-index ? Theme.palette().content-accent : Theme.palette().content-cool;
                                         border-width: 1px;
-                                        border-color: index == root.active-track-index ? #d97745 : #527890;
+                                        border-color: index == root.active-track-index ? Theme.palette().content-accent : Theme.palette().content-cool;
                                         HorizontalLayout {
                                             padding-left: 8px;
                                             spacing: 7px;
-                                            Icon { icon: root.track-kinds[index] == "MIDI" ? "keyboard" : "waveform"; size: 18px; tint: #ffffff; }
-                                            Text { text: label; color: #ffffff; font-size: Theme.tokens.typography.micro; font-weight: 650; overflow: elide; vertical-alignment: center; }
+                                            Icon { icon: root.track-kinds[index] == "MIDI" ? "keyboard" : "waveform"; size: 18px; tint: Theme.palette().paper; }
+                                            Text { text: label; color: Theme.palette().paper; font-size: Theme.tokens.typography.micro; font-weight: 650; overflow: elide; vertical-alignment: center; }
                                         }
                                     }
                                 }

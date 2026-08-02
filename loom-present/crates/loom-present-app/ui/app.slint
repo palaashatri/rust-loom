@@ -92,27 +92,27 @@ export component PresentApp inherits Window {
 
         if root.is-preview-mode : Rectangle {
             vertical-stretch: 1;
-            background: #050608;
+            background: Theme.palette().media-stage;
             VerticalLayout {
                 alignment: center;
                 spacing: 18px;
                 Rectangle {
                     width: 960px;
                     height: 540px;
-                    background: #fbfaf6;
+                    background: Theme.palette().paper;
                     border-radius: 4px;
                     VerticalLayout {
                         padding: 64px;
                         spacing: 22px;
-                        Text { text: root.slide-title; font-size: 38px; font-weight: 700; color: #1d1d1f; wrap: word-wrap; }
-                        Text { text: root.slide-body; font-size: 20px; color: #55565b; wrap: word-wrap; vertical-stretch: 1; }
+                        Text { text: root.slide-title; font-size: 38px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
+                        Text { text: root.slide-body; font-size: 20px; color: Theme.palette().paper-muted; wrap: word-wrap; vertical-stretch: 1; }
                     }
                 }
                 HorizontalLayout {
                     alignment: center;
                     spacing: 14px;
                     ToolButton { icon: "chevron-left"; text: "Previous"; clicked => { root.prev-slide(); } }
-                    Text { text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length; color: #f5f5f2; font-size: 13px; }
+                    Text { text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length; color: Theme.palette().ink; font-size: 13px; }
                     ToolButton { icon: "chevron-right"; text: "Next"; clicked => { root.next-slide(); } }
                     ToolButton { icon: "close"; text: "Exit"; clicked => { root.toggle-preview-mode(); } }
                 }
@@ -157,15 +157,15 @@ export component PresentApp inherits Window {
                                 border-radius: 5px;
                                 border-width: 1px;
                                 border-color: Theme.palette().border-strong;
-                                background: #fbfaf6;
+                                background: Theme.palette().paper;
                                 VerticalLayout {
                                     padding: 9px;
                                     spacing: 5px;
-                                    Text { text: title; font-size: 12px; font-weight: 700; color: #1d1d1f; overflow: elide; }
-                                    Rectangle { height: 4px; width: 72%; border-radius: 2px; background: #d6d4ce; }
-                                    Rectangle { height: 4px; width: 52%; border-radius: 2px; background: #e5e3dd; }
+                                    Text { text: title; font-size: 12px; font-weight: 700; color: Theme.palette().paper-ink; overflow: elide; }
+                                    Rectangle { height: 4px; width: 72%; border-radius: 2px; background: Theme.palette().paper-line; }
+                                    Rectangle { height: 4px; width: 52%; border-radius: 2px; background: Theme.palette().paper-line; }
                                     Rectangle { vertical-stretch: 1; background: transparent; }
-                                    Rectangle { height: 3px; width: 24%; border-radius: 2px; background: #c66f43; }
+                                    Rectangle { height: 3px; width: 24%; border-radius: 2px; background: Theme.palette().content-accent; }
                                 }
                             }
                         }
@@ -195,7 +195,7 @@ export component PresentApp inherits Window {
                         border-radius: 5px;
                         border-width: 1px;
                         border-color: Theme.palette().border-strong;
-                        background: #fbfaf6;
+                        background: Theme.palette().paper;
                         clip: true;
                         VerticalLayout {
                             padding: 48px;
@@ -205,20 +205,20 @@ export component PresentApp inherits Window {
                                 border-radius: 5px;
                                 border-width: root.active-element-index == 0 ? 2px : 0px;
                                 border-color: Theme.palette().accent;
-                                Text { text: root.slide-title; font-size: 34px; font-weight: 700; color: #1d1d1f; wrap: word-wrap; }
+                                Text { text: root.slide-title; font-size: 34px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
                             }
                             Rectangle {
                                 vertical-stretch: 1;
                                 border-radius: 5px;
                                 border-width: root.active-element-index == 1 ? 2px : 0px;
                                 border-color: Theme.palette().accent;
-                                Text { text: root.slide-body; font-size: 18px; color: #55565b; wrap: word-wrap; }
+                                Text { text: root.slide-body; font-size: 18px; color: Theme.palette().paper-muted; wrap: word-wrap; }
                             }
                             HorizontalLayout {
                                 spacing: 12px;
-                                Rectangle { width: 30%; height: 66px; border-radius: 8px; background: #eeeae3; Text { text: "42%"; color: #c66f43; font-size: 25px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } }
-                                Rectangle { width: 30%; height: 66px; border-radius: 8px; background: #e8edf0; Text { text: "Local"; color: #35576c; font-size: 18px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; } }
-                                Rectangle { horizontal-stretch: 1; height: 66px; border-radius: 8px; background: #eeeae3; Text { text: "Loom"; color: #1d1d1f; font-size: 18px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; } }
+                                Rectangle { width: 30%; height: 66px; border-radius: 8px; background: Theme.palette().content-accent-soft; Text { text: "42%"; color: Theme.palette().content-accent; font-size: 25px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } }
+                                Rectangle { width: 30%; height: 66px; border-radius: 8px; background: Theme.palette().content-cool-soft; Text { text: "Local"; color: Theme.palette().content-cool; font-size: 18px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; } }
+                                Rectangle { horizontal-stretch: 1; height: 66px; border-radius: 8px; background: Theme.palette().content-accent-soft; Text { text: "Loom"; color: Theme.palette().paper-ink; font-size: 18px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; } }
                             }
                         }
                     }

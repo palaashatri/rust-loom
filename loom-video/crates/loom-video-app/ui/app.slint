@@ -148,7 +148,7 @@ export component VideoApp inherits Window {
                     vertical-stretch: 1;
                     Rectangle {
                         x: 20px; y: 18px; width: parent.width - 40px; height: parent.height - 36px;
-                        border-radius: 8px; background: #050608; clip: true;
+                        border-radius: 8px; background: Theme.palette().media-stage; clip: true;
                         if root.has-preview : Image { source: root.preview-image; width: parent.width; height: parent.height; image-fit: contain; }
                         if !root.has-preview : VerticalLayout {
                             alignment: center; spacing: 10px;
@@ -156,8 +156,8 @@ export component VideoApp inherits Window {
                             Text { text: "Import media to decode a real preview frame"; color: Theme.palette().ink; font-size: Theme.tokens.typography.body-large; horizontal-alignment: center; }
                         }
                         Rectangle {
-                            x: 12px; y: 12px; height: 26px; min-width: 138px; border-radius: 6px; background: #000000aa;
-                            Text { text: root.timecode-display; color: #ffffff; font-size: 12px; font-weight: 700; x: 8px; width: parent.width - 16px; vertical-alignment: center; }
+                            x: 12px; y: 12px; height: 26px; min-width: 138px; border-radius: 6px; background: Theme.palette().scrim;
+                            Text { text: root.timecode-display; color: Theme.palette().paper; font-size: 12px; font-weight: 700; x: 8px; width: parent.width - 16px; vertical-alignment: center; }
                         }
                     }
                 }
@@ -205,22 +205,22 @@ export component VideoApp inherits Window {
                                     TouchArea { clicked => { root.select-track(index); } }
                                 }
                                 Rectangle {
-                                    horizontal-stretch: 1; background: Math.mod(index, 2) == 0 ? #12151a : #101216;
+                                    horizontal-stretch: 1; background: Math.mod(index, 2) == 0 ? Theme.palette().media-stage : Theme.palette().media-stage;
                                     for clip[clip-index] in root.clip-labels : Rectangle {
                                         visible: index == 0;
                                         x: parent.width * root.clip-starts[clip-index] / Math.max(0.01, root.timeline-duration);
                                         width: Math.max(56px, parent.width * root.clip-durations[clip-index] / Math.max(0.01, root.timeline-duration) - 3px);
                                         y: 6px; height: 52px; border-radius: 6px;
-                                        background: clip-index == root.active-clip-index ? #b95f36 : #37566c;
+                                        background: clip-index == root.active-clip-index ? Theme.palette().content-accent : Theme.palette().content-cool;
                                         border-width: clip-index == root.active-clip-index ? 2px : 1px;
-                                        border-color: clip-index == root.active-clip-index ? #f1a27d : #5b7890;
+                                        border-color: clip-index == root.active-clip-index ? Theme.palette().content-accent : Theme.palette().content-cool;
                                         VerticalLayout { padding: 6px; spacing: 3px;
-                                            Text { text: clip; color: #ffffff; font-size: 11px; font-weight: 650; overflow: elide; }
-                                            Icon { icon: "waveform"; size: 16px; tint: #dce6ed; }
+                                            Text { text: clip; color: Theme.palette().paper; font-size: 11px; font-weight: 650; overflow: elide; }
+                                            Icon { icon: "waveform"; size: 16px; tint: Theme.palette().paper-line; }
                                         }
                                         TouchArea { clicked => { root.select-clip(clip-index); } }
                                     }
-                                    Rectangle { x: parent.width * root.playhead-seconds / Math.max(0.01, root.timeline-duration); width: 2px; height: parent.height; background: #f09a6c; }
+                                    Rectangle { x: parent.width * root.playhead-seconds / Math.max(0.01, root.timeline-duration); width: 2px; height: parent.height; background: Theme.palette().meter-warn; }
                                 }
                             }
                         }
