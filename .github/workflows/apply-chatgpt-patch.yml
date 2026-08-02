@@ -22,7 +22,14 @@ jobs:
           gzip -d < .ci/loom-ui-functional.patch.gz.b64 > /tmp/loom-ui-functional.patch
           git apply --check --binary /tmp/loom-ui-functional.patch
           git apply --binary /tmp/loom-ui-functional.patch
-          git rm .ci/loom-ui-functional.patch.gz.b64 .github/workflows/apply-chatgpt-patch.yml
+
+          # GitHub Actions tokens cannot create/update workflow files. Keep the
+          # current workflow tree untouched in this bot-authored commit; the
+          # coordinating GitHub app will install the final root workflow next.
+          git checkout HEAD -- .github/workflows/apply-chatgpt-patch.yml loom-bootstrap/.github/workflows/ci.yml
+          rm -f .github/workflows/ci.yml
+          git rm .ci/loom-ui-functional.patch.gz.b64
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
