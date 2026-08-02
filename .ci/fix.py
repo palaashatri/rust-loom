@@ -25,24 +25,20 @@ core = replace_once(
     "            scale_keys: Vec::new(),\n            rotation_keys: Vec::new(),\n        }",
     "rotation initialization",
 )
-core = replace_once(
-    core,
-    '            "scale" => Some(&mut self.scale_keys),\n            _ => None,',
-    '            "scale" => Some(&mut self.scale_keys),\n            "rotation" => Some(&mut self.rotation_keys),\n            _ => None,',
-    "add keyframe rotation",
-)
+keyframe_match = '            "scale" => Some(&mut self.scale_keys),\n            _ => None,'
+keyframe_replacement = '            "scale" => Some(&mut self.scale_keys),\n            "rotation" => Some(&mut self.rotation_keys),\n            _ => None,'
+if core.count(keyframe_match) != 2:
+    raise RuntimeError(
+        f"rotation keyframe match sites: expected two, found {core.count(keyframe_match)}"
+    )
+core = core.replace(keyframe_match, keyframe_replacement, 1)
 core = replace_once(
     core,
     "    /// Uniform scale, where `1` is original size.\n    pub scale: f32,\n    /// Whether the layer is active at this time.",
     "    /// Uniform scale, where `1` is original size.\n    pub scale: f32,\n    /// Rotation in degrees.\n    pub rotation: f32,\n    /// Whether the layer is active at this time.",
     "sample rotation field",
 )
-core = replace_once(
-    core,
-    '            "scale" => Some(&mut self.scale_keys),\n            _ => None,',
-    '            "scale" => Some(&mut self.scale_keys),\n            "rotation" => Some(&mut self.rotation_keys),\n            _ => None,',
-    "remove keyframe rotation",
-)
+core = core.replace(keyframe_match, keyframe_replacement, 1)
 core = replace_once(
     core,
     "            scale: sample_keys(&self.scale_keys, local_time, 1.0).max(0.0),\n            visible,",
