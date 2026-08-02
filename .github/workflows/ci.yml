@@ -48,12 +48,14 @@ jobs:
           done
       - name: Commit ordinary source
         run: |
-          rm -rf .ci .github/workflows/apply-native-productisation.yml
+          rm -rf .ci
+          find loom-bootstrap -type d -name __pycache__ -prune -exec rm -rf {} +
+          git restore --source=HEAD -- .github/workflows
           git config user.name 'Loom Engineering Bot'
           git config user.email 'actions@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'feat(product): make Windows and macOS first-class targets'
+          git commit -m 'feat(product): add native integration and measured readiness'
           git push origin HEAD:chatgpt/loom-ui-functional-audit-2
 
   contracts:
