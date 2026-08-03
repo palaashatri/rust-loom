@@ -6,7 +6,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ["writer", "sheets", "present", "photo", "motion", "video", "studio", "encode"]
 failures = []
-emoji = re.compile("[\\U0001F000-\\U0001FAFF\\u2600-\\u27BF]")
+emoji = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF]")
 
 
 def slider_blocks(text: str):
@@ -31,10 +31,25 @@ def slider_blocks(text: str):
             return
 
 
+def application_ui_text(app: str) -> str:
+    """Read the complete Slint module graph owned by an application.
+
+    Productised workspaces may keep app.slint as a stable public entrypoint and
+    move the implementation into sibling modules. Auditing every sibling Slint
+    file prevents compatibility re-exports from hiding either good practice or
+    regressions.
+    """
+    ui_dir = ROOT / f"loom-{app}/crates/loom-{app}-app/ui"
+    files = sorted(ui_dir.glob("*.slint"))
+    if not files:
+        failures.append(f"{app}: no Slint UI modules found")
+        return ""
+    return "\n".join(file.read_text(encoding="utf-8") for file in files)
+
+
 for app in APPS:
-    file = ROOT / f"loom-{app}/crates/loom-{app}-app/ui/app.slint"
     main = ROOT / f"loom-{app}/crates/loom-{app}-app/src/main.rs"
-    text = file.read_text(encoding="utf-8")
+    text = application_ui_text(app)
     main_text = main.read_text(encoding="utf-8")
     for token, message in (
         ("AppHeader {", "missing shared AppHeader"),
@@ -51,7 +66,16 @@ for app in APPS:
         failures.append(f"{app}: emoji/icon-font glyphs remain in professional UI")
     if re.search(r"#[0-9a-fA-F]{6,8}", text):
         failures.append(f"{app}: hard-coded color outside the shared theme")
-    if any(token in text.lower() for token in ("coming soon", "placeholder ui", "placeholder control", "fake progress", "model preview")):
+    if any(
+        token in text.lower()
+        for token in (
+            "coming soon",
+            "placeholder ui",
+            "placeholder control",
+            "fake progress",
+            "model preview",
+        )
+    ):
         failures.append(f"{app}: prototype or fabricated-state language remains")
     if "!other.starts_with('-') && args.open.is_none()" not in main_text:
         failures.append(f"{app}: native shell positional document opening is not supported")
@@ -60,10 +84,26 @@ for app in APPS:
             failures.append(f"{app}: slider lacks a semantic accessibility label")
 
 shared = (ROOT / "loom-core/crates/loom-ui/ui/components.slint").read_text(encoding="utf-8")
-for component in ["WorkspaceToolbar", "SidebarSurface", "InspectorSurface", "PaneTabs", "CanvasBackdrop", "TransportButton"]:
+for component in [
+    "WorkspaceToolbar",
+    "SidebarSurface",
+    "InspectorSurface",
+    "PaneTabs",
+    "CanvasBackdrop",
+    "TransportButton",
+]:
     if f"export component {component}" not in shared:
         failures.append(f"shared UI: missing {component}")
-for component in ("ToolButton", "IconButton", "PrimaryButton", "SegmentedControl", "Slider", "WorkspaceRow", "PaneTabs", "TransportButton"):
+for component in (
+    "ToolButton",
+    "IconButton",
+    "PrimaryButton",
+    "SegmentedControl",
+    "Slider",
+    "WorkspaceRow",
+    "PaneTabs",
+    "TransportButton",
+):
     start = shared.find(f"export component {component}")
     if start < 0:
         continue
@@ -73,7 +113,16 @@ for component in ("ToolButton", "IconButton", "PrimaryButton", "SegmentedControl
         failures.append(f"shared UI: {component} lacks accessible role or label")
     if component not in ("Slider",) and "accessible-action-default" not in block:
         failures.append(f"shared UI: {component} lacks an accessible default action")
-for component in ("ToolButton", "IconButton", "PrimaryButton", "SegmentedControl", "Slider", "WorkspaceRow", "PaneTabs", "TransportButton"):
+for component in (
+    "ToolButton",
+    "IconButton",
+    "PrimaryButton",
+    "SegmentedControl",
+    "Slider",
+    "WorkspaceRow",
+    "PaneTabs",
+    "TransportButton",
+):
     start = shared.find(f"export component {component}")
     end = shared.find("\nexport component ", start + 1)
     block = shared[start:] if end < 0 else shared[start:end]
@@ -81,12 +130,27 @@ for component in ("ToolButton", "IconButton", "PrimaryButton", "SegmentedControl
         failures.append(f"shared UI: {component} lacks keyboard interaction")
 
 theme = (ROOT / "loom-core/crates/loom-ui/ui/theme.slint").read_text(encoding="utf-8")
-for token in ["surface-raised", "chrome", "panel", "shadow", "grid-major", "control-height", "header-height", "reduced-motion"]:
+for token in [
+    "surface-raised",
+    "chrome",
+    "panel",
+    "shadow",
+    "grid-major",
+    "control-height",
+    "header-height",
+    "reduced-motion",
+]:
     if token not in theme:
         failures.append(f"theme: missing product token {token}")
 
 native = (ROOT / ".github/workflows/cross-platform.yml").read_text(encoding="utf-8")
-for token in ("windows-2025", "macos-15", "macos-15-intel", "native-ui-matrix.py", "upload-artifact"):
+for token in (
+    "windows-2025",
+    "macos-15",
+    "macos-15-intel",
+    "native-ui-matrix.py",
+    "upload-artifact",
+):
     if token not in native:
         failures.append(f"native UI validation: missing {token}")
 
