@@ -297,7 +297,7 @@ pub fn verify_signed_package(
 fn package_manifest(package: &[u8]) -> Result<PluginManifest, LifecycleError> {
     let mut archive = zip::ZipArchive::new(Cursor::new(package))
         .map_err(|error| LifecycleError::InvalidData(format!("invalid plugin ZIP: {error}")))?;
-    let mut entry = archive
+    let entry = archive
         .by_name("manifest.json")
         .map_err(|_| LifecycleError::InvalidData("plugin package has no manifest.json".into()))?;
     if entry.size() > MAX_MANIFEST_BYTES {

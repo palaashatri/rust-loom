@@ -85,9 +85,7 @@ impl AudioIo {
         let output_device = host
             .default_output_device()
             .ok_or_else(|| "no default audio output device is available".to_string())?;
-        let output_device_name = output_device
-            .name()
-            .unwrap_or_else(|_| "Default output".into());
+        let output_device_name = output_device.to_string();
         let output_supported = output_device
             .default_output_config()
             .map_err(|error| format!("read output configuration: {error}"))?;
@@ -113,9 +111,9 @@ impl AudioIo {
             if let Ok(supported) = input_device.default_input_config() {
                 let format = supported.sample_format();
                 let config = supported.config();
-                input_rate = config.sample_rate.0;
+                input_rate = config.sample_rate;
                 input_channels = config.channels;
-                input_device_name = input_device.name().ok();
+                input_device_name = Some(input_device.to_string());
                 if let Ok(stream) =
                     build_input_stream(&input_device, config, format, capture.clone())
                 {
@@ -330,7 +328,7 @@ fn build_output_stream(
     playback: Arc<PlaybackShared>,
 ) -> Result<Stream, String> {
     let channels = config.channels as usize;
-    let device_rate = config.sample_rate.0;
+    let device_rate = config.sample_rate;
     let error = |error| eprintln!("Loom Studio output stream error: {error}");
     match format {
         SampleFormat::F32 => device
