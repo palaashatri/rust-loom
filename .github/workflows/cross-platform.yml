@@ -68,6 +68,19 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.platform == 'windows' && '-C link-arg=/STACK:33554432' || '' }}
         run: bash loom-bootstrap/scripts/build-all.sh --release
+      - name: Run native functional journeys and generate sample projects
+        shell: bash
+        run: >-
+          python3 loom-bootstrap/scripts/native-functional-matrix.py
+          --root "$GITHUB_WORKSPACE"
+          --output "$NATIVE_EVIDENCE/functional"
+          --platform "${{ matrix.platform }}"
+      - name: Publish generated samples for positional-open UI validation
+        shell: bash
+        run: |
+          rm -rf loom-bootstrap/.work/generated-samples
+          mkdir -p loom-bootstrap/.work/generated-samples
+          cp -R "$NATIVE_EVIDENCE/functional/generated-samples/." loom-bootstrap/.work/generated-samples/
       - name: Render compact, reference, and large native UI matrices
         shell: bash
         run: >-
