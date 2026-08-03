@@ -814,8 +814,8 @@ mod tests {
         let mut checked = 0usize;
         for (relative, format, minimum_confidence) in expected {
             let path = corpus.join(relative);
-            let bytes = fs::read(&path)
-                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let bytes =
+                fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
             let detected = detect(&bytes, Some(relative));
             assert_eq!(
                 detected.format, *format,

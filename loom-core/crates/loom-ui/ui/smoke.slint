@@ -20,7 +20,7 @@
 //   large explicit `max-width` / `max-height` (10000px is the house
 //   convention). Without it the layout never grows into the shared space.
 
-import { ToolButton, IconButton, PrimaryButton, SearchField, SegmentedControl, Field, EmptyState, Panel, InspectorSection, StatusBar } from "components.slint";
+import { ToolButton, IconButton, PrimaryButton, SearchField, SegmentedControl, Field, EmptyState, Panel, InspectorSection, StatusBar, CommandPalette } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -164,5 +164,16 @@ export component SmokeWindow inherits Window {
             status-left: "Paragraph 12 of 34";
             status-right: "Zoom 100%";
         }
+    }
+
+    CommandPalette {
+        open: true;
+        selected: 1;
+        query: "exp";
+        commands: [
+            { id: "export.pdf", label: "Export PDF", shortcut: "Ctrl+P", enabled: true },
+            { id: "export.epub", label: "Export EPUB", shortcut: "", enabled: true },
+            { id: "document.search", label: "Search document", shortcut: "Ctrl+F", enabled: false },
+        ];
     }
 }

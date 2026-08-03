@@ -1172,3 +1172,173 @@ export component TransportButton inherits Rectangle {
     Icon { icon: root.icon; size: 16px; tint: !root.enabled ? Theme.palette().ink-disabled : root.destructive ? Theme.palette().danger : root.active ? Theme.palette().accent : Theme.palette().ink; }
     touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
+
+/// One command shown by the searchable command palette.
+export struct CommandPaletteItem {
+    /// Stable command identifier used by journey logs.
+    id: string,
+    /// Human-readable command name.
+    label: string,
+    /// Shortcut hint, such as `Ctrl+K`.
+    shortcut: string,
+    /// Whether the command can currently run.
+    enabled: bool,
+}
+
+/// Modal, searchable, fully keyboard-operable command palette.
+///
+/// The host owns the command model and filters it as the query changes. The
+/// palette renders the filtered list, keeps the selection index, and routes
+/// every key through a single focus scope so the full journey — open, type,
+/// move, invoke, close — works without a pointing device. `Escape` closes,
+/// `Up`/`Down` move the selection, `Return` invokes, `Backspace` edits the
+/// query, and printable characters append to the query. The typed query is
+/// rendered as text (a palette search box does not need a blinking caret).
+export component CommandPalette inherits Rectangle {
+    in property <bool> open: false;
+    in property <[CommandPaletteItem]> commands: [];
+    in-out property <string> query: "";
+    in-out property <int> selected: 0;
+    callback command-invoked(int);
+    callback query-changed(string);
+    callback move-selection(int);
+    callback key-text(string);
+    callback backspace;
+    callback close-requested;
+
+    background: transparent;
+    visible: root.open;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: Theme.palette().overlay;
+        opacity: 0.78;
+        touch := TouchArea {
+            clicked => { root.close-requested(); }
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - Math.min(560px, parent.width - 48px)) / 2;
+        y: Math.max(64px, parent.height / 5);
+        width: Math.min(560px, parent.width - 48px);
+        height: Math.min(430px, parent.height - 140px);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+        background: Theme.palette().surface-raised;
+        accessible-role: list;
+        accessible-label: "Command palette";
+
+        focus-scope := FocusScope {
+            key-pressed(event) => {
+                if (!root.open) { return reject; }
+                if (event.modifiers.control || event.modifiers.alt || event.modifiers.shift) { return reject; }
+                if (event.text == Key.Escape) { root.close-requested(); return accept; }
+                if (event.text == Key.UpArrow) { root.move-selection(-1); return accept; }
+                if (event.text == Key.DownArrow) { root.move-selection(1); return accept; }
+                if (event.text == Key.PageUp) { root.move-selection(-8); return accept; }
+                if (event.text == Key.PageDown) { root.move-selection(8); return accept; }
+                if (event.text == Key.Return) {
+                    root.command-invoked(root.selected);
+                    return accept;
+                }
+                if (event.text == Key.Backspace) { root.backspace(); return accept; }
+                root.key-text(event.text);
+                return accept;
+            }
+        }
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 32px;
+                    horizontal-stretch: 1;
+                    border-radius: 7px;
+                    border-width: 1px;
+                    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+                    background: Theme.palette().surface;
+                    Text {
+                        x: 12px;
+                        vertical-alignment: center;
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                        text: root.query == "" ? "Search commands…" : "> " + root.query;
+                        width: parent.width - 24px;
+                        overflow: clip;
+                    }
+                }
+                Text {
+                    text: "↑↓ select  ↵ run  esc close";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-disabled;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.palette().border;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                clip: true;
+                border-radius: 6px;
+
+                VerticalLayout {
+                    width: parent.width;
+                    for item[idx] in root.commands : Rectangle {
+                        height: 34px;
+                        border-radius: 6px;
+                        background: idx == root.selected ? Theme.palette().selection-soft
+                            : row-touch.has-hover ? Theme.palette().surface-sunken : transparent;
+                        border-width: 1px;
+                        border-color: idx == root.selected ? Theme.palette().accent : transparent;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text {
+                                horizontal-stretch: 1;
+                                text: item.label;
+                                font-size: Theme.tokens.typography.body;
+                                color: item.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                                vertical-alignment: center;
+                                overflow: clip;
+                            }
+                            Text {
+                                text: item.shortcut;
+                                font-size: Theme.tokens.typography.caption;
+                                color: Theme.palette().ink-secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+                        row-touch := TouchArea {
+                            clicked => {
+                                focus-scope.focus();
+                                root.selected = idx;
+                                if (item.enabled) { root.command-invoked(idx); }
+                            }
+                        }
+                        accessible-role: button;
+                        accessible-label: item.label;
+                        accessible-action-default => {
+                            focus-scope.focus();
+                            root.selected = idx;
+                            if (item.enabled) { root.command-invoked(idx); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
