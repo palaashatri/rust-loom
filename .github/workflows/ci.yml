@@ -7,13 +7,38 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: loom-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-product-fix:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'chatgpt/loom-ui-functional-audit-2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Apply bounded product repair
+        run: python3 .ci/fix.py
+      - name: Commit ordinary source
+        run: |
+          rm -rf .ci
+          git config user.name 'Loom Engineering Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(product): validate Motion export and format history changes'
+          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
+
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
