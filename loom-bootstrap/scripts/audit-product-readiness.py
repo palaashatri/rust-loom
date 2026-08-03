@@ -63,8 +63,11 @@ def score(evidence_root: Path | None) -> dict[str, object]:
     packaging = read(ROOT / "loom-bootstrap/packaging/release.py")
     report = native_report(evidence_root)
     packages = native_packages(evidence_root)
+    functional_reports = sorted(evidence_root.rglob("native-functional-matrix.json")) if evidence_root and evidence_root.exists() else []
+    functional_report = load_json(functional_reports[0]) if functional_reports else None
 
     native_passed = bool(report and report.get("passed") is True)
+    functional_passed = bool(functional_report and functional_report.get("passed") is True)
     native_sizes = tuple(report.get("sizes", ())) if report else ()
     native_apps = report.get("applications", {}) if report else {}
     sample_open_count = sum(
@@ -250,14 +253,15 @@ def score(evidence_root: Path | None) -> dict[str, object]:
     )
 
     journey_ratio = sample_open_count / len(APPS) if report else 0.0
-    delivery_score = 0.35 if contains_all(native_workflow, ("windows-2025", "macos-15", "macos-15-intel")) else 0.0
-    delivery_score += 0.25 if packages else 0.0
-    delivery_score += 0.4 * journey_ratio
+    delivery_score = 0.2 if contains_all(native_workflow, ("windows-2025", "macos-15", "macos-15-intel")) else 0.0
+    delivery_score += 0.2 if packages else 0.0
+    delivery_score += 0.3 * journey_ratio
+    delivery_score += 0.3 if functional_passed else 0.0
     fn_point(
         "native delivery and user-journey evidence",
         delivery_score,
-        f"native packages={len(packages)}, sample-open journeys={sample_open_count}/8",
-        None if journey_ratio == 1.0 and packages else "all native package and sample-open journeys must pass",
+        f"native packages={len(packages)}, functional matrix={functional_passed}, sample-open journeys={sample_open_count}/8",
+        None if journey_ratio == 1.0 and packages and functional_passed else "all native packages, CLI workflows, and sample-open journeys must pass",
     )
 
     ui_score = round(sum(float(item["score"]) for item in ui_dimensions), 2)

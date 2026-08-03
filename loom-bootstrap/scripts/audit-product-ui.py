@@ -140,9 +140,14 @@ for token in (
         failures.append(f"native UI validation: missing {token}")
 
 native_matrix = (ROOT / "loom-bootstrap/scripts/native-ui-matrix.py").read_text(encoding="utf-8")
-for token in ("png_dimensions", "find_sample", "sample_open", "one or more theme/size captures are byte-identical"):
+for token in ("png_dimensions", "find_sample", "generated-samples", "sample_open", "one or more theme/size captures are byte-identical"):
     if token not in native_matrix:
         failures.append(f"native UI matrix: missing evidence check {token}")
+
+functional_matrix = (ROOT / "loom-bootstrap/scripts/native-functional-matrix.py").read_text(encoding="utf-8")
+for token in ("validate_package", "export-md", "render-demo", "sine", "recover", "native-functional-matrix.json"):
+    if token not in functional_matrix:
+        failures.append(f"native functional matrix: missing journey evidence {token}")
 
 packaging = (ROOT / "loom-bootstrap/packaging/release.py").read_text(encoding="utf-8")
 for token in ("DOCUMENT_TYPES", "MimeType=", "RegistryValue", "CFBundleDocumentTypes"):

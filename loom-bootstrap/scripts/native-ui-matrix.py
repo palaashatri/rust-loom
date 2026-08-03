@@ -101,7 +101,11 @@ def validate_png(path: Path, expected: tuple[int, int]) -> tuple[str, int] | str
 def find_sample(root: Path, app: str) -> Path | None:
     extension = EXTENSIONS[app]
     candidates: list[Path] = []
-    for search_root in (root / "loom-samples", root / f"loom-{app}"):
+    for search_root in (
+        root / "loom-bootstrap" / ".work" / "generated-samples",
+        root / "loom-samples",
+        root / f"loom-{app}",
+    ):
         if search_root.is_dir():
             candidates.extend(path for path in search_root.rglob(f"*{extension}") if path.is_file())
     return sorted(candidates, key=lambda path: ("sample" not in path.name.lower(), len(str(path)), str(path)))[0] if candidates else None
