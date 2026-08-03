@@ -1,3 +1,4 @@
+# Bounded applicator for the Motion SVG serializer and modified workspace formatting.
 import subprocess
 from pathlib import Path
 
