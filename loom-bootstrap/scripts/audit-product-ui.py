@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APPS = ["writer", "sheets", "present", "photo", "motion", "video", "studio", "encode"]
 failures = []
 emoji = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF]")
+slint_reference = re.compile(r'(?:from\s+|export\s+\{[^}]+\}\s+from\s+)["\']([^"\']+\.slint)["\']')
 
 
 def slider_blocks(text: str):
@@ -32,18 +33,41 @@ def slider_blocks(text: str):
 
 
 def application_ui_text(app: str) -> str:
-    """Read the complete Slint module graph owned by an application."""
+    """Read only the active Slint module graph rooted at app.slint."""
     ui_dir = ROOT / f"loom-{app}/crates/loom-{app}-app/ui"
-    files = sorted(ui_dir.glob("*.slint"))
-    if not files:
-        failures.append(f"{app}: no Slint UI modules found")
+    entry = ui_dir / "app.slint"
+    if not entry.is_file():
+        failures.append(f"{app}: missing app.slint entry point")
         return ""
-    return "\n".join(file.read_text(encoding="utf-8") for file in files)
+
+    visited: set[Path] = set()
+    chunks: list[str] = []
+
+    def visit(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved in visited or not path.is_file():
+            return
+        visited.add(resolved)
+        text = path.read_text(encoding="utf-8")
+        chunks.append(text)
+        for reference in slint_reference.findall(text):
+            candidate = path.parent / reference
+            try:
+                candidate.resolve().relative_to(ui_dir.resolve())
+            except ValueError:
+                continue
+            if candidate.is_file():
+                visit(candidate)
+
+    visit(entry)
+    return "\n".join(chunks)
 
 
+application_texts: dict[str, str] = {}
 for app in APPS:
     main = ROOT / f"loom-{app}/crates/loom-{app}-app/src/main.rs"
     text = application_ui_text(app)
+    application_texts[app] = text
     main_text = main.read_text(encoding="utf-8")
     for token, message in (
         ("AppHeader {", "missing shared AppHeader"),
@@ -77,6 +101,16 @@ for app in APPS:
     for slider in slider_blocks(text):
         if "label:" not in slider:
             failures.append(f"{app}: slider lacks a semantic accessibility label")
+
+for app, tokens in {
+    "photo": ("canvas-pan := TouchArea", "pressed-x", "viewport-pan-x", "key-pressed(event)"),
+    "motion": ("drag := TouchArea", "pressed-x", "transform-changed", "key-pressed(event)"),
+    "video": ("ruler-scrub := TouchArea", "playhead-seconds", "root.seek(", "key-pressed(event)"),
+}.items():
+    text = application_texts[app]
+    for token in tokens:
+        if token not in text:
+            failures.append(f"{app}: missing direct-manipulation contract {token}")
 
 shared = (ROOT / "loom-core/crates/loom-ui/ui/components.slint").read_text(encoding="utf-8")
 for component in [
