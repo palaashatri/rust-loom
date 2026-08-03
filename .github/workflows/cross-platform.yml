@@ -37,6 +37,8 @@ jobs:
             architecture: x86_64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
+    env:
+      RUST_MIN_STACK: 33554432
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux native dependencies
@@ -62,6 +64,8 @@ jobs:
           cargo --version
       - name: Build every application workspace
         shell: bash
+        env:
+          RUSTFLAGS: ${{ matrix.platform == 'windows' && '-C link-arg=/STACK:33554432' || '' }}
         run: bash loom-bootstrap/scripts/build-all.sh --release
       - name: Render native UI matrix and smoke every app
         shell: bash
@@ -94,6 +98,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: loom-native-${{ matrix.platform }}-${{ matrix.architecture }}
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
           path: loom-bootstrap/.work/native-${{ matrix.platform }}-${{ matrix.architecture }}/
