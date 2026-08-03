@@ -25,8 +25,9 @@ jobs:
           python3 loom-bootstrap/scripts/audit-product-ui.py
           python3 loom-bootstrap/scripts/audit-product-readiness.py --minimum-ui 6.5 --minimum-functionality 5.5
           git diff --check
-      - name: Commit native functional validation
+      - name: Commit ordinary source only
         run: |
+          git checkout -- .github/workflows/cross-platform.yml
           git rm .ci/loom-functional.patch.xz.b64
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
