@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   apply-native-menus:
-    if: github.head_ref == 'chatgpt/loom-ui-functional-audit-2' && github.actor != 'github-actions[bot]' && hashFiles('.ci/loom-native-menus.patch.xz.b64') != ''
+    if: github.head_ref == 'chatgpt/loom-ui-functional-audit-2' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -92,7 +92,7 @@ jobs:
           git diff --check
       - name: Commit ordinary source only
         run: |
-          git rm .ci/loom-native-menus.patch.xz.b64
+          git rm .ci/loom-native-menus.patch.xz.b64 .ci/apply-native-menus.trigger
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
@@ -100,7 +100,6 @@ jobs:
           git push origin HEAD:chatgpt/loom-ui-functional-audit-2
 
   contracts:
-    if: hashFiles('.ci/loom-native-menus.patch.xz.b64') == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -119,7 +118,6 @@ jobs:
           retention-days: 14
 
   workspace:
-    if: hashFiles('.ci/loom-native-menus.patch.xz.b64') == ''
     name: ${{ matrix.workspace }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -146,7 +144,6 @@ jobs:
         run: cargo build --workspace --release
 
   visual-smoke:
-    if: hashFiles('.ci/loom-native-menus.patch.xz.b64') == ''
     needs: [contracts, workspace]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
