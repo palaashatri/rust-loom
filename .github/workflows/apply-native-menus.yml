@@ -2,6 +2,8 @@ name: Apply native menus and parallel build
 
 on:
   pull_request:
+  push:
+    branches: [chatgpt/loom-ui-functional-audit-2]
   workflow_dispatch:
 
 permissions:
