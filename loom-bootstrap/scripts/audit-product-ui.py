@@ -32,13 +32,7 @@ def slider_blocks(text: str):
 
 
 def application_ui_text(app: str) -> str:
-    """Read the complete Slint module graph owned by an application.
-
-    Productised workspaces may keep app.slint as a stable public entrypoint and
-    move the implementation into sibling modules. Auditing every sibling Slint
-    file prevents compatibility re-exports from hiding either good practice or
-    regressions.
-    """
+    """Read the complete Slint module graph owned by an application."""
     ui_dir = ROOT / f"loom-{app}/crates/loom-{app}-app/ui"
     files = sorted(ui_dir.glob("*.slint"))
     if not files:
@@ -111,21 +105,8 @@ for component in (
     block = shared[start:] if end < 0 else shared[start:end]
     if "accessible-role" not in block or "accessible-label" not in block:
         failures.append(f"shared UI: {component} lacks accessible role or label")
-    if component not in ("Slider",) and "accessible-action-default" not in block:
+    if component != "Slider" and "accessible-action-default" not in block:
         failures.append(f"shared UI: {component} lacks an accessible default action")
-for component in (
-    "ToolButton",
-    "IconButton",
-    "PrimaryButton",
-    "SegmentedControl",
-    "Slider",
-    "WorkspaceRow",
-    "PaneTabs",
-    "TransportButton",
-):
-    start = shared.find(f"export component {component}")
-    end = shared.find("\nexport component ", start + 1)
-    block = shared[start:] if end < 0 else shared[start:end]
     if "key-pressed(event)" not in block:
         failures.append(f"shared UI: {component} lacks keyboard interaction")
 
@@ -149,10 +130,18 @@ for token in (
     "macos-15",
     "macos-15-intel",
     "native-ui-matrix.py",
+    "1024x720",
+    "1440x900",
+    "1920x1200",
     "upload-artifact",
 ):
     if token not in native:
         failures.append(f"native UI validation: missing {token}")
+
+native_matrix = (ROOT / "loom-bootstrap/scripts/native-ui-matrix.py").read_text(encoding="utf-8")
+for token in ("png_dimensions", "find_sample", "sample_open", "one or more theme/size captures are byte-identical"):
+    if token not in native_matrix:
+        failures.append(f"native UI matrix: missing evidence check {token}")
 
 packaging = (ROOT / "loom-bootstrap/packaging/release.py").read_text(encoding="utf-8")
 for token in ("DOCUMENT_TYPES", "MimeType=", "RegistryValue", "CFBundleDocumentTypes"):
