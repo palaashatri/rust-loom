@@ -1206,6 +1206,12 @@ export component CommandPalette inherits Rectangle {
     callback backspace;
     callback close-requested;
 
+    /// Move keyboard focus into the palette's focus scope. The host calls
+    /// this when opening the palette so the modal captures the next keypress.
+    public function grab-focus() {
+        focus-scope.focus();
+    }
+
     background: transparent;
     visible: root.open;
 
