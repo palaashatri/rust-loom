@@ -1,0 +1,386 @@
+import {
+    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton,
+    StatusBar, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs,
+    Slider, SegmentedControl, Field, MetricChip, CanvasBackdrop, StatusPill
+} from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export component PhotoApp inherits Window {
+    title: "Loom Photo";
+    min-width: 900px;
+    min-height: 680px;
+    background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1140px;
+
+    in property <string> project-name: "Untitled Photo";
+    in property <string> dimensions-text: "0 × 0";
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Offline";
+    in property <[string]> layer-labels: [];
+    in property <[bool]> layer-visibilities: [];
+    in property <int> active-layer-index: 0;
+    in property <string> active-blend-mode: "Normal";
+    in property <float> active-layer-opacity: 100.0;
+    in property <image> preview-image;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <bool> has-preview: false;
+
+    in-out property <int> active-tool: 0;
+    in-out property <int> inspector-tab: 0;
+    in-out property <float> brightness-value: 0.0;
+    in-out property <float> contrast-value: 0.0;
+    in-out property <float> saturation-value: 0.0;
+    in-out property <float> zoom-value: 72.0;
+    in-out property <string> import-path: "";
+    in-out property <string> export-path: "loom-photo-export.png";
+
+    property <length> viewport-pan-x: 0px;
+    property <length> viewport-pan-y: 0px;
+    property <bool> show-grid: true;
+    property <bool> show-inspector: true;
+
+    callback new-project;
+    callback open-project;
+    callback save-project;
+    callback undo;
+    callback redo;
+    callback add-layer;
+    callback add-adjustment;
+    callback remove-layer;
+    callback move-layer(int);
+    callback select-layer(int);
+    callback toggle-layer-visibility(int);
+    callback opacity-changed(float);
+    callback blend-mode-changed(string);
+    callback select-tool(string);
+    callback brightness-changed(float);
+    callback contrast-changed(float);
+    callback saturation-changed(float);
+    callback import-image(string);
+    callback export-png(string);
+    callback export-jpeg(string);
+
+    VerticalLayout {
+        spacing: 0px;
+
+        AppHeader {
+            app-name: "Loom Photo";
+            document-title: root.project-name;
+            icon: "image";
+            context: root.dimensions-text;
+            state-text: canvas-pan.pressed ? "Panning viewport" : "Nondestructive · Local";
+            state-tone: canvas-pan.pressed ? 1 : 0;
+        }
+
+        WorkspaceToolbar {
+            ToolButton { icon: "new"; text: "New"; clicked => { root.new-project(); } }
+            ToolButton { icon: "open"; text: "Open Project"; clicked => { root.open-project(); } }
+            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-project(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            ToolButton {
+                icon: "cursor";
+                text: "Select";
+                checked: root.active-tool == 0;
+                clicked => { root.active-tool = 0; root.select-tool("Select"); }
+            }
+            ToolButton {
+                icon: "cursor";
+                text: "Pan";
+                checked: root.active-tool == 1;
+                clicked => { root.active-tool = 1; root.select-tool("Pan"); }
+            }
+            ToolButton {
+                icon: "grid";
+                text: "Grid";
+                checked: root.show-grid;
+                clicked => { root.show-grid = !root.show-grid; }
+            }
+            ToolButton { icon: "plus"; text: "Pixel Layer"; clicked => { root.add-layer(); } }
+            ToolButton { icon: "wand"; text: "Adjustment"; clicked => { root.add-adjustment(); } }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
+            ToolButton {
+                icon: "settings";
+                text: "Inspector";
+                checked: root.show-inspector;
+                clicked => { root.show-inspector = !root.show-inspector; }
+            }
+            PrimaryButton { text: "Export"; enabled: root.has-preview; clicked => { root.export-png(root.export-path); } }
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+
+            SidebarSurface {
+                width: root.compact-layout ? 190px : 244px;
+                title: "Layers";
+                detail: root.layer-labels.length + " items";
+                VerticalLayout {
+                    spacing: 6px;
+                    padding: 10px;
+                    for label[index] in root.layer-labels : WorkspaceRow {
+                        label: label;
+                        height: 54px;
+                        selected: index == root.active-layer-index;
+                        clicked => { root.select-layer(index); }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            IconButton {
+                                icon: root.layer-visibilities[index] ? "eye" : "eye-off";
+                                label: "Toggle layer visibility";
+                                clicked => { root.toggle-layer-visibility(index); }
+                            }
+                            Rectangle {
+                                width: 34px;
+                                height: 34px;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: index == root.active-layer-index ? Theme.palette().accent : Theme.palette().border;
+                                background: index == root.active-layer-index ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                                Icon { icon: index == 0 ? "image" : "layers"; size: 15px; tint: index == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: label; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; font-weight: index == root.active-layer-index ? 650 : 500; overflow: elide; }
+                                Text { text: index == root.active-layer-index ? root.active-blend-mode + " · " + Math.round(root.active-layer-opacity) + "%" : "Layer"; color: index == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; }
+                            }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    HorizontalLayout {
+                        spacing: 5px;
+                        IconButton { icon: "plus"; label: "Add pixel layer"; clicked => { root.add-layer(); } }
+                        IconButton { icon: "wand"; label: "Add adjustment"; clicked => { root.add-adjustment(); } }
+                        IconButton { icon: "chevron-left"; label: "Move layer down"; clicked => { root.move-layer(-1); } }
+                        IconButton { icon: "chevron-right"; label: "Move layer up"; clicked => { root.move-layer(1); } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        IconButton { icon: "trash"; label: "Delete selected layer"; enabled: root.layer-labels.length > 1; clicked => { root.remove-layer(); } }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            CanvasBackdrop {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                stage-color: Theme.palette().surface-sunken;
+
+                stage := Rectangle {
+                    x: root.compact-layout ? 12px : 22px;
+                    y: root.compact-layout ? 12px : 22px;
+                    width: parent.width - (root.compact-layout ? 24px : 44px);
+                    height: parent.height - (root.compact-layout ? 24px : 44px);
+                    border-radius: 10px;
+                    background: Theme.palette().media-stage;
+                    clip: true;
+                    border-width: 1px;
+                    border-color: canvas-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+                    animate border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
+
+                    if root.show-grid : Rectangle { x: parent.width / 2; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
+                    if root.show-grid : Rectangle { y: parent.height / 2; width: parent.width; height: 1px; background: Theme.palette().grid-major; }
+                    if root.show-grid : Rectangle { x: parent.width / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+                    if root.show-grid : Rectangle { x: parent.width * 3 / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+                    if root.show-grid : Rectangle { y: parent.height / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+                    if root.show-grid : Rectangle { y: parent.height * 3 / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+                    if root.has-preview : viewport := Rectangle {
+                        property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
+                        property <length> scaled-height: max(90px, stage.height * root.zoom-value / 100.0);
+                        x: (stage.width - self.scaled-width) / 2 + root.viewport-pan-x;
+                        y: (stage.height - self.scaled-height) / 2 + root.viewport-pan-y;
+                        width: self.scaled-width;
+                        height: self.scaled-height;
+                        border-radius: 7px;
+                        background: Theme.palette().paper-ink;
+                        border-width: 2px;
+                        border-color: canvas-pan.has-hover || canvas-focus.has-focus ? Theme.palette().focus : Theme.palette().accent;
+                        clip: true;
+                        animate x, y, width, height {
+                            duration: canvas-pan.pressed || Theme.tokens.reduced-motion ? 0ms : 180ms;
+                            easing: cubic-bezier(0.2, 0.9, 0.2, 1.0);
+                        }
+                        Image {
+                            source: root.preview-image;
+                            width: parent.width;
+                            height: parent.height;
+                            image-fit: contain;
+                        }
+                        Rectangle { x: -4px; y: -4px; width: 8px; height: 8px; border-radius: 4px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                        Rectangle { x: parent.width - 4px; y: -4px; width: 8px; height: 8px; border-radius: 4px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                        Rectangle { x: -4px; y: parent.height - 4px; width: 8px; height: 8px; border-radius: 4px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                        Rectangle { x: parent.width - 4px; y: parent.height - 4px; width: 8px; height: 8px; border-radius: 4px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                    }
+
+                    if !root.has-preview : VerticalLayout {
+                        alignment: center;
+                        spacing: 10px;
+                        Icon { icon: "image"; size: 42px; tint: Theme.palette().ink-disabled; }
+                        Text { text: "Import an image to begin"; font-size: Theme.tokens.typography.heading; color: Theme.palette().ink; horizontal-alignment: center; }
+                        Text { text: "PNG and JPEG are decoded locally."; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; horizontal-alignment: center; }
+                    }
+
+                    canvas-focus := FocusScope {
+                        enabled: root.has-preview;
+                        key-pressed(event) => {
+                            if (event.text == Key.LeftArrow) {
+                                root.viewport-pan-x = root.viewport-pan-x - 1px;
+                                return accept;
+                            }
+                            if (event.text == Key.RightArrow) {
+                                root.viewport-pan-x = root.viewport-pan-x + 1px;
+                                return accept;
+                            }
+                            if (event.text == Key.UpArrow) {
+                                root.viewport-pan-y = root.viewport-pan-y - 1px;
+                                return accept;
+                            }
+                            if (event.text == Key.DownArrow) {
+                                root.viewport-pan-y = root.viewport-pan-y + 1px;
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+
+                    canvas-pan := TouchArea {
+                        enabled: root.has-preview;
+                        mouse-cursor: root.active-tool == 1 ? (self.pressed ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.default;
+                        property <length> start-pan-x: 0px;
+                        property <length> start-pan-y: 0px;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                self.start-pan-x = root.viewport-pan-x;
+                                self.start-pan-y = root.viewport-pan-y;
+                                canvas-focus.focus();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed && root.active-tool == 1) {
+                                root.viewport-pan-x = clamp(self.start-pan-x + self.mouse-x - self.pressed-x, -stage.width, stage.width);
+                                root.viewport-pan-y = clamp(self.start-pan-y + self.mouse-y - self.pressed-y, -stage.height, stage.height);
+                            }
+                        }
+                    }
+
+                    if canvas-pan.pressed && root.active-tool == 1 : Rectangle {
+                        x: stage.width / 2 + root.viewport-pan-x;
+                        width: 1px;
+                        height: stage.height;
+                        background: Theme.palette().focus;
+                    }
+                    if canvas-pan.pressed && root.active-tool == 1 : Rectangle {
+                        y: stage.height / 2 + root.viewport-pan-y;
+                        width: stage.width;
+                        height: 1px;
+                        background: Theme.palette().focus;
+                    }
+
+                    Rectangle {
+                        x: 12px;
+                        y: 12px;
+                        min-width: 196px;
+                        height: 30px;
+                        border-radius: 9px;
+                        background: Theme.palette().overlay;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        HorizontalLayout {
+                            spacing: 7px;
+                            padding-left: 9px;
+                            padding-right: 9px;
+                            StatusPill { text: root.active-tool == 1 ? "PAN" : "SELECT"; tone: canvas-pan.pressed ? 1 : 0; }
+                            Text {
+                                text: root.active-tool == 1 ? (canvas-pan.pressed ? "Dragging viewport" : "Drag canvas · arrows nudge") : "Choose Pan to move the viewport";
+                                font-size: Theme.tokens.typography.caption;
+                                color: Theme.palette().ink-secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: root.compact-layout ? 18px : 30px;
+                    y: parent.height - 58px;
+                    width: root.compact-layout ? 250px : 304px;
+                    height: 36px;
+                    border-radius: 10px;
+                    background: Theme.palette().overlay;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    HorizontalLayout {
+                        spacing: 7px;
+                        padding-left: 9px;
+                        padding-right: 9px;
+                        ToolButton {
+                            icon: "image";
+                            text: "Fit";
+                            clicked => { root.zoom-value = 72; root.viewport-pan-x = 0px; root.viewport-pan-y = 0px; }
+                        }
+                        IconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
+                        Slider { label: "Zoom"; minimum: 10; maximum: 200; value <=> root.zoom-value; horizontal-stretch: 1; }
+                        IconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); } }
+                    }
+                }
+            }
+
+            if root.show-inspector : Rectangle { width: 1px; background: Theme.palette().border; }
+            if root.show-inspector : InspectorSurface {
+                width: root.compact-layout ? 236px : 292px;
+                title: "Inspector";
+                detail: "Selected layer";
+                PaneTabs { items: ["Adjust", "Layer", "Export"]; current <=> root.inspector-tab; }
+                Rectangle { height: 1px; background: Theme.palette().border; }
+                VerticalLayout {
+                    spacing: 12px;
+                    padding: 14px;
+                    if root.inspector-tab == 0 : VerticalLayout {
+                        spacing: 12px;
+                        Text { text: "COLOR ADJUSTMENTS"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        Text { text: "Brightness   " + Math.round(root.brightness-value); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Brightness"; minimum: -100; maximum: 100; value <=> root.brightness-value; changed(value) => { root.brightness-changed(value); } }
+                        Text { text: "Contrast   " + Math.round(root.contrast-value); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Contrast"; minimum: -100; maximum: 100; value <=> root.contrast-value; changed(value) => { root.contrast-changed(value); } }
+                        Text { text: "Saturation   " + Math.round(root.saturation-value); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Saturation"; minimum: -100; maximum: 100; value <=> root.saturation-value; changed(value) => { root.saturation-changed(value); } }
+                    }
+                    if root.inspector-tab == 1 : VerticalLayout {
+                        spacing: 12px;
+                        Text { text: "COMPOSITING"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        Text { text: "Blend mode"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        SegmentedControl {
+                            items: ["Normal", "Multiply", "Screen", "Overlay"];
+                            current: root.active-blend-mode == "Multiply" ? 1 : root.active-blend-mode == "Screen" ? 2 : root.active-blend-mode == "Overlay" ? 3 : 0;
+                            selected(index) => { root.blend-mode-changed(index == 1 ? "Multiply" : index == 2 ? "Screen" : index == 3 ? "Overlay" : "Normal"); }
+                        }
+                        Text { text: "Opacity   " + Math.round(root.active-layer-opacity) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Opacity"; minimum: 0; maximum: 100; value: root.active-layer-opacity; changed(value) => { root.opacity-changed(value); } }
+                    }
+                    if root.inspector-tab == 2 : VerticalLayout {
+                        spacing: 10px;
+                        Text { text: "IMPORT"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        Field { label: "Image path"; placeholder: "/path/to/image.png"; value <=> root.import-path; }
+                        ToolButton { icon: "import"; text: "Import PNG / JPEG"; clicked => { root.import-image(root.import-path); } }
+                        Rectangle { height: 1px; background: Theme.palette().border; }
+                        Text { text: "EXPORT"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        Field { label: "Export path"; placeholder: "output.png"; value <=> root.export-path; }
+                        PrimaryButton { text: "Export PNG"; enabled: root.has-preview; clicked => { root.export-png(root.export-path); } }
+                        ToolButton { icon: "export"; text: "Export JPEG"; enabled: root.has-preview; clicked => { root.export-jpeg(root.export-path); } }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+            }
+        }
+
+        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+    }
+}
