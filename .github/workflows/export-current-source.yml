@@ -1,0 +1,28 @@
+name: Export current PR source
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'chatgpt/loom-ui-functional-audit-2' || github.ref_name == 'chatgpt/loom-ui-functional-audit-2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Create clean source archive
+        run: |
+          git status --short
+          tar --exclude=.git --exclude='**/target' --exclude='loom-bootstrap/.work' -czf /tmp/rust-loom-current.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-loom-current-source
+          path: /tmp/rust-loom-current.tar.gz
+          if-no-files-found: error
+          retention-days: 1
