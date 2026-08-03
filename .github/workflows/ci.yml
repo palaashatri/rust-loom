@@ -63,7 +63,10 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
+      - name: Build visual QA base image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build ci
+      - name: Build visual QA image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
       - run: >-
           docker compose -f loom-bootstrap/docker/compose.yaml run --rm visual
           bash -lc "VISUAL_QA_SIZE=1440x900 scripts/build-all.sh --release && VISUAL_QA_SIZE=1440x900 xvfb-run -a -s '-screen 0 1440x900x24' scripts/visual-smoke-matrix.sh"
