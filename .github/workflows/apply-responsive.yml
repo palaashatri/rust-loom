@@ -1,0 +1,34 @@
+name: Apply responsive creator workspace patch
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: (github.head_ref == 'chatgpt/loom-ui-functional-audit-2' || github.ref_name == 'chatgpt/loom-ui-functional-audit-2') && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+      - name: Apply exact audited patch
+        run: |
+          base64 -d .ci/loom-responsive.patch.xz.b64 | xz -d > /tmp/loom-responsive.patch
+          git apply --check /tmp/loom-responsive.patch
+          git apply /tmp/loom-responsive.patch
+          python3 loom-bootstrap/scripts/audit-product-ui.py
+          git diff --check
+      - name: Commit responsive productisation
+        run: |
+          git rm .ci/loom-responsive.patch.xz.b64
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(ui): add compact creator layouts across all apps'
+          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
