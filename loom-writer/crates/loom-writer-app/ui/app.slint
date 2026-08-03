@@ -9,9 +9,10 @@ export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
     title: "Loom Writer";
-    min-width: 980px;
+    min-width: 900px;
     min-height: 680px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1120px;
 
     in property <string> doc-title: "Untitled";
     in-out property <string> doc-content: "";
@@ -98,15 +99,15 @@ export component WriterApp inherits Window {
             stage-color: Theme.palette().canvas-alt;
 
             Rectangle {
-                width: min(806px, parent.width - 96px);
-                height: parent.height - 64px;
+                width: min(806px, parent.width - (root.compact-layout ? 36px : 96px));
+                height: parent.height - (root.compact-layout ? 36px : 64px);
                 border-radius: 7px;
                 background: Theme.palette().shadow;
             }
 
             Rectangle {
-                width: min(794px, parent.width - 108px);
-                height: parent.height - 76px;
+                width: min(794px, parent.width - (root.compact-layout ? 48px : 108px));
+                height: parent.height - (root.compact-layout ? 48px : 76px);
                 border-radius: 5px;
                 background: Theme.palette().paper;
                 border-width: 1px;
@@ -123,8 +124,8 @@ export component WriterApp inherits Window {
 
                     HorizontalLayout {
                         spacing: 0px;
-                        padding-left: 56px;
-                        padding-right: 56px;
+                        padding-left: root.compact-layout ? 32px : 56px;
+                        padding-right: root.compact-layout ? 32px : 56px;
                         for marker in ["0", "1", "2", "3", "4", "5", "6", "7"] : Rectangle {
                             horizontal-stretch: 1;
                             Text {
@@ -149,10 +150,10 @@ export component WriterApp inherits Window {
                     y: 28px;
                     width: parent.width;
                     height: parent.height - 28px;
-                    padding-left: 66px;
-                    padding-right: 66px;
-                    padding-top: 40px;
-                    padding-bottom: 44px;
+                    padding-left: root.compact-layout ? 34px : 66px;
+                    padding-right: root.compact-layout ? 34px : 66px;
+                    padding-top: root.compact-layout ? 26px : 40px;
+                    padding-bottom: root.compact-layout ? 28px : 44px;
                     spacing: 15px;
 
                     Text {
@@ -203,9 +204,9 @@ export component WriterApp inherits Window {
             }
 
             Rectangle {
-                x: parent.width - 280px;
+                x: parent.width - (root.compact-layout ? 220px : 280px);
                 y: parent.height - 56px;
-                width: 250px;
+                width: root.compact-layout ? 200px : 250px;
                 height: 34px;
                 border-radius: 9px;
                 background: Theme.palette().overlay;

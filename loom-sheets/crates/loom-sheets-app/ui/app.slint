@@ -51,9 +51,10 @@ component FormulaBarField inherits Rectangle {
 
 export component SheetsApp inherits Window {
     title: "Loom Sheets";
-    min-width: 1040px;
+    min-width: 900px;
     min-height: 680px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1120px;
 
     in property <string> sheet-name: "Untitled";
     in property <string> status-left: "";
@@ -117,13 +118,13 @@ export component SheetsApp inherits Window {
             IconButton { icon: "redo"; label: "Redo"; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             ToolButton { text: "SUM"; clicked => { root.quick-formula("SUM"); } }
-            ToolButton { text: "AVERAGE"; clicked => { root.quick-formula("AVERAGE"); } }
+            ToolButton { text: root.compact-layout ? "AVG" : "AVERAGE"; clicked => { root.quick-formula("AVERAGE"); } }
             ToolButton { text: "COUNT"; clicked => { root.quick-formula("COUNT"); } }
             ToolButton { text: "MIN"; clicked => { root.quick-formula("MIN"); } }
             ToolButton { text: "MAX"; clicked => { root.quick-formula("MAX"); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             MetricChip { label: root.selected-cell; value: root.selection-value == "" ? "Empty" : root.selection-value; }
-            ToolButton { icon: "export"; text: "Export CSV"; clicked => { root.export-csv(); } }
+            ToolButton { icon: "export"; text: root.compact-layout ? "CSV" : "Export CSV"; clicked => { root.export-csv(); } }
         }
 
         Rectangle {
@@ -138,7 +139,7 @@ export component SheetsApp inherits Window {
                 cross-axis-alignment: center;
 
                 Rectangle {
-                    width: 62px;
+                    width: root.compact-layout ? 52px : 62px;
                     height: Theme.tokens.metrics.control-height;
                     border-radius: Theme.tokens.metrics.radius-medium;
                     border-width: 1px;
@@ -192,7 +193,7 @@ export component SheetsApp inherits Window {
 
                 if root.formula-feedback != "" : Text {
                     text: root.formula-feedback;
-                    max-width: 180px;
+                    max-width: root.compact-layout ? 96px : 180px;
                     font-size: Theme.tokens.typography.caption;
                     color: Theme.palette().ink-secondary;
                     vertical-alignment: center;
@@ -234,8 +235,8 @@ export component SheetsApp inherits Window {
                             border-color: Theme.palette().border;
                         }
                         for c in root.cols : Rectangle {
-                            min-width: 132px;
-                            max-width: 132px;
+                            min-width: root.compact-layout ? 104px : 132px;
+                            max-width: root.compact-layout ? 104px : 132px;
                             min-height: 30px;
                             max-height: 30px;
                             background: c == root.selected-col
@@ -284,8 +285,8 @@ export component SheetsApp inherits Window {
                         }
 
                         for c in root.cols : Rectangle {
-                            min-width: 132px;
-                            max-width: 132px;
+                            min-width: root.compact-layout ? 104px : 132px;
+                            max-width: root.compact-layout ? 104px : 132px;
                             min-height: 32px;
                             max-height: 32px;
                             border-width: r == root.selected-row && c == root.selected-col ? 2px : 1px;

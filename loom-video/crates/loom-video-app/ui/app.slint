@@ -9,9 +9,10 @@ export { Theme } from "theme.slint";
 
 export component VideoApp inherits Window {
     title: "Loom Video";
-    min-width: 1100px;
+    min-width: 920px;
     min-height: 700px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1200px;
 
     in property <string> project-name: "Untitled Video";
     in property <string> project-format: "1920 × 1080 · 30 fps";
@@ -93,7 +94,7 @@ export component VideoApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
             SidebarSurface {
-                width: 258px;
+                width: root.compact-layout ? 190px : 258px;
                 title: "Media";
                 detail: root.media-bin-items.length + " sources";
                 VerticalLayout {
@@ -131,7 +132,7 @@ export component VideoApp inherits Window {
                 CanvasBackdrop {
                     vertical-stretch: 1;
                     Rectangle {
-                        x: 20px; y: 18px; width: parent.width - 40px; height: parent.height - 36px;
+                        x: root.compact-layout ? 10px : 20px; y: root.compact-layout ? 10px : 18px; width: parent.width - (root.compact-layout ? 20px : 40px); height: parent.height - (root.compact-layout ? 20px : 36px);
                         border-radius: 8px; background: Theme.palette().media-stage; clip: true;
                         if root.has-preview : Image { source: root.preview-image; width: parent.width; height: parent.height; image-fit: contain; }
                         if !root.has-preview : VerticalLayout {
@@ -180,7 +181,7 @@ export component VideoApp inherits Window {
                             HorizontalLayout {
                                 spacing: 0px;
                                 Rectangle {
-                                    width: 124px; background: Theme.palette().surface;
+                                    width: root.compact-layout ? 94px : 124px; background: Theme.palette().surface;
                                     HorizontalLayout { padding-left: 8px; padding-right: 7px; spacing: 5px;
                                         IconButton { icon: "audio"; label: "Mute track"; checked: root.track-mutes[index]; clicked => { root.toggle-track-mute(index); } }
                                         ToolButton { text: "S"; checked: root.track-solos[index]; clicked => { root.toggle-track-solo(index); } }
@@ -214,7 +215,7 @@ export component VideoApp inherits Window {
 
             Rectangle { width: 1px; background: Theme.palette().border; }
             InspectorSurface {
-                width: 306px;
+                width: root.compact-layout ? 236px : 306px;
                 title: "Inspector";
                 detail: root.clip-labels.length > 0 ? "Selected clip" : "No selection";
                 PaneTabs { items: ["Clip", "Edit", "Export"]; current <=> root.inspector-tab; }

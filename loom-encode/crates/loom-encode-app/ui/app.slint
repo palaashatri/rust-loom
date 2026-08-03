@@ -9,9 +9,10 @@ export { Theme } from "theme.slint";
 
 export component EncodeApp inherits Window {
     title: "Loom Encode";
-    min-width: 1040px;
+    min-width: 900px;
     min-height: 680px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1220px;
 
     in property <string> queue-name: "Delivery Queue";
     in property <[string]> job-labels: [];
@@ -82,7 +83,7 @@ export component EncodeApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
             SidebarSurface {
-                width: 420px;
+                width: root.compact-layout ? 296px : 420px;
                 title: "Delivery Queue";
                 detail: Math.round(root.batch-progress) + "% complete";
                 VerticalLayout {
@@ -136,12 +137,12 @@ export component EncodeApp inherits Window {
                 horizontal-stretch: 1;
                 background: Theme.palette().canvas;
                 VerticalLayout {
-                    padding: 22px;
+                    padding: root.compact-layout ? 12px : 22px;
                     spacing: 16px;
                     HorizontalLayout {
                         spacing: 12px;
                         Rectangle {
-                            width: 86px; height: 86px; border-radius: 12px;
+                            width: root.compact-layout ? 64px : 86px; height: root.compact-layout ? 64px : 86px; border-radius: 12px;
                             background: Theme.palette().selection-soft;
                             border-width: 1px; border-color: Theme.palette().border-strong;
                             Icon { icon: "video"; size: 34px; tint: Theme.palette().accent; }
@@ -179,7 +180,7 @@ export component EncodeApp inherits Window {
 
             Rectangle { width: 1px; background: Theme.palette().border; }
             InspectorSurface {
-                width: 330px;
+                width: root.compact-layout ? 238px : 330px;
                 title: "Job Inspector";
                 detail: root.running ? "Queue locked" : "Editable";
                 PaneTabs { items: ["Source", "Preset", "Activity"]; current <=> root.inspector-tab; }

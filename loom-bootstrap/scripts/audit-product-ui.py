@@ -53,6 +53,7 @@ for app in APPS:
         ("min-height:", "missing minimum responsive height"),
         ("horizontal-stretch", "missing horizontal adaptive layout"),
         ("vertical-stretch", "missing vertical adaptive layout"),
+        ("compact-layout", "missing compact desktop layout policy"),
     ):
         if token not in text:
             failures.append(f"{app}: {message}")

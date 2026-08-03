@@ -8,9 +8,11 @@ import { Theme } from "theme.slint";
 
 export component MotionApp inherits Window {
     title: "Loom Motion";
-    min-width: 1100px;
+    min-width: 920px;
     min-height: 720px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1180px;
+    property <length> layer-column-width: root.compact-layout ? 188px : 246px;
 
     in property <string> comp-name: "Untitled Composition";
     in property <string> timecode-text: "00:00:00:00 (60 fps)";
@@ -126,7 +128,7 @@ export component MotionApp inherits Window {
             vertical-stretch: 1;
 
             SidebarSurface {
-                width: 246px;
+                width: root.layer-column-width;
                 title: "Layers";
                 detail: root.layer-labels.length + " items";
 
@@ -199,8 +201,8 @@ export component MotionApp inherits Window {
                     stage-color: Theme.palette().media-stage;
 
                     stage-shell := Rectangle {
-                        width: min(860px, parent.width - 70px);
-                        height: min(484px, parent.height - 74px);
+                        width: min(860px, parent.width - (root.compact-layout ? 28px : 70px));
+                        height: min(484px, parent.height - (root.compact-layout ? 34px : 74px));
                         border-radius: 9px;
                         background: Theme.palette().paper-ink;
                         border-width: 1px;
@@ -444,7 +446,7 @@ export component MotionApp inherits Window {
             Rectangle { width: 1px; background: Theme.palette().border; }
 
             InspectorSurface {
-                width: root.inspector-expanded ? 304px : 50px;
+                width: root.inspector-expanded ? (root.compact-layout ? 236px : 304px) : 50px;
                 title: root.inspector-expanded ? "Inspector" : "";
                 detail: root.inspector-expanded && root.layer-labels.length > 0 ? "Layer " + (root.active-layer-index + 1) : "";
                 animate width {
@@ -509,7 +511,7 @@ export component MotionApp inherits Window {
         }
 
         Rectangle {
-            height: 182px;
+            height: root.compact-layout ? 158px : 182px;
             background: Theme.palette().panel;
             VerticalLayout {
                 spacing: 0px;
@@ -520,7 +522,7 @@ export component MotionApp inherits Window {
                     HorizontalLayout {
                         spacing: 0px;
                         Rectangle {
-                            width: 246px;
+                            width: root.layer-column-width;
                             background: Theme.palette().surface-sunken;
                             Text { x: 12px; text: "LAYER"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().ink-disabled; vertical-alignment: center; }
                         }
@@ -547,7 +549,7 @@ export component MotionApp inherits Window {
                             HorizontalLayout {
                                 spacing: 0px;
                                 Rectangle {
-                                    width: 246px;
+                                    width: root.layer-column-width;
                                     background: Theme.palette().panel;
                                     HorizontalLayout {
                                         spacing: 7px;
@@ -576,8 +578,8 @@ export component MotionApp inherits Window {
                             }
                         }
                     }
-                    Rectangle { x: 246px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().accent; }
-                    Rectangle { x: 242px; y: 0px; width: 9px; height: 9px; border-radius: 3px; background: Theme.palette().accent; }
+                    Rectangle { x: root.layer-column-width; y: 0px; width: 1px; height: parent.height; background: Theme.palette().accent; }
+                    Rectangle { x: root.layer-column-width - 4px; y: 0px; width: 9px; height: 9px; border-radius: 3px; background: Theme.palette().accent; }
                 }
             }
         }

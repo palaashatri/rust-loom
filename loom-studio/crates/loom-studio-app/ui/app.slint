@@ -5,9 +5,10 @@ export { Theme } from "theme.slint";
 
 export component StudioApp inherits Window {
     title: "Loom Studio";
-    min-width: 1120px;
+    min-width: 920px;
     min-height: 720px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1220px;
 
     in property <string> song-title: "Untitled Song";
     in property <string> tempo-text: "120 BPM · 48 kHz";
@@ -107,7 +108,7 @@ export component StudioApp inherits Window {
             TransportButton { icon: "clock"; label: "Metronome"; active: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             MetricChip { label: "Tempo"; value: Math.round(root.bpm-val) + " BPM"; }
-            Slider { label: "Value"; width: 130px; minimum: 40; maximum: 240; value <=> root.bpm-val; changed(value) => { root.bpm-changed(value); } }
+            Slider { label: "Tempo in beats per minute"; width: root.compact-layout ? 96px : 130px; minimum: 40; maximum: 240; value <=> root.bpm-val; changed(value) => { root.bpm-changed(value); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             SegmentedControl {
                 items: ["Quick", "Pro"];
@@ -122,7 +123,7 @@ export component StudioApp inherits Window {
             vertical-stretch: 1;
 
             SidebarSurface {
-                width: 248px;
+                width: root.compact-layout ? 190px : 248px;
                 title: "Library";
                 detail: root.track-labels.length + " tracks";
                 VerticalLayout {
@@ -188,7 +189,7 @@ export component StudioApp inherits Window {
                             HorizontalLayout {
                                 spacing: 0px;
                                 Rectangle {
-                                    width: 174px;
+                                    width: root.compact-layout ? 136px : 174px;
                                     background: Theme.palette().surface;
                                     HorizontalLayout {
                                         padding-left: 8px;
@@ -234,7 +235,7 @@ export component StudioApp inherits Window {
             Rectangle { width: 1px; background: Theme.palette().border; }
 
             InspectorSurface {
-                width: 292px;
+                width: root.compact-layout ? 232px : 292px;
                 title: "Mixer";
                 detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
                 VerticalLayout {

@@ -10,9 +10,10 @@ export { Theme } from "theme.slint";
 
 export component PresentApp inherits Window {
     title: "Loom Present";
-    min-width: 1080px;
+    min-width: 900px;
     min-height: 700px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1180px;
 
     in property <string> deck-title: "Untitled Deck";
     in property <string> slide-title: "Slide Title";
@@ -97,12 +98,12 @@ export component PresentApp inherits Window {
                 alignment: center;
                 spacing: 18px;
                 Rectangle {
-                    width: 960px;
-                    height: 540px;
+                    width: min(960px, parent.width - (root.compact-layout ? 28px : 64px));
+                    height: min(540px, parent.height - (root.compact-layout ? 94px : 128px));
                     background: Theme.palette().paper;
                     border-radius: 4px;
                     VerticalLayout {
-                        padding: 64px;
+                        padding: root.compact-layout ? 36px : 64px;
                         spacing: 22px;
                         Text { text: root.slide-title; font-size: 38px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
                         Text { text: root.slide-body; font-size: 20px; color: Theme.palette().paper-muted; wrap: word-wrap; vertical-stretch: 1; }
@@ -123,7 +124,7 @@ export component PresentApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
             SidebarSurface {
-                width: 238px;
+                width: root.compact-layout ? 184px : 238px;
                 title: "Slides";
                 detail: root.slide-count-text;
                 VerticalLayout {
@@ -174,17 +175,17 @@ export component PresentApp inherits Window {
                 CanvasBackdrop {
                     vertical-stretch: 1;
                     Rectangle {
-                        x: 34px;
-                        y: 28px;
-                        width: parent.width - 68px;
-                        height: parent.height - 56px;
+                        x: root.compact-layout ? 14px : 34px;
+                        y: root.compact-layout ? 14px : 28px;
+                        width: parent.width - (root.compact-layout ? 28px : 68px);
+                        height: parent.height - (root.compact-layout ? 28px : 56px);
                         border-radius: 5px;
                         border-width: 1px;
                         border-color: Theme.palette().border-strong;
                         background: Theme.palette().paper;
                         clip: true;
                         VerticalLayout {
-                            padding: 48px;
+                            padding: root.compact-layout ? 24px : 48px;
                             spacing: 16px;
                             Rectangle {
                                 height: 84px;
@@ -204,7 +205,7 @@ export component PresentApp inherits Window {
                     }
                 }
                 if root.show-notes-drawer : Rectangle {
-                    height: 122px;
+                    height: root.compact-layout ? 96px : 122px;
                     background: Theme.palette().surface;
                     border-width: 0px;
                     VerticalLayout {
@@ -222,7 +223,7 @@ export component PresentApp inherits Window {
 
             Rectangle { width: 1px; background: Theme.palette().border; }
             InspectorSurface {
-                width: 300px;
+                width: root.compact-layout ? 236px : 300px;
                 title: "Inspector";
                 detail: root.element-labels.length + " elements";
                 PaneTabs { items: ["Format", "Arrange", "Animate"]; current <=> root.inspector-tab; }
@@ -247,13 +248,13 @@ export component PresentApp inherits Window {
                         spacing: 9px;
                         Text { text: "POSITION & SIZE"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                         Text { text: "X   " + Math.round(root.element-x); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Value"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
+                        Slider { label: "Horizontal position"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
                         Text { text: "Y   " + Math.round(root.element-y); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Value"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
+                        Slider { label: "Vertical position"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
                         Text { text: "Width   " + Math.round(root.element-width); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Value"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
+                        Slider { label: "Element width"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
                         Text { text: "Height   " + Math.round(root.element-height); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Value"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
+                        Slider { label: "Element height"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
                     }
                     if root.inspector-tab == 2 : VerticalLayout {
                         spacing: 10px;
