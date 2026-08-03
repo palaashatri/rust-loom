@@ -43,8 +43,10 @@ file and must override it when they disagree.
   recording workflows, and complete real-time DAW behavior remain incomplete.
 - **Encode:** editable FFmpeg-backed batch queue, presets, truthful progress,
   cancellation, retry, persisted crash recovery, and queue-edit undo and redo.
-  Hardware acceleration policy, exhaustive codec/container coverage, distributed
-  encoding, and production output conformance testing remain incomplete.
+  History state is refreshed on the Slint event loop through an owned shared
+  application state, avoiding borrowed state escaping across threads. Hardware
+  acceleration policy, exhaustive codec/container coverage, distributed encoding,
+  and production output conformance testing remain incomplete.
 - **Vision:** provider/model-pack architecture and CPU reference capabilities
   exist; production-quality OCR, segmentation, tracking, evaluated model packs,
   and redistributable acceleration backends remain incomplete.
