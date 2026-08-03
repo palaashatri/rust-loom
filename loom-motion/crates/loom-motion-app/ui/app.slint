@@ -32,10 +32,15 @@ export component MotionApp inherits Window {
 
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
 
     callback new-comp;
     callback open-comp;
     callback save-comp;
+    callback undo;
+    callback redo;
+    callback export-frame;
     callback add-layer;
     callback play-pause;
     callback step-back;
@@ -61,8 +66,11 @@ export component MotionApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-comp(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
+            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             ToolButton { icon: "plus"; text: "Layer"; clicked => { root.add-layer(); } }
+            ToolButton { icon: "export"; text: "Export SVG Frame"; clicked => { root.export-frame(); } }
 
             Rectangle { horizontal-stretch: 1; background: transparent; }
 

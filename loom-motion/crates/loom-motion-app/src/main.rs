@@ -12,6 +12,8 @@ slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "comp.loommotion";
+const EXPORT_FILENAME: &str = "composition-frame.svg";
+const HISTORY_LIMIT: usize = 128;
 
 loom_production::define_snapshot_recovery!(MOTION_RECOVERY, "org.loom.motion", "loom.motion/1");
 
@@ -89,6 +91,56 @@ fn initial_motion(args: &Args) -> Result<CompositionDocument, String> {
     }
 }
 
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace(''', "&apos;")
+}
+
+fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
+    let mut svg = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <rect width="1920" height="1080" fill="#101217"/>
+"#,
+    );
+    for (index, layer) in doc.layers.iter().enumerate() {
+        let sample = layer.sample(time_secs);
+        let opacity = sample.opacity.clamp(0.0, 1.0);
+        let scale = sample.scale.max(0.001);
+        let name = xml_escape(&layer.name);
+        let transform = format!(
+            "translate({:.3} {:.3}) rotate({:.3}) scale({:.5})",
+            sample.x, sample.y, sample.rotation, scale
+        );
+        match layer.layer_type.as_str() {
+            "Text" => svg.push_str(&format!(
+                "  <text transform="{transform}" opacity="{opacity:.5}" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="72">{name}</text>
+"
+            )),
+            "VectorShape" => svg.push_str(&format!(
+                "  <rect transform="{transform}" opacity="{opacity:.5}" x="-180" y="-100" width="360" height="200" rx="24" fill="#b86f4b"/>
+"
+            )),
+            _ => svg.push_str(&format!(
+                "  <g transform="{transform}" opacity="{opacity:.5}"><rect x="-160" y="-90" width="320" height="180" rx="16" fill="#303744" stroke="#b86f4b"/><text y="8" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="28">{name} {}</text></g>
+",
+                index + 1
+            )),
+        }
+    }
+    svg.push_str("</svg>
+");
+    svg
+}
+
+fn write_svg_frame(doc: &CompositionDocument, path: impl AsRef<Path>) -> Result<(), String> {
+    std::fs::write(path, export_svg_frame(doc, 0.0)).map_err(|error| error.to_string())
+}
+
 fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
     app.set_comp_name(doc.name.as_str().into());
     app.set_timecode_text(SharedString::from(format!(
@@ -142,8 +194,73 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Default)]
+struct MotionHistory {
+    undo: Vec<CompositionDocument>,
+    redo: Vec<CompositionDocument>,
+    coalescing_key: Option<String>,
+}
+
+impl MotionHistory {
+    fn checkpoint(&mut self, current: &CompositionDocument, key: impl Into<String>) {
+        let key = key.into();
+        if self.coalescing_key.as_deref() != Some(key.as_str()) {
+            self.undo.push(current.clone());
+            if self.undo.len() > HISTORY_LIMIT {
+                self.undo.remove(0);
+            }
+        }
+        self.redo.clear();
+        self.coalescing_key = Some(key);
+    }
+
+    fn break_coalescing(&mut self) {
+        self.coalescing_key = None;
+    }
+
+    fn undo(&mut self, current: &mut CompositionDocument) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo.push(current.clone());
+        *current = previous;
+        self.break_coalescing();
+        true
+    }
+
+    fn redo(&mut self, current: &mut CompositionDocument) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(current.clone());
+        *current = next;
+        self.break_coalescing();
+        true
+    }
+}
+
 struct GuiState {
     current: RefCell<CompositionDocument>,
+    history: RefCell<MotionHistory>,
+}
+
+impl GuiState {
+    fn checkpoint(&self, key: impl Into<String>) {
+        let current = self.current.borrow();
+        self.history.borrow_mut().checkpoint(&current, key);
+    }
+
+    fn replace(&self, document: CompositionDocument) {
+        *self.current.borrow_mut() = document;
+        *self.history.borrow_mut() = MotionHistory::default();
+    }
+}
+
+fn refresh_motion(app: &MotionApp, state: &GuiState) {
+    apply_motion(app, &state.current.borrow());
+    let history = state.history.borrow();
+    app.set_can_undo(!history.undo.is_empty());
+    app.set_can_redo(!history.redo.is_empty());
 }
 
 fn main() -> Result<(), String> {
@@ -174,6 +291,7 @@ fn main() -> Result<(), String> {
     };
     let state = Rc::new(GuiState {
         current: RefCell::new(initial),
+        history: RefCell::new(MotionHistory::default()),
     });
 
     {
@@ -181,8 +299,8 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_comp(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.current.borrow_mut() = sample_motion();
-                apply_motion(&app, &state.current.borrow());
+                state.replace(sample_motion());
+                refresh_motion(&app, &state);
             }
         });
     }
@@ -197,8 +315,8 @@ fn main() -> Result<(), String> {
                     .and_then(|bytes| load_motion(&bytes))
                 {
                     Ok(doc) => {
-                        *state.current.borrow_mut() = doc;
-                        apply_motion(&app, &state.current.borrow());
+                        state.replace(doc);
+                        refresh_motion(&app, &state);
                         app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
                     }
                     Err(err) => {
@@ -214,6 +332,7 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_add_layer(move || {
             if let Some(app) = app_ref.upgrade() {
+                state.checkpoint("add-layer");
                 let mut current = state.current.borrow_mut();
                 let count = current.len() + 1;
                 let mut layer = MotionLayer::new(
@@ -228,7 +347,8 @@ fn main() -> Result<(), String> {
                 layer.add_keyframe("opacity", 0.0, 1.0);
                 current.add_layer(layer);
                 current.active_layer_index = current.layers.len().saturating_sub(1);
-                apply_motion(&app, &current);
+                drop(current);
+                refresh_motion(&app, &state);
             }
         });
     }
@@ -243,7 +363,9 @@ fn main() -> Result<(), String> {
                 }
                 let mut current = state.current.borrow_mut();
                 if current.select_layer(index as usize) {
-                    apply_motion(&app, &current);
+                    state.history.borrow_mut().break_coalescing();
+                    drop(current);
+                    refresh_motion(&app, &state);
                 }
             }
         });
@@ -296,8 +418,7 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_transform_changed(move |prop, val| {
             if let Some(app) = app_ref.upgrade() {
-                let mut current = state.current.borrow_mut();
-                let active = current.active_layer_index;
+                let active = state.current.borrow().active_layer_index;
                 let property = match prop.as_str() {
                     "pos-x" => "x",
                     "pos-y" => "y",
@@ -315,13 +436,66 @@ fn main() -> Result<(), String> {
                     "scale" | "opacity" => val / 100.0,
                     _ => val,
                 };
+                state.checkpoint(format!("transform:{active}:{property}"));
+                let mut current = state.current.borrow_mut();
                 if let Some(layer) = current.layers.get_mut(active) {
                     layer.add_keyframe(property, 0.0, stored_value);
                     let layer_name = layer.name.clone();
-                    apply_motion(&app, &current);
+                    drop(current);
+                    refresh_motion(&app, &state);
                     app.set_status_left(SharedString::from(format!(
                         "Updated {layer_name} {property} to {val:.1}"
                     )));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_undo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let changed = {
+                    let mut current = state.current.borrow_mut();
+                    state.history.borrow_mut().undo(&mut current)
+                };
+                if changed {
+                    refresh_motion(&app, &state);
+                    app.set_status_left("Undid composition edit".into());
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_redo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let changed = {
+                    let mut current = state.current.borrow_mut();
+                    state.history.borrow_mut().redo(&mut current)
+                };
+                if changed {
+                    refresh_motion(&app, &state);
+                    app.set_status_left("Redid composition edit".into());
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_export_frame(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match write_svg_frame(&state.current.borrow(), EXPORT_FILENAME) {
+                    Ok(()) => app.set_status_left(
+                        format!("Exported SVG frame to {EXPORT_FILENAME}").into(),
+                    ),
+                    Err(error) => app
+                        .set_status_left(format!("SVG frame export failed: {error}").into()),
                 }
             }
         });
@@ -361,8 +535,37 @@ fn main() -> Result<(), String> {
         });
     }
 
-    apply_motion(&app, &state.current.borrow());
+    refresh_motion(&app, &state);
     app.show().map_err(|e| e.to_string())?;
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+
+#[cfg(test)]
+mod product_tests {
+    use super::*;
+
+    #[test]
+    fn svg_frame_export_contains_sampled_layers() {
+        let svg = export_svg_frame(&sample_motion(), 0.0);
+        assert!(svg.starts_with("<?xml"));
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("Subtitle Motion"));
+        assert!(svg.ends_with("</svg>
+"));
+    }
+
+    #[test]
+    fn motion_history_undoes_and_redoes_edits() {
+        let mut current = sample_motion();
+        let original = current.clone();
+        let mut history = MotionHistory::default();
+        history.checkpoint(&current, "add-layer");
+        current.add_layer(MotionLayer::new("extra", "Extra", "VectorShape"));
+        assert!(history.undo(&mut current));
+        assert_eq!(current.layers.len(), original.layers.len());
+        assert!(history.redo(&mut current));
+        assert_eq!(current.layers.len(), original.layers.len() + 1);
+    }
 }

@@ -32,6 +32,8 @@ export component EncodeApp inherits Window {
     in property <string> backend-version: "FFmpeg not found";
     in property <bool> running: false;
     in property <bool> can-start: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
     in-out property <int> inspector-tab: 0;
@@ -39,6 +41,8 @@ export component EncodeApp inherits Window {
     callback new-queue;
     callback open-queue;
     callback save-queue;
+    callback undo;
+    callback redo;
     callback add-job;
     callback remove-job;
     callback select-job(int);
@@ -63,8 +67,10 @@ export component EncodeApp inherits Window {
             ToolButton { icon: "new"; text: "New Queue"; clicked => { root.new-queue(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-queue(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-queue(); } }
+            IconButton { icon: "undo"; label: "Undo queue edit"; enabled: root.can-undo && !root.running; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo queue edit"; enabled: root.can-redo && !root.running; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { icon: "plus"; text: "Add Job"; clicked => { root.add-job(); } }
+            ToolButton { icon: "plus"; text: "Add Job"; enabled: !root.running; clicked => { root.add-job(); } }
             IconButton { icon: "trash"; label: "Remove selected job"; enabled: root.job-labels.length > 0 && !root.running; clicked => { root.remove-job(); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             MetricChip { label: "Batch"; value: Math.round(root.batch-progress) + "%"; }

@@ -15,6 +15,7 @@ slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "batch.loomencode";
+const HISTORY_LIMIT: usize = 128;
 
 loom_production::define_snapshot_recovery!(ENCODE_RECOVERY, "org.loom.encode", "loom.encode/1");
 
@@ -242,8 +243,43 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
 }
 
+#[derive(Default)]
+struct QueueHistory {
+    undo: Vec<EncodeQueue>,
+    redo: Vec<EncodeQueue>,
+}
+
+impl QueueHistory {
+    fn checkpoint(&mut self, queue: &EncodeQueue) {
+        self.undo.push(queue.clone());
+        if self.undo.len() > HISTORY_LIMIT {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    fn undo(&mut self, queue: &mut EncodeQueue) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo.push(queue.clone());
+        *queue = previous;
+        true
+    }
+
+    fn redo(&mut self, queue: &mut EncodeQueue) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(queue.clone());
+        *queue = next;
+        true
+    }
+}
+
 struct AppState {
     queue: Mutex<EncodeQueue>,
+    history: Mutex<QueueHistory>,
     backend: Option<EncoderBackend>,
     cancel: AtomicBool,
     running: AtomicBool,
@@ -257,12 +293,31 @@ fn snapshot(state: &AppState) -> EncodeQueue {
         .clone()
 }
 
+fn update_history_controls(app: &EncodeApp, state: &AppState) {
+    let history = state
+        .history
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let editable = !state.running.load(Ordering::Relaxed);
+    app.set_can_undo(editable && !history.undo.is_empty());
+    app.set_can_redo(editable && !history.redo.is_empty());
+}
+
+fn checkpoint_queue(state: &AppState, queue: &EncodeQueue) {
+    state
+        .history
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .checkpoint(queue);
+}
+
 fn post_refresh(weak: &slint::Weak<EncodeApp>, state: &Arc<AppState>, message: String) {
     let queue = snapshot(state);
     let backend = state.backend.clone();
     let running = state.running.load(Ordering::Relaxed);
     let _ = weak.upgrade_in_event_loop(move |app| {
         refresh(&app, &queue, backend.as_ref(), running);
+        update_history_controls(&app, &state);
         app.set_status_left(message.into());
     });
 }
@@ -295,6 +350,7 @@ fn main() -> Result<(), String> {
     initial.recover_interrupted();
     let state = Arc::new(AppState {
         queue: Mutex::new(initial),
+        history: Mutex::new(QueueHistory::default()),
         backend,
         cancel: AtomicBool::new(false),
         running: AtomicBool::new(false),
@@ -310,6 +366,7 @@ fn main() -> Result<(), String> {
                         .queue
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    checkpoint_queue(&state, &queue);
                     ($operation)(&mut queue);
                     refresh(
                         &app,
@@ -317,6 +374,7 @@ fn main() -> Result<(), String> {
                         state.backend.as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
+                    update_history_controls(&app, &state);
                 }
             });
         }};
@@ -340,8 +398,14 @@ fn main() -> Result<(), String> {
                             .queue
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner()) = queue;
+                        *state
+                            .history
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                            QueueHistory::default();
                         let queue = snapshot(&state);
                         refresh(&app, &queue, state.backend.as_ref(), false);
+                        update_history_controls(&app, &state);
                         app.set_status_left(format!("Opened {SAVE_FILENAME}").into());
                     }
                     Err(error) => app.set_status_left(format!("Open failed: {error}").into()),
@@ -427,6 +491,7 @@ fn main() -> Result<(), String> {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let index = queue.active_job_index;
+                    checkpoint_queue(&state, &queue);
                     if let Some(job) = queue.jobs.get_mut(index) {
                         job.source_file = value.as_str().to_string();
                         job.status = JobStatus::Queued;
@@ -437,6 +502,7 @@ fn main() -> Result<(), String> {
                         state.backend.as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
+                    update_history_controls(&app, &state);
                 }
             }),
             "output" => app.on_output_changed(move |value| {
@@ -446,6 +512,7 @@ fn main() -> Result<(), String> {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let index = queue.active_job_index;
+                    checkpoint_queue(&state, &queue);
                     if let Some(job) = queue.jobs.get_mut(index) {
                         job.output_file = value.as_str().to_string();
                         job.status = JobStatus::Queued;
@@ -456,6 +523,7 @@ fn main() -> Result<(), String> {
                         state.backend.as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
+                    update_history_controls(&app, &state);
                 }
             }),
             _ => app.on_preset_changed(move |value| {
@@ -465,6 +533,7 @@ fn main() -> Result<(), String> {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let index = queue.active_job_index;
+                    checkpoint_queue(&state, &queue);
                     if let Some(job) = queue.jobs.get_mut(index) {
                         job.preset = match value.as_str() {
                             "ProRes 422" => EncodePreset::prores_master(),
@@ -488,9 +557,68 @@ fn main() -> Result<(), String> {
                         state.backend.as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
+                    update_history_controls(&app, &state);
                 }
             }),
         }
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_undo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Relaxed) {
+                    return;
+                }
+                let changed = {
+                    let mut queue = state
+                        .queue
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    state
+                        .history
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .undo(&mut queue)
+                };
+                if changed {
+                    let queue = snapshot(&state);
+                    refresh(&app, &queue, state.backend.as_ref(), false);
+                    update_history_controls(&app, &state);
+                    app.set_status_left("Undid queue edit".into());
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_redo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Relaxed) {
+                    return;
+                }
+                let changed = {
+                    let mut queue = state
+                        .queue
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    state
+                        .history
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .redo(&mut queue)
+                };
+                if changed {
+                    let queue = snapshot(&state);
+                    refresh(&app, &queue, state.backend.as_ref(), false);
+                    update_history_controls(&app, &state);
+                    app.set_status_left("Redid queue edit".into());
+                }
+            }
+        });
     }
 
     {
@@ -631,7 +759,32 @@ fn main() -> Result<(), String> {
 
     let queue = snapshot(&state);
     refresh(&app, &queue, state.backend.as_ref(), false);
+    update_history_controls(&app, &state);
     app.set_status_left("Edit a source/output path, then start the local queue".into());
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
+}
+
+
+#[cfg(test)]
+mod product_tests {
+    use super::*;
+
+    #[test]
+    fn queue_history_undoes_and_redoes_edits() {
+        let mut queue = sample_queue();
+        let original_len = queue.jobs.len();
+        let mut history = QueueHistory::default();
+        history.checkpoint(&queue);
+        queue.add_job(EncodeJob::new(
+            "extra",
+            "extra.mov",
+            "extra.mp4",
+            EncodePreset::h264_1080p(),
+        ));
+        assert!(history.undo(&mut queue));
+        assert_eq!(queue.jobs.len(), original_len);
+        assert!(history.redo(&mut queue));
+        assert_eq!(queue.jobs.len(), original_len + 1);
+    }
 }
