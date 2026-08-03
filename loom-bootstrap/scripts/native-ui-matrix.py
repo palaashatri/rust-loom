@@ -215,12 +215,40 @@ def main() -> int:
                 if isinstance(default_dark, dict) and sample_record and sample_record["sha256"] == default_dark.get("sha256"):
                     failures.append(f"{app}: opening {sample.name} did not change the rendered application state")
 
+        target = output / f"loom-{app}-palette-open.png"
+        palette_record: dict[str, object] | None = None
+        command = [str(binary), "--screenshot", str(target), "--size", sizes[1], "--theme", "dark", "--palette"]
+        process = execute(command, environment)
+        if process.returncode != 0:
+            failures.append(
+                f"{app}/palette: capture failed ({process.returncode}): "
+                f"{process.stderr.strip() or process.stdout.strip()}"
+            )
+        else:
+            validated = validate_png(target, parse_size(sizes[1]))
+            if isinstance(validated, str):
+                failures.append(f"{app}/palette: {validated}")
+            else:
+                digest, byte_count = validated
+                palette_record = {
+                    "path": target.name,
+                    "bytes": byte_count,
+                    "sha256": digest,
+                    "width": parse_size(sizes[1])[0],
+                    "height": parse_size(sizes[1])[1],
+                    "query": "ex",
+                }
+                default_dark = size_records.get(sizes[1], {}).get("dark")
+                if isinstance(default_dark, dict) and digest == default_dark.get("sha256"):
+                    failures.append(f"{app}: palette capture is byte-identical to the default window")
+
         report["applications"][app] = {
             "binary": str(binary),
             "captures": size_records,
             "smoke_passed": smoke.returncode == 0,
             "sample_open": sample_record,
             "sample_available": sample is not None,
+            "palette_open": palette_record,
         }
 
     report["passed"] = not failures

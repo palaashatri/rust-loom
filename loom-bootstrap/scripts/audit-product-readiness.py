@@ -39,6 +39,28 @@ def load_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def keyboard_journeys(evidence_root: Path | None) -> dict[str, bool]:
+    """Load recorded keyboard journeys: {app: passed} for every application.
+
+    The journey recorder writes ``<app>/<app>.json`` beneath a ``journeys``
+    directory. Candidates are the repo-local recorder output and the evidence
+    root. Evidence in the report only counts when the journey passed.
+    """
+    candidates = [ROOT / ".work" / "tmp" / "journeys"]
+    if evidence_root is not None:
+        candidates.append(evidence_root / "journeys")
+        candidates.append(evidence_root)
+    journeys: dict[str, bool] = {}
+    for base in candidates:
+        for app in APPS:
+            if app in journeys:
+                continue
+            report = load_json(base / app / f"{app}.json")
+            if report is not None:
+                journeys[app] = report.get("passed") is True
+    return journeys
+
+
 def native_report(evidence_root: Path | None) -> dict[str, Any] | None:
     if evidence_root is None or not evidence_root.exists():
         return None
@@ -103,11 +125,15 @@ def score(evidence_root: Path | None) -> dict[str, object]:
     )
 
     key_handlers = shared.count("key-pressed(event)")
+    journeys = keyboard_journeys(evidence_root)
+    journeys_passed = sum(1 for passed in journeys.values() if passed)
+    journey_ratio = journeys_passed / len(APPS)
+    keyboard_score = min(1.0, key_handlers / 10.0) * 0.55 + journey_ratio * 0.45
     ui_point(
         "keyboard and command interaction",
-        min(0.75, key_handlers / 10.0),
-        f"{key_handlers} shared keyboard handlers; no full keyboard journey recorder",
-        "complete keyboard-only journeys and command-palette coverage are required",
+        keyboard_score,
+        f"{key_handlers} shared keyboard handlers; recorded keyboard journeys {journeys_passed}/{len(APPS)}",
+        None if journey_ratio == 1.0 else "complete keyboard-only journeys and command-palette coverage are required",
     )
 
     theme_source = contains_all(theme, ("light", "dark", "high-contrast", "reduced-motion"))
