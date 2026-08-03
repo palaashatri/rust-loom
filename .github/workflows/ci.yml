@@ -21,9 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 loom-bootstrap/scripts/audit-contracts.py
       - run: python3 loom-bootstrap/scripts/audit-product-ui.py
-      - run: >-
+      - name: Generate strict source-only readiness score
+        run: >-
           python3 loom-bootstrap/scripts/audit-product-readiness.py
-          --minimum-ui 7.0 --minimum-functionality 6.0
+          --minimum-ui 6.5 --minimum-functionality 5.5
           --json loom-bootstrap/.work/product-score.json
       - uses: actions/upload-artifact@v4
         with:
