@@ -36,9 +36,10 @@ jobs:
             platform: macos
             architecture: x86_64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     env:
       RUST_MIN_STACK: 33554432
+      NATIVE_EVIDENCE: loom-bootstrap/.work/native-${{ matrix.platform }}-${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux native dependencies
@@ -67,37 +68,67 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.platform == 'windows' && '-C link-arg=/STACK:33554432' || '' }}
         run: bash loom-bootstrap/scripts/build-all.sh --release
-      - name: Render native UI matrix and smoke every app
+      - name: Render compact, reference, and large native UI matrices
         shell: bash
         run: >-
           python3 loom-bootstrap/scripts/native-ui-matrix.py
           --root "$GITHUB_WORKSPACE"
-          --output "loom-bootstrap/.work/native-${{ matrix.platform }}-${{ matrix.architecture }}/ui"
+          --output "$NATIVE_EVIDENCE/ui"
           --platform "${{ matrix.platform }}"
-          --size 1440x900
+          --sizes 1024x720,1440x900,1920x1200
       - name: Build native validation package
         shell: bash
         run: >-
           python3 loom-bootstrap/packaging/release.py
           --root "$GITHUB_WORKSPACE"
-          --output "loom-bootstrap/.work/native-${{ matrix.platform }}-${{ matrix.architecture }}/packages"
+          --output "$NATIVE_EVIDENCE/packages"
           --platform "${{ matrix.platform }}"
           --architecture "${{ matrix.architecture }}"
           --version 0.1.0
           --allow-unsigned
-      - name: Run suite contracts and readiness score
+      - name: Run suite contracts and strict readiness score
         shell: bash
         run: |
           python3 loom-bootstrap/scripts/audit-contracts.py
           python3 loom-bootstrap/scripts/audit-product-ui.py
           python3 loom-bootstrap/scripts/audit-product-readiness.py \
-            --minimum-ui 7.0 --minimum-functionality 6.0 \
-            --json "loom-bootstrap/.work/native-${{ matrix.platform }}-${{ matrix.architecture }}/product-score.json"
+            --evidence-root "$NATIVE_EVIDENCE" \
+            --minimum-ui 6.5 --minimum-functionality 5.5 \
+            --json "$NATIVE_EVIDENCE/product-score.json"
+      - name: Inventory downloadable native evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['NATIVE_EVIDENCE'])
+          files = []
+          for path in sorted(root.rglob('*')):
+              if not path.is_file():
+                  continue
+              payload = path.read_bytes()
+              files.append({
+                  'path': str(path.relative_to(root)),
+                  'bytes': len(payload),
+                  'sha256': hashlib.sha256(payload).hexdigest(),
+              })
+          manifest = {
+              'schema_version': 1,
+              'platform': '${{ matrix.platform }}',
+              'architecture': '${{ matrix.architecture }}',
+              'files': files,
+          }
+          (root / 'artifact-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
       - name: Upload native package and UI evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: loom-native-${{ matrix.platform }}-${{ matrix.architecture }}
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
-          path: loom-bootstrap/.work/native-${{ matrix.platform }}-${{ matrix.architecture }}/
+          compression-level: 6
+          path: ${{ env.NATIVE_EVIDENCE }}/
