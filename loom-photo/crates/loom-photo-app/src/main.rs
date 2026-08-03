@@ -9,9 +9,10 @@ use loom_photo_core::{
     BlendMode, Layer, PhotoCanvas, PhotoDocument, PhotoSession, RgbaImage,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
+use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use slint::{
-    ComponentHandle, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, SharedString,
-    VecModel,
+    ComponentHandle, Image, Model, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer,
+    SharedString, VecModel,
 };
 
 slint::include_modules!();
@@ -25,6 +26,8 @@ loom_production::define_snapshot_recovery!(PHOTO_RECOVERY, "org.loom.photo", "lo
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
+    palette: bool,
+    journey: Option<String>,
     size: (u32, u32),
     theme: String,
     open: Option<String>,
@@ -34,6 +37,8 @@ fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         screenshot: None,
         smoke: false,
+        palette: false,
+        journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".to_string(),
         open: None,
@@ -43,6 +48,10 @@ fn parse_args() -> Result<Args, String> {
         match argument.as_str() {
             "--screenshot" => args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?),
             "--smoke" => args.smoke = true,
+            "--palette" => args.palette = true,
+            "--journey" => {
+                args.journey = Some(it.next().ok_or("--journey needs an output directory")?);
+            }
             "--size" => {
                 let value = it.next().ok_or("--size needs WxH")?;
                 let (width, height) = value.split_once('x').ok_or("--size must be WxH")?;
@@ -209,12 +218,166 @@ fn apply_theme(app: &PhotoApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
+/// Commands exposed through the command palette. Each palette entry maps to
+/// one of the application callbacks, so palette invocation and toolbar clicks
+/// share a single dispatch path.
+#[derive(Debug, Clone)]
+enum PaletteAction {
+    NewProject,
+    OpenProject,
+    SaveProject,
+    Undo,
+    Redo,
+    AddLayer,
+    AddAdjustment,
+    RemoveLayer,
+    MoveLayer(i32),
+    SelectTool(&'static str),
+    ExportPng,
+    ExportJpeg,
+}
+
+struct PaletteCommand {
+    action: PaletteAction,
+    id: &'static str,
+    label: &'static str,
+    shortcut: &'static str,
+}
+
+fn master_palette(app: &PhotoApp) -> Vec<PaletteCommand> {
+    vec![
+        PaletteCommand {
+            action: PaletteAction::NewProject,
+            id: "photo.new",
+            label: "New Project",
+            shortcut: "Ctrl+N",
+        },
+        PaletteCommand {
+            action: PaletteAction::OpenProject,
+            id: "photo.open",
+            label: "Open Project",
+            shortcut: "Ctrl+O",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveProject,
+            id: "photo.save",
+            label: "Save Project",
+            shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::Undo,
+            id: "photo.undo",
+            label: "Undo",
+            shortcut: "Ctrl+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::Redo,
+            id: "photo.redo",
+            label: "Redo",
+            shortcut: "Ctrl+Shift+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddLayer,
+            id: "photo.layer.add",
+            label: "Add Pixel Layer",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddAdjustment,
+            id: "photo.layer.adjustment",
+            label: "Add Adjustment Layer",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::RemoveLayer,
+            id: "photo.layer.remove",
+            label: "Remove Selected Layer",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::MoveLayer(1),
+            id: "photo.layer.move-up",
+            label: "Move Layer Up",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::MoveLayer(-1),
+            id: "photo.layer.move-down",
+            label: "Move Layer Down",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::SelectTool("Select"),
+            id: "photo.tool.select",
+            label: "Tool: Select",
+            shortcut: "V",
+        },
+        PaletteCommand {
+            action: PaletteAction::SelectTool("Pan"),
+            id: "photo.tool.pan",
+            label: "Tool: Pan",
+            shortcut: "H",
+        },
+        PaletteCommand {
+            action: PaletteAction::ExportPng,
+            id: "photo.export-png",
+            label: "Export PNG",
+            shortcut: "Ctrl+E",
+        },
+        PaletteCommand {
+            action: PaletteAction::ExportJpeg,
+            id: "photo.export-jpeg",
+            label: "Export JPEG",
+            shortcut: "",
+        },
+    ]
+    .into_iter()
+    .filter(|c| match c.action {
+        PaletteAction::Undo => app.get_can_undo(),
+        PaletteAction::Redo => app.get_can_redo(),
+        _ => true,
+    })
+    .collect()
+}
+
+fn rebuild_palette(app: &PhotoApp, query: &str) {
+    let query_lower = query.trim().to_lowercase();
+    let items: Vec<CommandPaletteItem> = master_palette(app)
+        .into_iter()
+        .filter(|c| {
+            query_lower.is_empty()
+                || c.label.to_lowercase().contains(&query_lower)
+                || c.id.to_lowercase().contains(&query_lower)
+        })
+        .map(|c| CommandPaletteItem {
+            id: c.id.into(),
+            label: c.label.into(),
+            shortcut: c.shortcut.into(),
+            enabled: true,
+        })
+        .collect();
+    app.set_palette_commands(Rc::new(VecModel::from(items)).into());
+    let count = app.get_palette_commands().row_count() as i32;
+    let selected = app.get_palette_selected();
+    if selected >= count && count > 0 {
+        app.set_palette_selected(count - 1);
+    } else if count == 0 {
+        app.set_palette_selected(0);
+    }
+}
+
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
     let session = PhotoSession::new(initial_canvas(args)?);
     refresh_photo(&app, &session)?;
+    if args.palette {
+        app.set_palette_query(SharedString::from("ex"));
+        rebuild_palette(&app, "ex");
+        app.set_palette_selected(1);
+        app.set_palette_open(true);
+    }
     let image = snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
         .map_err(|error| error.to_string())?;
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
@@ -222,6 +385,52 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 
 struct GuiState {
     session: RefCell<PhotoSession>,
+}
+
+/// Record the keyboard command-palette journey with per-step screenshots.
+fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
+    set_platform();
+    let app = PhotoApp::new().map_err(|error| error.to_string())?;
+    apply_theme(&app, &args.theme);
+    let session = PhotoSession::new(initial_canvas(args)?);
+    refresh_photo(&app, &session)?;
+    wire_palette(&app);
+    rebuild_palette(&app, "");
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let report = record_keyboard_palette_journey(&app, "photo", Path::new(out_dir), "layer")
+        .map_err(|error| format!("journey failed: {error}"))?;
+    println!(
+        "keyboard journey: {} ({})",
+        if report.passed { "PASS" } else { "FAIL" },
+        out_dir
+    );
+    if !report.passed {
+        return Err("keyboard journey invariants failed".to_string());
+    }
+    Ok(())
+}
+
+impl PaletteProbe for PhotoApp {
+    fn palette_open(&self) -> bool {
+        self.get_palette_open()
+    }
+
+    fn palette_commands(&self) -> usize {
+        self.get_palette_commands().row_count()
+    }
+
+    fn palette_selected(&self) -> i32 {
+        self.get_palette_selected()
+    }
+
+    fn palette_query(&self) -> String {
+        self.get_palette_query().to_string()
+    }
+
+    fn open_palette(&self) {
+        self.invoke_open_palette();
+    }
 }
 
 fn set_status(app: &PhotoApp, message: impl Into<SharedString>) {
@@ -280,6 +489,9 @@ fn main() -> Result<(), String> {
         let output =
             std::env::temp_dir().join(format!("loom-photo-smoke-{}.png", std::process::id()));
         return render_headless(&args, &output.to_string_lossy());
+    }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
     }
 
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
@@ -613,7 +825,115 @@ fn main() -> Result<(), String> {
         });
     }
 
+    wire_palette(&app);
+
     refresh_photo(&app, &state.session.borrow())?;
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
+}
+
+/// Connect the command-palette callbacks. Invocation dispatches through the
+/// same application callbacks as the toolbar, so palette and toolbar behave
+/// identically, and the query model stays in Rust for testability.
+fn wire_palette(app: &PhotoApp) {
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_query_changed(move |query| {
+            if let Some(app) = app_ref.upgrade() {
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_move(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let count = app.get_palette_commands().row_count() as i32;
+                if count == 0 {
+                    return;
+                }
+                let next = (app.get_palette_selected() + delta).clamp(0, count - 1);
+                app.set_palette_selected(next);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_key_text(move |text| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.push_str(text.as_str());
+                let query = SharedString::from(query.as_str());
+                app.set_palette_query(query.clone());
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_backspace(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.pop();
+                let query = SharedString::from(query.as_str());
+                app.set_palette_query(query.clone());
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_close(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_palette_open(false);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_invoked(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let command = master_palette(&app)
+                    .into_iter()
+                    .filter(|c| match c.action {
+                        PaletteAction::Undo => app.get_can_undo(),
+                        PaletteAction::Redo => app.get_can_redo(),
+                        _ => true,
+                    })
+                    .filter(|c| {
+                        let q = app.get_palette_query().trim().to_lowercase();
+                        q.is_empty()
+                            || c.label.to_lowercase().contains(&q)
+                            || c.id.to_lowercase().contains(&q)
+                    })
+                    .nth(index as usize);
+                if let Some(command) = command {
+                    app.set_palette_open(false);
+                    match command.action {
+                        PaletteAction::NewProject => app.invoke_new_project(),
+                        PaletteAction::OpenProject => app.invoke_open_project(),
+                        PaletteAction::SaveProject => app.invoke_save_project(),
+                        PaletteAction::Undo => app.invoke_undo(),
+                        PaletteAction::Redo => app.invoke_redo(),
+                        PaletteAction::AddLayer => app.invoke_add_layer(),
+                        PaletteAction::AddAdjustment => app.invoke_add_adjustment(),
+                        PaletteAction::RemoveLayer => app.invoke_remove_layer(),
+                        PaletteAction::MoveLayer(direction) => app.invoke_move_layer(direction),
+                        PaletteAction::SelectTool(tool) => {
+                            app.invoke_select_tool(SharedString::from(tool))
+                        }
+                        PaletteAction::ExportPng => {
+                            app.invoke_export_png(DEFAULT_EXPORT_FILENAME.into())
+                        }
+                        PaletteAction::ExportJpeg => {
+                            app.invoke_export_jpeg(DEFAULT_EXPORT_FILENAME.into())
+                        }
+                    }
+                }
+            }
+        });
+    }
 }

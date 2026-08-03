@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
+use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{RichBlock, WriterDocument};
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
@@ -32,6 +33,7 @@ struct Args {
     screenshot: Option<String>,
     smoke: bool,
     palette: bool,
+    journey: Option<String>,
     size: (u32, u32),
     theme: String,
     open: Option<String>,
@@ -42,6 +44,7 @@ fn parse_args() -> Result<Args, String> {
         screenshot: None,
         smoke: false,
         palette: false,
+        journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
         open: None,
@@ -54,6 +57,9 @@ fn parse_args() -> Result<Args, String> {
             }
             "--smoke" => args.smoke = true,
             "--palette" => args.palette = true,
+            "--journey" => {
+                args.journey = Some(it.next().ok_or("--journey needs an output directory")?);
+            }
             "--size" => {
                 let v = it.next().ok_or("--size needs WxH")?;
                 let (w, h) = v.split_once('x').ok_or("--size must be WxH")?;
@@ -733,7 +739,59 @@ fn main() -> Result<(), String> {
         let out = out.to_string_lossy().into_owned();
         return render_headless(&args, &out);
     }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
+    }
     run_gui(&args)
+}
+
+/// Record the keyboard command-palette journey with per-step screenshots.
+fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
+    set_platform();
+    let app = WriterApp::new().map_err(|e| e.to_string())?;
+    apply_theme(&app, &args.theme);
+    let doc = match &args.open {
+        Some(p) => load_file(p)?,
+        None => sample_document(),
+    };
+    apply_document(&app, &doc);
+    wire_palette(&app);
+    rebuild_palette(&app, "");
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let report = record_keyboard_palette_journey(&app, "writer", Path::new(out_dir), "ex")
+        .map_err(|e| format!("journey failed: {e}"))?;
+    println!(
+        "keyboard journey: {} ({})",
+        if report.passed { "PASS" } else { "FAIL" },
+        out_dir
+    );
+    if !report.passed {
+        return Err("keyboard journey invariants failed".to_string());
+    }
+    Ok(())
+}
+
+impl PaletteProbe for WriterApp {
+    fn palette_open(&self) -> bool {
+        self.get_palette_open()
+    }
+
+    fn palette_commands(&self) -> usize {
+        self.get_palette_commands().row_count()
+    }
+
+    fn palette_selected(&self) -> i32 {
+        self.get_palette_selected()
+    }
+
+    fn palette_query(&self) -> String {
+        self.get_palette_query().to_string()
+    }
+
+    fn open_palette(&self) {
+        self.invoke_open_palette();
+    }
 }
 
 /// Connect the command-palette callbacks. Invocation dispatches through the

@@ -9,7 +9,8 @@ use loom_present_core::{
     PresentationDocument, PresentationSession, SlideElement, TransitionKind,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
+use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
+use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -22,6 +23,8 @@ loom_production::define_snapshot_recovery!(PRESENT_RECOVERY, "org.loom.present",
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
+    palette: bool,
+    journey: Option<String>,
     size: (u32, u32),
     theme: String,
     open: Option<String>,
@@ -31,6 +34,8 @@ fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         screenshot: None,
         smoke: false,
+        palette: false,
+        journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".into(),
         open: None,
@@ -42,6 +47,14 @@ fn parse_args() -> Result<Args, String> {
                 args.screenshot = Some(iterator.next().ok_or("--screenshot needs a path")?)
             }
             "--smoke" => args.smoke = true,
+            "--palette" => args.palette = true,
+            "--journey" => {
+                args.journey = Some(
+                    iterator
+                        .next()
+                        .ok_or("--journey needs an output directory")?,
+                );
+            }
             "--size" => {
                 let value = iterator.next().ok_or("--size needs WxH")?;
                 let (width, height) = value.split_once('x').ok_or("--size must be WxH")?;
@@ -246,6 +259,12 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         selected_element: Cell::new(0),
     };
     refresh(&app, &state);
+    if args.palette {
+        app.set_palette_query(SharedString::from("ex"));
+        rebuild_palette(&app, "ex");
+        app.set_palette_selected(1);
+        app.set_palette_open(true);
+    }
     let image = snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
         .map_err(|error| error.to_string())?;
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
@@ -253,6 +272,55 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 
 fn set_status(app: &PresentApp, value: impl Into<SharedString>) {
     app.set_status_left(value.into());
+}
+
+/// Record the keyboard command-palette journey with per-step screenshots.
+fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
+    set_platform();
+    let app = PresentApp::new().map_err(|error| error.to_string())?;
+    apply_theme(&app, &args.theme);
+    let state = GuiState {
+        session: RefCell::new(initial_session(args)?),
+        selected_element: Cell::new(0),
+    };
+    refresh(&app, &state);
+    wire_palette(&app);
+    rebuild_palette(&app, "");
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let report = record_keyboard_palette_journey(&app, "present", Path::new(out_dir), "template")
+        .map_err(|error| format!("journey failed: {error}"))?;
+    println!(
+        "keyboard journey: {} ({})",
+        if report.passed { "PASS" } else { "FAIL" },
+        out_dir
+    );
+    if !report.passed {
+        return Err("keyboard journey invariants failed".to_string());
+    }
+    Ok(())
+}
+
+impl PaletteProbe for PresentApp {
+    fn palette_open(&self) -> bool {
+        self.get_palette_open()
+    }
+
+    fn palette_commands(&self) -> usize {
+        self.get_palette_commands().row_count()
+    }
+
+    fn palette_selected(&self) -> i32 {
+        self.get_palette_selected()
+    }
+
+    fn palette_query(&self) -> String {
+        self.get_palette_query().to_string()
+    }
+
+    fn open_palette(&self) {
+        self.invoke_open_palette();
+    }
 }
 
 fn main() -> Result<(), String> {
@@ -264,6 +332,9 @@ fn main() -> Result<(), String> {
         let output =
             std::env::temp_dir().join(format!("loom-present-smoke-{}.png", std::process::id()));
         return render_headless(&args, &output.to_string_lossy());
+    }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
     }
 
     let app = PresentApp::new().map_err(|error| error.to_string())?;
@@ -682,6 +753,288 @@ fn main() -> Result<(), String> {
     }
 
     refresh(&app, &state);
+    wire_palette(&app);
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
+}
+
+/// Commands exposed through the command palette. Dispatch reuses the same
+/// application callbacks as the toolbar and menus.
+#[derive(Debug, Clone)]
+enum PaletteAction {
+    NewDeck,
+    OpenDeck,
+    SaveDeck,
+    AddSlide,
+    DuplicateSlide,
+    DeleteSlide,
+    Undo,
+    Redo,
+    AddText,
+    ExportPdf,
+    TogglePreview,
+    PrevSlide,
+    NextSlide,
+    ApplyTemplate(i32),
+    SetTransition(i32),
+}
+
+struct PaletteCommand {
+    action: PaletteAction,
+    id: &'static str,
+    label: &'static str,
+    shortcut: &'static str,
+}
+
+fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
+    vec![
+        PaletteCommand {
+            action: PaletteAction::NewDeck,
+            id: "present.new",
+            label: "New Deck",
+            shortcut: "Ctrl+N",
+        },
+        PaletteCommand {
+            action: PaletteAction::OpenDeck,
+            id: "present.open",
+            label: "Open Deck",
+            shortcut: "Ctrl+O",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveDeck,
+            id: "present.save",
+            label: "Save Deck",
+            shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddSlide,
+            id: "present.add-slide",
+            label: "Add Slide",
+            shortcut: "Ctrl+Shift+A",
+        },
+        PaletteCommand {
+            action: PaletteAction::DuplicateSlide,
+            id: "present.duplicate-slide",
+            label: "Duplicate Slide",
+            shortcut: "Ctrl+D",
+        },
+        PaletteCommand {
+            action: PaletteAction::DeleteSlide,
+            id: "present.delete-slide",
+            label: "Delete Slide",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::Undo,
+            id: "present.undo",
+            label: "Undo",
+            shortcut: "Ctrl+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::Redo,
+            id: "present.redo",
+            label: "Redo",
+            shortcut: "Ctrl+Shift+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddText,
+            id: "present.add-text",
+            label: "Add Text",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::TogglePreview,
+            id: "present.preview",
+            label: "Toggle Preview Mode",
+            shortcut: "F5",
+        },
+        PaletteCommand {
+            action: PaletteAction::PrevSlide,
+            id: "present.prev",
+            label: "Previous Slide",
+            shortcut: "PageUp",
+        },
+        PaletteCommand {
+            action: PaletteAction::NextSlide,
+            id: "present.next",
+            label: "Next Slide",
+            shortcut: "PageDown",
+        },
+        PaletteCommand {
+            action: PaletteAction::ExportPdf,
+            id: "present.export-pdf",
+            label: "Export PDF",
+            shortcut: "Ctrl+E",
+        },
+        PaletteCommand {
+            action: PaletteAction::ApplyTemplate(0),
+            id: "present.template.title",
+            label: "Template: Title",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::ApplyTemplate(1),
+            id: "present.template.content",
+            label: "Template: Content",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::ApplyTemplate(2),
+            id: "present.template.2col",
+            label: "Template: 2 Column",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::ApplyTemplate(3),
+            id: "present.template.image",
+            label: "Template: Image",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::SetTransition(1),
+            id: "present.transition.dissolve",
+            label: "Transition: Dissolve",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::SetTransition(2),
+            id: "present.transition.push",
+            label: "Transition: Push",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::SetTransition(3),
+            id: "present.transition.morph",
+            label: "Transition: Morph",
+            shortcut: "",
+        },
+    ]
+    .into_iter()
+    .filter(|c| match c.action {
+        PaletteAction::Undo => app.get_can_undo(),
+        PaletteAction::Redo => app.get_can_redo(),
+        _ => true,
+    })
+    .collect()
+}
+
+fn rebuild_palette(app: &PresentApp, query: &str) {
+    let query_lower = query.trim().to_lowercase();
+    let items: Vec<CommandPaletteItem> = master_palette(app)
+        .into_iter()
+        .filter(|c| {
+            query_lower.is_empty()
+                || c.label.to_lowercase().contains(&query_lower)
+                || c.id.to_lowercase().contains(&query_lower)
+        })
+        .map(|c| CommandPaletteItem {
+            id: c.id.into(),
+            label: c.label.into(),
+            shortcut: c.shortcut.into(),
+            enabled: true,
+        })
+        .collect();
+    app.set_palette_commands(Rc::new(VecModel::from(items)).into());
+    let count = app.get_palette_commands().row_count() as i32;
+    let selected = app.get_palette_selected();
+    if selected >= count && count > 0 {
+        app.set_palette_selected(count - 1);
+    } else if count == 0 {
+        app.set_palette_selected(0);
+    }
+}
+
+fn wire_palette(app: &PresentApp) {
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_query_changed(move |query| {
+            if let Some(app) = app_ref.upgrade() {
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_move(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let count = app.get_palette_commands().row_count() as i32;
+                if count == 0 {
+                    return;
+                }
+                let next = (app.get_palette_selected() + delta).clamp(0, count - 1);
+                app.set_palette_selected(next);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_key_text(move |text| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.push_str(text.as_str());
+                let query = SharedString::from(query.as_str());
+                app.set_palette_query(query.clone());
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_backspace(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.pop();
+                let query = SharedString::from(query.as_str());
+                app.set_palette_query(query.clone());
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_close(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_palette_open(false);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_invoked(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let query = app.get_palette_query().trim().to_lowercase();
+                let command = master_palette(&app)
+                    .into_iter()
+                    .filter(|c| {
+                        query.is_empty()
+                            || c.label.to_lowercase().contains(&query)
+                            || c.id.to_lowercase().contains(&query)
+                    })
+                    .nth(index as usize);
+                if let Some(command) = command {
+                    app.set_palette_open(false);
+                    match command.action {
+                        PaletteAction::NewDeck => app.invoke_new_deck(),
+                        PaletteAction::OpenDeck => app.invoke_open_deck(),
+                        PaletteAction::SaveDeck => app.invoke_save_deck(),
+                        PaletteAction::AddSlide => app.invoke_add_slide(),
+                        PaletteAction::DuplicateSlide => app.invoke_duplicate_slide(),
+                        PaletteAction::DeleteSlide => app.invoke_delete_slide(),
+                        PaletteAction::Undo => app.invoke_undo(),
+                        PaletteAction::Redo => app.invoke_redo(),
+                        PaletteAction::AddText => app.invoke_add_text(),
+                        PaletteAction::TogglePreview => app.invoke_toggle_preview_mode(),
+                        PaletteAction::PrevSlide => app.invoke_prev_slide(),
+                        PaletteAction::NextSlide => app.invoke_next_slide(),
+                        PaletteAction::ExportPdf => app.invoke_export_pdf(),
+                        PaletteAction::ApplyTemplate(index) => app.invoke_apply_template(index),
+                        PaletteAction::SetTransition(index) => app.invoke_set_transition(index),
+                    }
+                }
+            }
+        });
+    }
 }

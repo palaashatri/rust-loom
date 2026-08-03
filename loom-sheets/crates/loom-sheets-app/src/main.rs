@@ -16,6 +16,7 @@ use loom_sheets_core::{
     Sheet, Value,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
+use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
@@ -31,6 +32,8 @@ loom_production::define_snapshot_recovery!(SHEETS_RECOVERY, "org.loom.sheets", "
 struct Args {
     screenshot: Option<String>,
     smoke: bool,
+    palette: bool,
+    journey: Option<String>,
     size: (u32, u32),
     theme: String,
     open: Option<String>,
@@ -40,6 +43,8 @@ fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         screenshot: None,
         smoke: false,
+        palette: false,
+        journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
         open: None,
@@ -51,6 +56,10 @@ fn parse_args() -> Result<Args, String> {
                 args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
             }
             "--smoke" => args.smoke = true,
+            "--palette" => args.palette = true,
+            "--journey" => {
+                args.journey = Some(it.next().ok_or("--journey needs an output directory")?);
+            }
             "--size" => {
                 let v = it.next().ok_or("--size needs WxH")?;
                 let (w, h) = v.split_once('x').ok_or("--size must be WxH")?;
@@ -282,6 +291,12 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         None => sample_sheet(),
     };
     apply_sheet(&app, &sheet);
+    if args.palette {
+        app.set_palette_query(SharedString::from("ex"));
+        rebuild_palette(&app, "ex");
+        app.set_palette_selected(1);
+        app.set_palette_open(true);
+    }
     let (w, h) = args.size;
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
     loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
@@ -552,6 +567,7 @@ fn run_gui(args: &Args) -> Result<(), String> {
     }
 
     apply_sheet(&app, &state.current.borrow());
+    wire_palette(&app);
     app.show().map_err(|e| e.to_string())?;
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
@@ -568,7 +584,285 @@ fn main() -> Result<(), String> {
         let out = out.to_string_lossy().into_owned();
         return render_headless(&args, &out);
     }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
+    }
     run_gui(&args)
+}
+
+/// Record the keyboard command-palette journey with per-step screenshots.
+fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
+    set_platform();
+    let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    apply_theme(&app, &args.theme);
+    let sheet = match &args.open {
+        Some(p) => load_sheet(p)?,
+        None => sample_sheet(),
+    };
+    apply_sheet(&app, &sheet);
+    wire_palette(&app);
+    rebuild_palette(&app, "");
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let report = record_keyboard_palette_journey(&app, "sheets", Path::new(out_dir), "format")
+        .map_err(|e| format!("journey failed: {e}"))?;
+    println!(
+        "keyboard journey: {} ({})",
+        if report.passed { "PASS" } else { "FAIL" },
+        out_dir
+    );
+    if !report.passed {
+        return Err("keyboard journey invariants failed".to_string());
+    }
+    Ok(())
+}
+
+impl PaletteProbe for SheetsApp {
+    fn palette_open(&self) -> bool {
+        self.get_palette_open()
+    }
+
+    fn palette_commands(&self) -> usize {
+        self.get_palette_commands().row_count()
+    }
+
+    fn palette_selected(&self) -> i32 {
+        self.get_palette_selected()
+    }
+
+    fn palette_query(&self) -> String {
+        self.get_palette_query().to_string()
+    }
+
+    fn open_palette(&self) {
+        self.invoke_open_palette();
+    }
+}
+
+/// Commands exposed through the command palette. Invocation dispatches
+/// through the same application callbacks as the toolbar.
+#[derive(Debug, Clone)]
+enum PaletteAction {
+    NewSheet,
+    OpenSheet,
+    SaveSheet,
+    ExportCsv,
+    Undo,
+    Redo,
+    AddSheet,
+    GoToSheet(i32),
+    CellFormat(i32),
+}
+
+struct PaletteCommand {
+    action: PaletteAction,
+    id: &'static str,
+    label: &'static str,
+    shortcut: &'static str,
+}
+
+fn master_palette() -> Vec<PaletteCommand> {
+    vec![
+        PaletteCommand {
+            action: PaletteAction::NewSheet,
+            id: "sheets.new",
+            label: "New Sheet",
+            shortcut: "Ctrl+N",
+        },
+        PaletteCommand {
+            action: PaletteAction::OpenSheet,
+            id: "sheets.open",
+            label: "Open Sheet",
+            shortcut: "Ctrl+O",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveSheet,
+            id: "sheets.save",
+            label: "Save Sheet",
+            shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::ExportCsv,
+            id: "sheets.export-csv",
+            label: "Export CSV",
+            shortcut: "Ctrl+E",
+        },
+        PaletteCommand {
+            action: PaletteAction::Undo,
+            id: "sheets.undo",
+            label: "Undo",
+            shortcut: "Ctrl+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::Redo,
+            id: "sheets.redo",
+            label: "Redo",
+            shortcut: "Ctrl+Shift+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::AddSheet,
+            id: "sheets.add-sheet",
+            label: "Add New Sheet",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::GoToSheet(0),
+            id: "sheets.goto-1",
+            label: "Go To Sheet 1",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::GoToSheet(1),
+            id: "sheets.goto-2",
+            label: "Go To Sheet 2",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::GoToSheet(2),
+            id: "sheets.goto-3",
+            label: "Go To Sheet 3",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::CellFormat(0),
+            id: "sheets.format.general",
+            label: "Format: General",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::CellFormat(1),
+            id: "sheets.format.number",
+            label: "Format: Number",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::CellFormat(2),
+            id: "sheets.format.currency",
+            label: "Format: Currency",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::CellFormat(3),
+            id: "sheets.format.percentage",
+            label: "Format: Percentage",
+            shortcut: "",
+        },
+    ]
+}
+
+fn rebuild_palette(app: &SheetsApp, query: &str) {
+    let query_lower = query.trim().to_lowercase();
+    let items: Vec<CommandPaletteItem> = master_palette()
+        .into_iter()
+        .filter(|c| {
+            query_lower.is_empty()
+                || c.label.to_lowercase().contains(&query_lower)
+                || c.id.to_lowercase().contains(&query_lower)
+        })
+        .map(|c| CommandPaletteItem {
+            id: c.id.into(),
+            label: c.label.into(),
+            shortcut: c.shortcut.into(),
+            enabled: true,
+        })
+        .collect();
+    app.set_palette_commands(Rc::new(VecModel::from(items)).into());
+    let count = app.get_palette_commands().row_count() as i32;
+    let selected = app.get_palette_selected();
+    if selected >= count && count > 0 {
+        app.set_palette_selected(count - 1);
+    } else if count == 0 {
+        app.set_palette_selected(0);
+    }
+}
+
+fn wire_palette(app: &SheetsApp) {
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_query_changed(move |query| {
+            if let Some(app) = app_ref.upgrade() {
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_move(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let count = app.get_palette_commands().row_count() as i32;
+                if count == 0 {
+                    return;
+                }
+                let next = (app.get_palette_selected() + delta).clamp(0, count - 1);
+                app.set_palette_selected(next);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_key_text(move |text| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.push_str(text.as_str());
+                let query = SharedString::from(query.as_str());
+                app.set_palette_query(query.clone());
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_backspace(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let mut query = app.get_palette_query().to_string();
+                query.pop();
+                let query = SharedString::from(query.as_str());
+                app.set_palette_query(query.clone());
+                rebuild_palette(&app, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_close(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_palette_open(false);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_palette_invoked(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let query = app.get_palette_query().trim().to_lowercase();
+                let command = master_palette()
+                    .into_iter()
+                    .filter(|c| {
+                        query.is_empty()
+                            || c.label.to_lowercase().contains(&query)
+                            || c.id.to_lowercase().contains(&query)
+                    })
+                    .nth(index as usize);
+                if let Some(command) = command {
+                    app.set_palette_open(false);
+                    match command.action {
+                        PaletteAction::NewSheet => app.invoke_new_sheet(),
+                        PaletteAction::OpenSheet => app.invoke_open_sheet(),
+                        PaletteAction::SaveSheet => app.invoke_save_sheet(),
+                        PaletteAction::ExportCsv => app.invoke_export_csv(),
+                        PaletteAction::Undo => app.invoke_undo(),
+                        PaletteAction::Redo => app.invoke_redo(),
+                        PaletteAction::AddSheet => app.invoke_add_new_sheet(),
+                        PaletteAction::GoToSheet(index) => app.invoke_select_sheet(index),
+                        PaletteAction::CellFormat(index) => app.invoke_set_cell_format(index),
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

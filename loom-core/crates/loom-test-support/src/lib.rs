@@ -13,6 +13,9 @@
 //!   against a committed baseline, writes the actual and diff images on
 //!   failure, and never auto-approves baselines (explicit `LOOM_SNAPSHOT_UPDATE`
 //!   opt-in only).
+//! * [`journey`] — keyboard journey recorder: dispatches real key events
+//!   through the Slint input pipeline, renders a screenshot per step, and
+//!   verifies palette open/type/navigate/invoke/dismiss invariants.
 //! * [`png`] — PNG load/save helpers.
 //!
 //! Baselines are generated and compared inside the pinned Docker visual-QA
@@ -22,9 +25,11 @@
 
 pub mod capture;
 pub mod image_diff;
+pub mod journey;
 pub mod png;
 pub mod snapshot;
 
 pub use capture::{snapshot_component, CaptureError};
 pub use image_diff::{perceptual_diff, within_tolerance, DiffReport};
+pub use journey::{record_keyboard_palette_journey, JourneyReport, PaletteProbe};
 pub use snapshot::{assert_matches_baseline, Tolerance};

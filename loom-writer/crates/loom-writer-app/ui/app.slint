@@ -52,21 +52,23 @@ export component WriterApp inherits Window {
     callback palette-key-text(string);
     callback palette-backspace;
     callback palette-close;
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
 
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open) { return reject; }
             if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
-                root.palette-open = true;
-                root.palette-query = "";
-                palette.grab-focus();
+                root.open-palette();
                 return accept;
             }
             return reject;
         }
-    }
 
-    VerticalLayout {
+        VerticalLayout {
         spacing: 0px;
 
         AppHeader {
@@ -298,5 +300,6 @@ export component WriterApp inherits Window {
             root.palette-open = false;
             app-focus.focus();
         }
+    }
     }
 }

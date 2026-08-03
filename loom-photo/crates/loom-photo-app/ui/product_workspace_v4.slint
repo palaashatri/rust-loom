@@ -1,7 +1,8 @@
 import {
     AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton,
     StatusBar, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs,
-    Slider, SegmentedControl, Field, MetricChip, CanvasBackdrop, StatusPill
+    Slider, SegmentedControl, Field, MetricChip, CanvasBackdrop, StatusPill,
+    CommandPalette, CommandPaletteItem
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
@@ -62,7 +63,34 @@ export component PhotoApp inherits Window {
     callback export-png(string);
     callback export-jpeg(string);
 
-    VerticalLayout {
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
+                root.open-palette();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
         spacing: 0px;
 
         AppHeader {
@@ -382,5 +410,37 @@ export component PhotoApp inherits Window {
         }
 
         StatusBar { status-left: root.status-left; status-right: root.status-right; }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => {
+            root.palette-invoked(idx);
+        }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => {
+            root.palette-move(delta);
+        }
+        key-text(text) => {
+            root.palette-key-text(text);
+        }
+        backspace => {
+            root.palette-backspace();
+        }
+        close-requested => {
+            root.palette-open = false;
+            app-focus.focus();
+        }
+    }
     }
 }
