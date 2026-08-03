@@ -765,7 +765,6 @@ fn main() -> Result<(), String> {
     slint::run_event_loop().map_err(|error| error.to_string())
 }
 
-
 #[cfg(test)]
 mod product_tests {
     use super::*;

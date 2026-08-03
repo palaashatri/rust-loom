@@ -97,15 +97,15 @@ fn xml_escape(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-        .replace(''', "&apos;")
+        .replace('\'', "&apos;")
 }
 
 fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
     let mut svg = String::from(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
+        r##"<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
   <rect width="1920" height="1080" fill="#101217"/>
-"#,
+"##,
     );
     for (index, layer) in doc.layers.iter().enumerate() {
         let sample = layer.sample(time_secs);
@@ -118,22 +118,21 @@ fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
         );
         match layer.layer_type.as_str() {
             "Text" => svg.push_str(&format!(
-                "  <text transform="{transform}" opacity="{opacity:.5}" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="72">{name}</text>
-"
+                r##"  <text transform="{transform}" opacity="{opacity:.5}" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="72">{name}</text>
+"##
             )),
             "VectorShape" => svg.push_str(&format!(
-                "  <rect transform="{transform}" opacity="{opacity:.5}" x="-180" y="-100" width="360" height="200" rx="24" fill="#b86f4b"/>
-"
+                r##"  <rect transform="{transform}" opacity="{opacity:.5}" x="-180" y="-100" width="360" height="200" rx="24" fill="#b86f4b"/>
+"##
             )),
             _ => svg.push_str(&format!(
-                "  <g transform="{transform}" opacity="{opacity:.5}"><rect x="-160" y="-90" width="320" height="180" rx="16" fill="#303744" stroke="#b86f4b"/><text y="8" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="28">{name} {}</text></g>
-",
+                r##"  <g transform="{transform}" opacity="{opacity:.5}"><rect x="-160" y="-90" width="320" height="180" rx="16" fill="#303744" stroke="#b86f4b"/><text y="8" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="28">{name} {}</text></g>
+"##,
                 index + 1
             )),
         }
     }
-    svg.push_str("</svg>
-");
+    svg.push_str("</svg>\n");
     svg
 }
 
@@ -491,11 +490,11 @@ fn main() -> Result<(), String> {
         app.on_export_frame(move || {
             if let Some(app) = app_ref.upgrade() {
                 match write_svg_frame(&state.current.borrow(), EXPORT_FILENAME) {
-                    Ok(()) => app.set_status_left(
-                        format!("Exported SVG frame to {EXPORT_FILENAME}").into(),
-                    ),
-                    Err(error) => app
-                        .set_status_left(format!("SVG frame export failed: {error}").into()),
+                    Ok(()) => app
+                        .set_status_left(format!("Exported SVG frame to {EXPORT_FILENAME}").into()),
+                    Err(error) => {
+                        app.set_status_left(format!("SVG frame export failed: {error}").into())
+                    }
                 }
             }
         });
@@ -541,7 +540,6 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod product_tests {
     use super::*;
@@ -552,8 +550,10 @@ mod product_tests {
         assert!(svg.starts_with("<?xml"));
         assert!(svg.contains("<svg"));
         assert!(svg.contains("Subtitle Motion"));
-        assert!(svg.ends_with("</svg>
-"));
+        assert!(svg.ends_with(
+            "</svg>
+"
+        ));
     }
 
     #[test]
