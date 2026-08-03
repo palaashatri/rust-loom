@@ -26,6 +26,12 @@ def contains_all(text: str, tokens: tuple[str, ...]) -> bool:
     return all(token in text for token in tokens)
 
 
+def app_ui(app: str) -> str:
+    """Read every application-owned Slint module behind the stable entrypoint."""
+    ui_dir = ROOT / f"loom-{app}/crates/loom-{app}-app/ui"
+    return "\n".join(read(path) for path in sorted(ui_dir.glob("*.slint")))
+
+
 def load_json(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -48,7 +54,7 @@ def native_packages(evidence_root: Path | None) -> list[Path]:
 
 
 def score(evidence_root: Path | None) -> dict[str, object]:
-    uis = {app: read(ROOT / f"loom-{app}/crates/loom-{app}-app/ui/app.slint") for app in APPS}
+    uis = {app: app_ui(app) for app in APPS}
     mains = {app: read(ROOT / f"loom-{app}/crates/loom-{app}-app/src/main.rs") for app in APPS}
     cores = {app: read(ROOT / f"loom-{app}/crates/loom-{app}-core/src/lib.rs") for app in APPS}
     shared = read(ROOT / "loom-core/crates/loom-ui/ui/components.slint")
@@ -143,12 +149,12 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "sheets": ("formula", "selected-row"),
         "present": ("slide", "InspectorSurface"),
         "photo": ("layer", "preview-image"),
-        "motion": ("timeline", "position-x"),
+        "motion": ("timeline", "transform-changed", "canvasbackdrop"),
         "video": ("timeline", "preview-image"),
         "studio": ("track", "mixer"),
         "encode": ("queue", "preset"),
     }
-    specific_count = sum(1 for app, tokens in app_specific.items() if contains_all(uis[app].lower(), tokens))
+    specific_count = sum(1 for app, tokens in app_specific.items() if contains_all(uis[app].lower(), tuple(token.lower() for token in tokens)))
     ui_point("workflow-specific composition", specific_count / len(APPS), f"{specific_count}/8 apps expose domain-specific workspace composition")
 
     forbidden = ("coming soon", "placeholder ui", "placeholder control", "fake progress", "model preview")
