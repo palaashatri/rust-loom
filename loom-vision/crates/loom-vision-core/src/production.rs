@@ -2,9 +2,60 @@
 //! contracts for Loom Vision.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
+
+/// Compute the lowercase hex SHA-256 digest of a byte slice.
+///
+/// Used to bind production evaluation claims to an immutable dataset
+/// manifest: a release's `dataset.manifest_sha256` must equal the digest of
+/// the manifest it was evaluated against.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write;
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
+
+/// Verify that `manifest_bytes` matches the SHA-256 declared by a dataset.
+///
+/// Accepts either the raw hex digest or a `sha256:<hex>` prefix form. Any
+/// mismatch, malformed hex, or absent declared digest is an error, so a
+/// benchmark or release can never silently claim results measured against a
+/// different manifest.
+pub fn verify_dataset_manifest(
+    manifest_bytes: &[u8],
+    dataset: &DatasetDescriptor,
+) -> Result<(), String> {
+    let declared = dataset.manifest_sha256.trim();
+    let declared = declared
+        .strip_prefix("sha256:")
+        .unwrap_or(declared)
+        .to_ascii_lowercase();
+    if declared.is_empty()
+        || declared.len() != 64
+        || !declared.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err(format!(
+            "declared dataset manifest_sha256 is not 64 hex characters: {:?}",
+            dataset.manifest_sha256
+        ));
+    }
+    let actual = sha256_hex(manifest_bytes);
+    if actual != declared {
+        return Err(format!(
+            "dataset manifest checksum mismatch: declared {declared}, actual {actual}"
+        ));
+    }
+    Ok(())
+}
 
 /// Tensor element type expected by a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,6 +440,14 @@ impl ProductionModelRelease {
         if self.dataset.manifest_sha256.len() != 64 {
             errors.push("dataset manifest_sha256 must contain 64 hex characters".into());
         }
+        if !self
+            .dataset
+            .manifest_sha256
+            .chars()
+            .all(|c| c.is_ascii_hexdigit())
+        {
+            errors.push("dataset manifest_sha256 must contain only hex characters".into());
+        }
         if self.metrics.is_empty() {
             errors.push("at least one evaluation metric is required".into());
         }
@@ -531,5 +590,68 @@ mod tests {
             .iter()
             .any(|error| error.contains("evaluation metric")));
         assert!(errors.iter().any(|error| error.contains("benchmark")));
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_digest() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn dataset_manifest_checksum_accepts_matching_bytes() {
+        let manifest = b"{\"examples\": 1024}\n";
+        let dataset = DatasetDescriptor {
+            id: "ocr-eval".into(),
+            version: "1".into(),
+            license: "CC-BY-4.0".into(),
+            examples: 1024,
+            manifest_sha256: sha256_hex(manifest),
+            strata: vec!["scanner".into()],
+        };
+        assert!(verify_dataset_manifest(manifest, &dataset).is_ok());
+    }
+
+    #[test]
+    fn dataset_manifest_checksum_rejects_tampered_bytes() {
+        let manifest = b"{\"examples\": 1024}\n";
+        let dataset = DatasetDescriptor {
+            id: "ocr-eval".into(),
+            version: "1".into(),
+            license: "CC-BY-4.0".into(),
+            examples: 1024,
+            manifest_sha256: sha256_hex(b"{\"examples\": 9999}\n"),
+            strata: vec!["scanner".into()],
+        };
+        let error = verify_dataset_manifest(manifest, &dataset).unwrap_err();
+        assert!(error.contains("checksum mismatch"), "{error}");
+    }
+
+    #[test]
+    fn dataset_manifest_checksum_accepts_prefixed_and_rejects_malformed() {
+        let manifest = b"manifest bytes";
+        let good = DatasetDescriptor {
+            id: "x".into(),
+            version: "1".into(),
+            license: "CC0-1.0".into(),
+            examples: 1,
+            manifest_sha256: format!("sha256:{}", sha256_hex(manifest)),
+            strata: Vec::new(),
+        };
+        assert!(verify_dataset_manifest(manifest, &good).is_ok());
+
+        let short = DatasetDescriptor {
+            manifest_sha256: "abc".into(),
+            ..good.clone()
+        };
+        assert!(verify_dataset_manifest(manifest, &short).is_err());
+
+        let not_hex = DatasetDescriptor {
+            manifest_sha256: "g".repeat(64),
+            ..good.clone()
+        };
+        assert!(verify_dataset_manifest(manifest, &not_hex).is_err());
     }
 }

@@ -784,4 +784,53 @@ mod tests {
         .expect_err("blocked");
         assert!(matches!(error, InteropError::Unsupported(_)));
     }
+
+    /// Every fixture in the committed conformance corpus must detect as its
+    /// documented format at full confidence, so the corpus cannot drift into
+    /// placeholder content. Regenerate the corpus with
+    /// `loom-bootstrap/scripts/generate-conformance-corpus.py`.
+    #[test]
+    fn conformance_corpus_detects_to_documented_formats() {
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("loom-samples")
+            .join("conformance");
+        if !corpus.is_dir() {
+            panic!("conformance corpus missing at {}", corpus.display());
+        }
+        let expected: &[(&str, Format, u8)] = &[
+            ("docx/minimal.docx", Format::Docx, 100),
+            ("xlsx/minimal.xlsx", Format::Xlsx, 100),
+            ("pptx/minimal.pptx", Format::Pptx, 100),
+            ("odt/minimal.odt", Format::Odt, 100),
+            ("ods/minimal.ods", Format::Ods, 100),
+            ("odp/minimal.odp", Format::Odp, 100),
+            ("psd/one_pixel.psd", Format::Psd, 100),
+            ("csv/accounts.csv", Format::Csv, 0),
+            ("tsv/measurements.tsv", Format::Text, 0),
+            ("markdown/notes.md", Format::Markdown, 0),
+            ("plaintext/catalog.txt", Format::Text, 0),
+        ];
+        let mut checked = 0usize;
+        for (relative, format, minimum_confidence) in expected {
+            let path = corpus.join(relative);
+            let bytes = fs::read(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let detected = detect(&bytes, Some(relative));
+            assert_eq!(
+                detected.format, *format,
+                "{} detected as {:?} ({})",
+                relative, detected.format, detected.reason
+            );
+            assert!(
+                detected.confidence >= *minimum_confidence,
+                "{} confidence {} below {}",
+                relative,
+                detected.confidence,
+                minimum_confidence
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, expected.len());
+    }
 }
