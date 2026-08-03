@@ -315,6 +315,7 @@ fn post_refresh(weak: &slint::Weak<EncodeApp>, state: &Arc<AppState>, message: S
     let queue = snapshot(state);
     let backend = state.backend.clone();
     let running = state.running.load(Ordering::Relaxed);
+    let state = state.clone();
     let _ = weak.upgrade_in_event_loop(move |app| {
         refresh(&app, &queue, backend.as_ref(), running);
         update_history_controls(&app, &state);
