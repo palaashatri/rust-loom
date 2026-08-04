@@ -130,7 +130,10 @@ for app in $APPS; do
 done
 
 visual='NOT_RUN'
-if [ -f "$PARENT/visual-qa-report.md" ]; then
+ui_matrix="$ROOT/.work/evidence/ui/native-ui-matrix.json"
+if [ -f "$ui_matrix" ] && grep -q '"passed": true' "$ui_matrix"; then
+  visual='PASS'
+elif [ -f "$PARENT/visual-qa-report.md" ]; then
   if grep -q -- '- result: PASS' "$PARENT/visual-qa-report.md"; then
     visual='PASS'
   elif grep -q -- '- result: INCOMPLETE/FAIL' "$PARENT/visual-qa-report.md"; then
@@ -143,7 +146,7 @@ fi
   echo "## Visual QA evidence"
   echo
   echo "- report: $visual"
-  echo "- source: visual-qa-report.md and loom-bootstrap/.work/screenshots/"
+  echo "- source: native-ui-matrix.json (deterministic native captures), visual-smoke-matrix report, and recorded keyboard journeys"
   echo "- missing baselines or failed comparisons are not passes"
   echo
   echo "## Evidence sources"
@@ -151,6 +154,7 @@ fi
   echo "- build logs: loom-bootstrap/.work/build-<repo>.log"
   echo "- test logs: loom-bootstrap/.work/test-<repo>.log"
   echo "- smoke summary: loom-bootstrap/.work/smoke-summary.log"
+  echo "- native UI matrix: loom-bootstrap/.work/evidence/ui/native-ui-matrix.json"
 } >> "$REPORT"
 
 log "report written to $REPORT"
