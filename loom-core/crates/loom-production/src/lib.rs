@@ -131,11 +131,22 @@ pub struct RecoveryJournal {
 
 impl RecoveryJournal {
     /// Open or create a journal directory and validate all existing records.
+    ///
+    /// A crash that interrupted an append can leave a torn final line that
+    /// was never durably synced. Open tolerates exactly that case: the
+    /// verified prefix is kept, the torn tail is dropped, and the journal is
+    /// repaired in place so later appends cannot resurrect the torn line.
+    /// Any other damage (interior corruption, broken checksums, non-monotonic
+    /// sequences) still fails loudly.
     pub fn open(directory: impl AsRef<Path>) -> Result<Self, ProductionError> {
         let directory = directory.as_ref().to_path_buf();
         fs::create_dir_all(&directory)?;
-        let records = read_records(&directory.join(JOURNAL_FILE))?;
-        let next_sequence = records
+        let read = read_records_at(&directory.join(JOURNAL_FILE), true)?;
+        if read.skipped_tail {
+            repair_journal(&directory, &read.records)?;
+        }
+        let next_sequence = read
+            .records
             .last()
             .map_or(1, |record| record.sequence.saturating_add(1));
         Ok(Self {
@@ -206,26 +217,29 @@ impl RecoveryJournal {
     pub fn recover(&self) -> Result<RecoveryState, ProductionError> {
         let metadata_path = self.directory.join(CHECKPOINT_META_FILE);
         let checkpoint_path = self.directory.join(CHECKPOINT_FILE);
-        let (checkpoint, checkpoint_metadata) = if metadata_path.exists()
-            || checkpoint_path.exists()
-        {
-            if !metadata_path.exists() || !checkpoint_path.exists() {
-                return Err(ProductionError::Integrity(
-                    "checkpoint metadata and payload must both exist".into(),
-                ));
-            }
-            let metadata: CheckpointMetadata = serde_json::from_slice(&fs::read(metadata_path)?)
-                .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-            let bytes = fs::read(checkpoint_path)?;
-            if sha256_hex(&bytes) != metadata.sha256 {
-                return Err(ProductionError::Integrity(
-                    "checkpoint digest mismatch".into(),
-                ));
-            }
-            (Some(bytes), Some(metadata))
-        } else {
-            (None, None)
-        };
+        let (checkpoint, checkpoint_metadata) =
+            if metadata_path.exists() || checkpoint_path.exists() {
+                if !metadata_path.exists() || !checkpoint_path.exists() {
+                    return Err(ProductionError::Integrity(
+                        "checkpoint metadata and payload must both exist".into(),
+                    ));
+                }
+                let metadata: CheckpointMetadata =
+                    serde_json::from_slice(&fs::read(metadata_path)?).map_err(|error| {
+                        ProductionError::InvalidData(format!(
+                            "checkpoint metadata is not valid JSON: {error}"
+                        ))
+                    })?;
+                let bytes = fs::read(checkpoint_path)?;
+                if sha256_hex(&bytes) != metadata.sha256 {
+                    return Err(ProductionError::Integrity(
+                        "checkpoint digest mismatch".into(),
+                    ));
+                }
+                (Some(bytes), Some(metadata))
+            } else {
+                (None, None)
+            };
         let last_sequence = checkpoint_metadata
             .as_ref()
             .map_or(0, |metadata| metadata.last_sequence);
@@ -258,21 +272,51 @@ impl RecoveryJournal {
     }
 }
 
+/// Outcome of reading a journal, including whether a torn tail was dropped.
+struct JournalRead {
+    records: Vec<JournalRecord>,
+    skipped_tail: bool,
+}
+
 fn read_records(path: &Path) -> Result<Vec<JournalRecord>, ProductionError> {
+    Ok(read_records_at(path, false)?.records)
+}
+
+/// Read journal records. When `tolerant_tail` is set, a final line that fails
+/// to parse is treated as a torn append tail rather than an error.
+fn read_records_at(path: &Path, tolerant_tail: bool) -> Result<JournalRead, ProductionError> {
     if !path.exists() {
-        return Ok(Vec::new());
+        return Ok(JournalRead {
+            records: Vec::new(),
+            skipped_tail: false,
+        });
     }
     let reader = BufReader::new(File::open(path)?);
+    let mut raw_lines = Vec::new();
+    for line in reader.lines() {
+        raw_lines.push(line?);
+    }
     let mut records = Vec::new();
     let mut previous = 0;
-    for (index, line) in reader.lines().enumerate() {
-        let line = line?;
+    let mut skipped_tail = false;
+    for (index, line) in raw_lines.iter().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
-        let record: JournalRecord = serde_json::from_str(&line).map_err(|error| {
-            ProductionError::InvalidData(format!("journal line {}: {error}", index + 1))
-        })?;
+        let is_last = index + 1 == raw_lines.len();
+        let record: JournalRecord = match serde_json::from_str(line) {
+            Ok(record) => record,
+            Err(error) => {
+                if tolerant_tail && is_last {
+                    skipped_tail = true;
+                    break;
+                }
+                return Err(ProductionError::InvalidData(format!(
+                    "journal line {}: {error}",
+                    index + 1
+                )));
+            }
+        };
         record.verify()?;
         if record.sequence <= previous {
             return Err(ProductionError::Integrity(format!(
@@ -283,7 +327,22 @@ fn read_records(path: &Path) -> Result<Vec<JournalRecord>, ProductionError> {
         previous = record.sequence;
         records.push(record);
     }
-    Ok(records)
+    Ok(JournalRead {
+        records,
+        skipped_tail,
+    })
+}
+
+/// Persist only the verified prefix of a journal, dropping a torn tail so a
+/// later crash cannot make it appear interior to valid records.
+fn repair_journal(directory: &Path, records: &[JournalRecord]) -> Result<(), ProductionError> {
+    let mut encoded = Vec::new();
+    for record in records {
+        serde_json::to_writer(&mut encoded, record)
+            .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
+        encoded.push(b'\n');
+    }
+    atomic_write(&directory.join(JOURNAL_FILE), &encoded)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProductionError> {
@@ -734,6 +793,93 @@ mod tests {
         bytes[position] = b'x';
         fs::write(journal_path, bytes).expect("tamper");
         assert!(RecoveryJournal::open(temporary.path()).is_err());
+    }
+
+    #[test]
+    fn crash_during_append_leaves_torn_tail_that_recovers_and_self_heals() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        {
+            let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+            for sequence in 1..=3 {
+                journal
+                    .append("op", "Edit", format!("payload-{sequence}").into_bytes())
+                    .expect("append");
+            }
+            // Simulate a crash interrupting a fourth append: a torn line that
+            // was never synced to disk.
+            let journal_path = temporary.path().join(JOURNAL_FILE);
+            let mut file = OpenOptions::new()
+                .append(true)
+                .open(&journal_path)
+                .expect("open journal");
+            file.write_all(b"{\"sequence\": 4,").expect("torn write");
+            file.sync_data().expect("sync torn tail");
+        }
+        // New process: open must tolerate the torn tail and repair the file.
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("reopen after crash");
+        assert_eq!(journal.records().expect("records").len(), 3);
+        let state = journal.recover().expect("recover");
+        assert_eq!(state.operations.len(), 3);
+        assert_eq!(state.operations[2].payload.as_slice(), b"payload-3");
+        // Appending after repair writes a clean record 4.
+        journal
+            .append("op", "Edit", b"payload-4".to_vec())
+            .expect("append after repair");
+        let journal_path = temporary.path().join(JOURNAL_FILE);
+        let final_lines = fs::read_to_string(journal_path).expect("read repaired journal");
+        assert_eq!(final_lines.lines().count(), 4);
+        assert!(journal.records().expect("records").len() == 4);
+        let reopened = RecoveryJournal::open(temporary.path()).expect("final reopen");
+        assert_eq!(
+            reopened.records().expect("records")[3].payload.as_slice(),
+            b"payload-4"
+        );
+    }
+
+    #[test]
+    fn corrupt_checkpoint_fails_bounded_without_panicking() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"first".to_vec())
+            .expect("append");
+        journal
+            .checkpoint(1, "loom.test/1", b"checkpoint")
+            .expect("checkpoint");
+        // Garbage checkpoint metadata (non-parseable) must surface as a
+        // bounded InvalidData/Integrity error, never a panic.
+        fs::write(
+            temporary.path().join(CHECKPOINT_META_FILE),
+            b"{\"not\": \"json\"\"",
+        )
+        .expect("corrupt metadata");
+        let outcome = journal.recover();
+        let error = match &outcome {
+            Err(error) => format!("{error}"),
+            Ok(_) => panic!("corrupt checkpoint metadata must not recover"),
+        };
+        assert!(
+            error.contains("checkpoint") || error.to_lowercase().contains("json"),
+            "error should describe the damaged checkpoint: {error}"
+        );
+        // Torn checkpoint payload (metadata present, payload garbage) must
+        // also be a bounded integrity failure.
+        fs::write(temporary.path().join(CHECKPOINT_META_FILE), {
+            let metadata = CheckpointMetadata {
+                last_sequence: 1,
+                sha256: sha256_hex(b"checkpoint"),
+                timestamp_ms: unix_time_ms(),
+                schema: "loom.test/1".into(),
+            };
+            serde_json::to_vec_pretty(&metadata).expect("encode metadata")
+        })
+        .expect("restore metadata");
+        fs::write(temporary.path().join(CHECKPOINT_FILE), b"garbage").expect("torn payload");
+        let outcome = journal.recover();
+        assert!(
+            matches!(outcome, Err(ProductionError::Integrity(_))),
+            "torn checkpoint payload must be a bounded integrity error"
+        );
     }
 
     #[test]

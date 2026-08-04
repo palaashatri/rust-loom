@@ -1,6 +1,6 @@
 # Loom Verification Report
 
-Generated: 2026-08-04T08:12:01Z by scripts/generate-status-report.sh
+Generated: 2026-08-04T14:29:48Z by scripts/generate-status-report.sh
 
 This report is evidence-based: source presence and metadata parsing are not build, test, binary, smoke, or visual evidence.
 
@@ -10,7 +10,7 @@ Status classes: COMPLETE | FUNCTIONAL_WITH_LIMITATIONS | EXPERIMENTAL | SCAFFOLD
 
 | repo | cargo | metadata | build log | test log | test cases | app binary |
 |------|-------|----------|-----------|----------|------------|-------------|
-| loom-core | yes | PASS | PASS | PASS | 112 | — |
+| loom-core | yes | PASS | PASS | PASS | 115 | — |
 | loom-writer | yes | PASS | PASS | PASS | 21 | PASS |
 | loom-sheets | yes | PASS | PASS | PASS | 22 | PASS |
 | loom-present | yes | PASS | PASS | PASS | 9 | PASS |
