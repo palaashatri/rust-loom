@@ -93,14 +93,75 @@ jobs:
           cargo fmt --manifest-path loom-core/Cargo.toml --all --check
           cargo fmt --manifest-path loom-photo/Cargo.toml --all --check
 
+      - name: Clippy Photo with annotations
+        shell: bash
+        run: |
+          set +e
+          cargo clippy \
+            --manifest-path loom-photo/Cargo.toml \
+            --workspace --all-targets --all-features \
+            --message-format=json \
+            -- -D warnings \
+            > /tmp/photo-clippy.json \
+            2> /tmp/photo-clippy.stderr
+          status=$?
+          set -e
+          CLIPPY_STATUS="$status" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def escape_command(value: str) -> str:
+              return (
+                  value.replace("%", "%25")
+                  .replace("\r", "%0D")
+                  .replace("\n", "%0A")
+              )
+
+          diagnostics = 0
+          for raw_line in Path("/tmp/photo-clippy.json").read_text().splitlines():
+              try:
+                  event = json.loads(raw_line)
+              except json.JSONDecodeError:
+                  continue
+              if event.get("reason") != "compiler-message":
+                  continue
+              message = event.get("message", {})
+              level = message.get("level")
+              if level not in {"error", "warning"}:
+                  continue
+              diagnostics += 1
+              rendered = (message.get("rendered") or message.get("message") or "Clippy diagnostic").strip()
+              primary = next(
+                  (span for span in message.get("spans", []) if span.get("is_primary")),
+                  None,
+              )
+              command = "error" if level == "error" else "warning"
+              if primary:
+                  print(
+                      f"::{command} file={primary.get('file_name','')},"
+                      f"line={primary.get('line_start',1)},"
+                      f"col={primary.get('column_start',1)}::"
+                      f"{escape_command(rendered)}"
+                  )
+              else:
+                  print(f"::{command}::{escape_command(rendered)}")
+              print(rendered)
+
+          stderr = Path("/tmp/photo-clippy.stderr").read_text().strip()
+          if stderr:
+              print(stderr)
+          status = int(os.environ["CLIPPY_STATUS"])
+          if status != 0 and diagnostics == 0:
+              print("::error::Photo Clippy failed without a compiler-message diagnostic")
+          PY
+          exit "$status"
+
       - name: Clippy core
         run: cargo clippy --manifest-path loom-core/Cargo.toml --workspace --all-targets --all-features -- -D warnings
 
       - name: Test core
         run: cargo test --manifest-path loom-core/Cargo.toml --workspace
-
-      - name: Clippy Photo
-        run: cargo clippy --manifest-path loom-photo/Cargo.toml --workspace --all-targets --all-features -- -D warnings
 
       - name: Test Photo
         run: cargo test --manifest-path loom-photo/Cargo.toml --workspace
