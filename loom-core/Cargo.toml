@@ -13,6 +13,7 @@ members = [
     "crates/loom-pdf",
     "crates/loom-ui",
     "crates/loom-runtime",
+    "crates/loom-desktop",
     "crates/loom-production",
     "crates/loom-interop",
     "crates/loom-media-runtime",
