@@ -70,6 +70,19 @@ jobs:
           base64 -d /tmp/photo-migration.b64 | gzip -d > /tmp/apply-photo-desktop-slice.py
           test "$(sha256sum /tmp/apply-photo-desktop-slice.py | cut -d' ' -f1)" = "491cd96a4106511bec5d23dcdad11701d10fce9756c33af4a2d281bc566f6b13"
           python3 /tmp/apply-photo-desktop-slice.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("loom-photo/crates/loom-photo-app/src/main.rs")
+          text = path.read_text()
+          old = "PathBuf::from(DEFAULT_EXPORT_FILENAME)"
+          new = "PathBuf::from(PNG_EXPORT_FILENAME)"
+          if text.count(old) != 1:
+              raise SystemExit(
+                  f"Photo export fallback repair expected 1 match, found {text.count(old)}"
+              )
+          path.write_text(text.replace(old, new, 1))
+          PY
 
       - name: Format and validate Photo
         env:
