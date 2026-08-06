@@ -15,10 +15,13 @@ It is not yet a complete replacement for mature commercial office, image,
 motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
-The current honest complete-suite parity score against the target defined in
-`AGENTS.MD` is still approximately **23/100**. The Writer desktop-file tranche
-is a real improvement, but one application adopting native dialogs is not large
-enough to move the rounded suite-wide score. It does not complete Epic 1.
+The current source supports a provisional complete-suite parity estimate of
+approximately **24/100**, up from 23/100. The increase is intentionally small:
+Writer and Sheets now use real native file workflows, New creates blank projects,
+and Sheets no longer advertises non-persistent multi-sheet and formatting
+commands through the command palette. The score remains provisional until the
+fresh four-platform native matrix passes on this exact head. Epic 1 is not
+complete; six applications still use development-era path workflows.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -33,8 +36,10 @@ parity or product completion.
   UI, test, Vision, interoperability, and plugin-SDK crates.
 - Versioned local project packages and positional document-open paths.
 - A shared injectable desktop file-dialog contract. The production adapter uses
-  native operating-system dialogs; deterministic tests can use a scripted
-  adapter without opening modal windows.
+  native operating-system dialogs; deterministic tests use a scripted adapter
+  without opening modal windows.
+- Writer and Sheets use that shared contract for normal Open, Save/Save As, and
+  export destination workflows.
 - Bounded undo/redo foundations and crash-recovery snapshots in all application
   front ends, with depth varying by application.
 - Light, dark, and high-contrast design tokens and adaptive desktop layouts.
@@ -45,23 +50,28 @@ parity or product completion.
 
 - **Writer:** editable paragraph surface, block model, style-run persistence,
   bounded/coalesced history, recovery, search/pagination foundations, Markdown
-  workflows, and PDF output. The normal desktop UI now opens arbitrary
-  `.loomdoc` files through a native picker, saves to the current path, supports
-  native Save As, and chooses a PDF destination through a native save dialog.
-  Cancellation and dialog failures are surfaced without replacing the current
-  document. File-dialog behavior is injectable for deterministic tests. Writer
-  does not yet provide recent-document UI, platform menus, drag/drop, printing,
-  asynchronous large-document I/O, or atomic save through the new desktop
-  service. Toolbar formatting is still document-wide rather than a complete
-  selection-aware rich-text path. Professional page layout, floating objects,
-  citations, forms, mail merge, EPUB, and high-fidelity DOCX/ODT remain
-  incomplete.
+  workflows, and PDF output. New creates a blank unsaved document. The normal
+  desktop UI opens arbitrary `.loomdoc` files through a native picker, saves to
+  the current path, supports native Save As, and chooses a PDF destination
+  through a native save dialog. Cancellation and dialog failures do not replace
+  the current document. File-dialog behavior is injectable for deterministic
+  tests. Writer does not yet provide recent-document UI, platform menus,
+  drag/drop, printing, asynchronous large-document I/O, or atomic save through
+  the new desktop service. Toolbar formatting is still document-wide rather
+  than selection-aware. Professional page layout, floating objects, citations,
+  forms, mail merge, EPUB, and high-fidelity DOCX/ODT remain incomplete.
 - **Sheets:** formulas, dependency and incremental-recalculation foundations,
   named ranges, validation, conditional predicates, filtering/sorting, CSV
-  workflows, persistence, history, and a visible grid. Large-grid
+  workflows, persistence, history, and a visible fixed grid. New creates a
+  blank single-sheet workbook. The desktop UI opens `.loomtable` or imports CSV
+  through a native picker, saves native workbooks through Save/Save As, and
+  selects CSV export destinations natively. Imported CSV paths are deliberately
+  not reused as native package save targets. The command palette no longer
+  exposes Add Sheet, Go To Sheet, or cell-format actions that previously changed
+  UI state without persisted workbook semantics. Multi-sheet storage, large-grid
   virtualization, rich formatting, charts, pivots, broad function coverage,
-  XLSX/ODS fidelity, data connectors, and native desktop file workflows remain
-  incomplete.
+  XLSX/ODS fidelity, data connectors, recent documents, menus, drag/drop,
+  asynchronous I/O, and atomic save remain incomplete.
 - **Present:** deck/slide models, layouts, notes, transitions, scene generation,
   validation, persistence, history, and PDF output. Full direct manipulation,
   masters, mixed media, animation authoring, presenter workflows, recording,
@@ -98,15 +108,19 @@ parity or product completion.
 
 ## Evidence boundaries
 
-### Writer native file workflow
+### First desktop-authenticity milestone
 
 The shared `loom-desktop` crate has unit tests for filter validation, scripted
 open/save results, cancellation, response exhaustion, and unsafe suggested file
-names. Writer's affected workspace passed formatting, strict Clippy, unit tests,
-and a release build before the migration was committed. This proves the
-controller and backend contracts compile and their deterministic behavior is
-tested. A fresh four-platform native run is still required before native dialog
-appearance and interaction can be called verified on every target.
+names. Writer and Sheets have deterministic controller tests for dialog request
+construction and current-directory behavior. Sheets additionally tests that CSV
+imports do not become native workbook save targets. Both affected applications
+passed formatting, strict Clippy, unit tests, and release builds after the final
+blank-project and status-semantics cleanup.
+
+This proves the source-level contracts and focused Linux build path. The score
+remains provisional until native builds and package journeys pass on Windows,
+Linux, macOS Apple silicon, and macOS Intel for this exact source revision.
 
 ### Keyboard journeys
 
@@ -124,7 +138,8 @@ complete keyboard-only application operation or complete command semantics.
 The native UI matrix proves that each binary can render valid, distinct
 light/dark/high-contrast images at three desktop sizes, open a generated sample
 through the positional path, run a smoke path, and display the palette overlay.
-A palette screenshot proves overlay rendering only.
+A palette screenshot proves overlay rendering only. It does not yet automate
+native modal file dialogs.
 
 ### Functional matrix
 
@@ -142,11 +157,11 @@ PSD conformance tests.
 
 ## Packaging status
 
-The branch builds the complete suite on Linux x86-64, Windows x86-64, macOS
-Apple silicon, and macOS Intel in the native matrix. Packaging source uses WiX
-v4-compatible package metadata and bounded retry for transient macOS `hdiutil`
-failures. Every new implementation head still requires its own fresh native
-matrix before those packages can be called verified for that exact source.
+The branch targets Linux x86-64, Windows x86-64, macOS Apple silicon, and macOS
+Intel in the native matrix. Packaging source uses WiX v4-compatible package
+metadata and bounded retry for transient macOS `hdiutil` failures. Every new
+implementation head requires its own fresh native matrix before packages can be
+called verified for that exact source.
 
 ## Audit and documentation policy
 
