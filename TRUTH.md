@@ -1,167 +1,141 @@
 # Loom — Current Truth
 
-This file is the concise, human-maintained statement of what the repository
-actually contains. Build logs and CI results are stronger evidence than this
-file and must override it when they disagree.
+This is the repository's human-maintained source of truth. `AGENTS.MD` defines
+the intended product; this file states what the current implementation actually
+delivers. CI artifacts can prove a build or journey passed, but generated scores
+and reports never override the functional boundaries documented here.
 
-## Implemented foundation
+## Product status
 
-- Rust/Slint application binaries for Writer, Sheets, Present, Photo, Motion,
+Loom is a local-first Rust/Slint creator-suite **functional alpha** composed of
+working reference engines, desktop applications, native package formats, and
+cross-platform validation infrastructure.
+
+It is not yet a complete replacement for mature commercial office, image,
+motion, video, audio, or delivery products. No application currently satisfies
+all requirements assigned to it in `AGENTS.MD`.
+
+A repository-readiness score produced by
+`loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
+visual, packaging, and journey evidence. It is **not** a percentage of feature
+parity or product completion.
+
+## Implemented foundations
+
+- Eight Rust/Slint desktop applications: Writer, Sheets, Present, Photo, Motion,
   Video, Studio, and Encode.
-- Shared package, command, job, history, storage, text, color, UI, testing,
-  Vision, and plugin-SDK crates.
-- Versioned Loom project packages and sample projects.
-- Headless smoke/screenshot paths and suite orchestration scripts.
-- Light, dark, and high-contrast design tokens.
-- Local-first architecture with no mandatory account or cloud service.
+- Shared package, runtime, job, history, storage, text, color, UI, test, Vision,
+  interoperability, and plugin-SDK crates.
+- Versioned local project packages and positional document-open paths.
+- Bounded undo/redo foundations and crash-recovery snapshots in all application
+  front ends, with depth varying by application.
+- Light, dark, and high-contrast design tokens and adaptive desktop layouts.
+- Headless screenshot, smoke, CLI-functional, package, and native matrix tooling.
+- No mandatory account, cloud service, telemetry, or hidden network dependency.
 
-## Functional application boundaries
+## Current application boundaries
 
-- **Writer:** editable document surface, bounded/coalesced undo and redo, crash
-  recovery, Loom package persistence, Markdown-oriented workflows, and PDF
-  output. It is not yet a complete rich-text/page-layout engine.
-- **Sheets:** formula engine, package persistence, CSV workflows, selected-cell
-  editing, undo and redo, and a visible grid. Large-grid virtualization,
-  advanced charts, pivots, and broad office-format compatibility are incomplete.
-- **Present:** deck/slide model, selection, notes, layouts, bounded undo and redo,
-  persistence, transitions, validation, and PDF output. The canvas is not yet a
-  complete direct-manipulation presentation editor.
-- **Photo:** local raster decoding, layers, blend modes, adjustments, compositing,
-  undo and redo, persistence, and PNG/JPEG export. Painting, masks, advanced
-  selection tools, RAW workflows, and GPU effects remain incomplete.
-- **Motion:** layer and keyframe editing, interpolation, persisted transforms,
-  bounded undo and redo, crash recovery, timeline controls, and deterministic
-  SVG frame export. GPU composition rendering, synchronized real-time playback,
-  tracking, particles, and professional effects remain incomplete.
-- **Video:** track and clip editing, local media probing/preview decoding,
-  timeline operations, undo and redo, persistence, FFmpeg-backed export, and
-  cancellation. Full synchronized playback, proxy workflows, GPU effects, and
-  broad professional codec/container coverage remain incomplete.
-- **Studio:** local project editing, track and region operations, PCM/WAV handling,
-  MIDI/oscillator synthesis, stereo mixing, undo and redo, persistence, and local
-  audio/MIDI device foundations. Production plugin hosting, process isolation,
-  recording workflows, and complete real-time DAW behavior remain incomplete.
-- **Encode:** editable FFmpeg-backed batch queue, presets, truthful progress,
-  cancellation, retry, persisted crash recovery, and queue-edit undo and redo.
-  History state is refreshed on the Slint event loop through an owned shared
-  application state, avoiding borrowed state escaping across threads. Hardware
-  acceleration policy, exhaustive codec/container coverage, distributed encoding,
-  and production output conformance testing remain incomplete.
-- **Vision:** provider/model-pack architecture and CPU reference capabilities
-  exist; production-quality OCR, segmentation, tracking, evaluated model packs,
-  and redistributable acceleration backends remain incomplete.
-- **Plugin SDK:** manifest, package, permission, defensive WebAssembly validation,
-  trust, update, and rollback foundations exist; complete host ABIs, production
-  UI embedding, signing infrastructure, and broad application integration remain
+- **Writer:** editable paragraph surface, block model, style-run persistence,
+  bounded/coalesced history, recovery, search/pagination foundations, Markdown
+  workflows, and PDF output. Toolbar formatting state is not yet a complete
+  selection-aware rich-text editing path. Professional page layout, floating
+  objects, citations, forms, mail merge, EPUB, and high-fidelity DOCX/ODT remain
   incomplete.
+- **Sheets:** formulas, dependency and incremental-recalculation foundations,
+  named ranges, validation, conditional predicates, filtering/sorting, CSV
+  workflows, persistence, history, and a visible grid. Large-grid
+  virtualization, rich formatting, charts, pivots, broad function coverage,
+  XLSX/ODS fidelity, and data connectors remain incomplete.
+- **Present:** deck/slide models, layouts, notes, transitions, scene generation,
+  validation, persistence, history, and PDF output. Full direct manipulation,
+  masters, mixed media, animation authoring, presenter workflows, recording,
+  video export, and PPTX/ODP fidelity remain incomplete.
+- **Photo:** raster decode, pixel buffers, layers, blend modes, adjustment and
+  mask foundations, compositing, crop/resize, persistence, history, and
+  PNG/JPEG export. Painting, production masks/selections, RAW/ICC, healing,
+  warping, HDR/panorama, PSD fidelity, GPU effects, and production AI editing
+  remain incomplete.
+- **Motion:** layer/keyframe models, interpolation, transform manipulation,
+  ordering, validation, persistence, bounded history, frame sampling, and SVG
+  frame export. A production compositor, synchronized playback, cameras/lights,
+  particles, effects, tracking, stabilization, optical flow, and render-queue
+  breadth remain incomplete.
+- **Video:** track/clip models, trim/split/speed/ripple operations, markers,
+  captions, local probing and preview decode, persistence, history, FFmpeg-backed
+  export, progress, and cancellation. Synchronized timeline playback, real proxy
+  workflows, multicam, advanced trims, professional audio/color/effects, HDR,
+  transcription/tracking, and interchange remain incomplete.
+- **Studio:** track/region models, PCM/WAV handling, oscillator and MIDI synthesis,
+  automation interpolation, stereo mixing, persistence, history, and local
+  audio/MIDI device foundations. Production recording, realtime scheduling,
+  complete editing/mixing, comping, time/pitch tools, CLAP/VST3 hosting,
+  isolation, plugin UI, spatial audio, and mastering remain incomplete.
+- **Encode:** editable FFmpeg queue, deterministic command plans, local backend
+  discovery, presets, execution, progress, cancellation, retry, persistence,
+  recovery, and queue history. Complete source controls, hardware policy,
+  exhaustive formats, pause/resume guarantees, watch folders, multi-destination
+  dependency workflows, and perceptual conformance remain incomplete.
 
-## Current UI and functional audit
+## Evidence boundaries
 
-- All eight apps use the shared graphite/copper token system, common application
-  header, semantic light/dark/high-contrast palettes, and shared professional
-  workspace components.
-- Shared buttons, tabs, segmented controls, sliders, transport controls, and
-  workspace rows expose keyboard and accessibility behavior through the Slint
-  component layer.
-- Applications accept an associated document path as the first positional
-  argument as well as through `--open`. Native file-picker/menu integration
-  remains incomplete.
-- Motion transform controls mutate persisted keyframes rather than status text;
-  its history coalesces repeated edits and its SVG export serializes a sampled
-  composition frame.
-- Encode locks queue editing and history controls while FFmpeg owns the queue;
-  user queue edits can be undone and redone independently of runtime progress.
-- CI checks callback wiring, production panic patterns, product-readiness scores,
-  all Cargo workspaces, release builds, and distinct light/dark/high-contrast
-  screenshots.
+### Keyboard journeys
 
-## Functional audit milestone (August 2026, branch `chatgpt/loom-ui-functional-audit-2`)
+All applications expose a shared command palette and a journey recorder that
+dispatches real key events for typing, filtering, navigation, Return, and
+Escape. Current Slint public APIs cannot inject the Ctrl/Cmd modifier, so the
+open step calls the same host function used by the shortcut. The recorder also
+verifies palette state rather than every invoked command's domain mutation.
 
-- The eight committed sample projects in `loom-samples/` were regenerated by the
-  current CLI toolchains so every sample matches the current versioned package
-  format (manifest.json + content payload). The previous committed samples were
-  stale and rejected by the application loaders.
-- Linux container gates pass for all eight workspaces: `cargo fmt --check`,
-  `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
-  `cargo test --workspace`, and `cargo build --workspace --release`.
-- The Linux native functional matrix passes 8/8 applications: create/validate/
-  inspect/search/paginate/export journeys for Writer, evaluation and CSV round
-  trips for Sheets, PDF export for Present, composite renders for Photo,
-  animation frames for Motion, project creation for Video and Encode, and WAV
-  exports for Studio.
-- The Linux native UI matrix passes 8 applications × 3 themes × 3 sizes plus a
-  per-app sample-open journey: every capture is a valid, distinct, plausible
-  PNG and opening a sample changes the rendered state.
-- A Debian package (`loom-creator-suite_0.1.0_arm64.deb`) builds with per-app
-  document associations from the release binaries.
-- Measured with the evidence pipeline, the product readiness audit reports
-  UI 9.5/10 and functionality 8.11/10 (see `audit-product-readiness.py`).
-  Remaining blockers: a full keyboard journey recorder, native shell extras
-  (menus, file pickers, drag and drop, recent documents), and functional
-  completion of the Vision/plugin/interop/engine dimensions.
+Therefore these journeys are useful regression evidence, but they do not prove
+complete keyboard-only application operation or complete command semantics.
 
-## Measured product score policy
+### Native UI matrix
 
-- `loom-bootstrap/scripts/audit-product-readiness.py` reports UI and functionality
-  separately on a ten-point evidence scale. The score is derived from source,
-  tests, native packaging, and screenshot workflows; it is not manually declared.
-- Ten out of ten is reserved for complete adaptive user journeys, native platform
-  integration, production engines, interoperability, accessibility, and measured
-  reliability. A passing regression floor is not equivalent to a 10/10 product.
-- Windows x86-64, macOS Apple silicon, and macOS Intel build release binaries,
-  render all eight apps in light/dark/high-contrast, run native smoke paths, build
-  MSI/DMG validation packages, and upload those packages and screenshots for review.
-- Native document associations are emitted by Linux, Windows, and macOS packages;
-  every application accepts an associated document path as its first positional
-  argument as well as through `--open`.
+The native UI matrix proves that each binary can render valid, distinct
+light/dark/high-contrast images at three desktop sizes, open a generated sample
+through the positional path, run a smoke path, and display the palette overlay.
+A palette screenshot proves overlay rendering only.
+
+### Functional matrix
+
+The native functional matrix executes real CLI operations and validates native
+Loom packages and selected exported file signatures. Its journeys are shallow
+reference-engine checks; they do not prove complete in-application editing
+workflows.
+
+### Interoperability corpus
+
+The committed minimal DOCX/XLSX/PPTX/ODT/ODS/ODP/PSD/text fixtures currently
+exercise content-based format detection. They are not round-trip fidelity,
+layout compatibility, formula preservation, animation preservation, or layered
+PSD conformance tests.
+
+## Packaging status
+
+The branch builds the complete suite on Linux x86-64, Windows x86-64, macOS
+Apple silicon, and macOS Intel in the native matrix. Packaging source now uses
+WiX v4-compatible package metadata and bounded retry for transient macOS
+`hdiutil` failures. Those fixes require a fresh CI run before all four package
+jobs can be called verified.
+
+## Audit and documentation policy
+
+- Root-level project prose is limited to `AGENTS.MD`, `README.md`, and
+  `TRUTH.md`.
+- Generated verification, accessibility, performance, security, dependency,
+  and visual reports belong in CI artifacts or `.work`, not source control.
+- A source token, callback name, visible control, screenshot, or generated
+  fixture does not by itself prove a feature is implemented.
+- A feature is complete only when its engine behavior, UI access, persistence,
+  history, failures, tests, and end-to-end user result are all evidenced.
+- Audit checks must not be weakened merely to permit a generated artifact or
+  raise a score.
 
 ## Non-negotiable direction
 
 - Rust + Slint; no UI-framework rewrite.
-- Linux first, cross-platform architecture.
 - Local-first and offline-capable.
-- No telemetry, mandatory account, or hidden network access.
-- Original Loom visual identity: graphite surfaces, warm copper accent, compact
-  professional controls, progressive disclosure, and functional motion.
-- Static mockups and fake progress never count as implemented features.
-- Keep `AGENTS.MD`, `README.md`, and `TRUTH.md` as the root-level project prose.
-  Put durable technical details next to code, schemas, tests, and fixtures.
-
-## End-to-end implementation tranche (August 2026)
-
-The repository contains executable reference implementations for the
-cross-suite foundations that were previously only described in specifications:
-
-- `loom-runtime`: deterministic settings, platform paths, atomic writes,
-  crash-recovery snapshots, bounded/redactable diagnostics, shortcut conflict
-  management, multi-format clipboard payloads, recent files, and autosave timing.
-- Writer: document search/replace, generated table of contents, deterministic
-  pagination, comments, tracked revisions, bookmarks, and table models.
-- Sheets: named ranges, validation, conditional-format predicates, row filters,
-  range sorting, dependency graphs, and incremental recalculation.
-- Present: bounded undo/redo sessions, slide duplication/reordering, element
-  transforms, transitions, normalized render scenes, and deck validation.
-- Photo: validated RGBA buffers, crop/resize, masks, blend modes, adjustment
-  layers, deterministic compositing, and raster export.
-- Motion: ordered keyframes, easing/interpolation, frame sampling, transform
-  history, SVG-frame export, layer reordering, validation, and bounded ranges.
-- Video: trim/split/speed operations, ripple moves/removal, markers, captions,
-  overlap detection, render plans, preview decoding, and FFmpeg-backed export.
-- Studio: validated PCM buffers, WAV export, oscillator/MIDI synthesis,
-  automation interpolation, region moves, project validation, and stereo mixing.
-- Encode: local FFmpeg discovery, deterministic command planning, queue history,
-  progress parsing, interruption recovery, process execution, and truthful states.
-- Loom Vision: CPU reference QR, statistics, threshold segmentation, document
-  region detection, image embeddings, and audio analysis, all local and
-  cancellable where work is iterative.
-- Plugin SDK: defensive package installation, bounded WebAssembly binary
-  validation, capability/path checks, entry-export validation, and optional
-  local Wasmtime execution with time and output limits.
-
-These are functional, testable reference engines and APIs. They do **not** yet
-constitute complete commercial parity with mature office, image, motion, video,
-audio, transcoding, or ML products. Hardware-accelerated render graphs, full
-codec/container coverage, rich interchange compatibility, production OCR and
-learned vision models, full plugin ABI host functions, and exhaustive UI wiring
-remain subsequent engineering work. No placeholder or sample-only path should
-be represented as those capabilities.
+- Original Loom visual identity.
+- No fabricated progress or placeholder behavior represented as complete.
+- Continue all implementation work on
+  `chatgpt/loom-ui-functional-audit-2` until this programme is integrated.
