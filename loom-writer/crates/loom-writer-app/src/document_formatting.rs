@@ -11,25 +11,13 @@ use loom_text::{Alignment, CharacterStyle, FontWeight, StyleRun};
 use loom_writer_core::{RichBlock, WriterDocument};
 
 /// Formatting state reflected by the current document-wide toolbar controls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DocumentFormattingState {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
     pub heading_level: i32,
     pub alignment: i32,
-}
-
-impl Default for DocumentFormattingState {
-    fn default() -> Self {
-        Self {
-            bold: false,
-            italic: false,
-            underline: false,
-            heading_level: 0,
-            alignment: 0,
-        }
-    }
 }
 
 fn mutate_character_styles(
