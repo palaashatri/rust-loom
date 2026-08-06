@@ -81,6 +81,31 @@ for name in (
     if (ROOT / name).exists():
         errors.append(f"root generated report must be a CI artifact, not committed prose: {name}")
 
+# Keep the corrected native-evidence model durable. Palette screenshots are
+# visual evidence only; actual journey executables must run before scoring.
+cross_platform = (ROOT / ".github/workflows/cross-platform.yml").read_text(encoding="utf-8")
+journey_step = cross_platform.find("Record real command-palette keyboard journeys")
+score_step = cross_platform.find("Run suite contracts and strict readiness score")
+package_step = cross_platform.find("Build native validation package")
+if journey_step < 0 or ' --journey ' not in cross_platform:
+    errors.append("native workflow must execute every application --journey recorder")
+if journey_step >= 0 and score_step >= 0 and journey_step > score_step:
+    errors.append("native workflow scores keyboard evidence before journeys run")
+if score_step >= 0 and package_step >= 0 and score_step > package_step:
+    errors.append("native workflow must produce readiness evidence even when packaging fails")
+
+packaging = (ROOT / "loom-bootstrap/packaging/release.py").read_text(encoding="utf-8")
+if 'Platform="{platform}"' in packaging:
+    errors.append("WiX v4 Package must not use the removed Platform attribute")
+if "run_with_retries" not in packaging or "hdiutil" not in packaging:
+    errors.append("macOS DMG creation must retain bounded transient-failure retry")
+
+readiness = (ROOT / "loom-bootstrap/scripts/audit-product-readiness.py").read_text(encoding="utf-8")
+if "not AGENTS.md feature-completion parity" not in readiness:
+    errors.append("readiness output must state that it is not product feature parity")
+if "Ctrl/Cmd+K opening and per-command application side effects" not in readiness:
+    errors.append("readiness audit must retain the keyboard side-effect evidence blocker")
+
 if errors:
     print("Loom contract audit: FAIL", file=sys.stderr)
     for error in errors:
