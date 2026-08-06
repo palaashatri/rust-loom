@@ -98,25 +98,46 @@ jobs:
           from pathlib import Path
 
           path = Path("loom-present/crates/loom-present-app/src/main.rs")
-          text = path.read_text()
-          old = '''    let state = GuiState {
-              session: RefCell::new(initial_session(args)?),
-              selected_element: Cell::new(0),
-          };'''
-          new = '''    let state = GuiState {
-              session: RefCell::new(initial_session(args)?),
-              selected_element: Cell::new(0),
-              save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
-              dialogs: Rc::new(NativeFileDialogs),
-              deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
-                  .map_err(|error| error.to_string())?,
-              pdf_filter: FileFilter::new("PDF document", ["pdf"])
-                  .map_err(|error| error.to_string())?,
-          };'''
-          count = text.count(old)
-          if count != 2:
-              raise SystemExit(f"generated headless GuiState repair expected 2 matches, found {count}")
-          path.write_text(text.replace(old, new))
+          lines = path.read_text().splitlines()
+          output = []
+          block = None
+          patched = 0
+
+          for line in lines:
+              if block is None and "let state = GuiState {" in line:
+                  block = [line]
+                  continue
+
+              if block is not None:
+                  block.append(line)
+                  if line.strip() == "};":
+                      content = "\n".join(block)
+                      if "initial_session(args)?" in content and "save_path:" not in content:
+                          indent = block[0][: len(block[0]) - len(block[0].lstrip())]
+                          closing = block.pop()
+                          block.extend(
+                              [
+                                  f"{indent}    save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),",
+                                  f"{indent}    dialogs: Rc::new(NativeFileDialogs),",
+                                  f'{indent}    deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])',
+                                  f"{indent}        .map_err(|error| error.to_string())?,",
+                                  f'{indent}    pdf_filter: FileFilter::new("PDF document", ["pdf"])',
+                                  f"{indent}        .map_err(|error| error.to_string())?,",
+                                  closing,
+                              ]
+                          )
+                          patched += 1
+                      output.extend(block)
+                      block = None
+                  continue
+
+              output.append(line)
+
+          if block is not None:
+              raise SystemExit("unterminated GuiState initializer")
+          if patched != 2:
+              raise SystemExit(f"generated headless GuiState repair expected 2 blocks, patched {patched}")
+          path.write_text("\n".join(output) + "\n")
           PY
 
       - name: Format and validate Present
