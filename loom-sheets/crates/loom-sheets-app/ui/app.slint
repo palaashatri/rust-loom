@@ -72,17 +72,14 @@ export component SheetsApp inherits Window {
     property <string> formula-edit-buffer: "";
     in property <string> selection-value: "";
 
-    // Retained for compatibility with the current Rust adapter. Only the
-    // persisted single-sheet workbook is surfaced until multi-sheet storage
-    // is implemented in the engine.
-    in-out property <[string]> sheets: ["Sheet 1"];
-    in-out property <int> active-sheet-index: 0;
-    in-out property <int> cell-format-index: 0;
+    // Only the persisted single-sheet workbook is surfaced until
+    // multi-sheet storage and cell-format persistence exist in the engine.
     in-out property <string> formula-feedback: "Ready";
 
     callback new-sheet;
     callback open-sheet;
     callback save-sheet;
+    callback save-as-sheet;
     callback export-csv;
     callback undo;
     callback redo;
@@ -90,9 +87,6 @@ export component SheetsApp inherits Window {
     callback commit-selected-cell(string);
     callback cancel-selected-cell;
     callback quick-formula(string);
-    callback select-sheet(int);
-    callback add-new-sheet;
-    callback set-cell-format(int);
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -118,9 +112,27 @@ export component SheetsApp inherits Window {
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open) { return reject; }
-            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
-                root.open-palette();
-                return accept;
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-sheet();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-sheet();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-sheet(); } else { root.save-sheet(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-csv();
+                    return accept;
+                }
             }
             return reject;
         }
@@ -141,6 +153,7 @@ export component SheetsApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-sheet(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-sheet(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-sheet(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-sheet(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             IconButton { icon: "undo"; label: "Undo"; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; clicked => { root.redo(); } }

@@ -6,9 +6,12 @@
 //! and the offline test mode exercise.
 
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::{
@@ -110,9 +113,13 @@ fn sample_sheet() -> Sheet {
     sheet
 }
 
-fn load_sheet(path: &str) -> Result<Sheet, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
-    if path.to_lowercase().ends_with(".csv") {
+fn load_sheet(path: &Path) -> Result<Sheet, String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
+    {
         let csv = std::str::from_utf8(&bytes).map_err(|e| format!("csv utf8: {e}"))?;
         return Ok(from_csv("imported", csv));
     }
@@ -136,7 +143,7 @@ fn load_sheet(path: &str) -> Result<Sheet, String> {
     sheet_from_json(s).map_err(|e| format!("sheet: {e}"))
 }
 
-fn save_sheet(path: &str, sheet: &Sheet) -> Result<(), String> {
+fn save_sheet(path: &Path, sheet: &Sheet) -> Result<(), String> {
     let mut arch = PackageArchive::new();
     let json = sheet_to_json(sheet);
     arch.add("content/sheet.json", json.clone().into_bytes())
@@ -159,7 +166,7 @@ fn save_sheet(path: &str, sheet: &Sheet) -> Result<(), String> {
     arch.add("manifest.json", manifest_str.into_bytes())
         .map_err(|e| e.to_string())?;
     let bytes = arch.to_bytes().map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|e| format!("write {path}: {e}"))
+    std::fs::write(path, bytes).map_err(|error| format!("write {}: {error}", path.display()))
 }
 
 fn cell_value(
@@ -287,7 +294,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
     let sheet = match &args.open {
-        Some(p) => load_sheet(p)?,
+        Some(p) => load_sheet(Path::new(p))?,
         None => sample_sheet(),
     };
     apply_sheet(&app, &sheet);
@@ -305,12 +312,106 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
 
 struct GuiState {
     current: RefCell<Sheet>,
-    save_path: RefCell<Option<String>>,
+    save_path: RefCell<Option<PathBuf>>,
     undo_stack: RefCell<Vec<String>>,
     redo_stack: RefCell<Vec<String>>,
+    dialogs: Rc<dyn FileDialogService>,
+    workbook_filter: FileFilter,
+    import_filter: FileFilter,
+    csv_filter: FileFilter,
+}
+
+fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
+    path.and_then(Path::parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+fn open_request(state: &GuiState) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open or Import Loom Sheets Workbook".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![state.workbook_filter.clone(), state.import_filter.clone()],
+    }
+}
+
+fn save_request(state: &GuiState) -> SaveFileRequest {
+    let path = state.save_path.borrow();
+    let suggested_name = path
+        .as_deref()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| SAVE_FILENAME.to_string());
+    SaveFileRequest {
+        title: "Save Loom Sheets Workbook".into(),
+        initial_directory: initial_directory(path.as_deref()),
+        suggested_name: Some(suggested_name),
+        filters: vec![state.workbook_filter.clone()],
+    }
+}
+
+fn export_request(state: &GuiState) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Loom Sheets CSV".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(EXPORT_FILENAME.to_string()),
+        filters: vec![state.csv_filter.clone()],
+    }
+}
+
+fn is_native_workbook(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("loomtable"))
+}
+
+fn replace_opened_sheet(app: &SheetsApp, state: &GuiState, path: PathBuf, sheet: Sheet) {
+    *state.current.borrow_mut() = sheet;
+    *state.save_path.borrow_mut() = is_native_workbook(&path).then_some(path);
+    state.undo_stack.borrow_mut().clear();
+    state.redo_stack.borrow_mut().clear();
+    apply_sheet(app, &state.current.borrow());
+}
+
+fn save_current_sheet(
+    app: &SheetsApp,
+    state: &GuiState,
+    force_picker: bool,
+) -> Result<bool, String> {
+    let current_path = (!force_picker)
+        .then(|| state.save_path.borrow().clone())
+        .flatten();
+    let path = match current_path {
+        Some(path) => Some(path),
+        None => state
+            .dialogs
+            .save_file(&save_request(state))
+            .map_err(|error| error.to_string())?,
+    };
+    let Some(path) = path else {
+        app.set_status_left("Save cancelled".into());
+        return Ok(false);
+    };
+    save_sheet(&path, &state.current.borrow())?;
+    *state.save_path.borrow_mut() = Some(path.clone());
+    checkpoint_snapshot_recovery(sheet_to_json(&state.current.borrow()).into_bytes()).map_err(
+        |error| {
+            format!(
+                "saved {}, but recovery checkpoint failed: {error}",
+                path.display()
+            )
+        },
+    )?;
+    app.set_status_left(SharedString::from(format!("Saved {}", path.display())));
+    Ok(true)
 }
 
 fn run_gui(args: &Args) -> Result<(), String> {
+    run_gui_with_dialogs(args, Rc::new(NativeFileDialogs))
+}
+
+fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
     app.window()
@@ -318,18 +419,28 @@ fn run_gui(args: &Args) -> Result<(), String> {
 
     let recovered = initialize_snapshot_recovery()?;
     let initial_sheet = match &args.open {
-        Some(path) => load_sheet(path)?,
+        Some(path) => load_sheet(Path::new(path))?,
         None => recovered
             .as_deref()
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
             .and_then(|json| sheet_from_json(json).ok())
             .unwrap_or_else(sample_sheet),
     };
+    let workbook_filter = FileFilter::new("Loom Sheets workbook", ["loomtable"])
+        .map_err(|error| error.to_string())?;
+    let import_filter =
+        FileFilter::new("Comma-separated values", ["csv"]).map_err(|error| error.to_string())?;
+    let csv_filter = import_filter.clone();
+    let initial_path = args.open.as_ref().map(PathBuf::from);
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_sheet),
-        save_path: RefCell::new(args.open.clone()),
+        save_path: RefCell::new(initial_path.filter(|path| is_native_workbook(path))),
         undo_stack: RefCell::new(Vec::new()),
         redo_stack: RefCell::new(Vec::new()),
+        dialogs,
+        workbook_filter,
+        import_filter,
+        csv_filter,
     });
 
     {
@@ -337,13 +448,12 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                state
-                    .undo_stack
-                    .borrow_mut()
-                    .push(sheet_to_json(&state.current.borrow()));
-                state.redo_stack.borrow_mut().clear();
                 *state.current.borrow_mut() = sample_sheet();
+                *state.save_path.borrow_mut() = None;
+                state.undo_stack.borrow_mut().clear();
+                state.redo_stack.borrow_mut().clear();
                 apply_sheet(&app, &state.current.borrow());
+                app.set_status_left("Created unsaved workbook".into());
             }
         });
     }
@@ -409,68 +519,32 @@ fn run_gui(args: &Args) -> Result<(), String> {
         });
     }
     {
-        let app_ref = app.as_weak();
-        app.on_select_sheet(move |idx| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_active_sheet_index(idx);
-                app.set_formula_feedback(SharedString::from(format!("Selected Sheet {}", idx + 1)));
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_add_new_sheet(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let current_sheets = app.get_sheets();
-                let mut sheets_vec: Vec<SharedString> = (0..current_sheets.row_count())
-                    .filter_map(|i| current_sheets.row_data(i))
-                    .collect();
-                let next_idx = sheets_vec.len() + 1;
-                sheets_vec.push(SharedString::from(format!("Sheet {next_idx}")));
-                let new_active = (sheets_vec.len() - 1) as i32;
-                app.set_sheets(ModelRc::new(VecModel::from(sheets_vec)));
-                app.set_active_sheet_index(new_active);
-                app.set_formula_feedback(SharedString::from(format!("Added Sheet {next_idx}")));
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_set_cell_format(move |fmt_idx| {
-            if let Some(app) = app_ref.upgrade() {
-                let name = match fmt_idx {
-                    1 => "Number",
-                    2 => "Currency",
-                    3 => "Percentage",
-                    _ => "General",
-                };
-                app.set_formula_feedback(SharedString::from(format!("Format: {name}")));
-            }
-        });
-    }
-    {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_open_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                let p = state
-                    .save_path
-                    .borrow()
-                    .clone()
-                    .unwrap_or_else(|| SAVE_FILENAME.to_string());
-                match load_sheet(&p) {
-                    Ok(sheet) => {
-                        state
-                            .undo_stack
-                            .borrow_mut()
-                            .push(sheet_to_json(&state.current.borrow()));
-                        state.redo_stack.borrow_mut().clear();
-                        *state.current.borrow_mut() = sheet;
-                        apply_sheet(&app, &state.current.borrow());
-                    }
-                    Err(e) => {
-                        app.set_status_left(SharedString::from(format!("open failed: {e}")));
-                    }
+                match state.dialogs.open_file(&open_request(&state)) {
+                    Ok(Some(path)) => match load_sheet(&path) {
+                        Ok(sheet) => {
+                            let imported = !is_native_workbook(&path);
+                            replace_opened_sheet(&app, &state, path.clone(), sheet);
+                            app.set_status_left(SharedString::from(if imported {
+                                format!(
+                                    "Imported {}; use Save As for a Loom workbook",
+                                    path.display()
+                                )
+                            } else {
+                                format!("Opened {}", path.display())
+                            }));
+                        }
+                        Err(error) => {
+                            app.set_status_left(SharedString::from(format!("Open failed: {error}")))
+                        }
+                    },
+                    Ok(None) => app.set_status_left("Open cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Open dialog failed: {error}"
+                    ))),
                 }
             }
         });
@@ -480,26 +554,19 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                let p = state
-                    .save_path
-                    .borrow()
-                    .clone()
-                    .unwrap_or_else(|| SAVE_FILENAME.to_string());
-                match save_sheet(&p, &state.current.borrow()) {
-                    Ok(()) => {
-                        let checkpoint = checkpoint_snapshot_recovery(
-                            sheet_to_json(&state.current.borrow()).into_bytes(),
-                        );
-                        match checkpoint {
-                            Ok(()) => app.set_status_left(SharedString::from(format!("saved {p}"))),
-                            Err(error) => app.set_status_left(SharedString::from(format!(
-                                "saved {p}, but recovery checkpoint failed: {error}"
-                            ))),
-                        }
-                    }
-                    Err(e) => {
-                        app.set_status_left(SharedString::from(format!("save failed: {e}")));
-                    }
+                if let Err(error) = save_current_sheet(&app, &state, false) {
+                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_sheet(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = save_current_sheet(&app, &state, true) {
+                    app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
                 }
             }
         });
@@ -509,13 +576,23 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_export_csv(move || {
             if let Some(app) = app_ref.upgrade() {
-                let csv = to_csv(&state.current.borrow());
-                match std::fs::write(EXPORT_FILENAME, csv) {
-                    Ok(()) => app
-                        .set_status_left(SharedString::from(format!("exported {EXPORT_FILENAME}"))),
-                    Err(e) => {
-                        app.set_status_left(SharedString::from(format!("export failed: {e}")));
+                match state.dialogs.save_file(&export_request(&state)) {
+                    Ok(Some(path)) => {
+                        let csv = to_csv(&state.current.borrow());
+                        match std::fs::write(&path, csv) {
+                            Ok(()) => app.set_status_left(SharedString::from(format!(
+                                "Exported {}",
+                                path.display()
+                            ))),
+                            Err(error) => app.set_status_left(SharedString::from(format!(
+                                "Export failed: {error}"
+                            ))),
+                        }
                     }
+                    Ok(None) => app.set_status_left("Export cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Export dialog failed: {error}"
+                    ))),
                 }
             }
         });
@@ -596,7 +673,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
     let sheet = match &args.open {
-        Some(p) => load_sheet(p)?,
+        Some(p) => load_sheet(Path::new(p))?,
         None => sample_sheet(),
     };
     apply_sheet(&app, &sheet);
@@ -646,12 +723,10 @@ enum PaletteAction {
     NewSheet,
     OpenSheet,
     SaveSheet,
+    SaveAsSheet,
     ExportCsv,
     Undo,
     Redo,
-    AddSheet,
-    GoToSheet(i32),
-    CellFormat(i32),
 }
 
 struct PaletteCommand {
@@ -682,6 +757,12 @@ fn master_palette() -> Vec<PaletteCommand> {
             shortcut: "Ctrl+S",
         },
         PaletteCommand {
+            action: PaletteAction::SaveAsSheet,
+            id: "sheets.save-as",
+            label: "Save Sheet As",
+            shortcut: "Ctrl+Shift+S",
+        },
+        PaletteCommand {
             action: PaletteAction::ExportCsv,
             id: "sheets.export-csv",
             label: "Export CSV",
@@ -698,54 +779,6 @@ fn master_palette() -> Vec<PaletteCommand> {
             id: "sheets.redo",
             label: "Redo",
             shortcut: "Ctrl+Shift+Z",
-        },
-        PaletteCommand {
-            action: PaletteAction::AddSheet,
-            id: "sheets.add-sheet",
-            label: "Add New Sheet",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::GoToSheet(0),
-            id: "sheets.goto-1",
-            label: "Go To Sheet 1",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::GoToSheet(1),
-            id: "sheets.goto-2",
-            label: "Go To Sheet 2",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::GoToSheet(2),
-            id: "sheets.goto-3",
-            label: "Go To Sheet 3",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::CellFormat(0),
-            id: "sheets.format.general",
-            label: "Format: General",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::CellFormat(1),
-            id: "sheets.format.number",
-            label: "Format: Number",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::CellFormat(2),
-            id: "sheets.format.currency",
-            label: "Format: Currency",
-            shortcut: "",
-        },
-        PaletteCommand {
-            action: PaletteAction::CellFormat(3),
-            id: "sheets.format.percentage",
-            label: "Format: Percentage",
-            shortcut: "",
         },
     ]
 }
@@ -852,12 +885,10 @@ fn wire_palette(app: &SheetsApp) {
                         PaletteAction::NewSheet => app.invoke_new_sheet(),
                         PaletteAction::OpenSheet => app.invoke_open_sheet(),
                         PaletteAction::SaveSheet => app.invoke_save_sheet(),
+                        PaletteAction::SaveAsSheet => app.invoke_save_as_sheet(),
                         PaletteAction::ExportCsv => app.invoke_export_csv(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
-                        PaletteAction::AddSheet => app.invoke_add_new_sheet(),
-                        PaletteAction::GoToSheet(index) => app.invoke_select_sheet(index),
-                        PaletteAction::CellFormat(index) => app.invoke_set_cell_format(index),
                     }
                 }
             }
@@ -868,6 +899,36 @@ fn wire_palette(app: &SheetsApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scripted_dialog_request_uses_current_workbook_directory() {
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+            [Some(PathBuf::from("/tmp/import.csv"))],
+            [Some(PathBuf::from("/tmp/workbook.loomtable"))],
+        ));
+        let state = GuiState {
+            current: RefCell::new(sample_sheet()),
+            save_path: RefCell::new(Some(PathBuf::from("/tmp/current.loomtable"))),
+            undo_stack: RefCell::new(Vec::new()),
+            redo_stack: RefCell::new(Vec::new()),
+            dialogs,
+            workbook_filter: FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+            import_filter: FileFilter::new("CSV", ["csv"]).expect("filter"),
+            csv_filter: FileFilter::new("CSV", ["csv"]).expect("filter"),
+        };
+        let request = open_request(&state);
+        assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
+        assert_eq!(
+            state.dialogs.open_file(&request).expect("open"),
+            Some(PathBuf::from("/tmp/import.csv"))
+        );
+    }
+
+    #[test]
+    fn csv_import_does_not_become_native_save_target() {
+        assert!(!is_native_workbook(Path::new("budget.csv")));
+        assert!(is_native_workbook(Path::new("budget.loomtable")));
+    }
 
     #[test]
     fn formula_bar_draft_is_not_applied_before_commit() {
