@@ -4,6 +4,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_photo_core::{
     decode_raster, encode_jpeg, encode_png, load_photo, load_photo_canvas, save_photo_canvas,
     BlendMode, Layer, PhotoCanvas, PhotoDocument, PhotoSession, RgbaImage,
@@ -18,8 +21,9 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const SAVE_FILENAME: &str = "image.loomphoto";
-const DEFAULT_EXPORT_FILENAME: &str = "loom-photo-export.png";
+const SAVE_FILENAME: &str = "untitled-photo.loomphoto";
+const PNG_EXPORT_FILENAME: &str = "loom-photo-export.png";
+const JPEG_EXPORT_FILENAME: &str = "loom-photo-export.jpg";
 
 loom_production::define_snapshot_recovery!(PHOTO_RECOVERY, "org.loom.photo", "loom.photo/1");
 
@@ -72,6 +76,16 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+fn blank_canvas() -> Result<PhotoCanvas, String> {
+    let width = 1920;
+    let height = 1080;
+    let mut document = PhotoDocument::new("untitled-photo", "Untitled Photo", width, height);
+    document.dpi = 144;
+    let mut canvas = PhotoCanvas::new(document)?;
+    canvas.set_layer_image("layer-bg", RgbaImage::transparent(width, height)?)?;
+    Ok(canvas)
+}
+
 fn sample_canvas() -> Result<PhotoCanvas, String> {
     let width = 960;
     let height = 540;
@@ -122,17 +136,37 @@ fn sample_canvas() -> Result<PhotoCanvas, String> {
     Ok(canvas)
 }
 
-fn initial_canvas(args: &Args) -> Result<PhotoCanvas, String> {
-    let Some(path) = args.open.as_deref() else {
-        return sample_canvas();
-    };
+fn load_project(path: &Path) -> Result<PhotoCanvas, String> {
     let bytes = std::fs::read(path)
-        .map_err(|error| format!("failed to read photo project '{path}': {error}"))?;
+        .map_err(|error| format!("failed to read photo project '{}': {error}", path.display()))?;
     load_photo_canvas(&bytes).or_else(|_| {
-        let document = load_photo(&bytes)
-            .map_err(|error| format!("failed to load photo project '{path}': {error}"))?;
+        let document = load_photo(&bytes).map_err(|error| {
+            format!("failed to load photo project '{}': {error}", path.display())
+        })?;
         PhotoCanvas::new(document)
     })
+}
+
+fn load_raster_canvas(path: &Path) -> Result<PhotoCanvas, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("failed to read image '{}': {error}", path.display()))?;
+    let image = decode_raster(&bytes)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Imported Image");
+    let mut document = PhotoDocument::new("imported-photo", name, image.width, image.height);
+    document.dpi = 144;
+    let mut canvas = PhotoCanvas::new(document)?;
+    canvas.set_layer_image("layer-bg", image)?;
+    Ok(canvas)
+}
+
+fn initial_canvas(args: &Args) -> Result<PhotoCanvas, String> {
+    match args.open.as_deref() {
+        Some(path) => load_project(Path::new(path)),
+        None => sample_canvas(),
+    }
 }
 
 fn adjustment_value(document: &PhotoDocument, kind: &str) -> f32 {
@@ -226,6 +260,8 @@ enum PaletteAction {
     NewProject,
     OpenProject,
     SaveProject,
+    SaveAsProject,
+    ImportImage,
     Undo,
     Redo,
     AddLayer,
@@ -263,6 +299,18 @@ fn master_palette(app: &PhotoApp) -> Vec<PaletteCommand> {
             id: "photo.save",
             label: "Save Project",
             shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveAsProject,
+            id: "photo.save-as",
+            label: "Save Project As",
+            shortcut: "Ctrl+Shift+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::ImportImage,
+            id: "photo.import-image",
+            label: "Import PNG or JPEG",
+            shortcut: "Ctrl+I",
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -385,6 +433,186 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 
 struct GuiState {
     session: RefCell<PhotoSession>,
+    save_path: RefCell<Option<PathBuf>>,
+    dialogs: Rc<dyn FileDialogService>,
+    project_filter: FileFilter,
+    raster_filter: FileFilter,
+    png_filter: FileFilter,
+    jpeg_filter: FileFilter,
+}
+
+#[derive(Clone, Copy)]
+enum ExportKind {
+    Png,
+    Jpeg,
+}
+
+impl ExportKind {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Png => "Export Loom Photo PNG",
+            Self::Jpeg => "Export Loom Photo JPEG",
+        }
+    }
+
+    fn suggested_name(self) -> &'static str {
+        match self {
+            Self::Png => PNG_EXPORT_FILENAME,
+            Self::Jpeg => JPEG_EXPORT_FILENAME,
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+        }
+    }
+}
+
+fn new_gui_state(
+    session: PhotoSession,
+    save_path: Option<PathBuf>,
+    dialogs: Rc<dyn FileDialogService>,
+) -> Result<GuiState, String> {
+    Ok(GuiState {
+        session: RefCell::new(session),
+        save_path: RefCell::new(save_path),
+        dialogs,
+        project_filter: FileFilter::new("Loom Photo project", ["loomphoto"])
+            .map_err(|error| error.to_string())?,
+        raster_filter: FileFilter::new("PNG or JPEG image", ["png", "jpg", "jpeg"])
+            .map_err(|error| error.to_string())?,
+        png_filter: FileFilter::new("PNG image", ["png"]).map_err(|error| error.to_string())?,
+        jpeg_filter: FileFilter::new("JPEG image", ["jpg", "jpeg"])
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
+    path.and_then(Path::parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+fn open_project_request(state: &GuiState) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Loom Photo Project".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![state.project_filter.clone()],
+    }
+}
+
+fn import_image_request(state: &GuiState) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Import PNG or JPEG Image".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![state.raster_filter.clone()],
+    }
+}
+
+fn save_project_request(state: &GuiState) -> SaveFileRequest {
+    let path = state.save_path.borrow().clone();
+    let suggested_name = path
+        .as_deref()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| SAVE_FILENAME.to_string());
+    SaveFileRequest {
+        title: "Save Loom Photo Project".into(),
+        initial_directory: initial_directory(path.as_deref()),
+        suggested_name: Some(suggested_name),
+        filters: vec![state.project_filter.clone()],
+    }
+}
+
+fn export_request(state: &GuiState, kind: ExportKind) -> SaveFileRequest {
+    SaveFileRequest {
+        title: kind.title().into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(kind.suggested_name().to_string()),
+        filters: vec![match kind {
+            ExportKind::Png => state.png_filter.clone(),
+            ExportKind::Jpeg => state.jpeg_filter.clone(),
+        }],
+    }
+}
+
+fn is_native_project(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("loomphoto"))
+}
+
+fn ensure_extension(mut path: PathBuf, extension: &str) -> PathBuf {
+    if path.extension().is_none() {
+        path.set_extension(extension);
+    }
+    path
+}
+
+fn save_current_project(
+    app: &PhotoApp,
+    state: &GuiState,
+    force_picker: bool,
+) -> Result<bool, String> {
+    let existing = (!force_picker)
+        .then(|| state.save_path.borrow().clone())
+        .flatten();
+    let path = match existing {
+        Some(path) => Some(path),
+        None => state
+            .dialogs
+            .save_file(&save_project_request(state))
+            .map_err(|error| error.to_string())?,
+    };
+    let Some(path) = path else {
+        set_status(app, "Save cancelled");
+        return Ok(false);
+    };
+    let path = ensure_extension(path, "loomphoto");
+    let bytes = save_photo_canvas(&state.session.borrow().canvas)?;
+    std::fs::write(&path, &bytes)
+        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    *state.save_path.borrow_mut() = Some(path.clone());
+    match checkpoint_snapshot_recovery(bytes) {
+        Ok(()) => set_status(app, format!("Saved {}", path.display())),
+        Err(error) => set_status(
+            app,
+            format!(
+                "Saved {}, but recovery checkpoint failed: {error}",
+                path.display()
+            ),
+        ),
+    }
+    Ok(true)
+}
+
+fn export_current_image(
+    app: &PhotoApp,
+    state: &GuiState,
+    kind: ExportKind,
+) -> Result<bool, String> {
+    let path = state
+        .dialogs
+        .save_file(&export_request(state, kind))
+        .map_err(|error| error.to_string())?;
+    let Some(path) = path else {
+        set_status(app, "Export cancelled");
+        return Ok(false);
+    };
+    let path = ensure_extension(path, kind.extension());
+    let image = state.session.borrow().canvas.composite()?;
+    let bytes = match kind {
+        ExportKind::Png => encode_png(&image)?,
+        ExportKind::Jpeg => encode_jpeg(&image, 92)?,
+    };
+    std::fs::write(&path, bytes)
+        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    set_status(app, format!("Exported {}", path.display()));
+    Ok(true)
 }
 
 /// Record the keyboard command-palette journey with per-step screenshots.
@@ -435,19 +663,6 @@ impl PaletteProbe for PhotoApp {
 
 fn set_status(app: &PhotoApp, message: impl Into<SharedString>) {
     app.set_status_left(message.into());
-}
-
-fn normalize_export_path(value: &str, extension: &str) -> PathBuf {
-    let value = value.trim();
-    let mut path = if value.is_empty() {
-        PathBuf::from(DEFAULT_EXPORT_FILENAME)
-    } else {
-        PathBuf::from(value)
-    };
-    if path.extension().is_none() {
-        path.set_extension(extension);
-    }
-    path
 }
 
 fn update_adjustment(state: &GuiState, app: &PhotoApp, kind: &str, display_name: &str, value: f32) {
@@ -507,9 +722,16 @@ fn main() -> Result<(), String> {
             .and_then(|bytes| load_photo_canvas(bytes).ok())
             .unwrap_or(initial_canvas(&args)?)
     };
-    let state = Rc::new(GuiState {
-        session: RefCell::new(PhotoSession::new(initial)),
-    });
+    let initial_path = args
+        .open
+        .as_ref()
+        .map(PathBuf::from)
+        .filter(|path| is_native_project(path));
+    let state = Rc::new(new_gui_state(
+        PhotoSession::new(initial),
+        initial_path,
+        Rc::new(NativeFileDialogs),
+    )?);
 
     macro_rules! mutate_and_refresh {
         ($callback:ident, $body:expr) => {{
@@ -527,30 +749,47 @@ fn main() -> Result<(), String> {
         }};
     }
 
-    mutate_and_refresh!(on_new_project, |session: &mut PhotoSession| {
-        if let Ok(canvas) = sample_canvas() {
-            *session = PhotoSession::new(canvas);
-        }
-    });
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_new_project(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match blank_canvas() {
+                    Ok(canvas) => {
+                        *state.session.borrow_mut() = PhotoSession::new(canvas);
+                        *state.save_path.borrow_mut() = None;
+                        if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
+                            set_status(&app, format!("New project failed: {error}"));
+                        } else {
+                            set_status(&app, "Created unsaved photo project");
+                        }
+                    }
+                    Err(error) => set_status(&app, format!("New project failed: {error}")),
+                }
+            }
+        });
+    }
 
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_open_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                match std::fs::read(SAVE_FILENAME)
-                    .map_err(|error| error.to_string())
-                    .and_then(|bytes| load_photo_canvas(&bytes))
-                {
-                    Ok(canvas) => {
-                        *state.session.borrow_mut() = PhotoSession::new(canvas);
-                        if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
-                            set_status(&app, format!("Open preview failed: {error}"));
-                        } else {
-                            set_status(&app, format!("Opened {SAVE_FILENAME}"));
+                match state.dialogs.open_file(&open_project_request(&state)) {
+                    Ok(Some(path)) => match load_project(&path) {
+                        Ok(canvas) => {
+                            *state.session.borrow_mut() = PhotoSession::new(canvas);
+                            *state.save_path.borrow_mut() = Some(path.clone());
+                            if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
+                                set_status(&app, format!("Open preview failed: {error}"));
+                            } else {
+                                set_status(&app, format!("Opened {}", path.display()));
+                            }
                         }
-                    }
-                    Err(error) => set_status(&app, format!("Open failed: {error}")),
+                        Err(error) => set_status(&app, format!("Open failed: {error}")),
+                    },
+                    Ok(None) => set_status(&app, "Open cancelled"),
+                    Err(error) => set_status(&app, format!("Open dialog failed: {error}")),
                 }
             }
         });
@@ -561,15 +800,20 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                match save_photo_canvas(&state.session.borrow().canvas) {
-                    Ok(bytes) => match std::fs::write(SAVE_FILENAME, &bytes)
-                        .map_err(|error| error.to_string())
-                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
-                    {
-                        Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
-                        Err(error) => set_status(&app, format!("Save/checkpoint failed: {error}")),
-                    },
-                    Err(error) => set_status(&app, format!("Save failed: {error}")),
+                if let Err(error) = save_current_project(&app, &state, false) {
+                    set_status(&app, format!("Save failed: {error}"));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_project(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = save_current_project(&app, &state, true) {
+                    set_status(&app, format!("Save As failed: {error}"));
                 }
             }
         });
@@ -736,44 +980,29 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_import_image(move |path| {
+        app.on_import_image(move || {
             if let Some(app) = app_ref.upgrade() {
-                let path = path.trim();
-                if path.is_empty() {
-                    set_status(&app, "Enter a PNG or JPEG path first");
-                    return;
-                }
-                match std::fs::read(path)
-                    .map_err(|error| error.to_string())
-                    .and_then(|bytes| decode_raster(&bytes))
-                {
-                    Ok(image) => {
-                        let mut document = PhotoDocument::new(
-                            "imported-photo",
-                            Path::new(path)
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .unwrap_or("Imported Image"),
-                            image.width,
-                            image.height,
-                        );
-                        document.dpi = 144;
-                        let mut canvas = match PhotoCanvas::new(document) {
-                            Ok(canvas) => canvas,
-                            Err(error) => {
-                                set_status(&app, format!("Import failed: {error}"));
-                                return;
+                match state.dialogs.open_file(&import_image_request(&state)) {
+                    Ok(Some(path)) => match load_raster_canvas(&path) {
+                        Ok(canvas) => {
+                            *state.session.borrow_mut() = PhotoSession::new(canvas);
+                            *state.save_path.borrow_mut() = None;
+                            if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
+                                set_status(&app, format!("Import preview failed: {error}"));
+                            } else {
+                                set_status(
+                                    &app,
+                                    format!(
+                                        "Imported {}; save as a Loom Photo project to preserve edits",
+                                        path.display()
+                                    ),
+                                );
                             }
-                        };
-                        if let Err(error) = canvas.set_layer_image("layer-bg", image) {
-                            set_status(&app, format!("Import failed: {error}"));
-                            return;
                         }
-                        *state.session.borrow_mut() = PhotoSession::new(canvas);
-                        let _ = refresh_photo(&app, &state.session.borrow());
-                        set_status(&app, format!("Imported {path}"));
-                    }
-                    Err(error) => set_status(&app, format!("Import failed: {error}")),
+                        Err(error) => set_status(&app, format!("Import failed: {error}")),
+                    },
+                    Ok(None) => set_status(&app, "Import cancelled"),
+                    Err(error) => set_status(&app, format!("Import dialog failed: {error}")),
                 }
             }
         });
@@ -782,21 +1011,10 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_export_png(move |path| {
+        app.on_export_png(move || {
             if let Some(app) = app_ref.upgrade() {
-                let target = normalize_export_path(path.as_str(), "png");
-                let result = state
-                    .session
-                    .borrow()
-                    .canvas
-                    .composite()
-                    .and_then(|image| encode_png(&image))
-                    .and_then(|bytes| {
-                        std::fs::write(&target, bytes).map_err(|error| error.to_string())
-                    });
-                match result {
-                    Ok(()) => set_status(&app, format!("Exported {}", target.display())),
-                    Err(error) => set_status(&app, format!("Export failed: {error}")),
+                if let Err(error) = export_current_image(&app, &state, ExportKind::Png) {
+                    set_status(&app, format!("PNG export failed: {error}"));
                 }
             }
         });
@@ -805,21 +1023,10 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_export_jpeg(move |path| {
+        app.on_export_jpeg(move || {
             if let Some(app) = app_ref.upgrade() {
-                let target = normalize_export_path(path.as_str(), "jpg");
-                let result = state
-                    .session
-                    .borrow()
-                    .canvas
-                    .composite()
-                    .and_then(|image| encode_jpeg(&image, 92))
-                    .and_then(|bytes| {
-                        std::fs::write(&target, bytes).map_err(|error| error.to_string())
-                    });
-                match result {
-                    Ok(()) => set_status(&app, format!("Exported {}", target.display())),
-                    Err(error) => set_status(&app, format!("Export failed: {error}")),
+                if let Err(error) = export_current_image(&app, &state, ExportKind::Jpeg) {
+                    set_status(&app, format!("JPEG export failed: {error}"));
                 }
             }
         });
@@ -916,6 +1123,8 @@ fn wire_palette(app: &PhotoApp) {
                         PaletteAction::NewProject => app.invoke_new_project(),
                         PaletteAction::OpenProject => app.invoke_open_project(),
                         PaletteAction::SaveProject => app.invoke_save_project(),
+                        PaletteAction::SaveAsProject => app.invoke_save_as_project(),
+                        PaletteAction::ImportImage => app.invoke_import_image(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddLayer => app.invoke_add_layer(),
@@ -925,15 +1134,112 @@ fn wire_palette(app: &PhotoApp) {
                         PaletteAction::SelectTool(tool) => {
                             app.invoke_select_tool(SharedString::from(tool))
                         }
-                        PaletteAction::ExportPng => {
-                            app.invoke_export_png(DEFAULT_EXPORT_FILENAME.into())
-                        }
-                        PaletteAction::ExportJpeg => {
-                            app.invoke_export_jpeg(DEFAULT_EXPORT_FILENAME.into())
-                        }
+                        PaletteAction::ExportPng => app.invoke_export_png(),
+                        PaletteAction::ExportJpeg => app.invoke_export_jpeg(),
                     }
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_desktop::ScriptedFileDialogs;
+
+    fn scripted_state() -> GuiState {
+        new_gui_state(
+            PhotoSession::new(blank_canvas().expect("blank canvas")),
+            None,
+            Rc::new(ScriptedFileDialogs::new(
+                [
+                    Some(PathBuf::from("opened.loomphoto")),
+                    Some(PathBuf::from("source.png")),
+                ],
+                [
+                    Some(PathBuf::from("saved")),
+                    Some(PathBuf::from("exported")),
+                    Some(PathBuf::from("exported-jpeg")),
+                ],
+            )),
+        )
+        .expect("state")
+    }
+
+    #[test]
+    fn dialog_requests_keep_projects_imports_and_exports_separate() {
+        let state = scripted_state();
+        let project = open_project_request(&state);
+        let import = import_image_request(&state);
+        let save = save_project_request(&state);
+        let png = export_request(&state, ExportKind::Png);
+        let jpeg = export_request(&state, ExportKind::Jpeg);
+
+        assert_eq!(project.filters[0].extensions, vec!["loomphoto".to_string()]);
+        assert_eq!(
+            import.filters[0].extensions,
+            vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string()]
+        );
+        assert_eq!(save.suggested_name.as_deref(), Some(SAVE_FILENAME));
+        assert_eq!(png.filters[0].extensions, vec!["png".to_string()]);
+        assert_eq!(
+            jpeg.filters[0].extensions,
+            vec!["jpg".to_string(), "jpeg".to_string()]
+        );
+    }
+
+    #[test]
+    fn scripted_dialog_backend_drives_all_photo_file_operations() {
+        let state = scripted_state();
+        assert_eq!(
+            state
+                .dialogs
+                .open_file(&open_project_request(&state))
+                .expect("project picker"),
+            Some(PathBuf::from("opened.loomphoto"))
+        );
+        assert_eq!(
+            state
+                .dialogs
+                .open_file(&import_image_request(&state))
+                .expect("import picker"),
+            Some(PathBuf::from("source.png"))
+        );
+        assert_eq!(
+            state
+                .dialogs
+                .save_file(&save_project_request(&state))
+                .expect("save picker"),
+            Some(PathBuf::from("saved"))
+        );
+        assert_eq!(
+            state
+                .dialogs
+                .save_file(&export_request(&state, ExportKind::Png))
+                .expect("png picker"),
+            Some(PathBuf::from("exported"))
+        );
+        assert_eq!(
+            state
+                .dialogs
+                .save_file(&export_request(&state, ExportKind::Jpeg))
+                .expect("jpeg picker"),
+            Some(PathBuf::from("exported-jpeg"))
+        );
+    }
+
+    #[test]
+    fn imported_rasters_never_become_project_save_paths() {
+        assert!(is_native_project(Path::new("project.loomphoto")));
+        assert!(!is_native_project(Path::new("source.png")));
+        assert_eq!(
+            ensure_extension(PathBuf::from("project"), "loomphoto"),
+            PathBuf::from("project.loomphoto")
+        );
+        assert_eq!(
+            ensure_extension(PathBuf::from("already.jpeg"), "jpg"),
+            PathBuf::from("already.jpeg")
+        );
     }
 }

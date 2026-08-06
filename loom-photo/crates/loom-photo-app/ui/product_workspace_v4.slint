@@ -1,7 +1,7 @@
 import {
     AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton,
     StatusBar, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs,
-    Slider, SegmentedControl, Field, MetricChip, CanvasBackdrop, StatusPill,
+    Slider, SegmentedControl, MetricChip, CanvasBackdrop, StatusPill,
     CommandPalette, CommandPaletteItem
 } from "components.slint";
 import { Icon } from "icons.slint";
@@ -34,8 +34,6 @@ export component PhotoApp inherits Window {
     in-out property <float> contrast-value: 0.0;
     in-out property <float> saturation-value: 0.0;
     in-out property <float> zoom-value: 72.0;
-    in-out property <string> import-path: "";
-    in-out property <string> export-path: "loom-photo-export.png";
 
     property <length> viewport-pan-x: 0px;
     property <length> viewport-pan-y: 0px;
@@ -45,6 +43,7 @@ export component PhotoApp inherits Window {
     callback new-project;
     callback open-project;
     callback save-project;
+    callback save-as-project;
     callback undo;
     callback redo;
     callback add-layer;
@@ -59,9 +58,9 @@ export component PhotoApp inherits Window {
     callback brightness-changed(float);
     callback contrast-changed(float);
     callback saturation-changed(float);
-    callback import-image(string);
-    callback export-png(string);
-    callback export-jpeg(string);
+    callback import-image;
+    callback export-png;
+    callback export-jpeg;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -106,6 +105,7 @@ export component PhotoApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-project(); } }
             ToolButton { icon: "open"; text: "Open Project"; clicked => { root.open-project(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-project(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-project(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
@@ -138,7 +138,8 @@ export component PhotoApp inherits Window {
                 checked: root.show-inspector;
                 clicked => { root.show-inspector = !root.show-inspector; }
             }
-            PrimaryButton { text: "Export"; enabled: root.has-preview; clicked => { root.export-png(root.export-path); } }
+            ToolButton { icon: "import"; text: "Import"; clicked => { root.import-image(); } }
+            PrimaryButton { text: "Export"; enabled: root.has-preview; clicked => { root.export-png(); } }
         }
 
         HorizontalLayout {
@@ -396,13 +397,13 @@ export component PhotoApp inherits Window {
                     if root.inspector-tab == 2 : VerticalLayout {
                         spacing: 10px;
                         Text { text: "IMPORT"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        Field { label: "Image path"; placeholder: "/path/to/image.png"; value <=> root.import-path; }
-                        ToolButton { icon: "import"; text: "Import PNG / JPEG"; clicked => { root.import-image(root.import-path); } }
+                        Text { text: "Choose a PNG or JPEG with the native file picker. Imported images remain separate from Loom Photo project files."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        ToolButton { icon: "import"; text: "Import PNG / JPEG"; clicked => { root.import-image(); } }
                         Rectangle { height: 1px; background: Theme.palette().border; }
                         Text { text: "EXPORT"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        Field { label: "Export path"; placeholder: "output.png"; value <=> root.export-path; }
-                        PrimaryButton { text: "Export PNG"; enabled: root.has-preview; clicked => { root.export-png(root.export-path); } }
-                        ToolButton { icon: "export"; text: "Export JPEG"; enabled: root.has-preview; clicked => { root.export-jpeg(root.export-path); } }
+                        Text { text: "Each export opens a native destination picker."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        PrimaryButton { text: "Export PNG"; enabled: root.has-preview; clicked => { root.export-png(); } }
+                        ToolButton { icon: "export"; text: "Export JPEG"; enabled: root.has-preview; clicked => { root.export-jpeg(); } }
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
