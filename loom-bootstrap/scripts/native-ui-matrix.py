@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Render and validate every Loom application on the current native OS.
 
-The matrix intentionally tests more than "a window launched": every application
-is rendered at compact, reference, and large desktop sizes in all supported
-visual themes. When a native Loom sample package exists, it is opened through
-the same positional-document path used by the operating-system association.
+The matrix tests native rendering at compact, reference, and large desktop
+sizes in all supported themes. It also verifies positional document opening and
+that a command-palette overlay can be rendered. Keyboard interaction and command
+side effects are deliberately validated by separate journey evidence.
 """
 from __future__ import annotations
 
@@ -89,12 +89,18 @@ def validate_png(path: Path, expected: tuple[int, int]) -> tuple[str, int] | str
     if dimensions is None:
         return "output is not a valid PNG with an IHDR chunk"
     if dimensions != expected:
-        return f"PNG dimensions {dimensions[0]}x{dimensions[1]} do not match requested {expected[0]}x{expected[1]}"
+        return (
+            f"PNG dimensions {dimensions[0]}x{dimensions[1]} do not match requested "
+            f"{expected[0]}x{expected[1]}"
+        )
     if len(payload) < 4096:
         return f"screenshot is implausibly small ({len(payload)} bytes)"
     minimum_density = max(4096, expected[0] * expected[1] // 150)
     if len(payload) < minimum_density:
-        return f"screenshot lacks plausible visual density ({len(payload)} bytes, expected at least {minimum_density})"
+        return (
+            f"screenshot lacks plausible visual density ({len(payload)} bytes, "
+            f"expected at least {minimum_density})"
+        )
     return hashlib.sha256(payload).hexdigest(), len(payload)
 
 
@@ -107,8 +113,19 @@ def find_sample(root: Path, app: str) -> Path | None:
         root / f"loom-{app}",
     ):
         if search_root.is_dir():
-            candidates.extend(path for path in search_root.rglob(f"*{extension}") if path.is_file())
-    return sorted(candidates, key=lambda path: ("sample" not in path.name.lower(), len(str(path)), str(path)))[0] if candidates else None
+            candidates.extend(
+                path for path in search_root.rglob(f"*{extension}") if path.is_file()
+            )
+    if not candidates:
+        return None
+    return sorted(
+        candidates,
+        key=lambda path: (
+            "sample" not in path.name.lower(),
+            len(str(path)),
+            str(path),
+        ),
+    )[0]
 
 
 def capture(
@@ -149,7 +166,10 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     sizes = tuple(item.strip() for item in arguments.sizes.split(",") if item.strip())
     if len(sizes) < 3:
-        print("native UI matrix requires at least compact, reference, and large sizes", file=sys.stderr)
+        print(
+            "native UI matrix requires at least compact, reference, and large sizes",
+            file=sys.stderr,
+        )
         return 2
     try:
         for size in sizes:
@@ -161,7 +181,8 @@ def main() -> int:
     environment = os.environ.copy()
     environment.setdefault("SLINT_BACKEND", "software")
     report: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "scope": "visual rendering and positional-open evidence only",
         "platform": arguments.platform,
         "sizes": list(sizes),
         "themes": list(THEMES),
@@ -191,7 +212,9 @@ def main() -> int:
                 all_hashes.add(digest)
                 theme_records[theme] = record
             if len(size_hashes) != len(THEMES):
-                failures.append(f"{app}/{size}: light, dark, and high-contrast captures are not all distinct")
+                failures.append(
+                    f"{app}/{size}: light, dark, and high-contrast captures are not all distinct"
+                )
             size_records[size] = theme_records
         if len(all_hashes) != len(sizes) * len(THEMES):
             failures.append(f"{app}: one or more theme/size captures are byte-identical")
@@ -207,17 +230,34 @@ def main() -> int:
         sample_record: dict[str, object] | None = None
         if sample is not None:
             target = output / f"loom-{app}-sample-open-dark.png"
-            sample_record, error = capture(binary, target, sizes[1], "dark", environment, sample)
+            sample_record, error = capture(
+                binary, target, sizes[1], "dark", environment, sample
+            )
             if error:
                 failures.append(f"{app}/sample-open: {error}")
             else:
                 default_dark = size_records.get(sizes[1], {}).get("dark")
-                if isinstance(default_dark, dict) and sample_record and sample_record["sha256"] == default_dark.get("sha256"):
-                    failures.append(f"{app}: opening {sample.name} did not change the rendered application state")
+                if (
+                    isinstance(default_dark, dict)
+                    and sample_record
+                    and sample_record["sha256"] == default_dark.get("sha256")
+                ):
+                    failures.append(
+                        f"{app}: opening {sample.name} did not change the rendered application state"
+                    )
 
         target = output / f"loom-{app}-palette-open.png"
         palette_record: dict[str, object] | None = None
-        command = [str(binary), "--screenshot", str(target), "--size", sizes[1], "--theme", "dark", "--palette"]
+        command = [
+            str(binary),
+            "--screenshot",
+            str(target),
+            "--size",
+            sizes[1],
+            "--theme",
+            "dark",
+            "--palette",
+        ]
         process = execute(command, environment)
         if process.returncode != 0:
             failures.append(
@@ -236,11 +276,13 @@ def main() -> int:
                     "sha256": digest,
                     "width": parse_size(sizes[1])[0],
                     "height": parse_size(sizes[1])[1],
-                    "query": "ex",
+                    "scope": "overlay-visible-only",
                 }
                 default_dark = size_records.get(sizes[1], {}).get("dark")
                 if isinstance(default_dark, dict) and digest == default_dark.get("sha256"):
-                    failures.append(f"{app}: palette capture is byte-identical to the default window")
+                    failures.append(
+                        f"{app}: palette capture is byte-identical to the default window"
+                    )
 
         report["applications"][app] = {
             "binary": str(binary),
@@ -254,7 +296,9 @@ def main() -> int:
     report["passed"] = not failures
     report["failures"] = failures
     report_path = output / "native-ui-matrix.json"
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     if failures:
         for failure in failures:
             print(f"native UI matrix: {failure}", file=sys.stderr)
