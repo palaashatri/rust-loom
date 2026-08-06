@@ -87,6 +87,26 @@ jobs:
               'assert_eq!(export.filters[0].extensions, ["pdf"]);',
               'assert_eq!(export.filters[0].extensions, vec!["pdf".to_string()]);',
           )
+
+          state_old = '''    let state = GuiState {
+              session: RefCell::new(initial_session(args)?),
+              selected_element: Cell::new(0),
+          };'''
+          state_new = '''    let state = GuiState {
+              session: RefCell::new(initial_session(args)?),
+              selected_element: Cell::new(0),
+              save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
+              dialogs: Rc::new(NativeFileDialogs),
+              deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
+                  .map_err(|error| error.to_string())?,
+              pdf_filter: FileFilter::new("PDF document", ["pdf"])
+                  .map_err(|error| error.to_string())?,
+          };'''
+          if text.count(state_old) != 2:
+              raise SystemExit(
+                  f"headless GuiState generator repair expected 2 matches, found {text.count(state_old)}"
+              )
+          text = text.replace(state_old, state_new)
           path.write_text(text)
           PY
 
