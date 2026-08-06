@@ -20,8 +20,8 @@ approximately **24/100**, up from 23/100. The increase is intentionally small:
 Writer and Sheets now use real native file workflows, New creates blank projects,
 and Sheets no longer advertises non-persistent multi-sheet and formatting
 commands through the command palette. The score remains provisional until the
-fresh four-platform native matrix passes on this exact head. Epic 1 is not
-complete; six applications still use development-era path workflows.
+fresh four-platform native matrix passes on the final milestone head. Epic 1 is
+not complete; six applications still use development-era path workflows.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
