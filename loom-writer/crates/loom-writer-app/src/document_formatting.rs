@@ -165,12 +165,15 @@ fn all_non_empty_blocks_match(
 }
 
 fn uniform_heading_level(document: &WriterDocument) -> i32 {
-    let mut levels = document.blocks.iter().map(|block| match block.kind.as_str() {
-        "heading1" => 1,
-        "heading2" => 2,
-        "heading3" => 3,
-        _ => 0,
-    });
+    let mut levels = document
+        .blocks
+        .iter()
+        .map(|block| match block.kind.as_str() {
+            "heading1" => 1,
+            "heading2" => 2,
+            "heading3" => 3,
+            _ => 0,
+        });
     let Some(first) = levels.next() else {
         return 0;
     };
@@ -182,12 +185,15 @@ fn uniform_heading_level(document: &WriterDocument) -> i32 {
 }
 
 fn uniform_alignment(document: &WriterDocument) -> i32 {
-    let mut alignments = document.blocks.iter().map(|block| match block.style.alignment {
-        Alignment::Center => 1,
-        Alignment::Right => 2,
-        Alignment::Justify => 3,
-        Alignment::Left => 0,
-    });
+    let mut alignments = document
+        .blocks
+        .iter()
+        .map(|block| match block.style.alignment {
+            Alignment::Center => 1,
+            Alignment::Right => 2,
+            Alignment::Justify => 3,
+            Alignment::Left => 0,
+        });
     let Some(first) = alignments.next() else {
         return 0;
     };
