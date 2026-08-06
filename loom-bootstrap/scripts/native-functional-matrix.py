@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Exercise native Loom CLI workflows and generate UI-ready project samples."""
+"""Exercise native Loom CLI workflows and generate UI-ready project samples.
+
+The matrix validates package integrity, selected domain mutations, command
+output invariants, and representative exported files. It is a regression suite
+for executable reference workflows, not proof of full application parity.
+"""
 from __future__ import annotations
 
 import argparse
@@ -96,6 +101,23 @@ def expect_signature(path: Path, signature: bytes, label: str) -> dict[str, obje
     return digest(path)
 
 
+def expect_stdout(
+    records: list[dict[str, object]],
+    command_index: int,
+    expected_fragments: tuple[str, ...],
+    label: str,
+) -> None:
+    try:
+        stdout = str(records[command_index]["stdout"])
+    except (IndexError, KeyError) as error:
+        raise RuntimeError(f"{label}: missing command record {command_index}") from error
+    missing = [fragment for fragment in expected_fragments if fragment not in stdout]
+    if missing:
+        raise RuntimeError(
+            f"{label}: command {command_index} output missed {missing!r}; stdout={stdout!r}"
+        )
+
+
 def main() -> int:
     arguments = parse_arguments()
     root = arguments.root.resolve()
@@ -105,7 +127,8 @@ def main() -> int:
     samples.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
     report: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "scope": "native CLI reference workflows; not full in-app feature parity",
         "platform": arguments.platform,
         "applications": {},
         "passed": False,
@@ -113,15 +136,25 @@ def main() -> int:
     }
     failures: list[str] = []
 
-    def journey(app: str, commands: list[list[str]], outputs: list[tuple[Path, bytes, str]] = ()) -> None:
+    def journey(
+        app: str,
+        commands: list[list[str]],
+        outputs: list[tuple[Path, bytes, str]] = [],
+        stdout_expectations: list[tuple[int, tuple[str, ...], str]] = [],
+    ) -> None:
         try:
             cli = cli_path(root, app, arguments.platform)
             if not cli.is_file():
                 raise RuntimeError(f"missing CLI binary: {cli}")
             records = [run([str(cli), *command], work) for command in commands]
+            for command_index, expected, label in stdout_expectations:
+                expect_stdout(records, command_index, expected, label)
             package = samples / f"sample{EXTENSIONS[app]}"
             package_record = validate_package(package)
-            output_records = [expect_signature(path, signature, label) for path, signature, label in outputs]
+            output_records = [
+                expect_signature(path, signature, label)
+                for path, signature, label in outputs
+            ]
             report["applications"][app] = {
                 "passed": True,
                 "commands": records,
@@ -137,7 +170,12 @@ def main() -> int:
     journey(
         "writer",
         [
-            ["create", str(writer), "Native Journey", "Loom creates, validates, exports, and reopens documents locally."],
+            [
+                "create",
+                str(writer),
+                "Native Journey",
+                "Loom creates, validates, exports, and reopens documents locally.",
+            ],
             ["validate", str(writer)],
             ["info", str(writer)],
             ["search", str(writer), "locally"],
@@ -145,12 +183,16 @@ def main() -> int:
             ["export-md", str(writer), str(markdown)],
         ],
         [(markdown, b"# Native Journey", "Writer Markdown export")],
+        [(3, ("1 match",), "Writer search")],
     )
 
     sheets = samples / "sample.loomsheet"
     csv_input = work / "input.csv"
     csv_output = work / "normalized.csv"
-    csv_input.write_text("Item,Amount\nDesign,8000\nEngineering,15000\nTotal,=SUM(B2:B3)\n", encoding="utf-8")
+    csv_input.write_text(
+        "Item,Amount\nDesign,8000\nEngineering,15000\nTotal,=SUM(B2:B3)\n",
+        encoding="utf-8",
+    )
     journey(
         "sheets",
         [
@@ -161,6 +203,7 @@ def main() -> int:
             ["to-csv", str(csv_input), str(csv_output)],
         ],
         [(csv_output, b"Item,Amount", "Sheets CSV export")],
+        [(2, ("24000",), "Sheets recalculation")],
     )
 
     present = samples / "sample.loomdeck"
@@ -175,6 +218,7 @@ def main() -> int:
             ["pdf", str(present), str(pdf)],
         ],
         [(pdf, b"%PDF", "Present PDF export")],
+        [(3, ("slide",), "Present scene")],
     )
 
     photo = samples / "sample.loomphoto"
@@ -187,6 +231,7 @@ def main() -> int:
             ["render-demo", str(ppm), "320", "180"],
         ],
         [(ppm, b"P6\n", "Photo composite render")],
+        [(1, ("640", "360"), "Photo dimensions")],
     )
 
     motion = samples / "sample.loommotion"
@@ -198,14 +243,29 @@ def main() -> int:
             ["inspect", str(motion)],
             ["frame", str(motion), "12"],
         ],
+        stdout_expectations=[(3, ("frame",), "Motion frame sampling")],
     )
 
     video = samples / "sample.loomvideo"
+    edl = work / "video.edl"
     journey(
         "video",
         [
             ["create", str(video), "Native Video"],
+            ["edit-demo", str(video)],
             ["inspect", str(video)],
+            ["plan", str(video)],
+            ["edl", str(video), str(edl)],
+        ],
+        [(edl, b"TITLE: Native Video", "Video EDL export")],
+        [
+            (
+                1,
+                ("Edited video project: 3 clips, 1 marker, 1 caption",),
+                "Video persisted edit",
+            ),
+            (2, ("Timeline: 3 clips, 1 markers, 1 captions",), "Video inspection"),
+            (3, ("c-interview-b", "rate 1.500"), "Video render plan"),
         ],
     )
 
@@ -221,7 +281,11 @@ def main() -> int:
             ["sine", str(sine), "440", "0.25"],
             ["synth", str(synth), "64", "0.25"],
         ],
-        [(sine, b"RIFF", "Studio oscillator WAV"), (synth, b"RIFF", "Studio MIDI WAV")],
+        [
+            (sine, b"RIFF", "Studio oscillator WAV"),
+            (synth, b"RIFF", "Studio MIDI WAV"),
+        ],
+        [(2, ("124",), "Studio tempo")],
     )
 
     encode = samples / "sample.loomencode"
@@ -229,16 +293,33 @@ def main() -> int:
         "encode",
         [
             ["create", str(encode), "Native Delivery Queue"],
+            ["prepare-recovery-demo", str(encode)],
             ["inspect", str(encode)],
             ["recover", str(encode)],
             ["inspect", str(encode)],
+        ],
+        stdout_expectations=[
+            (1, ("Prepared recovery demo: 3 jobs",), "Encode recovery setup"),
+            (
+                2,
+                ("Pending Jobs: 2", "Encoding { progress: 0.42 }"),
+                "Encode interrupted state",
+            ),
+            (3, ("requeued 1 interrupted job",), "Encode recovery"),
+            (
+                4,
+                ("Pending Jobs: 3", "Aggregate Progress: 0.000"),
+                "Encode recovered state",
+            ),
         ],
     )
 
     report["passed"] = not failures
     report["failures"] = failures
     report_path = output / "native-functional-matrix.json"
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     if failures:
         for failure in failures:
             print(f"native functional matrix: {failure}", file=sys.stderr)
