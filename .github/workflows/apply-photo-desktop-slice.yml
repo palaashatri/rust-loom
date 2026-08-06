@@ -1,0 +1,76 @@
+name: Apply Photo native desktop slice
+
+on:
+  push:
+    branches:
+      - chatgpt/loom-ui-functional-audit-2
+    paths:
+      - .github/workflows/apply-photo-desktop-slice.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libfontconfig1-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+
+      - name: Select Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loom-core
+            loom-photo
+
+      - name: Apply deterministic Photo source migration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import gzip
+
+          payload = "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"
+          source = gzip.decompress(base64.b64decode(payload))
+          exec(compile(source, "apply-photo-desktop-slice.py", "exec"))
+          PY
+
+      - name: Format and validate Photo
+        env:
+          CARGO_INCREMENTAL: 0
+        run: |
+          cargo fmt --manifest-path loom-core/Cargo.toml --all
+          cargo fmt --manifest-path loom-photo/Cargo.toml --all
+          cargo fmt --manifest-path loom-core/Cargo.toml --all --check
+          cargo fmt --manifest-path loom-photo/Cargo.toml --all --check
+          cargo clippy --manifest-path loom-core/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+          cargo test --manifest-path loom-core/Cargo.toml --workspace
+          cargo clippy --manifest-path loom-photo/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+          cargo test --manifest-path loom-photo/Cargo.toml --workspace
+          cargo build --manifest-path loom-photo/Cargo.toml --workspace --release
+          cargo run --manifest-path loom-photo/Cargo.toml --bin loom-photo -- --smoke
+
+      - name: Commit validated Photo slice
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-photo-desktop-slice.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(photo): add native project, import, and export workflows"
+          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
