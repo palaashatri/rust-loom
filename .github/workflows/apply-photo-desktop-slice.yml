@@ -42,16 +42,33 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          payload=loom-bootstrap/scripts/apply-photo-desktop-slice.py.gz.b64
-          wc -c "$payload"
-          payload_hash="$(sha256sum "$payload" | cut -d' ' -f1)"
-          echo "payload_sha256=$payload_hash"
-          test "$payload_hash" = "0fe4b72fac8fad3dfe13289d9802286d209161d06f3267dc0a17291266320512"
-          base64 -d "$payload" | gzip -d > /tmp/apply-photo-desktop-slice.py
-          wc -c /tmp/apply-photo-desktop-slice.py
-          script_hash="$(sha256sum /tmp/apply-photo-desktop-slice.py | cut -d' ' -f1)"
-          echo "script_sha256=$script_hash"
-          test "$script_hash" = "491cd96a4106511bec5d23dcdad11701d10fce9756c33af4a2d281bc566f6b13"
+          root=loom-bootstrap/scripts/photo-migration-payload
+          parts=(
+            part-00 part-01 part-02 part-03 part-04
+            part-05 part-06 part-07 part-08
+          )
+          hashes=(
+            ac8178f868c37a87ccf1efac2dcb71a616473503e9f6633100e5c2992fc6833e
+            82d32b89d7de6653b8dc4784f797191cf6af6e76e5632318a63ac69996a99edc
+            271b8c0c62aeea608884c60e2faccec204a55b02e6d2526e2ae3319af6279c6f
+            7827a6cd9a2d7d43ccfc2bc9cb0c80a543fd5da6b81f2425bfd40870f629bfbf
+            f494c22a6af191540e8d0b2d4017520415badeefd49dd8dc479ae587e863a651
+            a94d5ef3e950e4766380faea843f4c240f88f4ed5ce0cb5d194aaf377b01bd20
+            f48006de39937c7f2b43c619d671477af237735874481679edcfb139e04a36a5
+            b3c62acb8c8cdcfd17e7fc4cfe7465dfa1b3128042fe213b48176c7de4963a38
+            ed4ac1b5806b216f13184ac7dd9d6ab3cc9b9ce6665f5e935669844811ef3fa6
+          )
+          : > /tmp/photo-migration.b64
+          for index in "${!parts[@]}"; do
+            part="$root/${parts[$index]}"
+            test "$(wc -c < "$part")" = "760"
+            test "$(sha256sum "$part" | cut -d' ' -f1)" = "${hashes[$index]}"
+            cat "$part" >> /tmp/photo-migration.b64
+          done
+          test "$(wc -c < /tmp/photo-migration.b64)" = "6840"
+          test "$(sha256sum /tmp/photo-migration.b64 | cut -d' ' -f1)" = "95b518ca65935cebdc40a3737bb567e4f37f37416f00f9395bd2f17f992738bc"
+          base64 -d /tmp/photo-migration.b64 | gzip -d > /tmp/apply-photo-desktop-slice.py
+          test "$(sha256sum /tmp/apply-photo-desktop-slice.py | cut -d' ' -f1)" = "491cd96a4106511bec5d23dcdad11701d10fce9756c33af4a2d281bc566f6b13"
           python3 /tmp/apply-photo-desktop-slice.py
 
       - name: Format and validate Photo
@@ -74,6 +91,7 @@ jobs:
         run: |
           rm -f .github/workflows/apply-photo-desktop-slice.yml
           rm -f loom-bootstrap/scripts/apply-photo-desktop-slice.py.gz.b64
+          rm -rf loom-bootstrap/scripts/photo-migration-payload
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
