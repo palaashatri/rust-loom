@@ -125,185 +125,16 @@ jobs:
           ''',
               "blank CompositionDocument constructor",
           )
-          core = replace_once(
-              core,
-              "        assert_eq!(doc.len(), 1);\n",
-              "        assert!(doc.is_empty());\n",
-              "blank constructor test",
-          )
-          core = replace_once(
-              core,
-              '''        doc.add_layer(MotionLayer::new("l2", "Background", "VectorShape"));
-                  assert!(doc.select_layer(1));
-                  assert!(!doc.select_layer(2));
-                  assert_eq!(doc.active_layer_index, 1);
-          ''',
-              '''        doc.add_layer(MotionLayer::new("l2", "Background", "VectorShape"));
-                  assert!(doc.select_layer(0));
-                  assert!(!doc.select_layer(1));
-                  assert_eq!(doc.active_layer_index, 0);
-          ''',
-              "layer selection test",
-          )
-          core = replace_once(
-              core,
-              "        assert_eq!(loaded.len(), 2);\n",
-              '''        assert_eq!(loaded.len(), 1);
-                  assert_eq!(loaded, doc);
-                  let loaded_again = load_motion(&bytes).expect("second load failed");
-                  assert_eq!(loaded_again, loaded);
-          ''',
-              "exact idempotent core round trip",
-          )
-          core = replace_once(
-              core,
-              '''        let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
-                  doc.frame_rate = 0.0;
-                  doc.layers[0].position_x_keys = vec![
-          ''',
-              '''        let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
-                  doc.frame_rate = 0.0;
-                  doc.add_layer(MotionLayer::new("layer-invalid", "Invalid Layer", "Text"));
-                  doc.layers[0].position_x_keys = vec![
-          ''',
-              "validation test explicit layer",
-          )
-          core_path.write_text(core)
-
-          main_path = Path("loom-motion/crates/loom-motion-app/src/main.rs")
-          main = main_path.read_text()
-          main = replace_once(
-              main,
-              '''fn sample_motion() -> CompositionDocument {
-                  let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
-                  doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
-          ''',
-              '''fn sample_motion() -> CompositionDocument {
-                  let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
-                  let mut title = MotionLayer::new("layer-title", "Animated Title", "Text");
-                  title.add_keyframe("opacity", 0.0, 0.0);
-                  title.add_keyframe("opacity", 1.0, 1.0);
-                  doc.add_layer(title);
-                  doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
-          ''',
-              "explicit Motion sample layers",
-          )
-          constructor_anchor = '''    let app = MotionApp::new().map_err(|e| e.to_string())?;
-              apply_theme(&app, &args.theme);
-          '''
-          count = main.count(constructor_anchor)
-          if count != 3:
-              raise SystemExit(f"Motion app constructors: expected 3 matches, found {count}")
-          main = main.replace(
-              constructor_anchor,
-              '''    let app = MotionApp::new().map_err(|e| e.to_string())?;
-              app.set_compact_layout(args.size.0 < 1180);
-              apply_theme(&app, &args.theme);
-          ''',
-          )
-          main = replace_once(
-              main,
-              '''    fn motion_path_round_trip_preserves_composition() {
-                  let path = std::env::temp_dir().join(format!(
-                      "loom-motion-roundtrip-{}.loommotion",
-                      std::process::id()
-                  ));
-                  let mut document = empty_motion();
-                  document.add_layer(MotionLayer::new("layer", "Layer", "VectorShape"));
-                  let bytes = save_motion(&document).expect("serialize");
-                  std::fs::write(&path, bytes).expect("write");
-                  let loaded = load_motion_path(&path).expect("load");
-                  let _ = std::fs::remove_file(&path);
-                  assert_eq!(loaded.name, document.name);
-                  assert_eq!(loaded.layers.len(), 1);
-              }
-          ''',
-              '''    fn motion_path_round_trip_preserves_composition() {
-                  let path = std::env::temp_dir().join(format!(
-                      "loom-motion-roundtrip-{}.loommotion",
-                      std::process::id()
-                  ));
-                  let mut document = empty_motion();
-                  document.width = 3840;
-                  document.height = 2160;
-                  document.frame_rate = 23.976;
-                  document.duration_secs = 37.5;
-                  let mut layer = MotionLayer::new("layer", "Layer", "VectorShape");
-                  layer.start_time = 1.25;
-                  layer.duration = 12.0;
-                  layer.add_keyframe("x", 0.0, 120.0);
-                  layer.add_keyframe("x", 2.0, 840.0);
-                  layer.add_keyframe("rotation", 1.0, 33.0);
-                  document.add_layer(layer);
-                  document.active_layer_index = 0;
-
-                  let bytes = save_motion(&document).expect("serialize");
-                  std::fs::write(&path, bytes).expect("write");
-                  let loaded = load_motion_path(&path).expect("load");
-                  let loaded_again = load_motion_path(&path).expect("repeated load");
-                  let _ = std::fs::remove_file(&path);
-
-                  assert_eq!(loaded, document);
-                  assert_eq!(loaded_again, loaded);
-              }
-          ''',
-              "exact path round trip test",
-          )
-          main_path.write_text(main)
-
-          ui_path = Path("loom-motion/crates/loom-motion-app/ui/product_workspace_v2.slint")
-          ui = ui_path.read_text()
-          ui = replace_once(
-              ui,
-              "    property <bool> compact-layout: root.width < 1180px;\n",
-              "    in property <bool> compact-layout: false;\n",
-              "one-way compact layout state",
-          )
-          ui_path.write_text(ui)
-          PY
-
-      - name: Format Motion and core
-        run: |
-          cargo fmt --manifest-path loom-core/Cargo.toml --all
-          cargo fmt --manifest-path loom-motion/Cargo.toml --all
-          cargo fmt --manifest-path loom-core/Cargo.toml --all --check
-          cargo fmt --manifest-path loom-motion/Cargo.toml --all --check
-
-      - name: Clippy core
-        run: cargo clippy --manifest-path loom-core/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-
-      - name: Test core
-        run: cargo test --manifest-path loom-core/Cargo.toml --workspace
-
-      - name: Clippy Motion
-        run: cargo clippy --manifest-path loom-motion/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-
-      - name: Test Motion
-        run: cargo test --manifest-path loom-motion/Cargo.toml --workspace
-
-      - name: Release build Motion
-        run: cargo build --manifest-path loom-motion/Cargo.toml --workspace --release
-
-      - name: Smoke Motion at representative window sizes
-        shell: bash
-        run: |
-          set -euo pipefail
-          for size in 920x720 1179x800 1180x800 1440x900; do
-            output="$(cargo run --manifest-path loom-motion/Cargo.toml --bin loom-motion -- --smoke --size "$size" 2>&1)"
-            printf '%s\n' "$output"
-            if grep -Eqi 'binding[ -]loop' <<<"$output"; then
-              echo "Slint binding loop detected at $size" >&2
-              exit 1
-            fi
-          done
-
-      - name: Commit validated Motion slice
-        shell: bash
-        run: |
-          rm -f .github/workflows/apply-motion-desktop-slice.yml
-          rm -rf loom-bootstrap/scripts/motion-migration-payload
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat(motion): complete native project and SVG export workflows"
-          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
+         ÛÜ™HH™\XÙWÛÛ˜ÙJˆÛÜ™Kˆˆ\ÜÙ\Ù\HJØË›[Š
+KJN×ˆ‹ˆˆ\ÜÙ\JØËš\×Ù[\J
+JN×ˆ‹ˆ˜›[šÈÛÛœÝXÝÜˆ\Ý‹ˆ
+BˆÛÜ™HH™\XÙWÛÛ˜ÙJˆÛÜ™Kˆ	ÉÉÈØË˜YÛ^Y\Š[Ý[Û“^Y\ŽŽ›™]Ê›ˆ‹˜XÚÙÜ›Ý[™‹•™XÝÜ”Ú\HŠJNÂˆ\ÜÙ\JØËœÙ[XÝÛ^Y\ŠJJNÂˆ\ÜÙ\JYØËœÙ[XÝÛ^Y\ŠŠJNÂˆ\ÜÙ\Ù\HJØË˜XÝ]™WÛ^Y\—Ú[™^JNÂˆ	ÉÉËˆ	ÉÉÈØË˜YÛ^Y\Š[Ý[Û“^Y\ŽŽ›™]Ê›ˆ‹˜XÚÙÜ›Ý[™‹•™XÝÜ”Ú\HŠJNÂˆ\ÜÙ\JØËœÙ[XÝÛ^Y\Š
+JNÂˆ\ÜÙ\JYØËœÙ[XÝÛ^Y\ŠJJNÂˆ\ÜÙ\Ù\HJØË˜XÝ]™WÛ^Y\—Ú[™^
+NÂˆ	ÉÉËˆ›^Y\ˆÙ[XÝ[Ûˆ\Ý‹ˆ
+BˆÛÜ™HH™\XÙWÛÛ˜ÙJˆÛÜ™Kˆˆ\ÜÙ\Ù\HJØYY›[Š
+KŠN×ˆ‹ˆ	ÉÉÈ\ÜÙ\Ù\HJØYY›[Š
+KJNÂˆ\ÜÙ\Ù\HJØYYØÊNÂˆ]ØYYØYØZ[ˆHØYÛ[Ý[ÛŠ	˜ž]\ÊK™^XÝ
+œÙXÛÛ™ØY˜Z[YŠNÂˆ\ÜÙ\Ù\HJØYYØYØZ[‹ØYY
+NÂˆ	ÉÉËˆ™^XÝY[\Ý[ÛÜ™H›Ý[™š\‹ˆ
+BˆÛÜ™HH™\XÙWÛÛ˜ÙJˆÛÜ™Kˆ	ÉÉÈ]]]ØÈHÛÛ\ÜÚ][Û‘ØÝ[Y[Ž›™]Ê˜ÛÛ\Z[˜[Y‹’[˜[YŠNÂˆØË™œ˜[YWÜ˜]HHŒÂˆØË›^Y\œÖÌKœÜÚ][Û—ÞÚÙ^\ÈH™XÈVÂˆ	ÉÉËˆ	ÉÉÈ]]]ØÈHÛÛ\ÜÚ][Û‘ØÝ[Y[Ž›™]Ê˜ÛÛ\Z[˜[Y‹’[˜[YŠNÂˆØË™œ˜[YWÜ˜]HHŒÂˆØË˜YÛ^Y\Š[Ý[Û“^Y\ŽŽ›™]Ê›^Y\‹Z[˜[Y‹’[˜[Y^Y\ˆ‹•^ŠJNÂˆØË›^Y\œÖÌKœÜÚ][Û—ÞÚÙ^\ÈH™XÈVÂˆ	ÉÉËˆ˜[Y][Ûˆ\Ý^XÚ]^Y\ˆ‹ˆ
+Bˆ6÷&U÷F‚çw&—FU÷FW‡B†6÷&R ¢Ö–å÷F‚ÒF‚‚&ÆööÒÖÖ÷F–öâö7&FW2öÆööÒÖÖ÷F–öâÖ÷7&2öÖ–âç'2"¢Ö–âÒÖ–å÷F‚ç&VE÷FW‡B‚¢Ö–âÒ&WÆ6Uööæ6R€¢Ö–âÀ¢rrvfâ6×ÆUöÖ÷F–öâ‚’Óâ6ö×÷6—F–öäFö7VÖVçB°¢ÆWB×WBFö2Ò6ö×÷6—F–öäFö7VÖVçC£¦æWr‚&6ö××6×ÆR"Â$¶–æWF–2G—öw&‡’–çG&ò"“°¢Fö2æFEöÆ–W"„Ö÷F–öäÆ–W#£¦æWr‚&Â×7V""Â%7V'F—FÆRÖ÷F–öâ"Â%FW‡B"’“°¢rrrÀ¢rrvfâ6×ÆUöÖ÷F–öâ‚’Óâ6ö×÷6—F–öäFö7VÖVçB°¢ÆWB×WBFö2Ò6ö×÷6—F–öäFö7VÖVçC£¦æWr‚&6ö××6×ÆR"Â$¶–æWF–2G—öw&‡’–çG&ò"“°¢ÆWB×WBF—FÆRÒÖ÷F–öäÆ–W#£¦æWr‚&Æ–W"×F—FÆR"Â$æ–ÖFVBF—FÆR"Â%FW‡B"“°¢F—FÆRæFEö¶W–g&ÖR‚&÷6—G’"ÂãÂã“°¢F—FÆRæFEö¶W–g&ÖR‚&÷6—G’"ÂãÂã“°¢Fö2æFEöÆ–W"‡F—FÆR“°¢Fö2æFEöÆ–W"„Ö÷F–öäÆ–W#£¦æWr‚&Â×7V""Â%7V'F—FÆRÖ÷F–öâ"Â%FW‡B"’“°¢rrrÀ¢&W‡Æ–6—BÖ÷F–öâ6×ÆRÆ–W'2"À¢¢6öç7G'V7F÷%öæ6†÷"ÒrrrÆWBÒÖ÷F–öä£¦æWr‚’æÖöW'"‡ÆWÂRçFõ÷7G&–ær‚’“ó°¢Ç•÷F†VÖR‚fÂf&w2çF†VÖR“°¢rrp¢6÷VçBÒÖ–âæ6÷VçB†6öç7G'V7F÷%öæ6†÷"¢–b6÷VçBÒ3 ¢&—6R7—7FVÔW†—B†b$Ö÷F–öâ6öç7G'V7F÷'3¢W‡V7FVB2ÖF6†W2Âf÷VæB¶6÷VçGÒ"¢Ö–âÒÖ–âç&WÆ6R€¢6öç7G'V7F÷%öæ6†÷"À¢rrrÆWBÒÖ÷F–öä£¦æWr‚’æÖöW'"‡ÆWÂRçFõ÷7G&–ær‚’“ó°¢ç6WEö6ö×7EöÆ–÷WB†&w2ç6—¦RãÂƒ“°¢Ç•÷F†VÖR‚fÂf&w2çF†VÖR“°¢rrrÀ¢¢Ö–âÒ&WÆ6Uööæ6R€¢Ö–âÀ¢rrrfâÖ÷F–öå÷F…÷&÷VæE÷G&—÷&W6W'fW5ö6ö×÷6—F–öâ‚’°¢ÆWBF‚Ò7FC£¦Vçc£§FV×öF—"‚’æ¦ö–â†f÷&ÖB€¢&ÆööÒÖÖ÷F–öâ×&÷VæGG&—×·ÒæÆööÖÖ÷F–öâ"À¢7FC£§&ö6W73£¦–B‚¢’“°¢ÆWB×WBFö7VÖVçBÒV×G•öÖ÷F–öâ‚“°¢Fö7VÖVçBæFEöÆ–W"„Ö÷F–öäÆ–W#£¦æWr‚&Æ–W""Â$Æ–W""Â%fV7F÷%6†R"’“°¢ÆWB'—FW2Ò6fUöÖ÷F–öâ‚fFö7VÖVçB’æW‡V7B‚'6W&–Æ—¦R"“°¢7FC£¦g3£§w&—FR‚gF‚Â'—FW2’æW‡V7B‚'w&—FR"“°¢ÆWBÆöFVBÒÆöEöÖ÷F–öå÷F‚‚gF‚’æW‡V7B‚&ÆöB"“°¢ÆWBòÒ7FC£¦g3£§&VÖ÷fUöf–ÆR‚gF‚“°¢76W'EöW†ÆöFVBææÖRÂFö7VÖVçBææÖR“°¢76W'EöW†ÆöFVBæÆ–W'2æÆVâ‚’Â“°¢Ð¢rrrÀ¢rrrfâÖ÷F–öå÷F…÷&÷VæE÷G&—÷&W6W'fW5ö6ö×÷6—F–öâ‚’°¢ÆWBF‚Ò7FC£¦Vçc£§FV×öF—"‚’æ¦ö–â†f÷&ÖB€¢&ÆööÒÖÖ÷F–öâ×&÷VæGG&—×·ÒæÆööÖÖ÷F–öâ"À¢7FC£§&ö6W73£¦–B‚¢’“°¢ÆWB×WBFö7VÖVçBÒV×G•öÖ÷F–öâ‚“°¢Fö7VÖVçBçv–GF‚Ò3ƒC°¢Fö7VÖVçBæ†V–v‡BÒ#c°¢Fö7VÖVçBæg&ÖU÷&FRÒ#2ã“sc°¢Fö7VÖVçBæGW&F–öå÷6V72Ò3rãS°¢ÆWB×WBÆ–W"ÒÖ÷F–öäÆ–W#£¦æWr‚&Æ–W""Â$Æ–W""Â%fV7F÷%6†R"“°¢Æ–W"ç7F'E÷F–ÖRÒã#S°¢Æ–W"æGW&F–öâÒ"ã°¢Æ–W"æFEö¶W–g&ÖR‚'‚"ÂãÂ#ã“°¢Æ–W"æFEö¶W–g&ÖR‚'‚"Â"ãÂƒCã“°¢Æ–W"æFEö¶W–g&ÖR‚'&÷FF–öâ"ÂãÂ32ã“°¢Fö7VÖVçBæFEöÆ–W"†Æ–W"“°¢Fö7VÖVçBæ7F—fUöÆ–W%ö–æFW‚Ò° ¢ÆWB'—FW2Ò6fUöÖ÷F–öâ‚fFö7VÖVçB’æW‡V7B‚'6W&–Æ—¦R"“°¢7FC£¦g3£§w&—FR‚gF‚Â'—FW2’æW‡V7B‚'w&—FR"“°¢ÆWBÆöFVBÒÆöEöÖ÷F–öå÷F‚‚gF‚’æW‡V7B‚&ÆöB"“°¢ÆWBÆöFVEöv–âÒÆöEöÖ÷F–öå÷F‚‚gF‚’æW‡V7B‚'&WVFVBÆöB"“°¢ÆWBòÒ7FC£¦g3£§&VÖ÷fUöf–ÆR‚gF‚“° ¢76W'EöW†ÆöFVBÂFö7VÖVçB“°¢76W'EöW†ÆöFVEöv–âÂÆöFVB“°¢Ð¢rrrÀ¢&W†7BF‚&÷VæBG&—FW7B"À¢¢Ö–å÷F‚çw&—FU÷FW‡B†Ö–â ¢V•÷F‚ÒF‚‚&ÆööÒÖÖ÷F–öâö7&FW2öÆööÒÖÖ÷F–öâÖ÷V’÷&öGV7E÷v÷&·76U÷c"ç6Æ–çB"¢V’ÒV•÷F‚ç&VE÷FW‡B‚¢V’Ò&WÆ6Uööæ6R€¢V’À¢"&÷W'G’Æ&ööÃâ6ö×7BÖÆ–÷WC¢&ö÷Bçv–GF‚ÂƒƒµÆâ"À¢"–â&÷W'G’Æ&ööÃâ6ö×7BÖÆ–÷WC¢fÇ6SµÆâ"À¢&öæR×v’6ö×7BÆ–÷WB7FFR"À¢¢V•÷F‚çw&—FU÷FW‡B‡V’¢ ¢ÒæÖS¢f÷&ÖBÖ÷F–öâæB6÷&P¢'Vã¢À¢6&vòf×BÒÖÖæ–fW7B×F‚ÆööÒÖ6÷&Rô6&vòçFöÖÂÒÖÆÀ¢6&vòf×BÒÖÖæ–fW7B×F‚ÆööÒÖÖ÷F–öâô6&vòçFöÖÂÒÖÆÀ¢6&vòf×BÒÖÖæ–fW7B×F‚ÆööÒÖ6÷&Rô6&vòçFöÖÂÒÖÆÂÒÖ6†V6°¢6&vòf×BÒÖÖæ–fW7B×F‚ÆööÒÖÖ÷F–öâô6&vòçFöÖÂÒÖÆÂÒÖ6†V6° ¢ÒæÖS¢6Æ—’6÷&P¢'Vã¢6&vò6Æ—’ÒÖÖæ–fW7B×F‚ÆööÒÖ6÷&Rô6&vòçFöÖÂÒ×v÷&·76RÒÖÆÂ×F&vWG2ÒÖÆÂÖfVGW&W2ÒÒÔBv&æ–æw0 ¢ÒæÖS¢FW7B6÷&P¢'Vã¢6&vòFW7BÒÖÖæ–fW7B×F‚ÆööÒÖ6÷&Rô6&vòçFöÖÂÒ×v÷&·76P ¢ÒæÖS¢6Æ—’Ö÷F–öà¢'Vã¢6&vò6Æ—’ÒÖÖæ–fW7B×F‚ÆööÒÖÖ÷F–öâô6&vòçFöÖÂÒ×v÷&·76RÒÖÆÂ×F&vWG2ÒÖÆÂÖfVGW&W2ÒÒÔBv&æ–æw0 ¢ÒæÖS¢FW7BÖ÷F–öà¢'Vã¢6&vòFW7BÒÖÖæ–fW7B×F‚ÆööÒÖÖ÷F–öâô6&vòçFöÖÂÒ×v÷&·76P ¢ÒæÖS¢&VÆV6R'V–ÆBÖ÷F–öà¢'Vã¢6&vò'V–ÆBÒÖÖæ–fW7B×F‚ÆööÒÖÖ÷F–öâô6&vòçFöÖÂÒ×v÷&·76RÒ×&VÆV6P ¢ÒæÖS¢6Öö¶RÖ÷F–öâB&W&W6VçFF—fRv–æF÷r6—¦W0¢6†VÆÃ¢&6€¢'Vã¢À¢6WBÖWVò—Vf–À¢f÷"6—¦R–â“#ƒs#s—ƒƒƒƒƒCCƒ“²Fð¢÷WGWCÒ"B†6&vò'VâÒÖÖæ–fW7B×F‚ÆööÒÖÖ÷F–öâô6&vòçFöÖÂÒÖ&–âÆööÒÖÖ÷F–öâÒÒÒ×6Öö¶RÒ×6—¦R"G6—¦R"#âc’ ¢&–çFbrW5Æâr"F÷WGWB ¢–bw&WÔW’v&–æF–æu²ÕÖÆö÷rÃÃÂ"F÷WGWB#²F†Và¢V6†ò%6Æ–çB&–æF–ærÆö÷FWFV7FVBBG6—¦R"âc ¢W†—B¢f¢FöæP ¢ÒæÖS¢6öÖÖ—BfÆ–FFVBÖ÷F–öâ6Æ–6P¢6†VÆÃ¢&6€¢'Vã¢À¢&ÒÖbæv—F‡V"÷v÷&¶fÆ÷w2öÇ’ÖÖ÷F–öâÖFW6·F÷×6Æ–6Rç–ÖÀ¢&Ò×&bÆööÒÖ&ö÷G7G&÷67&—G2öÖ÷F–öâÖÖ–w&F–öâ×–Æö@¢v—B6öæf–rW6W"ææÖR&v—F‡V"Ö7F–öç5¶&÷EÒ ¢v—B6öæf–rW6W"æVÖ–Â#Cƒ“ƒ#ƒ"¶v—F‡V"Ö7F–öç5¶&÷EÔW6W'2ææ÷&WÇ’æv—F‡V"æ6öÒ ¢v—BFBÔ¢v—B6öÖÖ—BÖÒ&fVB†Ö÷F–öâ“¢6ö×ÆWFRæF—fR&ö¦V7BæB5drW‡÷'Bv÷&¶fÆ÷w2 ¢v—BW6‚÷&–v–â„TC¦6†FwBöÆööÒ×V’ÖgVæ7F–öæÂÖVF—BÓ  
