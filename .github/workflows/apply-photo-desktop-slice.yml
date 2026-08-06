@@ -46,7 +46,7 @@ jobs:
           wc -c "$payload"
           payload_hash="$(sha256sum "$payload" | cut -d' ' -f1)"
           echo "payload_sha256=$payload_hash"
-          test "$payload_hash" = "95b518ca65935cebdc40a3737bb567e4f37f37416f00f9395bd2f17f992738bc"
+          test "$payload_hash" = "0fe4b72fac8fad3dfe13289d9802286d209161d06f3267dc0a17291266320512"
           base64 -d "$payload" | gzip -d > /tmp/apply-photo-desktop-slice.py
           wc -c /tmp/apply-photo-desktop-slice.py
           script_hash="$(sha256sum /tmp/apply-photo-desktop-slice.py | cut -d' ' -f1)"
