@@ -1,6 +1,8 @@
 //! Command line tool for Loom Video.
 
-use loom_video_core::{load_video_project, save_video_project, Clip, VideoProject};
+use loom_video_core::{
+    load_video_project, save_video_project, CaptionCue, Clip, TimelineMarker, VideoProject,
+};
 use std::env;
 
 fn main() -> Result<(), String> {
@@ -9,6 +11,7 @@ fn main() -> Result<(), String> {
         println!("Loom Video CLI");
         println!("Usage:");
         println!("  loom-video-cli create <output.loomvideo> <name>");
+        println!("  loom-video-cli edit-demo <input.loomvideo>");
         println!("  loom-video-cli inspect <input.loomvideo>");
         println!("  loom-video-cli edl <input.loomvideo> [output.edl]");
         println!("  loom-video-cli plan <input.loomvideo>");
@@ -19,12 +22,83 @@ fn main() -> Result<(), String> {
         "create" => {
             let out_path = args.get(2).ok_or("missing output path")?;
             let name = args.get(3).map(|s| s.as_str()).unwrap_or("Untitled Video");
-            let mut proj = VideoProject::new("cli-video", name);
-            proj.tracks[0].add_clip(Clip::new("c-intro", "Intro_Shot.mov", 4.5));
-            proj.tracks[0].add_clip(Clip::new("c-interview", "Interview_A.mov", 15.0));
-            let bytes = save_video_project(&proj)?;
+            let mut project = VideoProject::new("cli-video", name);
+
+            let mut intro = Clip::new("c-intro", "Intro Shot", 4.5);
+            intro.source_path = "Intro_Shot.mov".to_string();
+            intro.start_time = 0.0;
+
+            let mut interview = Clip::new("c-interview", "Interview A", 15.0);
+            interview.source_path = "Interview_A.mov".to_string();
+            interview.start_time = intro.end_time();
+
+            project.tracks[0].add_clip(intro);
+            project.tracks[0].add_clip(interview);
+            project.tracks[0].sort_clips();
+
+            let bytes = save_video_project(&project)?;
             std::fs::write(out_path, bytes).map_err(|e| format!("write error: {e}"))?;
             println!("Created video project: {out_path} (2 tracks, 2 clips)");
+        }
+        "edit-demo" => {
+            let in_path = args.get(2).ok_or("missing input path")?;
+            let bytes = std::fs::read(in_path).map_err(|e| format!("read error: {e}"))?;
+            let mut project = load_video_project(&bytes)?;
+
+            let video_track = project.tracks.get_mut(0).ok_or("missing video track")?;
+            let intro = video_track
+                .clips
+                .iter_mut()
+                .find(|clip| clip.id == "c-intro")
+                .ok_or("missing c-intro")?;
+            intro.trim_out(3.0).map_err(|error| error.to_string())?;
+
+            project
+                .split_clip(0, "c-interview", 10.5)
+                .map_err(|error| error.to_string())?;
+            project
+                .move_clip(0, 0, "c-interview-a", 3.0, false)
+                .map_err(|error| error.to_string())?;
+
+            let video_track = project.tracks.get_mut(0).ok_or("missing video track")?;
+            let right = video_track
+                .clips
+                .iter_mut()
+                .find(|clip| clip.id == "c-interview-b")
+                .ok_or("missing split clip")?;
+            right
+                .set_playback_rate(1.5)
+                .map_err(|error| error.to_string())?;
+            right.start_time = 9.0;
+            video_track.sort_clips();
+
+            project
+                .add_marker(TimelineMarker {
+                    id: "marker-interview".to_string(),
+                    time: 3.0,
+                    label: "Interview begins".to_string(),
+                    color: "copper".to_string(),
+                })
+                .map_err(|error| error.to_string())?;
+            project
+                .add_caption(CaptionCue {
+                    id: "caption-intro".to_string(),
+                    start: 0.25,
+                    end: 2.75,
+                    text: "Loom native timeline journey".to_string(),
+                    language: "en".to_string(),
+                })
+                .map_err(|error| error.to_string())?;
+
+            let bytes = save_video_project(&project)?;
+            std::fs::write(in_path, bytes).map_err(|e| format!("write error: {e}"))?;
+            println!(
+                "Edited video project: {} clips, {} marker, {} caption, duration {:.3}s",
+                project.total_clips(),
+                project.markers.len(),
+                project.captions.len(),
+                project.duration()
+            );
         }
         "edl" => {
             let in_path = args.get(2).ok_or("missing input path")?;
@@ -69,22 +143,38 @@ fn main() -> Result<(), String> {
         "inspect" => {
             let in_path = args.get(2).ok_or("missing input path")?;
             let bytes = std::fs::read(in_path).map_err(|e| format!("read error: {e}"))?;
-            let proj = load_video_project(&bytes)?;
-            println!("Video Project: {}", proj.name);
+            let project = load_video_project(&bytes)?;
+            println!("Video Project: {}", project.name);
             println!(
                 "Format: {}x{} @ {} fps",
-                proj.width, proj.height, proj.frame_rate
+                project.width, project.height, project.frame_rate
             );
-            println!("Tracks ({} total):", proj.tracks.len());
-            for t in &proj.tracks {
+            println!("Duration: {:.3}s", project.duration());
+            println!(
+                "Timeline: {} clips, {} markers, {} captions",
+                project.total_clips(),
+                project.markers.len(),
+                project.captions.len()
+            );
+            println!("Tracks ({} total):", project.tracks.len());
+            for track in &project.tracks {
                 println!(
                     "  Track '{}' [{:?}]: {} clips",
-                    t.name,
-                    t.track_type,
-                    t.clips.len()
+                    track.name,
+                    track.track_type,
+                    track.clips.len()
                 );
-                for c in &t.clips {
-                    println!("    - Clip: {} ({:.1}s)", c.name, c.duration);
+                for clip in &track.clips {
+                    println!(
+                        "    - {} [{}]: {:.3}..{:.3}s, source {:.3}..{:.3}, rate {:.3}",
+                        clip.name,
+                        clip.id,
+                        clip.start_time,
+                        clip.end_time(),
+                        clip.in_point,
+                        clip.out_point,
+                        clip.playback_rate
+                    );
                 }
             }
         }
