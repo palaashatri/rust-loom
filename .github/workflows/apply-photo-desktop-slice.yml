@@ -41,10 +41,17 @@ jobs:
       - name: Verify and apply deterministic Photo migration
         shell: bash
         run: |
+          set -euxo pipefail
           payload=loom-bootstrap/scripts/apply-photo-desktop-slice.py.gz.b64
-          test "$(sha256sum "$payload" | cut -d' ' -f1)" = "95b518ca65935cebdc40a3737bb567e4f37f37416f00f9395bd2f17f992738bc"
+          wc -c "$payload"
+          payload_hash="$(sha256sum "$payload" | cut -d' ' -f1)"
+          echo "payload_sha256=$payload_hash"
+          test "$payload_hash" = "95b518ca65935cebdc40a3737bb567e4f37f37416f00f9395bd2f17f992738bc"
           base64 -d "$payload" | gzip -d > /tmp/apply-photo-desktop-slice.py
-          test "$(sha256sum /tmp/apply-photo-desktop-slice.py | cut -d' ' -f1)" = "491cd96a4106511bec5d23dcdad11701d10fce9756c33af4a2d281bc566f6b13"
+          wc -c /tmp/apply-photo-desktop-slice.py
+          script_hash="$(sha256sum /tmp/apply-photo-desktop-slice.py | cut -d' ' -f1)"
+          echo "script_sha256=$script_hash"
+          test "$script_hash" = "491cd96a4106511bec5d23dcdad11701d10fce9756c33af4a2d281bc566f6b13"
           python3 /tmp/apply-photo-desktop-slice.py
 
       - name: Format and validate Photo
