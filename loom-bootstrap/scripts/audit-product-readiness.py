@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Strict evidence-based Loom UI and functionality scorecard.
+"""Strict evidence-based Loom repository-readiness scorecard.
 
-Ten out of ten is deliberately difficult. Source tokens establish that an
-architecture exists; native screenshots, packages, sample-open journeys,
-conformance corpora, and interaction automation establish that it works.
+This score measures engineering evidence around the current implementation. It
+is not an application feature-completion percentage and must never be presented
+as parity with the full AGENTS.md product specification.
 """
 from __future__ import annotations
 
@@ -34,30 +34,33 @@ def app_ui(app: str) -> str:
 
 def load_json(path: Path) -> dict[str, Any] | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
     except (OSError, ValueError, TypeError):
         return None
 
 
-def keyboard_journeys(evidence_root: Path | None) -> dict[str, bool]:
-    """Load recorded keyboard journeys: {app: passed} for every application.
+def keyboard_journeys(evidence_root: Path | None) -> dict[str, dict[str, Any]]:
+    """Load actual per-application palette journey reports.
 
-    The journey recorder writes ``<app>/<app>.json`` beneath a ``journeys``
-    directory. Candidates are the repo-local recorder output and the evidence
-    root. Evidence in the report only counts when the journey passed.
+    A passing report proves dispatched key handling after the palette has been
+    opened. Current Slint public APIs cannot inject Ctrl/Cmd modifiers, and the
+    recorder does not yet assert the selected command's domain side effect.
+    Consequently these reports are useful evidence but never full keyboard or
+    command-completion evidence by themselves.
     """
     candidates = [ROOT / ".work" / "tmp" / "journeys"]
     if evidence_root is not None:
         candidates.append(evidence_root / "journeys")
         candidates.append(evidence_root)
-    journeys: dict[str, bool] = {}
+    journeys: dict[str, dict[str, Any]] = {}
     for base in candidates:
         for app in APPS:
             if app in journeys:
                 continue
             report = load_json(base / app / f"{app}.json")
             if report is not None:
-                journeys[app] = report.get("passed") is True
+                journeys[app] = report
     return journeys
 
 
@@ -72,20 +75,34 @@ def native_packages(evidence_root: Path | None) -> list[Path]:
     if evidence_root is None or not evidence_root.exists():
         return []
     suffixes = (".msi", ".dmg", ".pkg", ".deb", ".appimage", ".zip", ".tar.gz")
-    return [path for path in evidence_root.rglob("*") if path.is_file() and path.name.lower().endswith(suffixes)]
+    return [
+        path
+        for path in evidence_root.rglob("*")
+        if path.is_file() and path.name.lower().endswith(suffixes)
+    ]
 
 
 def score(evidence_root: Path | None) -> dict[str, object]:
     uis = {app: app_ui(app) for app in APPS}
-    mains = {app: read(ROOT / f"loom-{app}/crates/loom-{app}-app/src/main.rs") for app in APPS}
-    cores = {app: read(ROOT / f"loom-{app}/crates/loom-{app}-core/src/lib.rs") for app in APPS}
+    mains = {
+        app: read(ROOT / f"loom-{app}/crates/loom-{app}-app/src/main.rs")
+        for app in APPS
+    }
+    cores = {
+        app: read(ROOT / f"loom-{app}/crates/loom-{app}-core/src/lib.rs")
+        for app in APPS
+    }
     shared = read(ROOT / "loom-core/crates/loom-ui/ui/components.slint")
     theme = read(ROOT / "loom-core/crates/loom-ui/ui/theme.slint")
     native_workflow = read(ROOT / ".github/workflows/cross-platform.yml")
     packaging = read(ROOT / "loom-bootstrap/packaging/release.py")
     report = native_report(evidence_root)
     packages = native_packages(evidence_root)
-    functional_reports = sorted(evidence_root.rglob("native-functional-matrix.json")) if evidence_root and evidence_root.exists() else []
+    functional_reports = (
+        sorted(evidence_root.rglob("native-functional-matrix.json"))
+        if evidence_root and evidence_root.exists()
+        else []
+    )
     functional_report = load_json(functional_reports[0]) if functional_reports else None
 
     native_passed = bool(report and report.get("passed") is True)
@@ -103,41 +120,80 @@ def score(evidence_root: Path | None) -> dict[str, object]:
     ui_dimensions: list[dict[str, object]] = []
 
     def ui_point(name: str, value: float, evidence: str, blocker: str | None = None) -> None:
-        item: dict[str, object] = {"name": name, "score": round(max(0.0, min(1.0, value)), 2), "evidence": evidence}
+        item: dict[str, object] = {
+            "name": name,
+            "score": round(max(0.0, min(1.0, value)), 2),
+            "evidence": evidence,
+        }
         if blocker:
             item["blocker"] = blocker
         ui_dimensions.append(item)
 
-    shared_count = sum(1 for text in uis.values() if contains_all(text, ("AppHeader {", "StatusBar {", "Theme.palette()")))
-    ui_point("shared design system", shared_count / len(APPS), f"{shared_count}/8 apps use shared creator chrome")
+    shared_count = sum(
+        1
+        for text in uis.values()
+        if contains_all(text, ("AppHeader {", "StatusBar {", "Theme.palette()"))
+    )
+    ui_point(
+        "shared design system",
+        shared_count / len(APPS),
+        f"{shared_count}/8 apps use shared creator chrome",
+    )
 
-    semantic_count = sum(1 for text in uis.values() if not re.search(r"#[0-9a-fA-F]{6,8}", text))
-    ui_point("semantic visual language", semantic_count / len(APPS), f"{semantic_count}/8 app UIs avoid local color literals")
+    semantic_count = sum(
+        1 for text in uis.values() if not re.search(r"#[0-9a-fA-F]{6,8}", text)
+    )
+    ui_point(
+        "semantic visual language",
+        semantic_count / len(APPS),
+        f"{semantic_count}/8 app UIs avoid local color literals",
+    )
 
-    accessibility_tokens = ("accessible-role", "accessible-label", "accessible-action-default")
-    accessibility_base = sum(token in shared for token in accessibility_tokens) / len(accessibility_tokens)
-    accessibility_native = 0.2 if native_passed and "high-contrast" in tuple(report.get("themes", ())) else 0.0
+    accessibility_tokens = (
+        "accessible-role",
+        "accessible-label",
+        "accessible-action-default",
+    )
+    accessibility_base = sum(token in shared for token in accessibility_tokens) / len(
+        accessibility_tokens
+    )
+    high_contrast_evidence = bool(
+        native_passed and report and "high-contrast" in tuple(report.get("themes", ()))
+    )
+    accessibility_score = accessibility_base * 0.6 + (0.15 if high_contrast_evidence else 0.0)
     ui_point(
         "accessibility semantics",
-        min(1.0, accessibility_base * 0.8 + accessibility_native),
-        "shared semantic controls and native high-contrast evidence",
-        None if accessibility_native else "screen-reader and native high-contrast journey evidence is incomplete",
+        min(0.75, accessibility_score),
+        "shared semantic controls and native high-contrast captures",
+        "real screen-reader tree journeys, text scaling, RTL stress, and reduced-motion evidence are incomplete",
     )
 
     key_handlers = shared.count("key-pressed(event)")
     journeys = keyboard_journeys(evidence_root)
-    journeys_passed = sum(1 for passed in journeys.values() if passed)
+    journeys_passed = sum(
+        1 for report_value in journeys.values() if report_value.get("passed") is True
+    )
     journey_ratio = journeys_passed / len(APPS)
-    keyboard_score = min(1.0, key_handlers / 10.0) * 0.55 + journey_ratio * 0.45
+    source_ratio = min(1.0, key_handlers / 10.0)
+    # Current journeys programmatically open the palette because modifier-key
+    # injection is unavailable and do not assert the invoked command's domain
+    # side effect. Keep this dimension capped until both are evidenced.
+    keyboard_score = min(0.8, source_ratio * 0.5 + journey_ratio * 0.3)
     ui_point(
         "keyboard and command interaction",
         keyboard_score,
-        f"{key_handlers} shared keyboard handlers; recorded keyboard journeys {journeys_passed}/{len(APPS)}",
-        None if journey_ratio == 1.0 else "complete keyboard-only journeys and command-palette coverage are required",
+        f"{key_handlers} shared keyboard handlers; post-open palette journeys {journeys_passed}/8",
+        "Ctrl/Cmd+K opening and per-command application side effects are not yet verified end to end",
     )
 
-    theme_source = contains_all(theme, ("light", "dark", "high-contrast", "reduced-motion"))
-    theme_native = native_passed and set(report.get("themes", ())) >= {"light", "dark", "high-contrast"}
+    theme_source = contains_all(
+        theme, ("light", "dark", "high-contrast", "reduced-motion")
+    )
+    theme_native = bool(
+        native_passed
+        and report
+        and set(report.get("themes", ())) >= {"light", "dark", "high-contrast"}
+    )
     ui_point(
         "theme and motion coverage",
         (0.5 if theme_source else 0.0) + (0.5 if theme_native else 0.0),
@@ -147,22 +203,42 @@ def score(evidence_root: Path | None) -> dict[str, object]:
 
     ui_point(
         "native visual QA",
-        1.0 if native_passed else 0.2 if contains_all(native_workflow, ("native-ui-matrix.py", "windows-2025", "macos-15")) else 0.0,
-        "native screenshot matrix result" if native_passed else "workflow exists but completed native evidence is absent",
+        1.0
+        if native_passed
+        else 0.2
+        if contains_all(native_workflow, ("native-ui-matrix.py", "windows-2025", "macos-15"))
+        else 0.0,
+        "native screenshot matrix result"
+        if native_passed
+        else "workflow exists but completed native evidence is absent",
         None if native_passed else "all native screenshot jobs must pass",
     )
 
-    adaptive_source = all(contains_all(text, ("min-width:", "min-height:", "horizontal-stretch", "vertical-stretch")) for text in uis.values())
+    adaptive_source = all(
+        contains_all(
+            text,
+            ("min-width:", "min-height:", "horizontal-stretch", "vertical-stretch"),
+        )
+        for text in uis.values()
+    )
     adaptive_native = native_passed and len(native_sizes) >= 3
     ui_point(
         "adaptive layout",
         (0.35 if adaptive_source else 0.0) + (0.65 if adaptive_native else 0.0),
         f"bounded stretch layouts and {len(native_sizes)} native capture sizes",
-        None if adaptive_native else "compact, reference, and large native captures must pass",
+        None
+        if adaptive_native
+        else "compact, reference, and large native captures must pass",
     )
 
-    positional_open = all("!other.starts_with('-') && args.open.is_none()" in text for text in mains.values())
-    associations = contains_all(packaging, ("DOCUMENT_TYPES", "CFBundleDocumentTypes", "RegistryValue", "MimeType="))
+    positional_open = all(
+        "!other.starts_with('-') && args.open.is_none()" in text
+        for text in mains.values()
+    )
+    associations = contains_all(
+        packaging,
+        ("DOCUMENT_TYPES", "CFBundleDocumentTypes", "RegistryValue", "MimeType="),
+    )
     native_shell = 0.25 if positional_open else 0.0
     native_shell += 0.25 if associations else 0.0
     native_shell += 0.25 if packages else 0.0
@@ -183,25 +259,66 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "studio": ("track", "mixer"),
         "encode": ("queue", "preset"),
     }
-    specific_count = sum(1 for app, tokens in app_specific.items() if contains_all(uis[app].lower(), tuple(token.lower() for token in tokens)))
-    ui_point("workflow-specific composition", specific_count / len(APPS), f"{specific_count}/8 apps expose domain-specific workspace composition")
+    specific_count = sum(
+        1
+        for app, tokens in app_specific.items()
+        if contains_all(uis[app].lower(), tuple(token.lower() for token in tokens))
+    )
+    ui_point(
+        "workflow-specific composition",
+        specific_count / len(APPS),
+        f"{specific_count}/8 apps expose domain-specific workspace composition",
+    )
 
-    forbidden = ("coming soon", "placeholder ui", "placeholder control", "fake progress", "model preview")
-    honest = all(not any(token in text.lower() for token in forbidden) for text in uis.values())
-    ui_point("truthful states", 1.0 if honest else 0.0, "no fabricated product states in the application UI")
+    forbidden = (
+        "coming soon",
+        "placeholder ui",
+        "placeholder control",
+        "fake progress",
+        "model preview",
+    )
+    honest = all(
+        not any(token in text.lower() for token in forbidden) for text in uis.values()
+    )
+    status_only_tokens = ("Bold ON", "Style: {label}", "Align: {label}")
+    status_only = any(
+        token in mains["writer"] for token in status_only_tokens
+    )
+    ui_point(
+        "truthful states",
+        0.6 if status_only else 1.0 if honest else 0.0,
+        "source scan for fabricated and status-only product controls",
+        "Writer formatting controls currently update UI/status state without persisting rich-text formatting"
+        if status_only
+        else None,
+    )
 
     functionality_dimensions: list[dict[str, object]] = []
 
     def fn_point(name: str, value: float, evidence: str, blocker: str | None = None) -> None:
-        item: dict[str, object] = {"name": name, "score": round(max(0.0, min(1.0, value)), 2), "evidence": evidence}
+        item: dict[str, object] = {
+            "name": name,
+            "score": round(max(0.0, min(1.0, value)), 2),
+            "evidence": evidence,
+        }
         if blocker:
             item["blocker"] = blocker
         functionality_dimensions.append(item)
 
-    recovered = sum(1 for text in mains.values() if contains_all(text, ("save", "load", "define_snapshot_recovery")))
-    fn_point("persistence and recovery", recovered / len(APPS), f"{recovered}/8 apps use native package persistence and snapshot recovery")
+    recovered = sum(
+        1
+        for text in mains.values()
+        if contains_all(text, ("save", "load", "define_snapshot_recovery"))
+    )
+    fn_point(
+        "persistence and recovery",
+        recovered / len(APPS),
+        f"{recovered}/8 apps use native package persistence and snapshot recovery",
+    )
 
-    undo_apps = sum(1 for text in mains.values() if "on_undo" in text and "on_redo" in text)
+    undo_apps = sum(
+        1 for text in mains.values() if "on_undo" in text and "on_redo" in text
+    )
     fn_point(
         "undo and redo",
         undo_apps / len(APPS) * 0.85,
@@ -209,8 +326,16 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "operation-level undo/recovery coverage and crash replay tests are not yet complete",
     )
 
-    export_apps = sum(1 for text in mains.values() if re.search(r"on_export|export_|encode_|execute_", text))
-    import_apps = sum(1 for text in mains.values() if re.search(r"on_import|load_|decode_|from_csv|probe_media", text))
+    export_apps = sum(
+        1
+        for text in mains.values()
+        if re.search(r"on_export|export_|encode_|execute_", text)
+    )
+    import_apps = sum(
+        1
+        for text in mains.values()
+        if re.search(r"on_import|load_|decode_|from_csv|probe_media", text)
+    )
     fn_point(
         "import and export journeys",
         (export_apps + import_apps) / (2 * len(APPS)) * 0.85,
@@ -224,7 +349,11 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "studio": ("decode_wav", "AudioIo", "synthesize_notes"),
         "encode": ("discover_ffmpeg", "execute_job_with_cancel", "probe_duration"),
     }
-    media_count = sum(1 for app, tokens in media_tokens.items() if contains_all(mains[app], tokens))
+    media_count = sum(
+        1
+        for app, tokens in media_tokens.items()
+        if contains_all(mains[app], tokens)
+    )
     fn_point(
         "media engines",
         media_count / len(media_tokens) * 0.8,
@@ -237,7 +366,11 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "sheets": ("evaluate", "from_csv", "CellEditTransaction"),
         "present": ("PresentationSession", "export_pdf", "save_presentation_session"),
     }
-    document_count = sum(1 for app, tokens in document_tokens.items() if contains_all(mains[app], tokens))
+    document_count = sum(
+        1
+        for app, tokens in document_tokens.items()
+        if contains_all(mains[app], tokens)
+    )
     fn_point(
         "document engines",
         document_count / len(document_tokens) * 0.8,
@@ -245,11 +378,29 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "professional typography, layout, recalculation breadth, and format fidelity are incomplete",
     )
 
-    safety_count = sum(1 for text in list(mains.values()) + list(cores.values()) if any(token in text for token in ("cancel", "validate", "Result<", "map_err")))
-    fn_point("failure, validation, and cancellation", min(0.9, safety_count / 14.0), "bounded errors, validation, and cancellation across engines")
+    safety_count = sum(
+        1
+        for text in list(mains.values()) + list(cores.values())
+        if any(token in text for token in ("cancel", "validate", "Result<", "map_err"))
+    )
+    fn_point(
+        "failure, validation, and cancellation",
+        min(0.9, safety_count / 14.0),
+        "bounded errors, validation, and cancellation across engines",
+    )
 
     vision = read(ROOT / "loom-vision/crates/loom-vision-core/src/production.rs")
-    vision_score = sum(token in vision.lower() for token in ("preprocess", "benchmark", "accelerat", "license", "model pack", "checksum")) / 6.0
+    vision_score = sum(
+        token in vision.lower()
+        for token in (
+            "preprocess",
+            "benchmark",
+            "accelerat",
+            "license",
+            "model pack",
+            "checksum",
+        )
+    ) / 6.0
     fn_point(
         "Vision productionisation",
         vision_score * 0.75,
@@ -257,9 +408,21 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         "redistributable production models and measured application integration remain incomplete",
     )
 
-    plugin_files = "\n".join(read(path) for path in (ROOT / "loom-plugin-sdk").rglob("*.rs"))
-    plugin_tokens = ("permission", "wasm", "signature", "trust", "rollback", "migration", "ui")
-    plugin_score = sum(token in plugin_files.lower() for token in plugin_tokens) / len(plugin_tokens)
+    plugin_files = "\n".join(
+        read(path) for path in (ROOT / "loom-plugin-sdk").rglob("*.rs")
+    )
+    plugin_tokens = (
+        "permission",
+        "wasm",
+        "signature",
+        "trust",
+        "rollback",
+        "migration",
+        "ui",
+    )
+    plugin_score = sum(
+        token in plugin_files.lower() for token in plugin_tokens
+    ) / len(plugin_tokens)
     fn_point(
         "plugin productionisation",
         plugin_score * 0.75,
@@ -269,41 +432,65 @@ def score(evidence_root: Path | None) -> dict[str, object]:
 
     interop = read(ROOT / "loom-core/crates/loom-interop/src/lib.rs")
     interop_tokens = ("docx", "xlsx", "pptx", "psd", "odt", "ods", "odp", "fidelity")
-    format_coverage = sum(token in interop.lower() for token in interop_tokens) / len(interop_tokens)
-    fixture_count = len(list((ROOT / "loom-samples").rglob("*"))) if (ROOT / "loom-samples").exists() else 0
+    format_coverage = sum(
+        token in interop.lower() for token in interop_tokens
+    ) / len(interop_tokens)
+    fixture_count = (
+        len(list((ROOT / "loom-samples/conformance").rglob("*")))
+        if (ROOT / "loom-samples/conformance").exists()
+        else 0
+    )
     fn_point(
         "interoperability fidelity",
-        min(0.65, format_coverage * 0.45 + min(fixture_count, 20) / 100.0),
-        f"declared format coverage={format_coverage:.0%}, sample/conformance entries={fixture_count}",
-        "broad round-trip conformance, compatibility reports, and loss budgets remain incomplete",
+        min(0.45, format_coverage * 0.3 + min(fixture_count, 20) / 200.0),
+        f"format detection declarations={format_coverage:.0%}, minimal detection fixtures={fixture_count}",
+        "fixtures currently prove format detection, not semantic import/export or round-trip fidelity",
     )
 
-    journey_ratio = sample_open_count / len(APPS) if report else 0.0
-    delivery_score = 0.2 if contains_all(native_workflow, ("windows-2025", "macos-15", "macos-15-intel")) else 0.0
+    sample_ratio = sample_open_count / len(APPS) if report else 0.0
+    delivery_score = (
+        0.2
+        if contains_all(
+            native_workflow, ("windows-2025", "macos-15", "macos-15-intel")
+        )
+        else 0.0
+    )
     delivery_score += 0.2 if packages else 0.0
-    delivery_score += 0.3 * journey_ratio
+    delivery_score += 0.3 * sample_ratio
     delivery_score += 0.3 if functional_passed else 0.0
     fn_point(
         "native delivery and user-journey evidence",
         delivery_score,
-        f"native packages={len(packages)}, functional matrix={functional_passed}, sample-open journeys={sample_open_count}/8",
-        None if journey_ratio == 1.0 and packages and functional_passed else "all native packages, CLI workflows, and sample-open journeys must pass",
+        f"native packages={len(packages)}, shallow CLI matrix={functional_passed}, sample-open journeys={sample_open_count}/8",
+        "the current functional matrix is CLI-oriented and does not prove complete in-app editing workflows",
     )
 
     ui_score = round(sum(float(item["score"]) for item in ui_dimensions), 2)
-    functionality_score = round(sum(float(item["score"]) for item in functionality_dimensions), 2)
+    functionality_score = round(
+        sum(float(item["score"]) for item in functionality_dimensions), 2
+    )
     blockers = [
         {"area": "ui", "dimension": item["name"], "detail": item["blocker"]}
-        for item in ui_dimensions if "blocker" in item
+        for item in ui_dimensions
+        if "blocker" in item
     ] + [
-        {"area": "functionality", "dimension": item["name"], "detail": item["blocker"]}
-        for item in functionality_dimensions if "blocker" in item
+        {
+            "area": "functionality",
+            "dimension": item["name"],
+            "detail": item["blocker"],
+        }
+        for item in functionality_dimensions
+        if "blocker" in item
     ]
     return {
-        "schema_version": 2,
+        "schema_version": 3,
+        "scope": "repository readiness evidence; not AGENTS.md feature-completion parity",
         "target": 10.0,
         "ui": {"score": ui_score, "dimensions": ui_dimensions},
-        "functionality": {"score": functionality_score, "dimensions": functionality_dimensions},
+        "functionality": {
+            "score": functionality_score,
+            "dimensions": functionality_dimensions,
+        },
         "blockers": blockers,
         "evidence_root": str(evidence_root) if evidence_root else None,
     }
@@ -326,7 +513,7 @@ def main() -> int:
     functionality = float(payload["functionality"]["score"])
     if ui < arguments.minimum_ui or functionality < arguments.minimum_functionality:
         print(
-            f"product readiness below gate: UI {ui}/10 (minimum {arguments.minimum_ui}), "
+            f"repository readiness below gate: UI {ui}/10 (minimum {arguments.minimum_ui}), "
             f"functionality {functionality}/10 (minimum {arguments.minimum_functionality})",
             file=sys.stderr,
         )
