@@ -5,11 +5,17 @@
 //! renderer and write a PNG, which is what the Docker visual-QA pipeline
 //! and the offline test mode exercise.
 
+mod document_formatting;
+
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Instant;
 
+use document_formatting::{
+    formatting_state, set_document_alignment, set_document_bold, set_document_heading,
+    set_document_italic, set_document_underline,
+};
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -190,62 +196,62 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         },
         PaletteCommand {
             action: PaletteAction::ToggleBold,
-            id: "writer.style.bold",
-            label: "Style: Bold",
+            id: "writer.style.bold-all",
+            label: "Document Style: Bold",
             shortcut: "Ctrl+B",
         },
         PaletteCommand {
             action: PaletteAction::ToggleItalic,
-            id: "writer.style.italic",
-            label: "Style: Italic",
+            id: "writer.style.italic-all",
+            label: "Document Style: Italic",
             shortcut: "Ctrl+I",
         },
         PaletteCommand {
             action: PaletteAction::ToggleUnderline,
-            id: "writer.style.underline",
-            label: "Style: Underline",
+            id: "writer.style.underline-all",
+            label: "Document Style: Underline",
             shortcut: "Ctrl+U",
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(1),
-            id: "writer.style.heading-1",
-            label: "Style: Heading 1",
+            id: "writer.style.heading-1-all",
+            label: "All Paragraphs: Heading 1",
             shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(2),
-            id: "writer.style.heading-2",
-            label: "Style: Heading 2",
+            id: "writer.style.heading-2-all",
+            label: "All Paragraphs: Heading 2",
             shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(3),
-            id: "writer.style.heading-3",
-            label: "Style: Heading 3",
+            id: "writer.style.heading-3-all",
+            label: "All Paragraphs: Heading 3",
             shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(0),
-            id: "writer.style.body",
-            label: "Style: Body Text",
+            id: "writer.style.body-all",
+            label: "All Paragraphs: Body Text",
             shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(0),
-            id: "writer.align.left",
-            label: "Align Left",
+            id: "writer.align.left-all",
+            label: "Align All Left",
             shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(1),
-            id: "writer.align.center",
-            label: "Align Center",
+            id: "writer.align.center-all",
+            label: "Align All Center",
             shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetAlignment(2),
-            id: "writer.align.right",
-            label: "Align Right",
+            id: "writer.align.right-all",
+            label: "Align All Right",
             shortcut: "",
         },
     ]
@@ -434,9 +440,15 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
     let word_count = text.split_whitespace().count();
     let char_count = text.chars().count();
     let block_count = doc.len();
+    let formatting = formatting_state(doc);
 
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
+    app.set_is_bold(formatting.bold);
+    app.set_is_italic(formatting.italic);
+    app.set_is_underline(formatting.underline);
+    app.set_heading_level(formatting.heading_level);
+    app.set_text_alignment(formatting.alignment);
     app.set_status_left(SharedString::from(format!(
         "{} words · {} chars · {} blocks",
         word_count, char_count, block_count
@@ -654,68 +666,93 @@ fn run_gui(args: &Args) -> Result<(), String> {
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_toggle_bold(move || {
             if let Some(app) = app_ref.upgrade() {
-                let bold = app.get_is_bold();
-                app.set_status_right(SharedString::from(if bold {
-                    "Bold ON"
+                let enabled = app.get_is_bold();
+                let mut next = state.current.borrow().clone();
+                set_document_bold(&mut next, enabled);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                app.set_status_right(SharedString::from(if enabled {
+                    "Bold applied to all paragraphs"
                 } else {
-                    "Bold OFF"
+                    "Bold removed from all paragraphs"
                 }));
             }
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_toggle_italic(move || {
             if let Some(app) = app_ref.upgrade() {
-                let italic = app.get_is_italic();
-                app.set_status_right(SharedString::from(if italic {
-                    "Italic ON"
+                let enabled = app.get_is_italic();
+                let mut next = state.current.borrow().clone();
+                set_document_italic(&mut next, enabled);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                app.set_status_right(SharedString::from(if enabled {
+                    "Italic applied to all paragraphs"
                 } else {
-                    "Italic OFF"
+                    "Italic removed from all paragraphs"
                 }));
             }
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_toggle_underline(move || {
             if let Some(app) = app_ref.upgrade() {
-                let underline = app.get_is_underline();
-                app.set_status_right(SharedString::from(if underline {
-                    "Underline ON"
+                let enabled = app.get_is_underline();
+                let mut next = state.current.borrow().clone();
+                set_document_underline(&mut next, enabled);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                app.set_status_right(SharedString::from(if enabled {
+                    "Underline applied to all paragraphs"
                 } else {
-                    "Underline OFF"
+                    "Underline removed from all paragraphs"
                 }));
             }
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_select_heading(move |level| {
             if let Some(app) = app_ref.upgrade() {
+                let mut next = state.current.borrow().clone();
+                set_document_heading(&mut next, level);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 let label = match level {
                     1 => "Heading 1",
                     2 => "Heading 2",
                     3 => "Heading 3",
-                    _ => "Normal",
+                    _ => "Body Text",
                 };
-                app.set_status_right(SharedString::from(format!("Style: {label}")));
+                app.set_status_right(SharedString::from(format!(
+                    "{label} applied to all paragraphs"
+                )));
             }
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_select_alignment(move |align| {
             if let Some(app) = app_ref.upgrade() {
+                let mut next = state.current.borrow().clone();
+                set_document_alignment(&mut next, align);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 let label = match align {
                     1 => "Center",
                     2 => "Right",
+                    3 => "Justify",
                     _ => "Left",
                 };
-                app.set_status_right(SharedString::from(format!("Align: {label}")));
+                app.set_status_right(SharedString::from(format!(
+                    "{label} alignment applied to all paragraphs"
+                )));
             }
         });
     }
