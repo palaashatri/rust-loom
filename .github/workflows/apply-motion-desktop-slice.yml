@@ -69,6 +69,199 @@ jobs:
           test "$(sha256sum /tmp/apply-motion-desktop-slice.py | cut -d' ' -f1)" = "75b7d52001988e8fc7024ffe30f115a9ca05c7a949f8e60218b6283d410341fa"
           python3 /tmp/apply-motion-desktop-slice.py
 
+      - name: Stabilize blank documents, round trips, and responsive layout
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          core_path = Path("loom-motion/crates/loom-motion-core/src/lib.rs")
+          core = core_path.read_text()
+          for struct_name in ("Keyframe", "MotionLayer", "CompositionDocument"):
+              core = replace_once(
+                  core,
+                  f"#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct {struct_name}",
+                  f"#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct {struct_name}",
+                  f"{struct_name} equality",
+              )
+          core = replace_once(
+              core,
+              '''    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+                  let mut doc = Self {
+                      id: id.into(),
+                      name: name.into(),
+                      width: 1920,
+                      height: 1080,
+                      frame_rate: 60.0,
+                      duration_secs: 10.0,
+                      layers: Vec::new(),
+                      active_layer_index: 0,
+                  };
+                  let mut title_layer = MotionLayer::new("layer-title", "Animated Title", "Text");
+                  title_layer.add_keyframe("opacity", 0.0, 0.0);
+                  title_layer.add_keyframe("opacity", 1.0, 1.0);
+                  doc.layers.push(title_layer);
+                  doc
+              }
+          ''',
+              '''    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+                  Self {
+                      id: id.into(),
+                      name: name.into(),
+                      width: 1920,
+                      height: 1080,
+                      frame_rate: 60.0,
+                      duration_secs: 10.0,
+                      layers: Vec::new(),
+                      active_layer_index: 0,
+                  }
+              }
+          ''',
+              "blank CompositionDocument constructor",
+          )
+          core = replace_once(
+              core,
+              "        assert_eq!(doc.len(), 1);\n",
+              "        assert!(doc.is_empty());\n",
+              "blank constructor test",
+          )
+          core = replace_once(
+              core,
+              '''        doc.add_layer(MotionLayer::new("l2", "Background", "VectorShape"));
+                  assert!(doc.select_layer(1));
+                  assert!(!doc.select_layer(2));
+                  assert_eq!(doc.active_layer_index, 1);
+          ''',
+              '''        doc.add_layer(MotionLayer::new("l2", "Background", "VectorShape"));
+                  assert!(doc.select_layer(0));
+                  assert!(!doc.select_layer(1));
+                  assert_eq!(doc.active_layer_index, 0);
+          ''',
+              "layer selection test",
+          )
+          core = replace_once(
+              core,
+              "        assert_eq!(loaded.len(), 2);\n",
+              '''        assert_eq!(loaded.len(), 1);
+                  assert_eq!(loaded, doc);
+                  let loaded_again = load_motion(&bytes).expect("second load failed");
+                  assert_eq!(loaded_again, loaded);
+          ''',
+              "exact idempotent core round trip",
+          )
+          core = replace_once(
+              core,
+              '''        let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
+                  doc.frame_rate = 0.0;
+                  doc.layers[0].position_x_keys = vec![
+          ''',
+              '''        let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
+                  doc.frame_rate = 0.0;
+                  doc.add_layer(MotionLayer::new("layer-invalid", "Invalid Layer", "Text"));
+                  doc.layers[0].position_x_keys = vec![
+          ''',
+              "validation test explicit layer",
+          )
+          core_path.write_text(core)
+
+          main_path = Path("loom-motion/crates/loom-motion-app/src/main.rs")
+          main = main_path.read_text()
+          main = replace_once(
+              main,
+              '''fn sample_motion() -> CompositionDocument {
+                  let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
+                  doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
+          ''',
+              '''fn sample_motion() -> CompositionDocument {
+                  let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
+                  let mut title = MotionLayer::new("layer-title", "Animated Title", "Text");
+                  title.add_keyframe("opacity", 0.0, 0.0);
+                  title.add_keyframe("opacity", 1.0, 1.0);
+                  doc.add_layer(title);
+                  doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
+          ''',
+              "explicit Motion sample layers",
+          )
+          constructor_anchor = '''    let app = MotionApp::new().map_err(|e| e.to_string())?;
+              apply_theme(&app, &args.theme);
+          '''
+          count = main.count(constructor_anchor)
+          if count != 3:
+              raise SystemExit(f"Motion app constructors: expected 3 matches, found {count}")
+          main = main.replace(
+              constructor_anchor,
+              '''    let app = MotionApp::new().map_err(|e| e.to_string())?;
+              app.set_compact_layout(args.size.0 < 1180);
+              apply_theme(&app, &args.theme);
+          ''',
+          )
+          main = replace_once(
+              main,
+              '''    fn motion_path_round_trip_preserves_composition() {
+                  let path = std::env::temp_dir().join(format!(
+                      "loom-motion-roundtrip-{}.loommotion",
+                      std::process::id()
+                  ));
+                  let mut document = empty_motion();
+                  document.add_layer(MotionLayer::new("layer", "Layer", "VectorShape"));
+                  let bytes = save_motion(&document).expect("serialize");
+                  std::fs::write(&path, bytes).expect("write");
+                  let loaded = load_motion_path(&path).expect("load");
+                  let _ = std::fs::remove_file(&path);
+                  assert_eq!(loaded.name, document.name);
+                  assert_eq!(loaded.layers.len(), 1);
+              }
+          ''',
+              '''    fn motion_path_round_trip_preserves_composition() {
+                  let path = std::env::temp_dir().join(format!(
+                      "loom-motion-roundtrip-{}.loommotion",
+                      std::process::id()
+                  ));
+                  let mut document = empty_motion();
+                  document.width = 3840;
+                  document.height = 2160;
+                  document.frame_rate = 23.976;
+                  document.duration_secs = 37.5;
+                  let mut layer = MotionLayer::new("layer", "Layer", "VectorShape");
+                  layer.start_time = 1.25;
+                  layer.duration = 12.0;
+                  layer.add_keyframe("x", 0.0, 120.0);
+                  layer.add_keyframe("x", 2.0, 840.0);
+                  layer.add_keyframe("rotation", 1.0, 33.0);
+                  document.add_layer(layer);
+                  document.active_layer_index = 0;
+
+                  let bytes = save_motion(&document).expect("serialize");
+                  std::fs::write(&path, bytes).expect("write");
+                  let loaded = load_motion_path(&path).expect("load");
+                  let loaded_again = load_motion_path(&path).expect("repeated load");
+                  let _ = std::fs::remove_file(&path);
+
+                  assert_eq!(loaded, document);
+                  assert_eq!(loaded_again, loaded);
+              }
+          ''',
+              "exact path round trip test",
+          )
+          main_path.write_text(main)
+
+          ui_path = Path("loom-motion/crates/loom-motion-app/ui/product_workspace_v2.slint")
+          ui = ui_path.read_text()
+          ui = replace_once(
+              ui,
+              "    property <bool> compact-layout: root.width < 1180px;\n",
+              "    in property <bool> compact-layout: false;\n",
+              "one-way compact layout state",
+          )
+          ui_path.write_text(ui)
+          PY
+
       - name: Format Motion and core
         run: |
           cargo fmt --manifest-path loom-core/Cargo.toml --all
@@ -91,8 +284,18 @@ jobs:
       - name: Release build Motion
         run: cargo build --manifest-path loom-motion/Cargo.toml --workspace --release
 
-      - name: Smoke launch Motion
-        run: cargo run --manifest-path loom-motion/Cargo.toml --bin loom-motion -- --smoke
+      - name: Smoke Motion at representative window sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for size in 920x720 1179x800 1180x800 1440x900; do
+            output="$(cargo run --manifest-path loom-motion/Cargo.toml --bin loom-motion -- --smoke --size "$size" 2>&1)"
+            printf '%s\n' "$output"
+            if grep -Eqi 'binding[ -]loop' <<<"$output"; then
+              echo "Slint binding loop detected at $size" >&2
+              exit 1
+            fi
+          done
 
       - name: Commit validated Motion slice
         shell: bash
@@ -102,5 +305,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat(motion): add native project and SVG export workflows"
+          git commit -m "feat(motion): complete native project and SVG export workflows"
           git push origin HEAD:chatgpt/loom-ui-functional-audit-2
