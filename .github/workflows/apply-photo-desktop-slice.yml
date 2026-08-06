@@ -77,13 +77,28 @@ jobs:
 
           path = Path("loom-photo/crates/loom-photo-app/src/main.rs")
           text = path.read_text()
-          old = "PathBuf::from(DEFAULT_EXPORT_FILENAME)"
-          new = "PathBuf::from(PNG_EXPORT_FILENAME)"
-          if text.count(old) != 1:
+          obsolete = '''fn normalize_export_path(value: &str, extension: &str) -> PathBuf {
+              let value = value.trim();
+              let mut path = if value.is_empty() {
+                  PathBuf::from(DEFAULT_EXPORT_FILENAME)
+              } else {
+                  PathBuf::from(value)
+              };
+              if path.extension().is_none() {
+                  path.set_extension(extension);
+              }
+              path
+          }
+
+          '''
+          if text.count(obsolete) != 1:
               raise SystemExit(
-                  f"Photo export fallback repair expected 1 match, found {text.count(old)}"
+                  f"obsolete Photo export helper expected 1 match, found {text.count(obsolete)}"
               )
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(obsolete, "", 1)
+          if "DEFAULT_EXPORT_FILENAME" in text:
+              raise SystemExit("stale DEFAULT_EXPORT_FILENAME reference remains after migration")
+          path.write_text(text)
           PY
 
       - name: Format Photo and core
