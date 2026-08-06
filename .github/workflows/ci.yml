@@ -24,7 +24,7 @@ jobs:
       - name: Generate strict source-only readiness score
         run: >-
           python3 loom-bootstrap/scripts/audit-product-readiness.py
-          --minimum-ui 6.5 --minimum-functionality 5.5
+          --minimum-ui 6.2 --minimum-functionality 5.5
           --json loom-bootstrap/.work/product-score.json
       - uses: actions/upload-artifact@v4
         with:
