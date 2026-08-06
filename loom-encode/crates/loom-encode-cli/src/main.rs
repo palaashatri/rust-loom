@@ -2,7 +2,7 @@
 
 use loom_encode_core::{
     discover_ffmpeg, execute_job, load_encode_queue, save_encode_queue, EncodeJob, EncodePreset,
-    EncodeQueue, ExecutionPolicy,
+    EncodeQueue, ExecutionPolicy, JobStatus,
 };
 use std::env;
 
@@ -12,6 +12,7 @@ fn main() -> Result<(), String> {
         println!("Loom Encode CLI");
         println!("Usage:");
         println!("  loom-encode-cli create <output.loomencode> <name>");
+        println!("  loom-encode-cli prepare-recovery-demo <input.loomencode>");
         println!("  loom-encode-cli inspect <input.loomencode>");
         println!("  loom-encode-cli plan <input.loomencode> [job-index] [ffmpeg]");
         println!("  loom-encode-cli run <input.loomencode> [job-index] [ffmpeg] [duration-secs]");
@@ -26,16 +27,44 @@ fn main() -> Result<(), String> {
                 .get(3)
                 .map(|s| s.as_str())
                 .unwrap_or("Untitled Batch Queue");
-            let mut q = EncodeQueue::new("cli-queue", name);
-            q.add_job(EncodeJob::new(
+            let mut queue = EncodeQueue::new("cli-queue", name);
+            queue.add_job(EncodeJob::new(
                 "j-prores",
                 "Feature_Master.mov",
                 "Feature_Master_ProRes.mov",
                 EncodePreset::prores_master(),
             ));
-            let bytes = save_encode_queue(&q)?;
+            let bytes = save_encode_queue(&queue)?;
             std::fs::write(out_path, bytes).map_err(|e| format!("write error: {e}"))?;
-            println!("Created encode queue: {out_path} (2 jobs queued)");
+            println!(
+                "Created encode queue: {out_path} ({} jobs queued)",
+                queue.jobs.len()
+            );
+        }
+        "prepare-recovery-demo" => {
+            let in_path = args.get(2).ok_or("missing input path")?;
+            let bytes = std::fs::read(in_path).map_err(|e| format!("read error: {e}"))?;
+            let mut queue = load_encode_queue(&bytes)?;
+
+            if !queue.jobs.iter().any(|job| job.id == "j-review") {
+                queue.add_job(EncodeJob::new(
+                    "j-review",
+                    "Feature_Master.mov",
+                    "Feature_Master_Review.mp4",
+                    EncodePreset::h264_1080p(),
+                ));
+            }
+            let first = queue.jobs.first_mut().ok_or("queue has no jobs")?;
+            first.status = JobStatus::Encoding { progress: 0.42 };
+            queue.active_job_index = 0;
+
+            std::fs::write(in_path, save_encode_queue(&queue)?)
+                .map_err(|e| format!("write error: {e}"))?;
+            println!(
+                "Prepared recovery demo: {} jobs, aggregate progress {:.3}",
+                queue.jobs.len(),
+                queue.progress()
+            );
         }
         "plan" => {
             let in_path = args.get(2).ok_or("missing input path")?;
@@ -106,14 +135,15 @@ fn main() -> Result<(), String> {
         "inspect" => {
             let in_path = args.get(2).ok_or("missing input path")?;
             let bytes = std::fs::read(in_path).map_err(|e| format!("read error: {e}"))?;
-            let q = load_encode_queue(&bytes)?;
-            println!("Encode Batch Queue: {}", q.name);
-            println!("Pending Jobs: {}", q.pending_count());
-            println!("Jobs ({} total):", q.jobs.len());
-            for j in &q.jobs {
+            let queue = load_encode_queue(&bytes)?;
+            println!("Encode Batch Queue: {}", queue.name);
+            println!("Pending Jobs: {}", queue.pending_count());
+            println!("Aggregate Progress: {:.3}", queue.progress());
+            println!("Jobs ({} total):", queue.jobs.len());
+            for job in &queue.jobs {
                 println!(
                     "  Job {}: {} -> {} [{}] status: {:?}",
-                    j.id, j.source_file, j.output_file, j.preset.name, j.status
+                    job.id, job.source_file, job.output_file, job.preset.name, job.status
                 );
             }
         }
