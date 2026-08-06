@@ -57,26 +57,29 @@ for forbidden in (
         if forbidden in path.read_text(encoding="utf-8"):
             errors.append(f"{path.relative_to(ROOT)}: contains misleading hard-coded behavior: {forbidden}")
 
-# Root status reports are required §25 deliverables and are committed, so
-# their presence is expected. VERIFICATION_REPORT.md is generated from current
-# command evidence (scripts/generate-status-report.sh): verify it is not stale
-# against the latest test logs instead of forbidding the file.
-report = ROOT / "VERIFICATION_REPORT.md"
-work = ROOT / "loom-bootstrap" / ".work"
-if report.is_file():
-    report_text = report.read_text(encoding="utf-8")
-    for log in sorted(work.glob("test-*.log")):
-        repo = log.name[len("test-"):-len(".log")]
-        count = 0
-        for line in log.read_text(encoding="utf-8").splitlines():
-            match = re.match(r"^test result: ok\.\s+(\d+)", line)
-            if match:
-                count += int(match.group(1))
-        if count and repo not in report_text:
-            errors.append(
-                f"stale root generated report: {report.name} has no evidence for {repo} "
-                f"(latest log: {log.name}, {count} tests)"
-            )
+# Root prose is deliberately kept to the project contract, public overview,
+# and human-maintained truth statement. Generated status reports belong in CI
+# artifacts, not in source control where they quickly become contradictory.
+for name in (
+    "ACCESSIBILITY_REPORT.md",
+    "BUILD_ALL.md",
+    "BUILD_STATUS.md",
+    "DEPENDENCY_REPORT.md",
+    "FEATURE_STATUS.md",
+    "KNOWN_LIMITATIONS.md",
+    "LICENSE_REPORT.md",
+    "LOOM_MASTER_INDEX.md",
+    "PERFORMANCE_REPORT.md",
+    "REPOSITORY_MAP.md",
+    "RUN_ALL.md",
+    "SECURITY_REPORT.md",
+    "TEST_ALL.md",
+    "VERIFICATION_REPORT.md",
+    "VISUAL_QA_ALL.md",
+    "visual-qa-report.md",
+):
+    if (ROOT / name).exists():
+        errors.append(f"root generated report must be a CI artifact, not committed prose: {name}")
 
 if errors:
     print("Loom contract audit: FAIL", file=sys.stderr)
