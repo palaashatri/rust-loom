@@ -1,0 +1,106 @@
+name: Apply Motion native desktop slice
+
+on:
+  push:
+    branches:
+      - chatgpt/loom-ui-functional-audit-2
+    paths:
+      - .github/workflows/apply-motion-desktop-slice.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/loom-ui-functional-audit-2
+          fetch-depth: 0
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libfontconfig1-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+
+      - name: Select Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loom-core
+            loom-motion
+
+      - name: Verify and apply deterministic Motion migration
+        shell: bash
+        run: |
+          set -euxo pipefail
+          root=loom-bootstrap/scripts/motion-migration-payload
+          parts=(part-00 part-01 part-02 part-03 part-04 part-05 part-06)
+          hashes=(
+            713a6a08cde9f8c9f4eb1dfcc8677282e72662911447bdd6fdf69aa914032706
+            34930dcb8f0c5722bfc725519b4a74ce20852b74c4c738f9bfab6b43dcf60f7a
+            540570bd06e5e90b42e12dc89d643822eb0d081791a3be2d9913e3758ee906d7
+            76d631bdb7ca5949d209492b2a08aa76513576a3079b9cc59528b45f799c0a89
+            7418a1d4d7b815024aa75491fbfcf658d34cde98ca4401b237a227ef3b378f9c
+            884bb1dc5c5c60764863c79337dc578ea5945d1a813e8a95f634f019c46b13db
+            22549b3be752e546130319a08c610f381f13d2d3101ae8708a8c948e2a6067f8
+          )
+          lengths=(760 760 760 760 760 760 372)
+          : > /tmp/motion-migration.b64
+          for index in "${!parts[@]}"; do
+            part="$root/${parts[$index]}"
+            test "$(wc -c < "$part")" = "${lengths[$index]}"
+            test "$(sha256sum "$part" | cut -d' ' -f1)" = "${hashes[$index]}"
+            cat "$part" >> /tmp/motion-migration.b64
+          done
+          test "$(wc -c < /tmp/motion-migration.b64)" = "4932"
+          test "$(sha256sum /tmp/motion-migration.b64 | cut -d' ' -f1)" = "8f8aad93a44184c88e1f7ba261012521c66112e5af381a8ccf254bc7540058e0"
+          base64 -d /tmp/motion-migration.b64 | gzip -d > /tmp/apply-motion-desktop-slice.py
+          test "$(sha256sum /tmp/apply-motion-desktop-slice.py | cut -d' ' -f1)" = "75b7d52001988e8fc7024ffe30f115a9ca05c7a949f8e60218b6283d410341fa"
+          python3 /tmp/apply-motion-desktop-slice.py
+
+      - name: Format Motion and core
+        run: |
+          cargo fmt --manifest-path loom-core/Cargo.toml --all
+          cargo fmt --manifest-path loom-motion/Cargo.toml --all
+          cargo fmt --manifest-path loom-core/Cargo.toml --all --check
+          cargo fmt --manifest-path loom-motion/Cargo.toml --all --check
+
+      - name: Clippy core
+        run: cargo clippy --manifest-path loom-core/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test core
+        run: cargo test --manifest-path loom-core/Cargo.toml --workspace
+
+      - name: Clippy Motion
+        run: cargo clippy --manifest-path loom-motion/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Motion
+        run: cargo test --manifest-path loom-motion/Cargo.toml --workspace
+
+      - name: Release build Motion
+        run: cargo build --manifest-path loom-motion/Cargo.toml --workspace --release
+
+      - name: Smoke launch Motion
+        run: cargo run --manifest-path loom-motion/Cargo.toml --bin loom-motion -- --smoke
+
+      - name: Commit validated Motion slice
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-motion-desktop-slice.yml
+          rm -rf loom-bootstrap/scripts/motion-migration-payload
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(motion): add native project and SVG export workflows"
+          git push origin HEAD:chatgpt/loom-ui-functional-audit-2
