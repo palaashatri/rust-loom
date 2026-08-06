@@ -1,9 +1,12 @@
 //! Loom Present desktop presentation application.
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_present_core::{
     export_pdf, load_presentation_session, save_presentation_session, ElementType,
     PresentationDocument, PresentationSession, SlideElement, TransitionKind,
@@ -152,11 +155,27 @@ fn sample_session() -> PresentationSession {
     session
 }
 
+fn empty_session() -> PresentationSession {
+    let mut document = PresentationDocument::new("untitled-deck", "Untitled Presentation");
+    if let Some(slide) = document.active_slide_mut() {
+        slide.title = "Untitled Slide".into();
+        for element in &mut slide.elements {
+            element.content.clear();
+        }
+    }
+    PresentationSession::new(document)
+}
+
+fn load_session(path: &Path) -> Result<PresentationSession, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("failed to read presentation '{}': {error}", path.display()))?;
+    load_presentation_session(&bytes)
+        .map_err(|error| format!("failed to load presentation '{}': {error}", path.display()))
+}
+
 fn initial_session(args: &Args) -> Result<PresentationSession, String> {
     match args.open.as_deref() {
-        Some(path) => std::fs::read(path)
-            .map_err(|error| format!("failed to read presentation '{path}': {error}"))
-            .and_then(|bytes| load_presentation_session(&bytes)),
+        Some(path) => load_session(Path::new(path)),
         None => Ok(sample_session()),
     }
 }
@@ -164,6 +183,10 @@ fn initial_session(args: &Args) -> Result<PresentationSession, String> {
 struct GuiState {
     session: RefCell<PresentationSession>,
     selected_element: Cell<usize>,
+    save_path: RefCell<Option<PathBuf>>,
+    dialogs: Rc<dyn FileDialogService>,
+    deck_filter: FileFilter,
+    pdf_filter: FileFilter,
 }
 
 fn active_body(session: &PresentationSession) -> String {
@@ -257,6 +280,11 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     let state = GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
+        save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
+        dialogs: Rc::new(NativeFileDialogs),
+        deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
+            .map_err(|error| error.to_string())?,
+        pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
     };
     refresh(&app, &state);
     if args.palette {
@@ -274,6 +302,94 @@ fn set_status(app: &PresentApp, value: impl Into<SharedString>) {
     app.set_status_left(value.into());
 }
 
+fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
+    path.and_then(Path::parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+fn open_request(state: &GuiState) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Loom Present Deck".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![state.deck_filter.clone()],
+    }
+}
+
+fn save_request(state: &GuiState) -> SaveFileRequest {
+    let path = state.save_path.borrow().clone();
+    let suggested_name = path
+        .as_deref()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| SAVE_FILENAME.to_string());
+    SaveFileRequest {
+        title: "Save Loom Present Deck".into(),
+        initial_directory: initial_directory(path.as_deref()),
+        suggested_name: Some(suggested_name),
+        filters: vec![state.deck_filter.clone()],
+    }
+}
+
+fn export_request(state: &GuiState) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Loom Present PDF".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(EXPORT_FILENAME.to_string()),
+        filters: vec![state.pdf_filter.clone()],
+    }
+}
+
+fn replace_opened_deck(
+    app: &PresentApp,
+    state: &GuiState,
+    path: PathBuf,
+    session: PresentationSession,
+) {
+    *state.session.borrow_mut() = session;
+    *state.save_path.borrow_mut() = Some(path);
+    state.selected_element.set(0);
+    refresh(app, state);
+}
+
+fn save_current_deck(
+    app: &PresentApp,
+    state: &GuiState,
+    force_picker: bool,
+) -> Result<bool, String> {
+    let current_path = (!force_picker)
+        .then(|| state.save_path.borrow().clone())
+        .flatten();
+    let path = match current_path {
+        Some(path) => Some(path),
+        None => state
+            .dialogs
+            .save_file(&save_request(state))
+            .map_err(|error| error.to_string())?,
+    };
+    let Some(path) = path else {
+        set_status(app, "Save cancelled");
+        return Ok(false);
+    };
+
+    let bytes = save_presentation_session(&state.session.borrow())?;
+    std::fs::write(&path, &bytes)
+        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    *state.save_path.borrow_mut() = Some(path.clone());
+    match checkpoint_snapshot_recovery(bytes) {
+        Ok(()) => set_status(app, format!("Saved {}", path.display())),
+        Err(error) => set_status(
+            app,
+            format!(
+                "Saved {}, but recovery checkpoint failed: {error}",
+                path.display()
+            ),
+        ),
+    }
+    Ok(true)
+}
+
 /// Record the keyboard command-palette journey with per-step screenshots.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
@@ -282,6 +398,11 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let state = GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
+        save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
+        dialogs: Rc::new(NativeFileDialogs),
+        deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
+            .map_err(|error| error.to_string())?,
+        pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
     };
     refresh(&app, &state);
     wire_palette(&app);
@@ -336,23 +457,34 @@ fn main() -> Result<(), String> {
     if let Some(out_dir) = &args.journey {
         return run_journey(&args, out_dir);
     }
+    run_gui_with_dialogs(&args, Rc::new(NativeFileDialogs))
+}
 
+fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     let recovered = initialize_snapshot_recovery()?;
-    let initial = if args.open.is_some() {
-        initial_session(&args)?
+    let initial_path = args.open.as_ref().map(PathBuf::from);
+    let initial = if let Some(path) = initial_path.as_deref() {
+        load_session(path)?
     } else {
         recovered
             .as_deref()
             .and_then(|bytes| load_presentation_session(bytes).ok())
-            .unwrap_or(initial_session(&args)?)
+            .unwrap_or_else(sample_session)
     };
+    let deck_filter =
+        FileFilter::new("Loom Present deck", ["loomdeck"]).map_err(|error| error.to_string())?;
+    let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     let state = Rc::new(GuiState {
         session: RefCell::new(initial),
         selected_element: Cell::new(0),
+        save_path: RefCell::new(initial_path),
+        dialogs,
+        deck_filter,
+        pdf_filter,
     });
 
     {
@@ -360,9 +492,11 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.session.borrow_mut() = sample_session();
+                *state.session.borrow_mut() = empty_session();
+                *state.save_path.borrow_mut() = None;
                 state.selected_element.set(0);
                 refresh(&app, &state);
+                set_status(&app, "Created unsaved presentation");
             }
         });
     }
@@ -371,17 +505,16 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_open_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                match std::fs::read(SAVE_FILENAME)
-                    .map_err(|error| error.to_string())
-                    .and_then(|bytes| load_presentation_session(&bytes))
-                {
-                    Ok(session) => {
-                        *state.session.borrow_mut() = session;
-                        state.selected_element.set(0);
-                        refresh(&app, &state);
-                        set_status(&app, format!("Opened {SAVE_FILENAME}"));
-                    }
-                    Err(error) => set_status(&app, format!("Open failed: {error}")),
+                match state.dialogs.open_file(&open_request(&state)) {
+                    Ok(Some(path)) => match load_session(&path) {
+                        Ok(session) => {
+                            replace_opened_deck(&app, &state, path.clone(), session);
+                            set_status(&app, format!("Opened {}", path.display()));
+                        }
+                        Err(error) => set_status(&app, format!("Open failed: {error}")),
+                    },
+                    Ok(None) => set_status(&app, "Open cancelled"),
+                    Err(error) => set_status(&app, format!("Open dialog failed: {error}")),
                 }
             }
         });
@@ -391,15 +524,19 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                match save_presentation_session(&state.session.borrow()) {
-                    Ok(bytes) => match std::fs::write(SAVE_FILENAME, &bytes)
-                        .map_err(|error| error.to_string())
-                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
-                    {
-                        Ok(()) => set_status(&app, format!("Saved {SAVE_FILENAME}")),
-                        Err(error) => set_status(&app, format!("Save/checkpoint failed: {error}")),
-                    },
-                    Err(error) => set_status(&app, format!("Save failed: {error}")),
+                if let Err(error) = save_current_deck(&app, &state, false) {
+                    set_status(&app, format!("Save failed: {error}"));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_deck(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = save_current_deck(&app, &state, true) {
+                    set_status(&app, format!("Save As failed: {error}"));
                 }
             }
         });
@@ -741,12 +878,15 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_export_pdf(move || {
             if let Some(app) = app_ref.upgrade() {
-                match std::fs::write(
-                    EXPORT_FILENAME,
-                    export_pdf(&state.session.borrow().document),
-                ) {
-                    Ok(()) => set_status(&app, format!("Exported {EXPORT_FILENAME}")),
-                    Err(error) => set_status(&app, format!("Export failed: {error}")),
+                match state.dialogs.save_file(&export_request(&state)) {
+                    Ok(Some(path)) => {
+                        match std::fs::write(&path, export_pdf(&state.session.borrow().document)) {
+                            Ok(()) => set_status(&app, format!("Exported {}", path.display())),
+                            Err(error) => set_status(&app, format!("Export failed: {error}")),
+                        }
+                    }
+                    Ok(None) => set_status(&app, "Export cancelled"),
+                    Err(error) => set_status(&app, format!("Export dialog failed: {error}")),
                 }
             }
         });
@@ -765,6 +905,7 @@ enum PaletteAction {
     NewDeck,
     OpenDeck,
     SaveDeck,
+    SaveAsDeck,
     AddSlide,
     DuplicateSlide,
     DeleteSlide,
@@ -805,6 +946,12 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             id: "present.save",
             label: "Save Deck",
             shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveAsDeck,
+            id: "present.save-as",
+            label: "Save Deck As",
+            shortcut: "Ctrl+Shift+S",
         },
         PaletteCommand {
             action: PaletteAction::AddSlide,
@@ -1020,6 +1167,7 @@ fn wire_palette(app: &PresentApp) {
                         PaletteAction::NewDeck => app.invoke_new_deck(),
                         PaletteAction::OpenDeck => app.invoke_open_deck(),
                         PaletteAction::SaveDeck => app.invoke_save_deck(),
+                        PaletteAction::SaveAsDeck => app.invoke_save_as_deck(),
                         PaletteAction::AddSlide => app.invoke_add_slide(),
                         PaletteAction::DuplicateSlide => app.invoke_duplicate_slide(),
                         PaletteAction::DeleteSlide => app.invoke_delete_slide(),
@@ -1036,5 +1184,63 @@ fn wire_palette(app: &PresentApp) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+    use loom_desktop::ScriptedFileDialogs;
+
+    fn test_state() -> GuiState {
+        GuiState {
+            session: RefCell::new(empty_session()),
+            selected_element: Cell::new(0),
+            save_path: RefCell::new(Some(PathBuf::from("projects/demo.loomdeck"))),
+            dialogs: Rc::new(ScriptedFileDialogs::default()),
+            deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+        }
+    }
+
+    #[test]
+    fn new_presentation_is_blank_and_single_slide() {
+        let session = empty_session();
+        assert_eq!(session.document.len(), 1);
+        assert_eq!(session.document.title, "Untitled Presentation");
+        assert!(session.document.slides[0]
+            .elements
+            .iter()
+            .all(|element| element.content.is_empty()));
+    }
+
+    #[test]
+    fn dialog_requests_use_current_directory_and_expected_extensions() {
+        let state = test_state();
+        let open = open_request(&state);
+        let save = save_request(&state);
+        let export = export_request(&state);
+
+        assert_eq!(open.initial_directory, Some(PathBuf::from("projects")));
+        assert_eq!(open.filters[0].extensions, vec!["loomdeck".to_string()]);
+        assert_eq!(save.suggested_name.as_deref(), Some("demo.loomdeck"));
+        assert_eq!(export.suggested_name.as_deref(), Some(EXPORT_FILENAME));
+        assert_eq!(export.filters[0].extensions, vec!["pdf".to_string()]);
+    }
+
+    #[test]
+    fn presentation_path_round_trip_preserves_document() {
+        let path = std::env::temp_dir().join(format!(
+            "loom-present-roundtrip-{}.loomdeck",
+            std::process::id()
+        ));
+        let session = empty_session();
+        let bytes = save_presentation_session(&session).expect("serialize");
+        std::fs::write(&path, bytes).expect("write");
+        let loaded = load_session(&path).expect("load");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded.document.title, session.document.title);
+        assert_eq!(loaded.document.len(), session.document.len());
     }
 }

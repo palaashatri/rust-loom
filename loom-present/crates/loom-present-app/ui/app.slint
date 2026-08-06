@@ -45,6 +45,7 @@ export component PresentApp inherits Window {
     callback new-deck;
     callback open-deck;
     callback save-deck;
+    callback save-as-deck;
     callback add-slide;
     callback duplicate-slide;
     callback delete-slide;
@@ -84,9 +85,27 @@ export component PresentApp inherits Window {
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open) { return reject; }
-            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
-                root.open-palette();
-                return accept;
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-deck();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-deck();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-deck(); } else { root.save-deck(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return accept;
+                }
             }
             return reject;
         }
@@ -106,6 +125,7 @@ export component PresentApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-deck(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-deck(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-deck(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-deck(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
