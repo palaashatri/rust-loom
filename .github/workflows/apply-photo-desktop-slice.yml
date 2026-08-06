@@ -14,6 +14,8 @@ jobs:
   apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,20 +86,30 @@ jobs:
           path.write_text(text.replace(old, new, 1))
           PY
 
-      - name: Format and validate Photo
-        env:
-          CARGO_INCREMENTAL: 0
+      - name: Format Photo and core
         run: |
           cargo fmt --manifest-path loom-core/Cargo.toml --all
           cargo fmt --manifest-path loom-photo/Cargo.toml --all
           cargo fmt --manifest-path loom-core/Cargo.toml --all --check
           cargo fmt --manifest-path loom-photo/Cargo.toml --all --check
-          cargo clippy --manifest-path loom-core/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-          cargo test --manifest-path loom-core/Cargo.toml --workspace
-          cargo clippy --manifest-path loom-photo/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-          cargo test --manifest-path loom-photo/Cargo.toml --workspace
-          cargo build --manifest-path loom-photo/Cargo.toml --workspace --release
-          cargo run --manifest-path loom-photo/Cargo.toml --bin loom-photo -- --smoke
+
+      - name: Clippy core
+        run: cargo clippy --manifest-path loom-core/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test core
+        run: cargo test --manifest-path loom-core/Cargo.toml --workspace
+
+      - name: Clippy Photo
+        run: cargo clippy --manifest-path loom-photo/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Photo
+        run: cargo test --manifest-path loom-photo/Cargo.toml --workspace
+
+      - name: Release build Photo
+        run: cargo build --manifest-path loom-photo/Cargo.toml --workspace --release
+
+      - name: Smoke launch Photo
+        run: cargo run --manifest-path loom-photo/Cargo.toml --bin loom-photo -- --smoke
 
       - name: Commit validated Photo slice
         shell: bash
