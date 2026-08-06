@@ -1,9 +1,12 @@
 //! Loom Motion desktop application.
 
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_motion_core::{load_motion, save_motion, CompositionDocument, MotionLayer};
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -75,6 +78,10 @@ fn parse_args() -> Result<Args, String> {
 
 fn sample_motion() -> CompositionDocument {
     let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
+    let mut title = MotionLayer::new("layer-title", "Animated Title", "Text");
+    title.add_keyframe("opacity", 0.0, 0.0);
+    title.add_keyframe("opacity", 1.0, 1.0);
+    doc.add_layer(title);
     doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
     for layer in &mut doc.layers {
         layer.add_keyframe("x", 0.0, 960.0);
@@ -88,14 +95,28 @@ fn sample_motion() -> CompositionDocument {
     doc
 }
 
+fn empty_motion() -> CompositionDocument {
+    CompositionDocument::new("untitled-composition", "Untitled Composition")
+}
+
+fn load_motion_path(path: &Path) -> Result<CompositionDocument, String> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        format!(
+            "failed to read motion composition '{}': {error}",
+            path.display()
+        )
+    })?;
+    load_motion(&bytes).map_err(|error| {
+        format!(
+            "failed to load motion composition '{}': {error}",
+            path.display()
+        )
+    })
+}
+
 fn initial_motion(args: &Args) -> Result<CompositionDocument, String> {
     match args.open.as_deref() {
-        Some(path) => {
-            let bytes = std::fs::read(path)
-                .map_err(|e| format!("failed to read motion composition '{path}': {e}"))?;
-            load_motion(&bytes)
-                .map_err(|e| format!("failed to load motion composition '{path}': {e}"))
-        }
+        Some(path) => load_motion_path(Path::new(path)),
         None => Ok(sample_motion()),
     }
 }
@@ -198,6 +219,7 @@ enum PaletteAction {
     NewComp,
     OpenComp,
     SaveComp,
+    SaveAsComp,
     Undo,
     Redo,
     ExportFrame,
@@ -235,6 +257,12 @@ fn master_palette(app: &MotionApp) -> Vec<PaletteCommand> {
             id: "motion.save",
             label: "Save Composition",
             shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveAsComp,
+            id: "motion.save-as",
+            label: "Save Composition As",
+            shortcut: "Ctrl+Shift+S",
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -329,6 +357,7 @@ fn rebuild_palette(app: &MotionApp, query: &str) {
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
+    app.set_compact_layout(args.size.0 < 1180);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
     apply_motion(&app, &doc);
@@ -348,6 +377,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
+    app.set_compact_layout(args.size.0 < 1180);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
     apply_motion(&app, &doc);
@@ -438,6 +468,10 @@ impl MotionHistory {
 struct GuiState {
     current: RefCell<CompositionDocument>,
     history: RefCell<MotionHistory>,
+    save_path: RefCell<Option<PathBuf>>,
+    dialogs: Rc<dyn FileDialogService>,
+    composition_filter: FileFilter,
+    svg_filter: FileFilter,
 }
 
 impl GuiState {
@@ -459,6 +493,111 @@ fn refresh_motion(app: &MotionApp, state: &GuiState) {
     app.set_can_redo(!history.redo.is_empty());
 }
 
+fn set_status(app: &MotionApp, value: impl Into<SharedString>) {
+    app.set_status_left(value.into());
+}
+
+fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
+    path.and_then(Path::parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+fn open_request(state: &GuiState) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Loom Motion Composition".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![state.composition_filter.clone()],
+    }
+}
+
+fn save_request(state: &GuiState) -> SaveFileRequest {
+    let path = state.save_path.borrow().clone();
+    let suggested_name = path
+        .as_deref()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| SAVE_FILENAME.to_string());
+    SaveFileRequest {
+        title: "Save Loom Motion Composition".into(),
+        initial_directory: initial_directory(path.as_deref()),
+        suggested_name: Some(suggested_name),
+        filters: vec![state.composition_filter.clone()],
+    }
+}
+
+fn export_request(state: &GuiState) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Loom Motion SVG Frame".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(EXPORT_FILENAME.to_string()),
+        filters: vec![state.svg_filter.clone()],
+    }
+}
+
+fn selected_motion_to_open(
+    state: &GuiState,
+) -> Result<Option<(PathBuf, CompositionDocument)>, String> {
+    let path = state
+        .dialogs
+        .open_file(&open_request(state))
+        .map_err(|error| error.to_string())?;
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let document = load_motion_path(&path)?;
+    Ok(Some((path, document)))
+}
+
+fn persist_current_motion(
+    state: &GuiState,
+    force_picker: bool,
+) -> Result<Option<(PathBuf, Vec<u8>)>, String> {
+    let current_path = (!force_picker)
+        .then(|| state.save_path.borrow().clone())
+        .flatten();
+    let path = match current_path {
+        Some(path) => Some(path),
+        None => state
+            .dialogs
+            .save_file(&save_request(state))
+            .map_err(|error| error.to_string())?,
+    };
+    let Some(path) = path else {
+        return Ok(None);
+    };
+
+    let bytes = save_motion(&state.current.borrow())?;
+    std::fs::write(&path, &bytes)
+        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    *state.save_path.borrow_mut() = Some(path.clone());
+    Ok(Some((path, bytes)))
+}
+
+fn save_current_motion(
+    app: &MotionApp,
+    state: &GuiState,
+    force_picker: bool,
+) -> Result<bool, String> {
+    let Some((path, bytes)) = persist_current_motion(state, force_picker)? else {
+        set_status(app, "Save cancelled");
+        return Ok(false);
+    };
+
+    match checkpoint_snapshot_recovery(bytes) {
+        Ok(()) => set_status(app, format!("Saved {}", path.display())),
+        Err(error) => set_status(
+            app,
+            format!(
+                "Saved {}, but recovery checkpoint failed: {error}",
+                path.display()
+            ),
+        ),
+    }
+    Ok(true)
+}
+
 fn main() -> Result<(), String> {
     let args = parse_args()?;
     if let Some(out) = &args.screenshot {
@@ -475,6 +614,7 @@ fn main() -> Result<(), String> {
     }
 
     let app = MotionApp::new().map_err(|e| e.to_string())?;
+    app.set_compact_layout(args.size.0 < 1180);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -491,6 +631,11 @@ fn main() -> Result<(), String> {
     let state = Rc::new(GuiState {
         current: RefCell::new(initial),
         history: RefCell::new(MotionHistory::default()),
+        save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
+        dialogs: Rc::new(NativeFileDialogs),
+        composition_filter: FileFilter::new("Loom Motion composition", ["loommotion"])
+            .map_err(|error| error.to_string())?,
+        svg_filter: FileFilter::new("SVG image", ["svg"]).map_err(|error| error.to_string())?,
     });
 
     {
@@ -498,8 +643,10 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_comp(move || {
             if let Some(app) = app_ref.upgrade() {
-                state.replace(sample_motion());
+                state.replace(empty_motion());
+                *state.save_path.borrow_mut() = None;
                 refresh_motion(&app, &state);
+                set_status(&app, "Created a new untitled composition");
             }
         });
     }
@@ -509,18 +656,15 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_open_comp(move || {
             if let Some(app) = app_ref.upgrade() {
-                match std::fs::read(SAVE_FILENAME)
-                    .map_err(|e| format!("failed to read {SAVE_FILENAME}: {e}"))
-                    .and_then(|bytes| load_motion(&bytes))
-                {
-                    Ok(doc) => {
-                        state.replace(doc);
+                match selected_motion_to_open(&state) {
+                    Ok(Some((path, document))) => {
+                        state.replace(document);
+                        *state.save_path.borrow_mut() = Some(path.clone());
                         refresh_motion(&app, &state);
-                        app.set_status_left(SharedString::from(format!("Opened {SAVE_FILENAME}")));
+                        set_status(&app, format!("Opened {}", path.display()));
                     }
-                    Err(err) => {
-                        app.set_status_left(SharedString::from(format!("Open failed: {err}")))
-                    }
+                    Ok(None) => set_status(&app, "Open cancelled"),
+                    Err(error) => set_status(&app, format!("Open failed: {error}")),
                 }
             }
         });
@@ -689,12 +833,13 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_export_frame(move || {
             if let Some(app) = app_ref.upgrade() {
-                match write_svg_frame(&state.current.borrow(), EXPORT_FILENAME) {
-                    Ok(()) => app
-                        .set_status_left(format!("Exported SVG frame to {EXPORT_FILENAME}").into()),
-                    Err(error) => {
-                        app.set_status_left(format!("SVG frame export failed: {error}").into())
-                    }
+                match state.dialogs.save_file(&export_request(&state)) {
+                    Ok(Some(path)) => match write_svg_frame(&state.current.borrow(), &path) {
+                        Ok(()) => set_status(&app, format!("Exported {}", path.display())),
+                        Err(error) => set_status(&app, format!("SVG frame export failed: {error}")),
+                    },
+                    Ok(None) => set_status(&app, "Export cancelled"),
+                    Err(error) => set_status(&app, format!("Export dialog failed: {error}")),
                 }
             }
         });
@@ -715,20 +860,20 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_comp(move || {
             if let Some(app) = app_ref.upgrade() {
-                match save_motion(&state.current.borrow()) {
-                    Ok(bytes) => match std::fs::write(SAVE_FILENAME, &bytes)
-                        .map_err(|error| error.to_string())
-                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
-                    {
-                        Ok(()) => app
-                            .set_status_left(SharedString::from(format!("Saved {SAVE_FILENAME}"))),
-                        Err(error) => app.set_status_left(SharedString::from(format!(
-                            "Save/checkpoint failed: {error}"
-                        ))),
-                    },
-                    Err(error) => {
-                        app.set_status_left(SharedString::from(format!("Save failed: {error}")))
-                    }
+                if let Err(error) = save_current_motion(&app, &state, false) {
+                    set_status(&app, format!("Save failed: {error}"));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_comp(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = save_current_motion(&app, &state, true) {
+                    set_status(&app, format!("Save As failed: {error}"));
                 }
             }
         });
@@ -826,6 +971,7 @@ fn wire_palette(app: &MotionApp) {
                         PaletteAction::NewComp => app.invoke_new_comp(),
                         PaletteAction::OpenComp => app.invoke_open_comp(),
                         PaletteAction::SaveComp => app.invoke_save_comp(),
+                        PaletteAction::SaveAsComp => app.invoke_save_as_comp(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::ExportFrame => app.invoke_export_frame(),
@@ -854,6 +1000,276 @@ fn wire_palette(app: &MotionApp) {
 #[cfg(test)]
 mod product_tests {
     use super::*;
+    use loom_desktop::ScriptedFileDialogs;
+
+    fn test_state_with_dialogs(
+        dialogs: Rc<dyn FileDialogService>,
+        save_path: Option<PathBuf>,
+    ) -> GuiState {
+        GuiState {
+            current: RefCell::new(empty_motion()),
+            history: RefCell::new(MotionHistory::default()),
+            save_path: RefCell::new(save_path),
+            dialogs,
+            composition_filter: FileFilter::new("Loom Motion composition", ["loommotion"])
+                .expect("filter"),
+            svg_filter: FileFilter::new("SVG image", ["svg"]).expect("filter"),
+        }
+    }
+
+    fn test_state() -> GuiState {
+        test_state_with_dialogs(
+            Rc::new(ScriptedFileDialogs::default()),
+            Some(PathBuf::from("projects/demo.loommotion")),
+        )
+    }
+
+    #[test]
+    fn new_motion_composition_is_blank() {
+        let document = empty_motion();
+        assert_eq!(document.name, "Untitled Composition");
+        assert!(document.layers.is_empty());
+    }
+
+    #[test]
+    fn dialog_requests_use_current_directory_and_expected_extensions() {
+        let state = test_state();
+        let open = open_request(&state);
+        let save = save_request(&state);
+        let export = export_request(&state);
+
+        assert_eq!(open.initial_directory, Some(PathBuf::from("projects")));
+        assert_eq!(open.filters[0].extensions, vec!["loommotion".to_string()]);
+        assert_eq!(save.suggested_name.as_deref(), Some("demo.loommotion"));
+        assert_eq!(export.suggested_name.as_deref(), Some(EXPORT_FILENAME));
+        assert_eq!(export.filters[0].extensions, vec!["svg".to_string()]);
+    }
+
+    #[test]
+    fn motion_path_round_trip_preserves_composition() {
+        let path = std::env::temp_dir().join(format!(
+            "loom-motion-roundtrip-{}.loommotion",
+            std::process::id()
+        ));
+        let mut document = empty_motion();
+        document.width = 3840;
+        document.height = 2160;
+        document.frame_rate = 23.976;
+        document.duration_secs = 37.5;
+        let mut layer = MotionLayer::new("layer", "Layer", "VectorShape");
+        layer.start_time = 1.25;
+        layer.duration = 12.0;
+        layer.add_keyframe("x", 0.0, 120.0);
+        layer.add_keyframe("x", 2.0, 840.0);
+        layer.add_keyframe("rotation", 1.0, 33.0);
+        document.add_layer(layer);
+        document.active_layer_index = 0;
+
+        let bytes = save_motion(&document).expect("serialize");
+        std::fs::write(&path, bytes).expect("write");
+        let loaded = load_motion_path(&path).expect("load");
+        let loaded_again = load_motion_path(&path).expect("repeated load");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(loaded, document);
+        assert_eq!(loaded_again, loaded);
+    }
+
+    #[test]
+    fn save_then_save_as_changes_path_and_preserves_each_version() {
+        let first = std::env::temp_dir().join(format!(
+            "loom-motion-save-{}-first.loommotion",
+            std::process::id()
+        ));
+        let second = std::env::temp_dir().join(format!(
+            "loom-motion-save-{}-second.loommotion",
+            std::process::id()
+        ));
+        let dialogs: Rc<dyn FileDialogService> = Rc::new(ScriptedFileDialogs::new(
+            std::iter::empty::<Option<PathBuf>>(),
+            [Some(first.clone()), Some(second.clone())],
+        ));
+        let state = test_state_with_dialogs(dialogs, None);
+        state
+            .current
+            .borrow_mut()
+            .add_layer(MotionLayer::new("layer-a", "Layer A", "VectorShape"));
+        let first_document = state.current.borrow().clone();
+
+        let first_result = persist_current_motion(&state, false)
+            .expect("first save")
+            .expect("first save cancelled");
+        assert_eq!(first_result.0, first);
+        assert_eq!(*state.save_path.borrow(), Some(first.clone()));
+
+        state
+            .current
+            .borrow_mut()
+            .add_layer(MotionLayer::new("layer-b", "Layer B", "Text"));
+        let second_document = state.current.borrow().clone();
+        let second_result = persist_current_motion(&state, true)
+            .expect("Save As")
+            .expect("Save As cancelled");
+        assert_eq!(second_result.0, second);
+        assert_eq!(*state.save_path.borrow(), Some(second.clone()));
+        assert_eq!(
+            load_motion_path(&first).expect("load first"),
+            first_document
+        );
+        assert_eq!(
+            load_motion_path(&second).expect("load second"),
+            second_document
+        );
+
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn cancelled_save_and_open_leave_state_untouched() {
+        let dialogs: Rc<dyn FileDialogService> = Rc::new(ScriptedFileDialogs::new([None], [None]));
+        let state = test_state_with_dialogs(dialogs, None);
+        state
+            .current
+            .borrow_mut()
+            .add_layer(MotionLayer::new("layer", "Layer", "Text"));
+        state.checkpoint("before-cancel");
+        let before_document = state.current.borrow().clone();
+        let before_path = state.save_path.borrow().clone();
+        let before_history = {
+            let history = state.history.borrow();
+            (history.undo.len(), history.redo.len())
+        };
+
+        assert!(persist_current_motion(&state, false)
+            .expect("cancelled save")
+            .is_none());
+        assert!(selected_motion_to_open(&state)
+            .expect("cancelled open")
+            .is_none());
+        assert_eq!(*state.current.borrow(), before_document);
+        assert_eq!(*state.save_path.borrow(), before_path);
+        let after_history = state.history.borrow();
+        assert_eq!(
+            (after_history.undo.len(), after_history.redo.len()),
+            before_history
+        );
+    }
+
+    #[test]
+    fn open_replaces_document_and_resets_history_boundary() {
+        let path = std::env::temp_dir().join(format!(
+            "loom-motion-open-{}.loommotion",
+            std::process::id()
+        ));
+        let mut opened = empty_motion();
+        opened.name = "Opened Composition".into();
+        opened.add_layer(MotionLayer::new("opened-layer", "Opened Layer", "Text"));
+        std::fs::write(
+            &path,
+            save_motion(&opened).expect("serialize opened document"),
+        )
+        .expect("write opened document");
+
+        let dialogs: Rc<dyn FileDialogService> = Rc::new(ScriptedFileDialogs::new(
+            [Some(path.clone())],
+            std::iter::empty::<Option<PathBuf>>(),
+        ));
+        let state = test_state_with_dialogs(dialogs, None);
+        state.checkpoint("old-document");
+        state
+            .current
+            .borrow_mut()
+            .add_layer(MotionLayer::new("stale", "Stale", "VectorShape"));
+
+        let (opened_path, document) = selected_motion_to_open(&state)
+            .expect("open selection")
+            .expect("open cancelled");
+        state.replace(document);
+        *state.save_path.borrow_mut() = Some(opened_path.clone());
+
+        assert_eq!(*state.current.borrow(), opened);
+        assert_eq!(*state.save_path.borrow(), Some(path.clone()));
+        let history = state.history.borrow();
+        assert!(history.undo.is_empty());
+        assert!(history.redo.is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn missing_and_malformed_projects_return_actionable_errors() {
+        let missing = std::env::temp_dir().join(format!(
+            "loom-motion-missing-{}.loommotion",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&missing);
+        let missing_error = load_motion_path(&missing).expect_err("missing project loaded");
+        assert!(missing_error.contains("failed to read motion composition"));
+
+        let malformed = std::env::temp_dir().join(format!(
+            "loom-motion-malformed-{}.loommotion",
+            std::process::id()
+        ));
+        std::fs::write(&malformed, b"not a Loom Motion package").expect("write malformed");
+        let malformed_error = load_motion_path(&malformed).expect_err("malformed project loaded");
+        assert!(!malformed_error.trim().is_empty());
+        let _ = std::fs::remove_file(malformed);
+    }
+
+    #[test]
+    fn read_only_destination_reports_failure_without_changing_active_path() {
+        let path = std::env::temp_dir().join(format!(
+            "loom-motion-read-only-{}.loommotion",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"existing").expect("create destination");
+        let original_permissions = std::fs::metadata(&path)
+            .expect("destination metadata")
+            .permissions();
+        let mut read_only = original_permissions.clone();
+        read_only.set_readonly(true);
+        std::fs::set_permissions(&path, read_only).expect("set read-only");
+
+        let state =
+            test_state_with_dialogs(Rc::new(ScriptedFileDialogs::default()), Some(path.clone()));
+        let result = persist_current_motion(&state, false);
+
+        std::fs::set_permissions(&path, original_permissions).expect("restore permissions");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            result.is_err(),
+            "read-only destination unexpectedly accepted"
+        );
+        assert_eq!(*state.save_path.borrow(), Some(path));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_path_round_trip_is_supported() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut name = format!("loom-motion-non-utf8-{}-", std::process::id()).into_bytes();
+        name.push(0xff);
+        name.extend_from_slice(b".loommotion");
+        let path = std::env::temp_dir().join(OsString::from_vec(name));
+        let state =
+            test_state_with_dialogs(Rc::new(ScriptedFileDialogs::default()), Some(path.clone()));
+        state
+            .current
+            .borrow_mut()
+            .add_layer(MotionLayer::new("layer", "Layer", "Text"));
+        let expected = state.current.borrow().clone();
+
+        persist_current_motion(&state, false)
+            .expect("save non-UTF-8 path")
+            .expect("save unexpectedly cancelled");
+        assert_eq!(
+            load_motion_path(&path).expect("load non-UTF-8 path"),
+            expected
+        );
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn svg_frame_export_contains_sampled_layers() {

@@ -12,7 +12,7 @@ export component MotionApp inherits Window {
     min-width: 920px;
     min-height: 720px;
     background: Theme.palette().canvas;
-    property <bool> compact-layout: root.width < 1180px;
+    in property <bool> compact-layout: false;
     property <length> layer-column-width: root.compact-layout ? 188px : 246px;
 
     in property <string> comp-name: "Untitled Composition";
@@ -44,6 +44,7 @@ export component MotionApp inherits Window {
     callback new-comp;
     callback open-comp;
     callback save-comp;
+    callback save-as-comp;
     callback undo;
     callback redo;
     callback export-frame;
@@ -76,9 +77,27 @@ export component MotionApp inherits Window {
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open) { return reject; }
-            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
-                root.open-palette();
-                return accept;
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-comp();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-comp();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-comp(); } else { root.save-comp(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-frame();
+                    return accept;
+                }
             }
             return reject;
         }
@@ -99,6 +118,7 @@ export component MotionApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-comp(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-comp(); } }
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }

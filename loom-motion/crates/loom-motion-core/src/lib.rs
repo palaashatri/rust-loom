@@ -6,14 +6,14 @@ use loom_package::manifest::{
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Keyframe {
     pub time_secs: f32,
     pub value: f32,
     pub easing: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MotionLayer {
     pub id: String,
     pub name: String,
@@ -70,7 +70,7 @@ impl MotionLayer {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompositionDocument {
     pub id: String,
     pub name: String,
@@ -85,7 +85,7 @@ pub struct CompositionDocument {
 
 impl CompositionDocument {
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
-        let mut doc = Self {
+        Self {
             id: id.into(),
             name: name.into(),
             width: 1920,
@@ -94,12 +94,7 @@ impl CompositionDocument {
             duration_secs: 10.0,
             layers: Vec::new(),
             active_layer_index: 0,
-        };
-        let mut title_layer = MotionLayer::new("layer-title", "Animated Title", "Text");
-        title_layer.add_keyframe("opacity", 0.0, 0.0);
-        title_layer.add_keyframe("opacity", 1.0, 1.0);
-        doc.layers.push(title_layer);
-        doc
+        }
     }
 
     pub fn add_layer(&mut self, layer: MotionLayer) {
@@ -464,7 +459,7 @@ mod tests {
     fn test_motion_creation() {
         let doc = CompositionDocument::new("comp-1", "Logo Intro Animation");
         assert_eq!(doc.frame_rate, 60.0);
-        assert_eq!(doc.len(), 1);
+        assert!(doc.is_empty());
     }
 
     #[test]
@@ -479,9 +474,9 @@ mod tests {
     fn test_select_layer_rejects_invalid_index() {
         let mut doc = CompositionDocument::new("comp-1", "Logo Intro Animation");
         doc.add_layer(MotionLayer::new("l2", "Background", "VectorShape"));
-        assert!(doc.select_layer(1));
-        assert!(!doc.select_layer(2));
-        assert_eq!(doc.active_layer_index, 1);
+        assert!(doc.select_layer(0));
+        assert!(!doc.select_layer(1));
+        assert_eq!(doc.active_layer_index, 0);
     }
 
     #[test]
@@ -543,7 +538,46 @@ mod tests {
             .expect("manifest validation failed");
         let loaded = load_motion(&bytes).expect("load failed");
         assert_eq!(loaded.name, "Title Lower Third");
-        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded, doc);
+        let loaded_again = load_motion(&bytes).expect("second load failed");
+        assert_eq!(loaded_again, loaded);
+    }
+
+    #[test]
+    fn malformed_motion_package_is_rejected() {
+        let error = load_motion(b"not a Loom package").expect_err("malformed package loaded");
+        assert!(!error.trim().is_empty());
+    }
+
+    #[test]
+    fn unsupported_motion_schema_is_rejected() {
+        let document = CompositionDocument::new("future-motion", "Future Motion");
+        let content = serde_json::to_vec_pretty(&document).expect("serialize content");
+        let mut archive = PackageArchive::new();
+        archive
+            .add("content/motion.json", content.clone())
+            .expect("add content");
+        let manifest = Manifest {
+            schema: SchemaVersion::new(1, 0, 0),
+            kind: PackageKind::Motion,
+            id: document.id.clone(),
+            title: document.name.clone(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            entries: vec![ManifestEntry {
+                path: "content/motion.json".into(),
+                mime: MimeType::parse("application/vnd.loom.motion-content").expect("valid MIME"),
+                size: content.len() as u64,
+                sha256: Checksum::from_bytes(zip::sha256(&content)),
+            }],
+        };
+        archive
+            .add("manifest.json", pkg_json::write(&manifest).into_bytes())
+            .expect("add manifest");
+
+        let error = load_motion(&archive.to_bytes().expect("serialize package"))
+            .expect_err("future schema loaded");
+        assert!(error.contains("unsupported schema version"), "{error}");
     }
 
     #[test]
@@ -579,6 +613,7 @@ mod tests {
     fn motion_validation_reports_bad_documents() {
         let mut doc = CompositionDocument::new("comp-invalid", "Invalid");
         doc.frame_rate = 0.0;
+        doc.add_layer(MotionLayer::new("layer-invalid", "Invalid Layer", "Text"));
         doc.layers[0].position_x_keys = vec![
             Keyframe {
                 time_secs: 1.0,
