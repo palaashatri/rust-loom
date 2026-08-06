@@ -42,8 +42,17 @@ jobs:
           base64 -d /tmp/motion.b64 | gzip -d > /tmp/motion.py
           test "$(sha256sum /tmp/motion.py | cut -d' ' -f1)" = 75b7d52001988e8fc7024ffe30f115a9ca05c7a949f8e60218b6283d410341fa
           python3 /tmp/motion.py
-      - name: Stabilize Motion product invariants
-        run: python3 loom-bootstrap/scripts/stabilize-motion.py
+      - name: Apply complete Motion product invariants
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat loom-bootstrap/scripts/stabilize-motion-v2-payload/part-* > /tmp/stabilize-motion-v2.b64
+          test "$(wc -c < /tmp/stabilize-motion-v2.b64)" = 6148
+          test "$(sha256sum /tmp/stabilize-motion-v2.b64 | cut -d' ' -f1)" = 1cc6ed43c146e1493e172e19fbed0279187cc25ea19ba3fb923983b72008237e
+          base64 -d /tmp/stabilize-motion-v2.b64 | gzip -d > /tmp/stabilize-motion-v2.py
+          test "$(wc -c < /tmp/stabilize-motion-v2.py)" = 20060
+          test "$(sha256sum /tmp/stabilize-motion-v2.py | cut -d' ' -f1)" = 41bb8a2ba33e4350a8729e6ce45ca62ae1c685e999d28a1ae0626abdb4bf3423
+          python3 /tmp/stabilize-motion-v2.py
       - name: Format
         run: |
           cargo fmt --manifest-path loom-core/Cargo.toml --all
@@ -72,9 +81,9 @@ jobs:
         shell: bash
         run: |
           rm -f .github/workflows/apply-motion-desktop-slice.yml loom-bootstrap/scripts/stabilize-motion.py
-          rm -rf loom-bootstrap/scripts/motion-migration-payload
+          rm -rf loom-bootstrap/scripts/motion-migration-payload loom-bootstrap/scripts/stabilize-motion-v2-payload
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat(motion): complete native project and SVG export workflows"
+          git commit -m "feat(motion): complete native document workflow invariants"
           git push origin HEAD:chatgpt/loom-ui-functional-audit-2
