@@ -19,10 +19,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NoReturn
 
 APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "encode")
 DISPLAY_NAMES = {
@@ -70,7 +71,7 @@ class Artifact:
     kind: str
 
 
-def fail(message: str) -> "NoReturn":
+def fail(message: str) -> NoReturn:
     raise SystemExit(f"release error: {message}")
 
 
@@ -78,6 +79,30 @@ def run(arguments: list[str], *, cwd: Path | None = None) -> None:
     process = subprocess.run(arguments, cwd=cwd, check=False)
     if process.returncode != 0:
         fail(f"command failed ({process.returncode}): {' '.join(arguments)}")
+
+
+def run_with_retries(
+    arguments: list[str],
+    *,
+    cwd: Path | None = None,
+    attempts: int = 3,
+    delay_seconds: float = 2.0,
+) -> None:
+    """Run a native packaging tool with bounded retries for transient OS errors."""
+    if attempts < 1:
+        fail("retry attempt count must be positive")
+    last_code = 0
+    for attempt in range(1, attempts + 1):
+        process = subprocess.run(arguments, cwd=cwd, check=False)
+        last_code = process.returncode
+        if last_code == 0:
+            return
+        if attempt < attempts:
+            time.sleep(delay_seconds * attempt)
+    fail(
+        f"command failed ({last_code}) after {attempts} attempts: "
+        f"{' '.join(arguments)}"
+    )
 
 
 def require_program(name: str) -> str:
@@ -135,7 +160,6 @@ def loom_svg(app: str) -> str:
 </svg>'''
 
 
-
 def linux_mime_xml() -> str:
     entries = []
     for _app, (extension, mime, description) in DOCUMENT_TYPES.items():
@@ -179,6 +203,7 @@ def macos_document_type(app: str) -> tuple[list[dict[str, object]], list[dict[st
     ]
     return document_types, declarations
 
+
 def artifact(path: Path, platform: str, architecture: str, signed: bool, kind: str) -> Artifact:
     payload = path.read_bytes()
     return Artifact(
@@ -199,7 +224,7 @@ def package_linux(
     architecture: str,
     allow_unsigned: bool,
 ) -> list[Artifact]:
-    del allow_unsigned  # Linux package signing is repository/distribution specific.
+    del allow_unsigned
     binaries = collect_binaries(root, "linux")
     dpkg_deb = require_program("dpkg-deb")
     output.mkdir(parents=True, exist_ok=True)
@@ -308,7 +333,7 @@ def package_linux(
 
 
 def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> str:
-    platform = "x64" if architecture == "x86_64" else "arm64"
+    del architecture  # Architecture is selected by `wix build -arch`.
     components: list[str] = []
     refs: list[str] = []
     for app, source in binaries.items():
@@ -337,7 +362,7 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Loom Creator Suite" Manufacturer="Loom Project" Version="{version}"
-           UpgradeCode="{upgrade_code}" Scope="perMachine" Compressed="yes" Platform="{platform}">
+           UpgradeCode="{upgrade_code}" Scope="perMachine" Compressed="yes">
     <MajorUpgrade DowngradeErrorMessage="A newer version of Loom Creator Suite is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFiles6432Folder">
@@ -472,7 +497,9 @@ def package_macos(
         if not applications_link.exists():
             os.symlink("/Applications", applications_link)
         dmg = output / f"Loom-Creator-Suite-{version}-{architecture}.dmg"
-        run(
+        if dmg.exists():
+            dmg.unlink()
+        run_with_retries(
             [
                 hdiutil,
                 "create",
@@ -484,7 +511,9 @@ def package_macos(
                 "UDZO",
                 "-ov",
                 str(dmg),
-            ]
+            ],
+            attempts=3,
+            delay_seconds=3.0,
         )
         if identity:
             run(["codesign", "--force", "--timestamp", "--sign", identity, str(dmg)])
