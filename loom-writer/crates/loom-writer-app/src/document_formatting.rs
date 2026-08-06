@@ -258,6 +258,7 @@ mod tests {
     #[test]
     fn existing_style_boundaries_are_preserved() {
         let mut document = document();
+        let first_block_len = document.blocks[0].text.as_str().len();
         document.blocks[0].runs = vec![
             StyleRun {
                 start: 0,
@@ -266,7 +267,7 @@ mod tests {
             },
             StyleRun {
                 start: 5,
-                end: document.blocks[0].text.as_str().len(),
+                end: first_block_len,
                 style: CharacterStyle::default(),
             },
         ];
