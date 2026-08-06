@@ -32,6 +32,7 @@ export component WriterApp inherits Window {
     callback new-doc;
     callback open-doc;
     callback save-doc;
+    callback save-as-doc;
     callback export-pdf;
     callback undo;
     callback redo;
@@ -61,9 +62,27 @@ export component WriterApp inherits Window {
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open) { return reject; }
-            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
-                root.open-palette();
-                return accept;
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-doc();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-doc();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return accept;
+                }
             }
             return reject;
         }
@@ -75,7 +94,7 @@ export component WriterApp inherits Window {
             app-name: "Loom Writer";
             document-title: root.doc-title;
             icon: "document";
-            context: "Open document package";
+            context: "Local document package";
             state-text: "Editing locally";
             state-tone: 0;
         }
@@ -84,6 +103,7 @@ export component WriterApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-doc(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-doc(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-doc(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-doc(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
@@ -219,8 +239,17 @@ export component WriterApp inherits Window {
                                         root.undo();
                                     }
                                     accept
-                                } else if (event.modifiers.control && (event.text == "y" || event.text == "Y")) {
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "y" || event.text == "Y")) {
                                     root.redo();
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "s" || event.text == "S")) {
+                                    if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "o" || event.text == "O")) {
+                                    root.open-doc();
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "e" || event.text == "E")) {
+                                    root.export-pdf();
                                     accept
                                 }
                                 reject

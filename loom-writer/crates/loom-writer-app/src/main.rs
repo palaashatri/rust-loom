@@ -8,13 +8,16 @@
 mod document_formatting;
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
 use document_formatting::{
     formatting_state, set_document_alignment, set_document_bold, set_document_heading,
     set_document_italic, set_document_underline,
+};
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
 };
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
@@ -110,7 +113,7 @@ fn sample_document() -> WriterDocument {
     d.push(RichBlock::new(
         d.next_id(),
         "paragraph",
-        "Type styled text, insert images, track changes, and export to PDF or Markdown. All of it works offline.",
+        "Type and format local text, save an inspectable Loom document, and export a deterministic PDF or Markdown file. All implemented workflows work offline.",
     ));
     d.push(RichBlock::new(d.next_id(), "heading2", "Getting started"));
     d.push(RichBlock::new(
@@ -121,14 +124,15 @@ fn sample_document() -> WriterDocument {
     d
 }
 
-fn load_file(path: &str) -> Result<WriterDocument, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
-    loom_writer_core::load_document(&bytes).map_err(|e| format!("load {path}: {e}"))
+fn load_file(path: &Path) -> Result<WriterDocument, String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    loom_writer_core::load_document(&bytes)
+        .map_err(|error| format!("load {}: {error}", path.display()))
 }
 
-fn save_file(path: &str, doc: &WriterDocument) -> Result<(), String> {
-    let bytes = loom_writer_core::save_document(doc).map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|e| format!("write {path}: {e}"))
+fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
+    let bytes = loom_writer_core::save_document(doc).map_err(|error| error.to_string())?;
+    std::fs::write(path, bytes).map_err(|error| format!("write {}: {error}", path.display()))
 }
 
 /// Commands exposed through the command palette. Each palette entry maps to
@@ -139,6 +143,7 @@ enum PaletteAction {
     NewDoc,
     OpenDoc,
     SaveDoc,
+    SaveAsDoc,
     ExportPdf,
     Undo,
     Redo,
@@ -175,6 +180,12 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "writer.save",
             label: "Save Document",
             shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveAsDoc,
+            id: "writer.save-as",
+            label: "Save Document As",
+            shortcut: "Ctrl+Shift+S",
         },
         PaletteCommand {
             action: PaletteAction::ExportPdf,
@@ -429,10 +440,94 @@ impl EditorHistory {
 /// Mutable state shared between the UI callbacks.
 struct GuiState {
     current: RefCell<WriterDocument>,
-    save_path: RefCell<Option<String>>,
+    save_path: RefCell<Option<PathBuf>>,
     history: RefCell<EditorHistory>,
     history_clock: Instant,
     syncing_editor: Cell<bool>,
+    dialogs: Rc<dyn FileDialogService>,
+    document_filter: FileFilter,
+    pdf_filter: FileFilter,
+}
+
+fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
+    path.and_then(Path::parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+}
+
+fn writer_open_request(state: &GuiState) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Loom Writer Document".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![state.document_filter.clone()],
+    }
+}
+
+fn writer_save_request(state: &GuiState) -> SaveFileRequest {
+    let path = state.save_path.borrow();
+    let suggested_name = path
+        .as_deref()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| SAVE_FILENAME.to_string());
+    SaveFileRequest {
+        title: "Save Loom Writer Document".into(),
+        initial_directory: initial_directory(path.as_deref()),
+        suggested_name: Some(suggested_name),
+        filters: vec![state.document_filter.clone()],
+    }
+}
+
+fn writer_export_request(state: &GuiState) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Loom Writer PDF".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(EXPORT_FILENAME.to_string()),
+        filters: vec![state.pdf_filter.clone()],
+    }
+}
+
+fn replace_opened_document(
+    app: &WriterApp,
+    state: &GuiState,
+    path: PathBuf,
+    document: WriterDocument,
+) {
+    *state.current.borrow_mut() = document;
+    *state.save_path.borrow_mut() = Some(path);
+    *state.history.borrow_mut() = EditorHistory::new();
+    apply_state(app, state);
+}
+
+fn save_current_document(
+    app: &WriterApp,
+    state: &GuiState,
+    force_picker: bool,
+) -> Result<bool, String> {
+    let path = if !force_picker {
+        state.save_path.borrow().clone()
+    } else {
+        None
+    };
+    let path = match path {
+        Some(path) => Some(path),
+        None => state
+            .dialogs
+            .save_file(&writer_save_request(state))
+            .map_err(|error| error.to_string())?,
+    };
+    let Some(path) = path else {
+        app.set_status_left("Save cancelled".into());
+        return Ok(false);
+    };
+    save_file(&path, &state.current.borrow())?;
+    *state.save_path.borrow_mut() = Some(path.clone());
+    if let Ok(bytes) = loom_writer_core::save_document(&state.current.borrow()) {
+        let _ = checkpoint_snapshot_recovery(bytes);
+    }
+    app.set_status_left(SharedString::from(format!("Saved {}", path.display())));
+    Ok(true)
 }
 
 fn apply_document(app: &WriterApp, doc: &WriterDocument) {
@@ -508,7 +603,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
     let doc = match &args.open {
-        Some(p) => load_file(p)?,
+        Some(p) => load_file(Path::new(p))?,
         None => sample_document(),
     };
     apply_document(&app, &doc);
@@ -525,6 +620,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
 }
 
 fn run_gui(args: &Args) -> Result<(), String> {
+    run_gui_with_dialogs(args, Rc::new(NativeFileDialogs))
+}
+
+fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
     app.window()
@@ -535,19 +634,25 @@ fn run_gui(args: &Args) -> Result<(), String> {
     } else {
         None
     };
+    let document_filter =
+        FileFilter::new("Loom Writer document", ["loomdoc"]).map_err(|error| error.to_string())?;
+    let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     let state = Rc::new(GuiState {
         current: RefCell::new(if let Some(document) = recovered {
             document
         } else {
             match &args.open {
-                Some(p) => load_file(p)?,
+                Some(p) => load_file(Path::new(p))?,
                 None => sample_document(),
             }
         }),
-        save_path: RefCell::new(args.open.clone()),
+        save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
+        dialogs,
+        document_filter,
+        pdf_filter,
     });
 
     {
@@ -555,7 +660,11 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_doc(move || {
             if let Some(app) = app_ref.upgrade() {
-                apply_with_history(&app, &state, sample_document(), HistoryKind::DocumentAction);
+                *state.current.borrow_mut() = sample_document();
+                *state.save_path.borrow_mut() = None;
+                *state.history.borrow_mut() = EditorHistory::new();
+                apply_state(&app, &state);
+                app.set_status_left("Created unsaved document".into());
             }
         });
     }
@@ -564,16 +673,23 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_open_doc(move || {
             if let Some(app) = app_ref.upgrade() {
-                let p = state
-                    .save_path
-                    .borrow()
-                    .clone()
-                    .unwrap_or_else(|| SAVE_FILENAME.to_string());
-                match load_file(&p) {
-                    Ok(doc) => apply_with_history(&app, &state, doc, HistoryKind::DocumentAction),
-                    Err(e) => {
-                        app.set_status_left(SharedString::from(format!("open failed: {e}")));
-                    }
+                match state.dialogs.open_file(&writer_open_request(&state)) {
+                    Ok(Some(path)) => match load_file(&path) {
+                        Ok(document) => {
+                            replace_opened_document(&app, &state, path.clone(), document);
+                            app.set_status_left(SharedString::from(format!(
+                                "Opened {}",
+                                path.display()
+                            )));
+                        }
+                        Err(error) => {
+                            app.set_status_left(SharedString::from(format!("Open failed: {error}")))
+                        }
+                    },
+                    Ok(None) => app.set_status_left("Open cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Open dialog failed: {error}"
+                    ))),
                 }
             }
         });
@@ -583,22 +699,19 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_doc(move || {
             if let Some(app) = app_ref.upgrade() {
-                let p = state
-                    .save_path
-                    .borrow()
-                    .clone()
-                    .unwrap_or_else(|| SAVE_FILENAME.to_string());
-                match save_file(&p, &state.current.borrow()) {
-                    Ok(()) => {
-                        if let Ok(bytes) = loom_writer_core::save_document(&state.current.borrow())
-                        {
-                            let _ = checkpoint_snapshot_recovery(bytes);
-                        }
-                        app.set_status_left(SharedString::from(format!("saved {p}")));
-                    }
-                    Err(e) => {
-                        app.set_status_left(SharedString::from(format!("save failed: {e}")));
-                    }
+                if let Err(error) = save_current_document(&app, &state, false) {
+                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_doc(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = save_current_document(&app, &state, true) {
+                    app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
                 }
             }
         });
@@ -608,13 +721,23 @@ fn run_gui(args: &Args) -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_export_pdf(move || {
             if let Some(app) = app_ref.upgrade() {
-                let bytes = loom_writer_core::export_pdf(&state.current.borrow());
-                match std::fs::write(EXPORT_FILENAME, bytes) {
-                    Ok(()) => app
-                        .set_status_left(SharedString::from(format!("exported {EXPORT_FILENAME}"))),
-                    Err(e) => {
-                        app.set_status_left(SharedString::from(format!("export failed: {e}")));
+                match state.dialogs.save_file(&writer_export_request(&state)) {
+                    Ok(Some(path)) => {
+                        let bytes = loom_writer_core::export_pdf(&state.current.borrow());
+                        match std::fs::write(&path, bytes) {
+                            Ok(()) => app.set_status_left(SharedString::from(format!(
+                                "Exported {}",
+                                path.display()
+                            ))),
+                            Err(error) => app.set_status_left(SharedString::from(format!(
+                                "Export failed: {error}"
+                            ))),
+                        }
                     }
+                    Ok(None) => app.set_status_left("Export cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Export dialog failed: {error}"
+                    ))),
                 }
             }
         });
@@ -788,7 +911,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
     let doc = match &args.open {
-        Some(p) => load_file(p)?,
+        Some(p) => load_file(Path::new(p))?,
         None => sample_document(),
     };
     apply_document(&app, &doc);
@@ -915,6 +1038,7 @@ fn wire_palette(app: &WriterApp) {
                         PaletteAction::NewDoc => app.invoke_new_doc(),
                         PaletteAction::OpenDoc => app.invoke_open_doc(),
                         PaletteAction::SaveDoc => app.invoke_save_doc(),
+                        PaletteAction::SaveAsDoc => app.invoke_save_as_doc(),
                         PaletteAction::ExportPdf => app.invoke_export_pdf(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
@@ -1004,6 +1128,30 @@ mod tests {
         history.record(b, c, HistoryKind::DocumentAction, 1);
 
         assert!(history.total_bytes() <= 1000);
+    }
+
+    #[test]
+    fn scripted_dialog_request_uses_the_current_document_directory() {
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+            [Some(PathBuf::from("/tmp/next.loomdoc"))],
+            [Some(PathBuf::from("/tmp/saved.loomdoc"))],
+        ));
+        let state = GuiState {
+            current: RefCell::new(text_document("hello")),
+            save_path: RefCell::new(Some(PathBuf::from("/tmp/current.loomdoc"))),
+            history: RefCell::new(EditorHistory::new()),
+            history_clock: Instant::now(),
+            syncing_editor: Cell::new(false),
+            dialogs,
+            document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+        };
+        let request = writer_open_request(&state);
+        assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
+        assert_eq!(
+            state.dialogs.open_file(&request).expect("open"),
+            Some(PathBuf::from("/tmp/next.loomdoc"))
+        );
     }
 
     #[test]

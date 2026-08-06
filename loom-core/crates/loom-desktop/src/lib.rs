@@ -41,9 +41,9 @@ impl FileFilter {
         if extensions.is_empty()
             || extensions.iter().any(|extension| {
                 extension.is_empty()
-                    || !extension.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
-                    })
+                    || !extension
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
             })
         {
             return Err(DesktopError::InvalidRequest(
@@ -93,9 +93,14 @@ pub enum DesktopError {
 impl fmt::Display for DesktopError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidRequest(message) => write!(formatter, "invalid desktop request: {message}"),
+            Self::InvalidRequest(message) => {
+                write!(formatter, "invalid desktop request: {message}")
+            }
             Self::ScriptExhausted(operation) => {
-                write!(formatter, "scripted desktop service exhausted during {operation}")
+                write!(
+                    formatter,
+                    "scripted desktop service exhausted during {operation}"
+                )
             }
         }
     }
