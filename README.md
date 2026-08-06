@@ -27,6 +27,12 @@ The rigorous implementation programme, architecture contracts, application
 roadmaps, evidence gates, and final acceptance checklist are defined in
 [`AGENTS.MD`](AGENTS.MD).
 
+The first 23→100 implementation milestone has started. Writer and Sheets now
+use the shared native file-dialog service for their primary Open, Save/Save As,
+and export destination workflows. Six applications still need migration, and
+native menus, drag/drop, recent documents, asynchronous I/O, and atomic desktop
+save orchestration remain incomplete.
+
 All current implementation work is integrated on:
 
 ```text
