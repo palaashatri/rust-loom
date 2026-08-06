@@ -97,6 +97,10 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+fn blank_document() -> WriterDocument {
+    WriterDocument::new("untitled", "Untitled Document")
+}
+
 /// A sample document used by `--smoke`, screenshots, and first launch.
 fn sample_document() -> WriterDocument {
     let mut d = WriterDocument::new("quick-start", "Loom Writer — Quick Start");
@@ -660,7 +664,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_new_doc(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.current.borrow_mut() = sample_document();
+                *state.current.borrow_mut() = blank_document();
                 *state.save_path.borrow_mut() = None;
                 *state.history.borrow_mut() = EditorHistory::new();
                 apply_state(&app, &state);
@@ -1128,6 +1132,13 @@ mod tests {
         history.record(b, c, HistoryKind::DocumentAction, 1);
 
         assert!(history.total_bytes() <= 1000);
+    }
+
+    #[test]
+    fn new_document_is_blank_and_unsaved_ready() {
+        let document = blank_document();
+        assert!(document.blocks.is_empty());
+        assert_eq!(document.title, "Untitled Document");
     }
 
     #[test]

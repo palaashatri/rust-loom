@@ -91,6 +91,10 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+fn blank_sheet() -> Sheet {
+    Sheet::new("Untitled")
+}
+
 /// A small budget workbook used by `--smoke`, screenshots, and first launch.
 fn sample_sheet() -> Sheet {
     let mut sheet = Sheet::new("Budget");
@@ -395,15 +399,13 @@ fn save_current_sheet(
     };
     save_sheet(&path, &state.current.borrow())?;
     *state.save_path.borrow_mut() = Some(path.clone());
-    checkpoint_snapshot_recovery(sheet_to_json(&state.current.borrow()).into_bytes()).map_err(
-        |error| {
-            format!(
-                "saved {}, but recovery checkpoint failed: {error}",
-                path.display()
-            )
-        },
-    )?;
-    app.set_status_left(SharedString::from(format!("Saved {}", path.display())));
+    match checkpoint_snapshot_recovery(sheet_to_json(&state.current.borrow()).into_bytes()) {
+        Ok(()) => app.set_status_left(SharedString::from(format!("Saved {}", path.display()))),
+        Err(error) => app.set_status_left(SharedString::from(format!(
+            "Saved {}, but recovery checkpoint failed: {error}",
+            path.display()
+        ))),
+    }
     Ok(true)
 }
 
@@ -448,7 +450,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_new_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.current.borrow_mut() = sample_sheet();
+                *state.current.borrow_mut() = blank_sheet();
                 *state.save_path.borrow_mut() = None;
                 state.undo_stack.borrow_mut().clear();
                 state.redo_stack.borrow_mut().clear();
@@ -899,6 +901,13 @@ fn wire_palette(app: &SheetsApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_workbook_is_blank_and_named_untitled() {
+        let sheet = blank_sheet();
+        assert!(sheet.cells.is_empty());
+        assert_eq!(sheet.name, "Untitled");
+    }
 
     #[test]
     fn scripted_dialog_request_uses_current_workbook_directory() {
