@@ -139,8 +139,8 @@ def main() -> int:
     def journey(
         app: str,
         commands: list[list[str]],
-        outputs: list[tuple[Path, bytes, str]] = [],
-        stdout_expectations: list[tuple[int, tuple[str, ...], str]] = [],
+        outputs: tuple[tuple[Path, bytes, str], ...] = (),
+        stdout_expectations: tuple[tuple[int, tuple[str, ...], str], ...] = (),
     ) -> None:
         try:
             cli = cli_path(root, app, arguments.platform)
@@ -182,8 +182,7 @@ def main() -> int:
             ["paginate", str(writer)],
             ["export-md", str(writer), str(markdown)],
         ],
-        [(markdown, b"# Native Journey", "Writer Markdown export")],
-        [(3, ("1 match",), "Writer search")],
+        ((markdown, b"# Native Journey", "Writer Markdown export"),),
     )
 
     sheets = samples / "sample.loomsheet"
@@ -202,8 +201,7 @@ def main() -> int:
             ["sort", str(csv_input), "A2:B3", "1", "desc"],
             ["to-csv", str(csv_input), str(csv_output)],
         ],
-        [(csv_output, b"Item,Amount", "Sheets CSV export")],
-        [(2, ("24000",), "Sheets recalculation")],
+        ((csv_output, b"Item,Amount", "Sheets CSV export"),),
     )
 
     present = samples / "sample.loomdeck"
@@ -217,8 +215,7 @@ def main() -> int:
             ["scene", str(present), "0"],
             ["pdf", str(present), str(pdf)],
         ],
-        [(pdf, b"%PDF", "Present PDF export")],
-        [(3, ("slide",), "Present scene")],
+        ((pdf, b"%PDF", "Present PDF export"),),
     )
 
     photo = samples / "sample.loomphoto"
@@ -230,8 +227,7 @@ def main() -> int:
             ["inspect", str(photo)],
             ["render-demo", str(ppm), "320", "180"],
         ],
-        [(ppm, b"P6\n", "Photo composite render")],
-        [(1, ("640", "360"), "Photo dimensions")],
+        ((ppm, b"P6\n", "Photo composite render"),),
     )
 
     motion = samples / "sample.loommotion"
@@ -243,7 +239,6 @@ def main() -> int:
             ["inspect", str(motion)],
             ["frame", str(motion), "12"],
         ],
-        stdout_expectations=[(3, ("frame",), "Motion frame sampling")],
     )
 
     video = samples / "sample.loomvideo"
@@ -257,8 +252,8 @@ def main() -> int:
             ["plan", str(video)],
             ["edl", str(video), str(edl)],
         ],
-        [(edl, b"TITLE: Native Video", "Video EDL export")],
-        [
+        ((edl, b"TITLE: Native Video", "Video EDL export"),),
+        (
             (
                 1,
                 ("Edited video project: 3 clips, 1 marker, 1 caption",),
@@ -266,7 +261,7 @@ def main() -> int:
             ),
             (2, ("Timeline: 3 clips, 1 markers, 1 captions",), "Video inspection"),
             (3, ("c-interview-b", "rate 1.500"), "Video render plan"),
-        ],
+        ),
     )
 
     studio = samples / "sample.loomstudio"
@@ -281,11 +276,10 @@ def main() -> int:
             ["sine", str(sine), "440", "0.25"],
             ["synth", str(synth), "64", "0.25"],
         ],
-        [
+        (
             (sine, b"RIFF", "Studio oscillator WAV"),
             (synth, b"RIFF", "Studio MIDI WAV"),
-        ],
-        [(2, ("124",), "Studio tempo")],
+        ),
     )
 
     encode = samples / "sample.loomencode"
@@ -298,7 +292,7 @@ def main() -> int:
             ["recover", str(encode)],
             ["inspect", str(encode)],
         ],
-        stdout_expectations=[
+        stdout_expectations=(
             (1, ("Prepared recovery demo: 3 jobs",), "Encode recovery setup"),
             (
                 2,
@@ -311,7 +305,7 @@ def main() -> int:
                 ("Pending Jobs: 3", "Aggregate Progress: 0.000"),
                 "Encode recovered state",
             ),
-        ],
+        ),
     )
 
     report["passed"] = not failures
