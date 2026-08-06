@@ -38,6 +38,58 @@ jobs:
             loom-core
             loom-present
 
+      - name: Repair deterministic migration generator
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("loom-bootstrap/scripts/apply-present-desktop-slice.py")
+          text = path.read_text()
+          old = '''fn save_request(state: &GuiState) -> SaveFileRequest {
+              let path = state.save_path.borrow();
+              let suggested_name = path
+                  .as_deref()
+                  .and_then(Path::file_name)
+                  .map(|name| name.to_string_lossy().into_owned())
+                  .unwrap_or_else(|| SAVE_FILENAME.to_string());
+              SaveFileRequest {
+                  title: "Save Loom Present Deck".into(),
+                  initial_directory: initial_directory(path.as_deref()),
+                  suggested_name: Some(suggested_name),
+                  filters: vec![state.deck_filter.clone()],
+              }
+          }
+          '''
+          new = '''fn save_request(state: &GuiState) -> SaveFileRequest {
+              let path = state.save_path.borrow().clone();
+              let suggested_name = path
+                  .as_deref()
+                  .and_then(|path| path.file_name())
+                  .map(|name| name.to_string_lossy().into_owned())
+                  .unwrap_or_else(|| SAVE_FILENAME.to_string());
+              SaveFileRequest {
+                  title: "Save Loom Present Deck".into(),
+                  initial_directory: initial_directory(path.as_deref()),
+                  suggested_name: Some(suggested_name),
+                  filters: vec![state.deck_filter.clone()],
+              }
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("save_request generator repair did not match exactly once")
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              'assert_eq!(open.filters[0].extensions, ["loomdeck"]);',
+              'assert_eq!(open.filters[0].extensions, vec!["loomdeck".to_string()]);',
+          )
+          text = text.replace(
+              'assert_eq!(export.filters[0].extensions, ["pdf"]);',
+              'assert_eq!(export.filters[0].extensions, vec!["pdf".to_string()]);',
+          )
+          path.write_text(text)
+          PY
+
       - name: Apply deterministic source migration
         run: python3 loom-bootstrap/scripts/apply-present-desktop-slice.py
 
