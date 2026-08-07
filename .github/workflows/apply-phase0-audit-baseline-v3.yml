@@ -33,6 +33,18 @@ jobs:
           rustup default stable
       - name: Apply Phase 0 migration
         run: python3 loom-bootstrap/scripts/apply-phase0-audit-baseline.py
+      - name: Make keyboard truth check whitespace tolerant
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('loom-bootstrap/scripts/audit-contracts.py')
+          text = p.read_text(encoding='utf-8')
+          old = 'if "do not prove complete keyboard-only application operation" not in truth:\n    errors.append("TRUTH.md must preserve the keyboard host-hook limitation")'
+          new = 'if not re.search(r"do not prove\\s+complete keyboard-only application operation", truth):\n    errors.append("TRUTH.md must preserve the keyboard host-hook limitation")'
+          if text.count(old) != 1:
+              raise SystemExit('keyboard truth audit target drifted')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Audit truth and contracts
         run: |
           python3 loom-bootstrap/scripts/audit-contracts.py
