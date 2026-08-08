@@ -6,6 +6,7 @@ on:
       - chatgpt/loom-ui-functional-audit-2
     paths:
       - loom-bootstrap/scripts/apply-native-package-validation.py
+      - .github/workflows/apply-native-package-validation.yml
 
 permissions:
   contents: write
