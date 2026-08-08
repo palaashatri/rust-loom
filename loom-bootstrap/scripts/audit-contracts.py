@@ -85,14 +85,18 @@ for name in (
 # visual evidence only; actual journey executables must run before scoring.
 cross_platform = (ROOT / ".github/workflows/cross-platform.yml").read_text(encoding="utf-8")
 journey_step = cross_platform.find("Record palette input journeys (modifier-open unproven)")
+prepackage_step = cross_platform.find("Record pre-package readiness evidence")
 score_step = cross_platform.find("Run suite contracts and strict readiness score")
 package_step = cross_platform.find("Build native validation package")
+validation_step = cross_platform.find("Validate native package contents")
 if journey_step < 0 or ' --journey ' not in cross_platform:
     errors.append("native workflow must execute every application --journey recorder")
-if journey_step >= 0 and score_step >= 0 and journey_step > score_step:
-    errors.append("native workflow scores keyboard evidence before journeys run")
-if score_step >= 0 and package_step >= 0 and score_step > package_step:
+if journey_step >= 0 and prepackage_step >= 0 and journey_step > prepackage_step:
+    errors.append("native workflow records keyboard evidence after pre-package readiness")
+if prepackage_step < 0 or package_step < 0 or prepackage_step > package_step:
     errors.append("native workflow must produce readiness evidence even when packaging fails")
+if score_step < 0 or validation_step < 0 or score_step < validation_step:
+    errors.append("final native readiness score must consume independently validated package evidence")
 
 packaging = (ROOT / "loom-bootstrap/packaging/release.py").read_text(encoding="utf-8")
 if 'Platform="{platform}"' in packaging:
@@ -137,6 +141,22 @@ if "exercise content-based format detection" not in truth or "They are not round
     errors.append("detection-only fixtures must not be represented as conformance evidence")
 if "name: required-native-baseline" not in cross_platform or "needs: native-build" not in cross_platform:
     errors.append("native package workflow must aggregate all required platform results")
+
+
+# Native package evidence must be independently validated before scoring.
+release_source = (ROOT / "loom-bootstrap/packaging/release.py").read_text(encoding="utf-8")
+validator_source = ROOT / "loom-bootstrap/packaging/validate.py"
+ci_source = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+if '"commit_sha": os.environ.get("GITHUB_SHA")' not in release_source:
+    errors.append("release manifests must record source commit provenance")
+if not validator_source.is_file():
+    errors.append("native package validator is missing")
+if "Validate native package contents" not in cross_platform:
+    errors.append("native workflow must independently validate package contents")
+if "validated_native_packages" not in readiness or "package-validation.json" not in readiness:
+    errors.append("readiness may only count independently validated native packages")
+if "--minimum-ui" in ci_source or "--minimum-functionality" in ci_source:
+    errors.append("source-only readiness diagnostics must not enforce native-evidence thresholds")
 
 if errors:
     print("Loom contract audit: FAIL", file=sys.stderr)

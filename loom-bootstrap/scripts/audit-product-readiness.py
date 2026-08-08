@@ -8,6 +8,7 @@ as parity with the full AGENTS.md product specification.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -71,15 +72,25 @@ def native_report(evidence_root: Path | None) -> dict[str, Any] | None:
     return load_json(reports[0]) if reports else None
 
 
-def native_packages(evidence_root: Path | None) -> list[Path]:
+def validated_native_packages(evidence_root: Path | None) -> list[Path]:
     if evidence_root is None or not evidence_root.exists():
         return []
     suffixes = (".msi", ".dmg", ".pkg", ".deb", ".appimage", ".zip", ".tar.gz")
-    return [
-        path
-        for path in evidence_root.rglob("*")
-        if path.is_file() and path.name.lower().endswith(suffixes)
-    ]
+    validated: list[Path] = []
+    for path in evidence_root.rglob("*"):
+        if not path.is_file() or not path.name.lower().endswith(suffixes):
+            continue
+        report = load_json(path.parent / "package-validation.json")
+        if not report or report.get("passed") is not True:
+            continue
+        artifact = report.get("artifact")
+        if not isinstance(artifact, dict) or artifact.get("path") != path.name:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if artifact.get("sha256") != digest:
+            continue
+        validated.append(path)
+    return validated
 
 
 def score(evidence_root: Path | None) -> dict[str, object]:
@@ -97,7 +108,7 @@ def score(evidence_root: Path | None) -> dict[str, object]:
     native_workflow = read(ROOT / ".github/workflows/cross-platform.yml")
     packaging = read(ROOT / "loom-bootstrap/packaging/release.py")
     report = native_report(evidence_root)
-    packages = native_packages(evidence_root)
+    packages = validated_native_packages(evidence_root)
     functional_reports = (
         sorted(evidence_root.rglob("native-functional-matrix.json"))
         if evidence_root and evidence_root.exists()

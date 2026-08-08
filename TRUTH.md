@@ -134,6 +134,14 @@ This proves the source-level contracts and focused Linux build path. The score
 remains provisional until native builds and package journeys pass on Windows,
 Linux, macOS Apple silicon, and macOS Intel for this exact source revision.
 
+### Native package validation baseline
+
+Native package readiness now requires independent inspection of the produced DEB,
+MSI, or DMG, including artifact hash/provenance, executable architecture, all eight
+application payloads, and native document registrations. Merely producing a package
+filename is not readiness evidence. This infrastructure improvement does **not** by
+itself promote the complete-suite product score; four-platform evidence must pass.
+
 ### Present, Photo, and Motion re-audit
 
 The Phase 0 re-audit confirms real native desktop file workflows in all three

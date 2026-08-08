@@ -526,6 +526,7 @@ def write_manifest(output: Path, artifacts: Iterable[Artifact], version: str) ->
         "schema_version": 1,
         "suite": "Loom Creator Suite",
         "version": version,
+        "commit_sha": os.environ.get("GITHUB_SHA"),
         "artifacts": [asdict(item) for item in artifacts],
     }
     write_text(manifest, json.dumps(payload, indent=2, sort_keys=True) + "\n")
