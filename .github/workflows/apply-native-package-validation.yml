@@ -39,6 +39,38 @@ jobs:
           rustup default stable
       - name: Apply package validation product changes
         run: python3 loom-bootstrap/scripts/apply-native-package-validation.py
+      - name: Reconcile two-stage readiness ordering contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('loom-bootstrap/scripts/audit-contracts.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''score_step = cross_platform.find("Run suite contracts and strict readiness score")
+          package_step = cross_platform.find("Build native validation package")
+          if journey_step < 0 or ' --journey ' not in cross_platform:
+              errors.append("native workflow must execute every application --journey recorder")
+          if journey_step >= 0 and score_step >= 0 and journey_step > score_step:
+              errors.append("native workflow scores keyboard evidence before journeys run")
+          if score_step >= 0 and package_step >= 0 and score_step > package_step:
+              errors.append("native workflow must produce readiness evidence even when packaging fails")'''
+          new = '''prepackage_step = cross_platform.find("Record pre-package readiness evidence")
+          score_step = cross_platform.find("Run suite contracts and strict readiness score")
+          package_step = cross_platform.find("Build native validation package")
+          validation_step = cross_platform.find("Validate native package contents")
+          if journey_step < 0 or ' --journey ' not in cross_platform:
+              errors.append("native workflow must execute every application --journey recorder")
+          if journey_step >= 0 and prepackage_step >= 0 and journey_step > prepackage_step:
+              errors.append("native workflow records keyboard evidence after pre-package readiness")
+          if prepackage_step < 0 or package_step < 0 or prepackage_step > package_step:
+              errors.append("native workflow must produce readiness evidence even when packaging fails")
+          if score_step < 0 or validation_step < 0 or score_step < validation_step:
+              errors.append("final native readiness score must consume independently validated package evidence")'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('native readiness ordering contract drifted')
+          p.write_text(text, encoding='utf-8')
+          PY
       - name: Audit contracts and Python syntax
         run: |
           python3 -m py_compile \
