@@ -102,15 +102,6 @@ jobs:
             "$binary" --journey "$output" --theme dark --size 1280x800
             test -s "$output/$app.json"
           done
-      - name: Run suite contracts and strict readiness score
-        shell: bash
-        run: |
-          python3 loom-bootstrap/scripts/audit-contracts.py
-          python3 loom-bootstrap/scripts/audit-product-ui.py
-          python3 loom-bootstrap/scripts/audit-product-readiness.py \
-            --evidence-root "$NATIVE_EVIDENCE" \
-            --minimum-ui 6.5 --minimum-functionality 5.5 \
-            --json "$NATIVE_EVIDENCE/product-score.json"
       - name: Build native validation package
         shell: bash
         run: |
@@ -131,6 +122,26 @@ jobs:
             fi
             sleep $((attempt * 5))
           done
+      - name: Validate native package contents
+        shell: bash
+        env:
+          LOOM_ARTIFACT_SOURCE_SHA: ${{ github.sha }}
+          LOOM_ARTIFACT_SOURCE_RUN_ID: ${{ github.run_id }}
+        run: >-
+          python3 loom-bootstrap/packaging/validate.py
+          --manifest "$NATIVE_EVIDENCE/packages/release-manifest.json"
+          --platform "${{ matrix.platform }}"
+          --architecture "${{ matrix.architecture }}"
+          --output "$NATIVE_EVIDENCE/packages/package-validation.json"
+      - name: Run suite contracts and strict readiness score
+        shell: bash
+        run: |
+          python3 loom-bootstrap/scripts/audit-contracts.py
+          python3 loom-bootstrap/scripts/audit-product-ui.py
+          python3 loom-bootstrap/scripts/audit-product-readiness.py \
+            --evidence-root "$NATIVE_EVIDENCE" \
+            --minimum-ui 6.5 --minimum-functionality 5.5 \
+            --json "$NATIVE_EVIDENCE/product-score.json"
       - name: Inventory downloadable native evidence
         if: always()
         shell: bash
