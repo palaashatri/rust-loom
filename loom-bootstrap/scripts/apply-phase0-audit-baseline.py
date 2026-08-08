@@ -49,17 +49,21 @@ replace_once(
 )
 
 # Make the native matrix language honest and add an explicit aggregate gate so
-# package completion cannot be inferred from only a subset of targets.
+# package completion cannot be inferred from only a subset of targets. This is
+# intentionally idempotent because the repository API may land the workflow
+# change before the remaining validated Phase 0 tree.
 cross = ROOT / ".github/workflows/cross-platform.yml"
 cross_text = cross.read_text(encoding="utf-8")
 old_step = "      - name: Record real command-palette keyboard journeys"
 new_step = "      - name: Record palette input journeys (modifier-open unproven)"
-if cross_text.count(old_step) != 1:
+if old_step in cross_text:
+    if cross_text.count(old_step) != 1:
+        raise SystemExit("cross-platform.yml: keyboard journey step target drifted")
+    cross_text = cross_text.replace(old_step, new_step, 1)
+elif new_step not in cross_text:
     raise SystemExit("cross-platform.yml: keyboard journey step target drifted")
-cross_text = cross_text.replace(old_step, new_step, 1)
-if "name: required-native-baseline" in cross_text:
-    raise SystemExit("cross-platform.yml: native baseline aggregate already exists")
-cross_text = cross_text.rstrip() + """
+if "name: required-native-baseline" not in cross_text:
+    cross_text = cross_text.rstrip() + """
 
   native-baseline:
     name: required-native-baseline
