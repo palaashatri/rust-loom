@@ -153,7 +153,7 @@ pub fn record_keyboard_palette_journey<H: ComponentHandle + PaletteProbe>(
         .iter()
         .find(|step| step.name == "3-move-down")
         .ok_or("missing move step")?;
-    if move_step.selected <= last_query.selected {
+    if last_query.commands > 1 && move_step.selected <= last_query.selected {
         passed = false;
         failures.push("down-arrow did not move the selection forward".to_string());
     }

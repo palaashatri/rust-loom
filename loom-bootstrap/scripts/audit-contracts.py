@@ -84,7 +84,7 @@ for name in (
 # Keep the corrected native-evidence model durable. Palette screenshots are
 # visual evidence only; actual journey executables must run before scoring.
 cross_platform = (ROOT / ".github/workflows/cross-platform.yml").read_text(encoding="utf-8")
-journey_step = cross_platform.find("Record real command-palette keyboard journeys")
+journey_step = cross_platform.find("Record palette input journeys (modifier-open unproven)")
 score_step = cross_platform.find("Run suite contracts and strict readiness score")
 package_step = cross_platform.find("Build native validation package")
 if journey_step < 0 or ' --journey ' not in cross_platform:
@@ -105,6 +105,38 @@ if "not AGENTS.md feature-completion parity" not in readiness:
     errors.append("readiness output must state that it is not product feature parity")
 if "Ctrl/Cmd+K opening and per-command application side effects" not in readiness:
     errors.append("readiness audit must retain the keyboard side-effect evidence blocker")
+
+
+# Phase 0 truth enforcement.
+allowed_root_markdown = {"AGENTS.MD", "README.md", "TRUTH.md"}
+for path in ROOT.iterdir():
+    if path.is_file() and path.suffix.lower() == ".md" and path.name not in allowed_root_markdown:
+        errors.append(f"unauthorized root Markdown file: {path.name}")
+
+truth = (ROOT / "TRUTH.md").read_text(encoding="utf-8")
+score_claims = re.findall(r"approximately\s+\*\*(\d{1,3})/100\*\*", truth)
+if not score_claims:
+    errors.append("TRUTH.md must contain an explicit approximate complete-suite score")
+elif len(set(score_claims)) != 1:
+    errors.append(f"TRUTH.md contains contradictory complete-suite scores: {sorted(set(score_claims))}")
+
+for token in re.findall(r"`([^`\n]+)`", truth):
+    if token.startswith("loom-") and "/" in token and not any(ch in token for ch in "*?{}"):
+        if not (ROOT / token).exists():
+            errors.append(f"TRUTH.md references missing evidence path: {token}")
+
+if "source_ratio *" in readiness or "key_handlers / 10.0" in readiness:
+    errors.append("readiness scoring must not award points from source keyboard-handler counts")
+
+journey_source = (ROOT / "loom-core/crates/loom-test-support/src/journey.rs").read_text(encoding="utf-8")
+if "open step uses the Ctrl+K host hook" not in journey_source:
+    errors.append("palette journeys must disclose modifier-key opening as a host hook")
+if not re.search(r"do not prove\s+complete keyboard-only application operation", truth):
+    errors.append("TRUTH.md must preserve the keyboard host-hook limitation")
+if "exercise content-based format detection" not in truth or "They are not round-trip fidelity" not in truth:
+    errors.append("detection-only fixtures must not be represented as conformance evidence")
+if "name: required-native-baseline" not in cross_platform or "needs: native-build" not in cross_platform:
+    errors.append("native package workflow must aggregate all required platform results")
 
 if errors:
     print("Loom contract audit: FAIL", file=sys.stderr)

@@ -21,7 +21,7 @@ Writer and Sheets now use real native file workflows, New creates blank projects
 and Sheets no longer advertises non-persistent multi-sheet and formatting
 commands through the command palette. The score remains provisional until the
 fresh four-platform native matrix passes on the final milestone head. Epic 1 is
-not complete; six applications still use development-era path workflows.
+not complete; Video, Studio, and Encode still require the shared native desktop workflow migration.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -38,8 +38,8 @@ parity or product completion.
 - A shared injectable desktop file-dialog contract. The production adapter uses
   native operating-system dialogs; deterministic tests use a scripted adapter
   without opening modal windows.
-- Writer and Sheets use that shared contract for normal Open, Save/Save As, and
-  export destination workflows.
+- Writer, Sheets, Present, Photo, and Motion use that shared contract for normal
+  native Open, Save/Save As, import/export destination workflows where applicable.
 - Bounded undo/redo foundations and crash-recovery snapshots in all application
   front ends, with depth varying by application.
 - Light, dark, and high-contrast design tokens and adaptive desktop layouts.
@@ -73,20 +73,32 @@ parity or product completion.
   XLSX/ODS fidelity, data connectors, recent documents, menus, drag/drop,
   asynchronous I/O, and atomic save remain incomplete.
 - **Present:** deck/slide models, layouts, notes, transitions, scene generation,
-  validation, persistence, history, and PDF output. Full direct manipulation,
-  masters, mixed media, animation authoring, presenter workflows, recording,
-  video export, PPTX/ODP fidelity, and native desktop file workflows remain
-  incomplete.
+  validation, persistence, history, PDF output, and native New/Open/Save/Save As/
+  export-destination workflows are wired. The Phase 0 re-audit does **not** promote
+  its score: semantic round-trip assertions remain narrow, writes are non-atomic,
+  PDF output is not independently validated in the desktop journey, and recent
+  documents/import, full direct manipulation, masters, mixed media, animation
+  authoring, presenter workflows, recording, video export, and PPTX/ODP fidelity
+  remain incomplete.
 - **Photo:** raster decode, pixel buffers, layers, blend modes, adjustment and
-  mask foundations, compositing, crop/resize, persistence, history, and
-  PNG/JPEG export. Painting, production masks/selections, RAW/ICC, healing,
-  warping, HDR/panorama, PSD fidelity, GPU effects, production AI editing, and
-  native desktop file workflows remain incomplete.
-- **Motion:** layer/keyframe models, interpolation, transform manipulation,
-  ordering, validation, persistence, bounded history, frame sampling, and SVG
-  frame export. A production compositor, synchronized playback, cameras/lights,
-  particles, effects, tracking, stabilization, optical flow, render-queue
-  breadth, and native desktop file workflows remain incomplete.
+  mask foundations, compositing, crop/resize, persistence, history, native project
+  Open/Save/Save As, raster import, and native PNG/JPEG destination workflows are
+  wired. The Phase 0 re-audit does **not** promote its score: persistence/export
+  writes are non-atomic, exported files are not independently decoded in the desktop
+  journey, recent documents are absent, and tool selection still includes status-only
+  modes rather than complete canvas interaction. Painting, production masks/selections,
+  RAW/ICC, healing, warping, HDR/panorama, PSD fidelity, GPU effects, and production
+  AI editing remain incomplete.
+- **Motion:** layer/keyframe models, interpolation, transform manipulation, ordering,
+  validation, persistence, bounded history, frame sampling, SVG frame export, and
+  native New/Open/Save/Save As/export destination workflows are wired. The repaired
+  native slice has a genuinely blank New composition, exact model round-trip equality,
+  repeated-open idempotence, Save→Save As path coverage, cancellation/error coverage,
+  read-only and non-UTF-8 path coverage where supported, and responsive startup smoke
+  checks. This still does **not** justify a score increase: writes remain non-atomic,
+  recent documents and professional render validation are absent, and production
+  compositing/playback, cameras/lights, particles, effects, tracking, stabilization,
+  optical flow, and render-queue breadth remain incomplete.
 - **Video:** track/clip models, trim/split/speed/ripple operations, markers,
   captions, local probing and preview decode, persistence, history, FFmpeg-backed
   export, progress, and cancellation. Synchronized timeline playback, real proxy
@@ -121,6 +133,16 @@ blank-project and status-semantics cleanup.
 This proves the source-level contracts and focused Linux build path. The score
 remains provisional until native builds and package journeys pass on Windows,
 Linux, macOS Apple silicon, and macOS Intel for this exact source revision.
+
+### Present, Photo, and Motion re-audit
+
+The Phase 0 re-audit confirms real native desktop file workflows in all three
+applications, but none earns a readiness promotion from that fact alone. Present
+still lacks complete semantic round-trip and independent PDF evidence. Photo still
+has non-atomic persistence/export and status-only tool modes. Motion's repaired
+native workflow passed its focused strict gate, while its professional playback,
+compositing, and rendering engine remains incomplete. The complete-suite truth
+score therefore remains approximately **24/100**.
 
 ### Keyboard journeys
 

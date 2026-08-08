@@ -683,7 +683,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     rebuild_palette(&app, "");
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let report = record_keyboard_palette_journey(&app, "sheets", Path::new(out_dir), "format")
+    let report = record_keyboard_palette_journey(&app, "sheets", Path::new(out_dir), "save")
         .map_err(|e| format!("journey failed: {e}"))?;
     println!(
         "keyboard journey: {} ({})",

@@ -174,15 +174,13 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         1 for report_value in journeys.values() if report_value.get("passed") is True
     )
     journey_ratio = journeys_passed / len(APPS)
-    source_ratio = min(1.0, key_handlers / 10.0)
-    # Current journeys programmatically open the palette because modifier-key
-    # injection is unavailable and do not assert the invoked command's domain
-    # side effect. Keep this dimension capped until both are evidenced.
-    keyboard_score = min(0.8, source_ratio * 0.5 + journey_ratio * 0.3)
+    # Source handler counts are diagnostic only and contribute no readiness points.
+    # Modifier-key opening and command domain side effects remain unproven.
+    keyboard_score = min(0.3, journey_ratio * 0.3)
     ui_point(
         "keyboard and command interaction",
         keyboard_score,
-        f"{key_handlers} shared keyboard handlers; post-open palette journeys {journeys_passed}/8",
+        f"post-open palette journeys {journeys_passed}/8; {key_handlers} source handlers diagnostic only (unscored)",
         "Ctrl/Cmd+K opening and per-command application side effects are not yet verified end to end",
     )
 
