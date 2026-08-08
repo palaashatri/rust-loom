@@ -89,7 +89,7 @@ jobs:
           --output "$NATIVE_EVIDENCE/ui"
           --platform "${{ matrix.platform }}"
           --sizes 1024x720,1440x900,1920x1200
-      - name: Record real command-palette keyboard journeys
+      - name: Record palette input journeys (modifier-open unproven)
         shell: bash
         run: |
           set -euo pipefail
@@ -170,3 +170,20 @@ jobs:
           retention-days: 14
           compression-level: 6
           path: ${{ env.NATIVE_EVIDENCE }}/
+
+  native-baseline:
+    name: required-native-baseline
+    if: always()
+    needs: native-build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every declared native target to pass
+        env:
+          NATIVE_MATRIX_RESULT: ${{ needs.native-build.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$NATIVE_MATRIX_RESULT" != "success" ]; then
+            echo "required native matrix did not fully pass: $NATIVE_MATRIX_RESULT" >&2
+            exit 1
+          fi
