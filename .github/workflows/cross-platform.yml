@@ -102,6 +102,14 @@ jobs:
             "$binary" --journey "$output" --theme dark --size 1280x800
             test -s "$output/$app.json"
           done
+      - name: Record pre-package readiness evidence
+        shell: bash
+        run: |
+          python3 loom-bootstrap/scripts/audit-contracts.py
+          python3 loom-bootstrap/scripts/audit-product-ui.py
+          python3 loom-bootstrap/scripts/audit-product-readiness.py \
+            --evidence-root "$NATIVE_EVIDENCE" \
+            --json "$NATIVE_EVIDENCE/pre-package-product-score.json"
       - name: Build native validation package
         shell: bash
         run: |
