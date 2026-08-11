@@ -11,3 +11,5 @@ loom-package.workspace = true
 loom-color.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+image.workspace = true

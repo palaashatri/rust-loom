@@ -1,7 +1,8 @@
 //! # loom-plugin-cli
 //!
-//! A small command line tool for Loom plugin packages: `validate`, `install`,
-//! `list`, and `remove`. Argument parsing is hand-rolled (no clap).
+//! A command line tool for Loom plugin packages: manifest and WebAssembly
+//! validation, installation, discovery, removal, and local execution through
+//! an explicitly installed Wasmtime runtime. Argument parsing is hand-rolled (no clap).
 //!
 //! It also hosts the demo-package fixture builder used by tests and by the
 //! documented workflow in `BUILDING.md`: running `cargo test -p loom-plugin-cli`
@@ -15,7 +16,9 @@ pub mod fixture;
 
 use std::path::{Path, PathBuf};
 
-use loom_plugin_host::{HostError, PluginStore};
+use loom_plugin_host::{
+    validate_wasm_module, ExternalWasmtimeRuntime, HostError, PluginInvocation, PluginStore,
+};
 
 /// Run the CLI with `args` (everything after `argv[0]`) and return the
 /// process exit code: 0 on success, 1 on operational or validation errors,
@@ -41,6 +44,7 @@ pub fn run(args: Vec<String>) -> i32 {
                 2
             }
         },
+        "inspect-wasm" => cmd_inspect_wasm(&args[1..]),
         "install" => cmd_install(&args[1..]),
         "list" => match parse_dir(&args[1..]) {
             Ok(Some(dir)) => cmd_list(&dir),
@@ -54,6 +58,7 @@ pub fn run(args: Vec<String>) -> i32 {
             }
         },
         "remove" => cmd_remove(&args[1..]),
+        "invoke" => cmd_invoke(&args[1..]),
         other => {
             eprintln!("unknown command: {other}\n");
             eprintln!("{}", usage());
@@ -68,15 +73,18 @@ fn usage() -> String {
          \n\
          Usage:\n\
          \x20 loom-plugin validate <manifest.json>\n\
+         \x20 loom-plugin inspect-wasm <module.wasm> [--memory <bytes>]\n\
          \x20 loom-plugin install <file.loomplugin> --dir <store_dir>\n\
          \x20 loom-plugin list --dir <store_dir>\n\
          \x20 loom-plugin remove <id> --dir <store_dir>\n\
+         \x20 loom-plugin invoke <id> --dir <store_dir> [-- <args...>]\n\
          \x20 loom-plugin --help | --version\n\
          \n\
          Options:\n\
-         \x20 --dir <dir>   plugin store directory\n\
-         \x20 -h, --help    show this help\n\
-         \x20 -V, --version show version",
+         \x20 --dir <dir>      plugin store directory\n\
+         \x20 --memory <bytes> validation memory ceiling\n\
+         \x20 -h, --help       show this help\n\
+         \x20 -V, --version    show version",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -85,6 +93,9 @@ fn usage() -> String {
 fn parse_dir(args: &[String]) -> Result<Option<PathBuf>, String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
+        if arg == "--" {
+            break;
+        }
         if let Some(value) = arg.strip_prefix("--dir=") {
             return Ok(Some(PathBuf::from(value)));
         }
@@ -152,6 +163,81 @@ fn cmd_validate(manifest_path: &str) -> i32 {
         }
         Err(e) => {
             eprintln!("validation failed: {e}");
+            1
+        }
+    }
+}
+
+fn cmd_inspect_wasm(args: &[String]) -> i32 {
+    let Some(path) = args.first().filter(|value| !value.starts_with('-')) else {
+        eprintln!("usage: loom-plugin inspect-wasm <module.wasm> [--memory <bytes>]\n");
+        return 2;
+    };
+    let mut memory_limit = 64 * 1024 * 1024_u64;
+    let mut index = 1usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--memory" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("--memory requires a byte count");
+                    return 2;
+                };
+                memory_limit = match value.parse() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        eprintln!("--memory must be an integer byte count");
+                        return 2;
+                    }
+                };
+                index += 2;
+            }
+            value if value.starts_with("--memory=") => {
+                memory_limit = match value[9..].parse() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        eprintln!("--memory must be an integer byte count");
+                        return 2;
+                    }
+                };
+                index += 1;
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                return 2;
+            }
+        }
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("cannot read {path}: {error}");
+            return 1;
+        }
+    };
+    match validate_wasm_module(&bytes, memory_limit) {
+        Ok(info) => {
+            println!("WebAssembly module OK");
+            println!("  bytes: {}", bytes.len());
+            println!(
+                "  initial memory: {}",
+                info.initial_memory_pages
+                    .map(|pages| format!("{pages} page(s)"))
+                    .unwrap_or_else(|| "not declared".into())
+            );
+            println!(
+                "  maximum memory: {}",
+                info.maximum_memory_pages
+                    .map(|pages| format!("{pages} page(s)"))
+                    .unwrap_or_else(|| "not declared".into())
+            );
+            println!("  function exports: {}", info.exported_functions.len());
+            for name in info.exported_functions {
+                println!("    {name}");
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("validation failed: {error}");
             1
         }
     }
@@ -280,6 +366,79 @@ fn cmd_remove(args: &[String]) -> i32 {
         }
         Err(e) => {
             eprintln!("remove failed: {e}");
+            1
+        }
+    }
+}
+
+fn cmd_invoke(args: &[String]) -> i32 {
+    let Some(id) = args.first().filter(|value| !value.starts_with('-')) else {
+        eprintln!("usage: loom-plugin invoke <id> --dir <store_dir> [-- <args...>]\n");
+        return 2;
+    };
+    let store_dir = match parse_dir(args) {
+        Ok(Some(dir)) => dir,
+        Ok(None) => {
+            eprintln!("usage: loom-plugin invoke <id> --dir <store_dir> [-- <args...>]\n");
+            return 2;
+        }
+        Err(message) => {
+            eprintln!("{message}");
+            return 2;
+        }
+    };
+    let guest_arguments = args
+        .iter()
+        .position(|argument| argument == "--")
+        .map(|index| args[index + 1..].to_vec())
+        .unwrap_or_default();
+    let store = match PluginStore::open(&store_dir) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("cannot open store {:?}: {error}", store_dir);
+            return 1;
+        }
+    };
+    let Some(plugin) = store.get(id) else {
+        eprintln!("no such installed plugin: {id}");
+        return 1;
+    };
+    let mut invocation = match PluginInvocation::declared(&plugin) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            eprintln!("cannot invoke {id}: {error}");
+            return 1;
+        }
+    };
+    invocation.arguments = guest_arguments;
+    let runtime = match ExternalWasmtimeRuntime::discover() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("cannot invoke {id}: {error}");
+            return 1;
+        }
+    };
+    match runtime.invoke(&invocation) {
+        Ok(result) => {
+            if let Err(error) = std::io::Write::write_all(&mut std::io::stdout(), &result.stdout) {
+                eprintln!("failed to write plugin output: {error}");
+                return 1;
+            }
+            if !result.stderr.is_empty() {
+                let _ = std::io::Write::write_all(&mut std::io::stderr(), &result.stderr);
+            }
+            eprintln!(
+                "plugin {id} exited {:?} in {} ms",
+                result.exit_code, result.duration_ms
+            );
+            if result.exit_code == Some(0) {
+                0
+            } else {
+                1
+            }
+        }
+        Err(error) => {
+            eprintln!("invocation failed: {error}");
             1
         }
     }

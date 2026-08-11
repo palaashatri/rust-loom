@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Generate a verification report from current command evidence.
-# This script never treats metadata parsing, source presence, or a stale log as
-# proof that a binary, test suite, smoke run, or visual comparison succeeded.
+# Reports are build artifacts under .work, never committed root-level truth.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/lib.sh"
 
-REPORT="$PARENT/VERIFICATION_REPORT.md"
+REPORT="$WORK/VERIFICATION_REPORT.md"
 
 repo_app() {
   case "$1" in
@@ -82,14 +81,13 @@ binary_status() {
   fi
 }
 
+mkdir -p "$WORK"
 {
   echo "# Loom Verification Report"
   echo
   echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ) by scripts/generate-status-report.sh"
   echo
-  echo "This report is evidence-based: source presence and metadata parsing are not build, test, binary, smoke, or visual evidence."
-  echo
-  echo "Status classes: COMPLETE | FUNCTIONAL_WITH_LIMITATIONS | EXPERIMENTAL | SCAFFOLDED | NOT_STARTED | BLOCKED"
+  echo "This report is a disposable CI artifact. It is not the project truth statement or a product-completion score."
   echo
   echo "## Cargo workspaces"
   echo
@@ -130,12 +128,11 @@ for app in $APPS; do
 done
 
 visual='NOT_RUN'
-if [ -f "$PARENT/visual-qa-report.md" ]; then
-  if grep -q -- '- result: PASS' "$PARENT/visual-qa-report.md"; then
-    visual='PASS'
-  elif grep -q -- '- result: INCOMPLETE/FAIL' "$PARENT/visual-qa-report.md"; then
-    visual='INCOMPLETE/FAIL'
-  fi
+ui_matrix="$ROOT/.work/evidence/ui/native-ui-matrix.json"
+if [ -f "$ui_matrix" ] && grep -q '"passed": true' "$ui_matrix"; then
+  visual='PASS'
+elif [ -f "$ui_matrix" ]; then
+  visual='INCOMPLETE/FAIL'
 fi
 
 {
@@ -143,14 +140,16 @@ fi
   echo "## Visual QA evidence"
   echo
   echo "- report: $visual"
-  echo "- source: visual-qa-report.md and loom-bootstrap/.work/screenshots/"
-  echo "- missing baselines or failed comparisons are not passes"
+  echo "- source: native-ui-matrix.json"
+  echo "- palette screenshots prove overlay rendering only; keyboard journeys are separate artifacts"
   echo
   echo "## Evidence sources"
   echo
   echo "- build logs: loom-bootstrap/.work/build-<repo>.log"
   echo "- test logs: loom-bootstrap/.work/test-<repo>.log"
   echo "- smoke summary: loom-bootstrap/.work/smoke-summary.log"
+  echo "- native UI matrix: loom-bootstrap/.work/evidence/ui/native-ui-matrix.json"
+  echo "- keyboard journeys: native evidence journeys/<app>/<app>.json"
 } >> "$REPORT"
 
 log "report written to $REPORT"
