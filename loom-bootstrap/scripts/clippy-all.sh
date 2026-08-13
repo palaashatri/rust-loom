@@ -51,8 +51,9 @@ for repo in $REPOS; do
 done
 
 log "SUMMARY clippy: pass=$PASS fail=$FAIL skip=$SKIP diagnostic_lines=$TOTAL_LINES loom_crate_issues=$OURS"
-if [ "$FAIL" -gt 0 ]; then
+if [ "$FAIL" -gt 0 ] || [ "$SKIP" -gt 0 ]; then
   log "FAILED:$FAILED_REPOS"
+  [ "$SKIP" -gt 0 ] && log "INCOMPLETE: $SKIP workspace(s) were not present"
   exit 1
 fi
 log "RESULT: PASS"

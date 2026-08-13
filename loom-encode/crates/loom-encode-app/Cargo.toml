@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 loom-encode-core = { path = "../loom-encode-core" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
 loom-test-support.workspace = true
 loom-ui.workspace = true
 slint = "1.7"

@@ -3,32 +3,53 @@
 //! Evaluates workbook fixtures and exports CSV. Used by Docker visual-QA and
 //! CI to exercise the formula engine without a display.
 
-use loom_sheets_core::{evaluate, from_csv, to_csv, CellRef, Sheet};
+use loom_sheets_core::{
+    evaluate, from_csv, to_csv, CalculationCache, CellRange, CellRef, Sheet, SheetModel,
+};
 use std::collections::BTreeMap;
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: loom-sheets <command> [args]");
         eprintln!("  demo (prints an evaluated example)");
         eprintln!("  eval <csv-file> (evaluates a CSV as a sheet and prints values)");
-        eprintln!("  to-csv <csv-file> (normalizes a CSV through the engine)");
+        eprintln!("  to-csv <csv-file> <output.csv> (normalizes a CSV through the engine)");
         eprintln!("  create <file.loomsheet> <name>");
+        eprintln!("  recalc <csv-file> <cell> <raw-value>");
+        eprintln!("  sort <csv-file> <range> <column-offset> <asc|desc>");
         std::process::exit(2);
     }
-    let result = match args[1].as_str() {
+    match args[1].as_str() {
         "demo" => cmd_demo(),
-        "eval" => cmd_eval(&args[2]),
-        "to-csv" => cmd_tocsv(&args[2], &args[3]),
-        "create" => cmd_create(&args[2], &args[3]),
-        other => {
-            eprintln!("unknown command: {other}");
-            std::process::exit(2);
-        }
-    };
-    if let Err(e) = result {
-        eprintln!("error: {e}");
-        std::process::exit(1);
+        "eval" => cmd_eval(args.get(2).ok_or("eval requires <csv-file>")?),
+        "to-csv" => cmd_tocsv(
+            args.get(2).ok_or("to-csv requires <csv-file>")?,
+            args.get(3).ok_or("to-csv requires <output.csv>")?,
+        ),
+        "create" => cmd_create(
+            args.get(2).ok_or("create requires <file.loomsheet>")?,
+            args.get(3).ok_or("create requires <name>")?,
+        ),
+        "recalc" => cmd_recalc(
+            args.get(2).ok_or("recalc requires <csv-file>")?,
+            args.get(3).ok_or("recalc requires <cell>")?,
+            args.get(4).ok_or("recalc requires <raw-value>")?,
+        ),
+        "sort" => cmd_sort(
+            args.get(2).ok_or("sort requires <csv-file>")?,
+            args.get(3).ok_or("sort requires <range>")?,
+            args.get(4).ok_or("sort requires <column-offset>")?,
+            args.get(5).ok_or("sort requires <asc|desc>")?,
+        ),
+        other => Err(format!("unknown command: {other}")),
     }
 }
 
@@ -44,7 +65,6 @@ fn cmd_demo() -> Result<(), String> {
     sheet.set_str("B5", "=SUM(B2:B4)");
     sheet.set_str("B6", "=AVERAGE(B2:B4)");
     let vals = evaluate(&sheet);
-    // Print sheet as BTreeMap for deterministic output.
     let mut rows: BTreeMap<(u32, u32), String> = BTreeMap::new();
     for (r, c) in &sheet.cells {
         let v = vals
@@ -60,7 +80,9 @@ fn cmd_demo() -> Result<(), String> {
 }
 
 fn cmd_create(path: &str, name: &str) -> Result<(), String> {
-    use loom_package::manifest::{Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion};
+    use loom_package::manifest::{
+        Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
+    };
     use loom_package::zip::{self, PackageArchive};
 
     let mut sheet = Sheet::new(name);
@@ -80,6 +102,8 @@ fn cmd_create(path: &str, name: &str) -> Result<(), String> {
     arch.add("content/sheet.json", content_json.clone().into_bytes())
         .map_err(|e| e.to_string())?;
 
+    let mime = MimeType::parse("application/vnd.loom.sheet-content")
+        .map_err(|e| format!("invalid built-in sheet MIME type: {e}"))?;
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Sheets,
@@ -88,7 +112,7 @@ fn cmd_create(path: &str, name: &str) -> Result<(), String> {
         app_version: "0.1.0".into(),
         entries: vec![ManifestEntry {
             path: "content/sheet.json".into(),
-            mime: MimeType::parse("application/vnd.loom.sheet-content").unwrap(),
+            mime,
             size: content_json.len() as u64,
             sha256: Checksum::from_bytes(zip::sha256(content_json.as_bytes())),
         }],
@@ -115,8 +139,8 @@ fn cmd_eval(path: &str) -> Result<(), String> {
             .unwrap_or(loom_sheets_core::Value::Empty);
         rows.insert((r.row, r.col), v.display());
     }
-    for ((row, col), v) in rows {
-        println!("{}{} ", CellRef { row, col }.to_a1(), v);
+    for ((row, col), value) in rows {
+        println!("{}: {}", CellRef { row, col }.to_a1(), value);
     }
     Ok(())
 }
@@ -127,5 +151,45 @@ fn cmd_tocsv(path: &str, out: &str) -> Result<(), String> {
     let result = to_csv(&sheet);
     std::fs::write(out, result).map_err(|e| e.to_string())?;
     println!("wrote {out}");
+    Ok(())
+}
+
+fn cmd_recalc(path: &str, cell: &str, raw: &str) -> Result<(), String> {
+    let csv = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut sheet = from_csv("input", &csv);
+    let changed = CellRef::parse(cell).ok_or("invalid A1 cell reference")?;
+    let mut cache = CalculationCache::default();
+    cache.rebuild(&sheet);
+    sheet.set_raw(changed, raw);
+    let affected = cache.recalculate(&sheet, &[changed]);
+    let mut cells = affected.into_iter().collect::<Vec<_>>();
+    cells.sort_by_key(|cell| (cell.row, cell.col));
+    println!("affected: {}", cells.len());
+    for cell in cells {
+        let value = cache
+            .values
+            .get(&cell)
+            .cloned()
+            .unwrap_or(loom_sheets_core::Value::Empty);
+        println!("{}: {}", cell.to_a1(), value.display());
+    }
+    Ok(())
+}
+
+fn cmd_sort(path: &str, range: &str, column_offset: &str, order: &str) -> Result<(), String> {
+    let csv = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let sheet = from_csv("input", &csv);
+    let range = CellRange::parse(range).ok_or("invalid A1 range")?;
+    let column_offset = column_offset
+        .parse::<u32>()
+        .map_err(|_| "column offset must be an integer".to_string())?;
+    let ascending = match order {
+        "asc" => true,
+        "desc" => false,
+        _ => return Err("order must be asc or desc".into()),
+    };
+    let mut model = SheetModel::new(sheet);
+    model.sort_rows(range, column_offset, ascending)?;
+    print!("{}", to_csv(&model.sheet));
     Ok(())
 }

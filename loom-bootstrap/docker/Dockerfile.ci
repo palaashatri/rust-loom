@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config \
         curl \
         ca-certificates \
+        libasound2-dev \
         libfontconfig1-dev \
         libx11-dev \
         libxkbcommon-dev \
@@ -20,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglu1-mesa-dev \
         fonts-noto-core \
         xvfb \
+        x11-utils \
         x11-apps \
         imagemagick \
         python3-pil \
@@ -34,5 +36,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 
 ENV PATH="/root/.cargo/bin:${PATH}" \
     CARGO_HOME="/root/.cargo"
+
+RUN rustup component add rustfmt clippy
 
 WORKDIR /workspace/loom-bootstrap

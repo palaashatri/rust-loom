@@ -1,137 +1,294 @@
-// Loom Writer application window: shared components + writer-specific
-// chrome built inline (a Window component cannot be nested, so the app
-// owns its title bar and status bar).
-
-import { ToolButton, IconButton, SearchField, EmptyState, StatusBar } from "components.slint";
-import { Icon } from "icons.slint";
+import {
+    AppHeader, WorkspaceToolbar, ToolButton, IconButton, StatusBar,
+    SegmentedControl, CanvasBackdrop, Slider, MetricChip, CommandPalette,
+    CommandPaletteItem
+} from "components.slint";
 import { Theme } from "theme.slint";
+import { TextEdit } from "std-widgets.slint";
 export { Theme } from "theme.slint";
+export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
     title: "Loom Writer";
+    min-width: 900px;
+    min-height: 680px;
+    background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1120px;
+
     in property <string> doc-title: "Untitled";
-    in property <string> doc-content: "";
-    in property <bool> doc-empty: true;
+    in-out property <string> doc-content: "";
     in property <string> status-left: "";
     in property <string> status-right: "";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+
+    in-out property <bool> is-bold: false;
+    in-out property <bool> is-italic: false;
+    in-out property <bool> is-underline: false;
+    in-out property <int> heading-level: 0;
+    in-out property <int> text-alignment: 0;
+    in-out property <float> zoom-value: 88.0;
+
     callback new-doc;
     callback open-doc;
     callback save-doc;
+    callback save-as-doc;
     callback export-pdf;
     callback undo;
     callback redo;
+    callback document-edited(string);
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback select-heading(int);
+    callback select-alignment(int);
 
-    background: Theme.palette().canvas;
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
 
-    VerticalLayout {
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-doc();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-doc();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        VerticalLayout {
         spacing: 0px;
-        padding: 0px;
 
-        Rectangle {
-            min-height: 41px;
-            max-height: 41px;
-            background: Theme.palette().surface;
-
-            VerticalLayout {
-                spacing: 0px;
-                padding: 0px;
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    padding-left: 6px;
-                    padding-right: 12px;
-                    Icon {
-                        icon: "layers";
-                        size: 18px;
-                        tint: Theme.palette().accent;
-                        y: (parent.height - 18px) / 2;
-                    }
-                    Text {
-                        text: "Loom Writer";
-                        font-size: Theme.tokens.typography.title;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
-                        vertical-alignment: center;
-                    }
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                }
-
-                Rectangle {
-                    height: 1px;
-                    background: Theme.palette().border;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Writer";
+            document-title: root.doc-title;
+            icon: "document";
+            context: "Local document package";
+            state-text: "Editing locally";
+            state-tone: 0;
         }
 
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
+        WorkspaceToolbar {
+            ToolButton { icon: "new"; text: "New"; clicked => { root.new-doc(); } }
+            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-doc(); } }
+            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-doc(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-doc(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
 
-            HorizontalLayout {
-                height: parent.height;
-                cross-axis-alignment: center;
-                spacing: 6px;
-                padding-left: 8px;
-                padding-right: 8px;
-
-                ToolButton { icon: "new"; text: "New"; clicked => { root.new-doc(); } }
-                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-doc(); } }
-                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-doc(); } }
-                ToolButton { icon: "undo"; clicked => { root.undo(); } }
-                ToolButton { icon: "redo"; clicked => { root.redo(); } }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                SearchField { placeholder: "Search document"; }
-                IconButton { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+            SegmentedControl {
+                items: ["Body", "H1", "H2", "H3"];
+                current <=> root.heading-level;
+                selected(idx) => { root.select-heading(idx); }
             }
+            ToolButton {
+                text: "B";
+                checked: root.is-bold;
+                clicked => { root.is-bold = !root.is-bold; root.toggle-bold(); }
+            }
+            ToolButton {
+                text: "I";
+                checked: root.is-italic;
+                clicked => { root.is-italic = !root.is-italic; root.toggle-italic(); }
+            }
+            ToolButton {
+                text: "U";
+                checked: root.is-underline;
+                clicked => { root.is-underline = !root.is-underline; root.toggle-underline(); }
+            }
+            SegmentedControl {
+                items: ["Left", "Center", "Right"];
+                current <=> root.text-alignment;
+                selected(idx) => { root.select-alignment(idx); }
+            }
+
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
+            ToolButton { icon: "export"; text: "Export PDF"; clicked => { root.export-pdf(); } }
         }
 
-        HorizontalLayout {
-            spacing: 0px;
-            padding: 0px;
+        CanvasBackdrop {
+            horizontal-stretch: 1;
             vertical-stretch: 1;
+            stage-color: Theme.palette().canvas-alt;
 
             Rectangle {
-                vertical-stretch: 1;
-                horizontal-stretch: 1;
-                background: Theme.palette().canvas;
+                width: min(806px, parent.width - (root.compact-layout ? 36px : 96px));
+                height: parent.height - (root.compact-layout ? 36px : 64px);
+                border-radius: 7px;
+                background: Theme.palette().shadow;
+            }
 
-                if root.doc-empty : EmptyState {
-                    width: 100%;
-                    height: 100%;
-                    icon: "document";
-                    title: "No document open";
-                    description: "Create a new document or open an existing one to start writing.";
-                    action-text: "New Document";
-                    action => { root.new-doc(); }
+            Rectangle {
+                width: min(794px, parent.width - (root.compact-layout ? 48px : 108px));
+                height: parent.height - (root.compact-layout ? 48px : 76px);
+                border-radius: 5px;
+                background: Theme.palette().paper;
+                border-width: 1px;
+                border-color: Theme.palette().paper-line;
+                clip: true;
+
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: 28px;
+                    background: Theme.palette().content-accent-soft;
+                    border-width: 0px;
+
+                    HorizontalLayout {
+                        spacing: 0px;
+                        padding-left: root.compact-layout ? 32px : 56px;
+                        padding-right: root.compact-layout ? 32px : 56px;
+                        for marker in ["0", "1", "2", "3", "4", "5", "6", "7"] : Rectangle {
+                            horizontal-stretch: 1;
+                            Text {
+                                text: marker;
+                                font-size: Theme.tokens.typography.micro;
+                                color: Theme.palette().paper-muted;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                x: 0px;
+                                y: parent.height - 8px;
+                                width: 1px;
+                                height: 8px;
+                                background: Theme.palette().paper-line;
+                            }
+                        }
+                    }
                 }
 
-                if !root.doc-empty : VerticalLayout {
-                    width: 100%;
-                    height: 100%;
-                    padding-left: 48px;
-                    padding-right: 48px;
-                    padding-top: 32px;
-                    padding-bottom: 32px;
+                VerticalLayout {
+                    x: 0px;
+                    y: 28px;
+                    width: parent.width;
+                    height: parent.height - 28px;
+                    padding-left: root.compact-layout ? 34px : 66px;
+                    padding-right: root.compact-layout ? 34px : 66px;
+                    padding-top: root.compact-layout ? 26px : 40px;
+                    padding-bottom: root.compact-layout ? 28px : 44px;
+                    spacing: 15px;
 
                     Text {
                         text: root.doc-title;
                         font-size: Theme.tokens.typography.heading;
                         font-weight: 700;
-                        color: Theme.palette().ink;
+                        color: Theme.palette().paper-ink;
+                        horizontal-alignment: root.text-alignment == 1
+                            ? center
+                            : root.text-alignment == 2 ? right : left;
                     }
-                    Rectangle { min-height: 12px; max-height: 12px; }
+
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.palette().paper-line;
+                    }
+
                     Rectangle {
                         horizontal-stretch: 1;
                         vertical-stretch: 1;
                         clip: true;
-                        Text {
+
+                        TextEdit {
                             width: parent.width;
-                            text: root.doc-content;
-                            font-size: Theme.tokens.typography.body;
-                            color: Theme.palette().ink-secondary;
+                            height: parent.height;
+                            text <=> root.doc-content;
+                            font-size: Theme.tokens.typography.body-large;
+                            placeholder-text: "Start writing…";
                             wrap: word-wrap;
+                            edited => { root.document-edited(self.text); }
+                            key-pressed(event) => {
+                                if (event.modifiers.control && (event.text == "z" || event.text == "Z")) {
+                                    if (event.modifiers.shift) {
+                                        root.redo();
+                                    } else {
+                                        root.undo();
+                                    }
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "y" || event.text == "Y")) {
+                                    root.redo();
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "s" || event.text == "S")) {
+                                    if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "o" || event.text == "O")) {
+                                    root.open-doc();
+                                    accept
+                                } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "e" || event.text == "E")) {
+                                    root.export-pdf();
+                                    accept
+                                }
+                                reject
+                            }
                         }
+                    }
+                }
+            }
+
+            Rectangle {
+                x: parent.width - (root.compact-layout ? 220px : 280px);
+                y: parent.height - 56px;
+                width: root.compact-layout ? 200px : 250px;
+                height: 34px;
+                border-radius: 9px;
+                background: Theme.palette().overlay;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 9px;
+                    padding-right: 9px;
+                    IconButton {
+                        icon: "minus";
+                        label: "Zoom out";
+                        clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); }
+                    }
+                    Slider {
+                        label: "Zoom";
+                        minimum: 40;
+                        maximum: 160;
+                        value <=> root.zoom-value;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: "plus";
+                        label: "Zoom in";
+                        clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); }
                     }
                 }
             }
@@ -141,5 +298,37 @@ export component WriterApp inherits Window {
             status-left: root.status-left;
             status-right: root.status-right;
         }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => {
+            root.palette-invoked(idx);
+        }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => {
+            root.palette-move(delta);
+        }
+        key-text(text) => {
+            root.palette-key-text(text);
+        }
+        backspace => {
+            root.palette-backspace();
+        }
+        close-requested => {
+            root.palette-open = false;
+            app-focus.focus();
+        }
+    }
     }
 }

@@ -10,7 +10,9 @@ name = "loom-photo"
 path = "src/main.rs"
 
 [dependencies]
+loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
 loom-photo-core = { path = "../loom-photo-core" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
 loom-test-support.workspace = true
 loom-ui.workspace = true
 slint = "1.7"

@@ -10,3 +10,4 @@ loom-document.workspace = true
 loom-package.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+hound.workspace = true

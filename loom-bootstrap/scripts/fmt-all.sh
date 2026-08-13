@@ -27,8 +27,9 @@ for repo in $REPOS; do
 done
 
 log "SUMMARY fmt: pass=$PASS skip=$SKIP fail=$FAIL"
-if [ "$FAIL" -gt 0 ]; then
+if [ "$FAIL" -gt 0 ] || [ "$SKIP" -gt 0 ]; then
   log "UNFORMATTED:$FAILED_REPOS"
+  [ "$SKIP" -gt 0 ] && log "INCOMPLETE: $SKIP workspace(s) were not present"
   exit 1
 fi
 log "RESULT: PASS"

@@ -1,161 +1,351 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import {
+    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton, StatusBar,
+    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
+    SegmentedControl, Field, MetricChip, CanvasBackdrop, CommandPalette,
+    CommandPaletteItem
+} from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+import { TextEdit } from "std-widgets.slint";
 export { Theme } from "theme.slint";
 
 export component PresentApp inherits Window {
     title: "Loom Present";
     min-width: 900px;
-    min-height: 600px;
+    min-height: 700px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1180px;
 
     in property <string> deck-title: "Untitled Deck";
     in property <string> slide-title: "Slide Title";
-    in property <string> slide-count-text: "1 Slide";
+    in property <string> slide-body: "";
+    in property <string> slide-count-text: "1 slide";
+    in property <[string]> slide-titles: [];
+    in property <int> active-slide-index: 0;
+    in property <[string]> element-labels: [];
+    in property <int> active-element-index: 0;
+    in property <string> active-element-content: "";
+    in property <float> element-x: 100;
+    in property <float> element-y: 100;
+    in property <float> element-width: 400;
+    in property <float> element-height: 100;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
+
+    in-out property <string> slide-notes: "";
+    in-out property <bool> show-notes-drawer: true;
+    in-out property <bool> is-preview-mode: false;
+    in-out property <int> active-template-index: 1;
+    in-out property <int> inspector-tab: 0;
+    in-out property <int> transition-index: 0;
+    in-out property <float> zoom-value: 78;
 
     callback new-deck;
     callback open-deck;
     callback save-deck;
+    callback save-as-deck;
     callback add-slide;
-    callback export-pdf;
+    callback duplicate-slide;
+    callback delete-slide;
     callback undo;
     callback redo;
+    callback select-slide(int);
+    callback select-element(int);
+    callback add-text;
+    callback add-shape;
+    callback transform-element(string, float);
+    callback update-element-content(string);
+    callback export-pdf;
+    callback notes-edited(string);
+    callback toggle-preview-mode;
+    callback apply-template(int);
+    callback set-transition(int);
+    callback prev-slide;
+    callback next-slide;
 
-    VerticalLayout {
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-deck();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-deck();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-deck(); } else { root.save-deck(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        VerticalLayout {
         spacing: 0px;
+        AppHeader {
+            app-name: root.is-preview-mode ? "Loom Present · Play" : "Loom Present";
+            document-title: root.deck-title;
+            icon: "slide";
+            context: root.slide-count-text;
+            state-text: root.is-preview-mode ? "Presenter mode" : "Saved locally";
+            state-tone: root.is-preview-mode ? 1 : 0;
+        }
 
-        // Titlebar
-        Rectangle {
-            min-height: 41px;
-            max-height: 41px;
-            background: Theme.palette().surface;
+        if !root.is-preview-mode : WorkspaceToolbar {
+            ToolButton { icon: "new"; text: "New"; clicked => { root.new-deck(); } }
+            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-deck(); } }
+            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-deck(); } }
+            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-deck(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            ToolButton { icon: "plus"; text: "Slide"; clicked => { root.add-slide(); } }
+            ToolButton { icon: "text"; text: "Text"; clicked => { root.add-text(); } }
+            ToolButton { icon: "plus-circle"; text: "Shape"; clicked => { root.add-shape(); } }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
+            ToolButton { icon: "play"; text: "Present"; clicked => { root.toggle-preview-mode(); } }
+            PrimaryButton { text: "Export PDF"; clicked => { root.export-pdf(); } }
+        }
 
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
+        if root.is-preview-mode : Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().media-stage;
+            VerticalLayout {
+                alignment: center;
+                spacing: 18px;
+                Rectangle {
+                    width: min(960px, parent.width - (root.compact-layout ? 28px : 64px));
+                    height: min(540px, parent.height - (root.compact-layout ? 94px : 128px));
+                    background: Theme.palette().paper;
+                    border-radius: 4px;
+                    VerticalLayout {
+                        padding: root.compact-layout ? 36px : 64px;
+                        spacing: 22px;
+                        Text { text: root.slide-title; font-size: 38px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
+                        Text { text: root.slide-body; font-size: 20px; color: Theme.palette().paper-muted; wrap: word-wrap; vertical-stretch: 1; }
+                    }
                 }
-                Text {
-                    text: "Loom Present — " + root.deck-title;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 14px;
+                    ToolButton { icon: "chevron-left"; text: "Previous"; clicked => { root.prev-slide(); } }
+                    Text { text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length; color: Theme.palette().ink; font-size: 13px; }
+                    ToolButton { icon: "chevron-right"; text: "Next"; clicked => { root.next-slide(); } }
+                    ToolButton { icon: "close"; text: "Exit"; clicked => { root.toggle-preview-mode(); } }
                 }
             }
         }
 
-        // Toolbar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
-
-            HorizontalLayout {
-                height: parent.height;
-                cross-axis-alignment: center;
-                spacing: 6px;
-                padding-left: 8px;
-                padding-right: 8px;
-
-                ToolButton { icon: "new"; text: "New Deck"; clicked => { root.new-deck(); } }
-                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-deck(); } }
-                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-deck(); } }
-                ToolButton { icon: "add"; text: "+ Slide"; clicked => { root.add-slide(); } }
-                ToolButton { icon: "undo"; clicked => { root.undo(); } }
-                ToolButton { icon: "redo"; clicked => { root.redo(); } }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                IconButton { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-            }
-        }
-
-        // Content workspace
-        HorizontalLayout {
+        if !root.is-preview-mode : HorizontalLayout {
             spacing: 0px;
             vertical-stretch: 1;
-
-            // Slide Navigator Sidebar
-            Rectangle {
-                width: 220px;
-                background: Theme.palette().surface;
-
+            SidebarSurface {
+                width: root.compact-layout ? 184px : 238px;
+                title: "Slides";
+                detail: root.slide-count-text;
                 VerticalLayout {
-                    padding: 12px;
                     spacing: 8px;
-
-                    Text {
-                        text: "SLIDES (" + root.slide-count-text + ")";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink-secondary;
-                    }
-                    Rectangle {
-                        height: 80px;
-                        background: Theme.palette().canvas;
-                        border-radius: 4px;
-                        border-width: 2px;
-                        border-color: Theme.palette().accent;
-
-                        Text {
-                            text: "1. " + root.slide-title;
-                            color: Theme.palette().ink;
-                            font-size: Theme.tokens.typography.body;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                    padding: 10px;
+                    for title[index] in root.slide-titles : WorkspaceRow {
+                        height: 112px;
+                        selected: index == root.active-slide-index;
+                        clicked => { root.select-slide(index); }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            padding: 7px;
+                            Text { text: (index + 1); width: 18px; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; vertical-alignment: top; }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: 94px;
+                                border-radius: 5px;
+                                border-width: 1px;
+                                border-color: Theme.palette().border-strong;
+                                background: Theme.palette().paper;
+                                VerticalLayout {
+                                    padding: 9px;
+                                    spacing: 5px;
+                                    Text { text: title; font-size: 12px; font-weight: 700; color: Theme.palette().paper-ink; overflow: elide; }
+                                    Rectangle { height: 4px; width: 72%; border-radius: 2px; background: Theme.palette().paper-line; }
+                                    Rectangle { height: 4px; width: 52%; border-radius: 2px; background: Theme.palette().paper-line; }
+                                    Rectangle { vertical-stretch: 1; background: transparent; }
+                                    Rectangle { height: 3px; width: 24%; border-radius: 2px; background: Theme.palette().content-accent; }
+                                }
+                            }
                         }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    HorizontalLayout {
+                        spacing: 5px;
+                        IconButton { icon: "plus"; label: "Add slide"; clicked => { root.add-slide(); } }
+                        IconButton { icon: "plus-circle"; label: "Duplicate slide"; clicked => { root.duplicate-slide(); } }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        IconButton { icon: "trash"; label: "Delete slide"; enabled: root.slide-titles.length > 1; clicked => { root.delete-slide(); } }
                     }
                 }
             }
+            Rectangle { width: 1px; background: Theme.palette().border; }
 
-            // Slide Canvas view
-            Rectangle {
+            VerticalLayout {
+                spacing: 0px;
                 horizontal-stretch: 1;
-                background: Theme.palette().canvas;
-
-                VerticalLayout {
-                    alignment: center;
-
+                CanvasBackdrop {
+                    vertical-stretch: 1;
                     Rectangle {
-                        width: 560px;
-                        height: 315px;
-                        background: Theme.palette().surface;
-                        border-radius: 4px;
+                        x: root.compact-layout ? 14px : 34px;
+                        y: root.compact-layout ? 14px : 28px;
+                        width: parent.width - (root.compact-layout ? 28px : 68px);
+                        height: parent.height - (root.compact-layout ? 28px : 56px);
+                        border-radius: 5px;
                         border-width: 1px;
-                        border-color: Theme.palette().border;
-
+                        border-color: Theme.palette().border-strong;
+                        background: Theme.palette().paper;
+                        clip: true;
                         VerticalLayout {
-                            alignment: center;
-                            padding: 24px;
-
-                            Text {
-                                text: root.slide-title;
-                                font-size: Theme.tokens.typography.heading;
-                                font-weight: 700;
-                                color: Theme.palette().ink;
-                                horizontal-alignment: center;
+                            padding: root.compact-layout ? 24px : 48px;
+                            spacing: 16px;
+                            Rectangle {
+                                height: 84px;
+                                border-radius: 5px;
+                                border-width: root.active-element-index == 0 ? 2px : 0px;
+                                border-color: Theme.palette().accent;
+                                Text { text: root.slide-title; font-size: 34px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
                             }
-                            Text {
-                                text: "Click '+ Slide' to add slides to your presentation deck.";
-                                font-size: Theme.tokens.typography.body;
-                                color: Theme.palette().ink-secondary;
-                                horizontal-alignment: center;
+                            Rectangle {
+                                vertical-stretch: 1;
+                                border-radius: 5px;
+                                border-width: root.active-element-index == 1 ? 2px : 0px;
+                                border-color: Theme.palette().accent;
+                                Text { text: root.slide-body; font-size: 18px; color: Theme.palette().paper-muted; wrap: word-wrap; }
                             }
                         }
                     }
                 }
+                if root.show-notes-drawer : Rectangle {
+                    height: root.compact-layout ? 96px : 122px;
+                    background: Theme.palette().surface;
+                    border-width: 0px;
+                    VerticalLayout {
+                        spacing: 5px;
+                        padding: 8px;
+                        HorizontalLayout {
+                            Text { text: "SPEAKER NOTES"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            IconButton { icon: "close"; label: "Hide speaker notes"; clicked => { root.show-notes-drawer = false; } }
+                        }
+                        TextEdit { text <=> root.slide-notes; placeholder-text: "Add presenter notes…"; edited(value) => { root.notes-edited(value); } }
+                    }
+                }
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+            InspectorSurface {
+                width: root.compact-layout ? 236px : 300px;
+                title: "Inspector";
+                detail: root.element-labels.length + " elements";
+                PaneTabs { items: ["Format", "Arrange", "Animate"]; current <=> root.inspector-tab; }
+                Rectangle { height: 1px; background: Theme.palette().border; }
+                VerticalLayout {
+                    spacing: 12px;
+                    padding: 14px;
+                    if root.inspector-tab == 0 : VerticalLayout {
+                        spacing: 10px;
+                        Text { text: "ELEMENTS"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        for label[index] in root.element-labels : WorkspaceRow {
+                            height: 36px;
+                            selected: index == root.active-element-index;
+                            clicked => { root.select-element(index); }
+                            Text { text: label; x: 9px; width: parent.width - 18px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; vertical-alignment: center; overflow: elide; }
+                        }
+                        Field { label: "Element content"; placeholder: "Text"; value: root.active-element-content; edited(value) => { root.update-element-content(value); } }
+                        Text { text: "Layout"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        SegmentedControl { items: ["Title", "Content", "2 Column", "Image"]; current <=> root.active-template-index; selected(index) => { root.apply-template(index); } }
+                    }
+                    if root.inspector-tab == 1 : VerticalLayout {
+                        spacing: 9px;
+                        Text { text: "POSITION & SIZE"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        Text { text: "X   " + Math.round(root.element-x); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Horizontal position"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
+                        Text { text: "Y   " + Math.round(root.element-y); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Vertical position"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
+                        Text { text: "Width   " + Math.round(root.element-width); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Element width"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
+                        Text { text: "Height   " + Math.round(root.element-height); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                        Slider { label: "Element height"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
+                    }
+                    if root.inspector-tab == 2 : VerticalLayout {
+                        spacing: 10px;
+                        Text { text: "SLIDE TRANSITION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        SegmentedControl { items: ["None", "Dissolve", "Push", "Morph"]; current <=> root.transition-index; selected(index) => { root.set-transition(index); } }
+                        Text { text: "Transitions are stored in the deck and used by presenter/export renderers."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
             }
         }
+        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+    }
 
-        StatusBar {
-            status-left: root.status-left;
-            status-right: root.status-right;
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => {
+            root.palette-invoked(idx);
         }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => {
+            root.palette-move(delta);
+        }
+        key-text(text) => {
+            root.palette-key-text(text);
+        }
+        backspace => {
+            root.palette-backspace();
+        }
+        close-requested => {
+            root.palette-open = false;
+            app-focus.focus();
+        }
+    }
     }
 }

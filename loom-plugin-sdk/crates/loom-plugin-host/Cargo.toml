@@ -5,12 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Directory-backed Loom plugin registry with safe zip installation and permission checks."
+description = "Directory-backed Loom plugin registry with safe installation, trust, updates, rollback, UI extensions, and isolated native bridges."
 
 [dependencies]
 loom-plugin-manifest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+tempfile = "3"

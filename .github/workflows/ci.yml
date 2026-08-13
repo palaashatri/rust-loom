@@ -1,105 +1,82 @@
-name: Loom suite CI
+name: Loom CI
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, cline-implementation]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: loom-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 loom-bootstrap/scripts/audit-contracts.py
+      - run: python3 loom-bootstrap/scripts/audit-product-ui.py
+      - name: Generate source-only readiness diagnostic
+        run: >-
+          python3 loom-bootstrap/scripts/audit-product-readiness.py
+          --json loom-bootstrap/.work/product-score.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-product-score
+          path: loom-bootstrap/.work/product-score.json
+          retention-days: 14
+
+  workspace:
+    name: ${{ matrix.workspace }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        workspace: [loom-core, loom-writer, loom-sheets, loom-present, loom-photo, loom-motion, loom-video, loom-studio, loom-encode, loom-vision, loom-plugin-sdk]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libasound2-dev libfontconfig1-dev libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.workspace }}
+          shared-key: loom-${{ matrix.workspace }}
+      - working-directory: ${{ matrix.workspace }}
+        run: cargo fmt --all --check
+      - working-directory: ${{ matrix.workspace }}
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - working-directory: ${{ matrix.workspace }}
+        run: cargo test --workspace
+      - working-directory: ${{ matrix.workspace }}
+        run: cargo build --workspace --release
+
+  visual-smoke:
+    needs: [contracts, workspace]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    env:
-      CARGO_TERM_COLOR: always
-      RUST_BACKTRACE: 1
-      VISUAL_QA_SHOT_SECS: 180
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Apply ChatGPT hardening patch
-        run: |
-          base64 -d .ci/loom-hardening.patch.gz.b64 | gzip -d | git apply --binary --whitespace=nowarn
-
-      - name: Install Linux build and visual-QA dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libfontconfig1-dev \
-            libwayland-dev libx11-xcb-dev libgl1-mesa-dev libegl1-mesa-dev \
-            mesa-vulkan-drivers xvfb fonts-dejavu-core fonts-noto-core \
-            zip unzip python3 ca-certificates
-
-      - name: Select pinned Rust toolchain
-        run: |
-          rustup show
-          rustc --version
-          cargo --version
-          cargo clippy --version
-          cargo fmt --version
-
-      - name: Cache Cargo outputs
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            loom-core
-            loom-writer
-            loom-sheets
-            loom-present
-            loom-photo
-            loom-motion
-            loom-video
-            loom-studio
-            loom-encode
-            loom-vision
-            loom-plugin-sdk
-
-      - name: Check formatting
-        run: bash loom-bootstrap/scripts/fmt-all.sh
-
-      - name: Test all workspaces
-        run: bash loom-bootstrap/scripts/test-all.sh
-
-      - name: Lint all workspaces
-        run: bash loom-bootstrap/scripts/clippy-all.sh
-
-      - name: Build all release binaries
-        run: bash loom-bootstrap/scripts/build-all.sh --release
-
-      - name: Run app smoke captures
-        run: bash loom-bootstrap/scripts/run-apps.sh
-
-      - name: Capture and compare light/dark UI
-        id: visual
-        continue-on-error: true
-        run: bash loom-bootstrap/scripts/visual-qa-all.sh
-
-      - name: Generate evidence report
-        if: always()
-        run: bash loom-bootstrap/scripts/generate-status-report.sh
-
-      - name: Package verified source and binaries
-        if: success() || steps.visual.outcome == 'failure'
-        run: bash loom-bootstrap/scripts/package.sh
-
-      - name: Upload complete package
-        if: success() || steps.visual.outcome == 'failure'
+      - uses: actions/checkout@v4
+      - name: Build visual QA base image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build ci
+      - name: Build visual QA image
+        run: docker compose -f loom-bootstrap/docker/compose.yaml build visual
+      - run: >-
+          docker compose -f loom-bootstrap/docker/compose.yaml run --rm visual
+          bash -lc "VISUAL_QA_SIZE=1440x900 scripts/build-all.sh --release && VISUAL_QA_SIZE=1440x900 xvfb-run -a -s '-screen 0 1440x900x24' scripts/visual-smoke-matrix.sh"
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Loom-Complete
-          if-no-files-found: error
+          name: loom-theme-matrix
+          if-no-files-found: warn
           retention-days: 14
           path: |
-            Loom-Complete.zip
-            Loom-Complete.zip.sha256
-            Loom-Manifest.json
-            VERIFICATION_REPORT.md
-            visual-qa-report.md
-            loom-bootstrap/.work/screenshots/
-            loom-bootstrap/.work/diffs/
-            loom-bootstrap/.work/*.log
+            loom-bootstrap/.work/theme-matrix/
+            loom-bootstrap/.work/theme-matrix-report.md
+            loom-bootstrap/.work/theme-*.log

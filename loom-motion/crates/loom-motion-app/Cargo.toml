@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 loom-motion-core = { path = "../loom-motion-core" }
+loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
 loom-test-support.workspace = true
 loom-ui.workspace = true
 slint = "1.7"

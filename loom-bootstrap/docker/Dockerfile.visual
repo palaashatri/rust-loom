@@ -1,9 +1,7 @@
-# Loom visual-QA image: CI image plus input automation and GL diagnostics.
+# Loom visual-QA image: the CI image already contains Xvfb, image comparison,
+# and the software-rendering dependencies needed by visual-qa-all.sh. Keep
+# this layer network-free so visual QA does not depend on a second apt index
+# or optional diagnostic packages.
 FROM loom-bootstrap-ci
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        xdotool \
-        mesa-utils \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/loom-bootstrap

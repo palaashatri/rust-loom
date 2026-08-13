@@ -907,4 +907,95 @@ mod tests {
         };
         assert!(a.validate_manifest(&manifest).is_err());
     }
+
+    #[test]
+    fn hostile_inputs_never_panic_and_fail_bounded() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let mut valid = PackageArchive::new();
+        valid
+            .add("content/document.json", br#"{"x":1}"#.to_vec())
+            .unwrap();
+        valid.add("previews/thumb.png", vec![0xAB; 256]).unwrap();
+        let valid_bytes = valid.to_bytes().unwrap();
+
+        // Deterministic pseudo-random source (xorshift64) so the corpus is
+        // stable across runs and machines.
+        let mut state = 0xBADC_0FEE_0A11_0001u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        };
+        let random: Vec<u8> = (0..512).map(|_| next()).collect();
+
+        let mut oversized_cd_size = valid_bytes.clone();
+        oversized_cd_size[12..16].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        oversized_cd_size[16..20].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+
+        let mut entry_explosion = valid_bytes.clone();
+        entry_explosion[8..10].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        entry_explosion[10..12].copy_from_slice(&0xFFFFu16.to_le_bytes());
+
+        let must_fail: Vec<(&str, Vec<u8>)> = vec![
+            ("empty", Vec::new()),
+            ("single-zero", vec![0]),
+            ("libc-trailer", b"not a zip at all".to_vec()),
+            (
+                "eocd-garbage",
+                b"PK\x05\x06\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+                    .to_vec(),
+            ),
+            ("oversized-cd-size", oversized_cd_size),
+            ("entry-explosion-claim", entry_explosion),
+        ];
+        for (name, bytes) in must_fail {
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                PackageArchive::from_bytes_with_limits(&bytes, ArchiveLimits::default())
+            }))
+            .expect("outcome");
+            assert!(
+                outcome.is_err(),
+                "case {name} must fail bounded (got Ok with {} entries)",
+                outcome.map(|archive| archive.len()).unwrap_or(0)
+            );
+        }
+
+        // Truncations of a valid archive at several boundaries.
+        for cut in [0usize, 3, 7, valid_bytes.len() / 2, valid_bytes.len() - 1] {
+            let mut truncated = valid_bytes.clone();
+            truncated.truncate(cut);
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                PackageArchive::from_bytes_with_limits(&truncated, ArchiveLimits::default())
+            }))
+            .expect("outcome");
+            assert!(
+                outcome.is_err(),
+                "truncated archive (cut {cut}) must fail bounded"
+            );
+        }
+
+        // Arbitrary bytes: must never panic; may fail or (astronomically
+        // rarely) parse as a tiny archive, which is still acceptable. Note
+        // the outer result is the one that records a caught panic.
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            PackageArchive::from_bytes_with_limits(&random, ArchiveLimits::default())
+        }));
+        assert!(
+            outcome.is_ok(),
+            "random bytes caused a panic: {:?}",
+            outcome.err().map(|payload| format!("{payload:?}"))
+        );
+
+        // Control: the valid archive still round-trips through the same path.
+        let reparsed =
+            PackageArchive::from_bytes_with_limits(&valid_bytes, ArchiveLimits::default())
+                .expect("valid archive must parse");
+        assert_eq!(
+            reparsed.get("content/document.json").unwrap(),
+            br#"{"x":1}"#
+        );
+        assert_eq!(reparsed.len(), 2);
+    }
 }

@@ -6,8 +6,10 @@ if [ -z "${ROOT:-}" ]; then
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 PARENT="$(cd "$ROOT/.." && pwd)"
-WORK="$ROOT/.work"
-mkdir -p "$WORK/screenshots" "$WORK/diffs"
+WORK="${LOOM_WORK:-$ROOT/.work}"
+if [ "${LOOM_SKIP_WORK_INIT:-0}" != "1" ]; then
+  mkdir -p "$WORK/screenshots" "$WORK/diffs"
+fi
 
 # Cargo workspace repos that are part of the suite. Doc/spec/design/samples repos are
 # intentionally excluded (they are not cargo workspaces).
@@ -22,11 +24,15 @@ has_cargo() { [ -f "$PARENT/$1/Cargo.toml" ]; }
 
 # find_app_bin <app> -> prints path to a built loom-<app> binary, or empty string.
 find_app_bin() {
-  local app="$1" repo="$PARENT/loom-$app" bin=""
-  if [ -x "$repo/target/release/loom-$app" ]; then
-    bin="$repo/target/release/loom-$app"
-  elif [ -x "$repo/target/debug/loom-$app" ]; then
-    bin="$repo/target/debug/loom-$app"
+  local app="$1"
+  local repo="$PARENT/loom-$app"
+  local target_root
+  local bin=""
+  target_root="${CARGO_TARGET_DIR:-$repo/target}"
+  if [ -x "$target_root/release/loom-$app" ]; then
+    bin="$target_root/release/loom-$app"
+  elif [ -x "$target_root/debug/loom-$app" ]; then
+    bin="$target_root/debug/loom-$app"
   fi
   printf '%s' "$bin"
 }

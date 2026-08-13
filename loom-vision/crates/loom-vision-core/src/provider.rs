@@ -427,6 +427,29 @@ pub enum ProviderOutput {
         /// Michelson contrast in `[0.0, 1.0]`.
         contrast: f32,
     },
+    /// Binary or soft segmentation mask, one byte per input pixel.
+    SegmentationMask {
+        /// Mask width.
+        width: u32,
+        /// Mask height.
+        height: u32,
+        /// Row-major mask values in `[0, 255]`.
+        mask: Vec<u8>,
+    },
+    /// Fixed-length numeric embedding.
+    Embedding {
+        /// L2-normalized feature values.
+        values: Vec<f32>,
+    },
+    /// Deterministic audio statistics.
+    AudioAnalysis {
+        /// Root-mean-square amplitude.
+        rms: f32,
+        /// Peak absolute amplitude.
+        peak: f32,
+        /// Zero crossings per sample frame in `[0, 1]`.
+        zero_crossing_rate: f32,
+    },
     /// A generic string result.
     Generic {
         /// The message.

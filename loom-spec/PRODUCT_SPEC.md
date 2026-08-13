@@ -78,9 +78,10 @@ navigation where technically possible. Design authority:
 
 All applications are Rust + Slint desktop apps in separate repositories.
 Status of every capability is in `FEATURE_MATRICES.md`; the phase plan is in
-`ROADMAP.md`. As of this revision, engines exist for Writer and Sheets;
-no application has a GUI yet (Slint UI is the documented follow-on per
-`docs/rfcs/RFC-0003-Slint-Integration-Model.md`).
+`ROADMAP.md`. As of this revision, all eight application repositories have
+tested model/CLI/package slices and limited Slint showcase UIs. None is yet a
+full professional editor; the remaining capability gaps are recorded in the
+matrices and the Slint integration RFC.
 
 ### 3.1 Loom Writer (`../loom-writer/`)
 
@@ -93,7 +94,8 @@ wrapping, anchored and floating objects, templates, form fields, mail merge,
 print layout, PDF/EPUB export, DOCX/ODT/Markdown/plain-text import and export,
 OCR-assisted scanned-document import, local document search, crash recovery
 and version snapshots. Implemented now: headless document model, `.loomdoc`
-save/load, Markdown and plain-text export, CLI.
+save/load, Markdown and plain-text export, deterministic PDF export, CLI, and
+a Slint quick-start showcase; full document editing remains unimplemented.
 
 ### 3.2 Loom Sheets (`../loom-sheets/`)
 
@@ -107,7 +109,8 @@ formula auditing, error tracing, goal seeking, statistics/financial
 functions, photograph-to-table import through Loom Vision, receipt/invoice
 extraction. No arbitrary network queries from cells. Implemented now: formula
 engine (tokenizer, parser, dependency graph with cycle detection), CSV
-import/export, `.loomtable` JSON round-trip, CLI.
+import/export, `.loomtable` JSON round-trip, CLI, and a Slint grid showcase;
+cell editing remains unimplemented.
 
 ### 3.3 Loom Present (`../loom-present/`)
 
@@ -116,7 +119,9 @@ alignment/distribution, smart grouping, text/tables/charts/shapes/images/
 audio/video/equations, speaker notes, transitions, object animations,
 timeline-based animation editing, presenter display, rehearsal timing,
 presentation recording, PDF/video export, PPTX/ODP where feasible, local
-presenter background removal and tracking where supported. Status: not started.
+presenter background removal and tracking where supported. The current
+foundation slice has model/CLI/package round-trip and a Slint showcase;
+professional authoring is not started.
 
 ### 3.4 Loom Photo (`../loom-photo/`)
 
@@ -129,7 +134,8 @@ HDR, batch processing, PSD where practical, OpenRaster, TIFF/PNG/JPEG/WebP/
 AVIF/EXR, semantic subject selection, background removal, portrait matting,
 object-aware masks, local inpainting/super-resolution where compatible local
 models are installed. All AI-assisted selections must remain editable as
-ordinary masks. Status: not started.
+ordinary masks. The current foundation slice has a layer model, package/CLI
+round-trip, and a Slint showcase; pixel compositing is not started.
 
 ### 3.5 Loom Motion (`../loom-motion/`)
 
@@ -140,7 +146,9 @@ cameras, lights where supported, 2.5D scenes, transform hierarchy, blend
 modes, filters/effects, particles, replicators, behaviors, motion paths,
 chroma key, rotoscoping, planar/point/object tracking through Loom Vision,
 stabilization, optical-flow retiming, motion blur, render queue, template
-export for Loom Video and Loom Present. Status: not started.
+export for Loom Video and Loom Present. The current foundation slice has a
+composition model, package/CLI round-trip, and a Slint showcase; rendering
+and playback are not started.
 
 ### 3.6 Loom Video (`../loom-video/`)
 
@@ -154,7 +162,9 @@ stabilization, color correction, scopes, LUTs, HDR-aware processing, captions,
 local transcription, scene detection, subject tracking, automatic reframing,
 background removal where feasible, export through Loom Encode, XML/EDL/AAF
 interchange where feasible and legally appropriate, autosave, project
-backups, media relinking, offline media workflows. Status: not started.
+backups, media relinking, offline media workflows. The current foundation
+slice has a track/clip model, package/CLI round-trip, and a Slint showcase;
+media processing is not started.
 
 ### 3.7 Loom Studio (`../loom-studio/`)
 
@@ -174,7 +184,8 @@ markers, tempo maps, meter changes, surround architecture where feasible,
 mastering tools, loudness metering, local source separation/speech-noise
 enhancement where compatible local models are installed, beat/tempo/key/
 transient analysis. Linux plugin standards supported with sandboxing where
-practical. Status: not started.
+practical. The current foundation slice has a track/region model, package/CLI
+round-trip, and a Slint showcase; audio processing is not started.
 
 ### 3.8 Loom Encode (`../loom-encode/`)
 
@@ -185,8 +196,9 @@ HDR metadata handling, image sequences, audio-only output, multi-destination
 jobs, job dependencies, retry/recovery, pause/resume, hardware acceleration
 when available with software fallback, optional watch folders, CLI operation,
 integration with Video/Motion/Present/Photo/Studio, deterministic preset
-files, local content-aware analysis, perceptual quality metrics. Status:
-not started.
+files, local content-aware analysis, perceptual quality metrics. The current
+foundation slice has a queue/preset model, package/CLI round-trip, and a Slint
+showcase; encoder execution is not started.
 
 ## 4. Loom Vision
 

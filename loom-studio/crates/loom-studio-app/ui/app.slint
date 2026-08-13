@@ -1,188 +1,339 @@
-import { ToolButton, IconButton, StatusBar } from "components.slint";
+import { AppHeader, WorkspaceToolbar, SidebarSurface, InspectorSurface, WorkspaceRow, ToolButton, IconButton, PrimaryButton, TransportButton, StatusBar, Slider, SegmentedControl, Field, StatusPill, MetricChip, CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component StudioApp inherits Window {
     title: "Loom Studio";
-    min-width: 900px;
-    min-height: 600px;
+    min-width: 920px;
+    min-height: 720px;
     background: Theme.palette().canvas;
+    property <bool> compact-layout: root.width < 1220px;
 
     in property <string> song-title: "Untitled Song";
-    in property <string> tempo-text: "120 BPM • 4/4";
-    in property <string> workspace-mode: "Quick Workspace";
+    in property <string> tempo-text: "120 BPM · 48 kHz";
+    in-out property <float> bpm-val: 120.0;
+    in property <string> workspace-mode: "Quick";
+    in-out property <int> workspace-mode-index: 0;
+    in property <[string]> track-labels: [];
+    in property <[string]> track-kinds: [];
+    in property <[int]> track-region-counts: [];
+    in property <[float]> track-region-starts: [];
+    in property <[float]> track-region-durations: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[bool]> track-arms: [];
+    in property <[float]> track-volumes: [];
+    in property <[float]> track-pans: [];
+    in property <int> active-track-index: 0;
+    in property <float> duration-seconds: 10.0;
+    in-out property <float> playhead-seconds: 0.0;
+    in property <bool> audio-available: false;
+    in property <bool> input-available: false;
+    in property <string> output-device: "No output device";
+    in property <string> input-device: "No input device";
+    in property <[string]> midi-ports: [];
+    in-out property <int> selected-midi-port: 0;
+    in property <string> midi-status: "No MIDI input connected";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in-out property <bool> is-playing: false;
+    in-out property <bool> is-recording: false;
+    in-out property <bool> is-looping: false;
+    in-out property <bool> metronome-on: true;
+    in-out property <string> import-path: "";
+    in-out property <string> export-path: "loom-studio-mix.wav";
     in property <string> status-left: "Ready";
-    in property <string> status-right: "Offline";
+    in property <string> status-right: "Local";
 
     callback new-song;
     callback open-song;
     callback save-song;
+    callback undo;
+    callback redo;
     callback add-track;
-    callback toggle-workspace;
-    callback export-audio;
+    callback select-track(int);
+    callback set-workspace-mode(int);
+    callback play-pause;
+    callback stop;
+    callback toggle-record;
+    callback toggle-loop;
+    callback toggle-metronome;
+    callback seek(float);
+    callback bpm-changed(float);
+    callback toggle-mute(int);
+    callback toggle-solo(int);
+    callback toggle-rec-arm(int);
+    callback volume-changed(int, float);
+    callback pan-changed(int, float);
+    callback import-audio(string);
+    callback export-mix(string);
+    callback connect-midi(int);
 
-    VerticalLayout {
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
+                root.open-palette();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
         spacing: 0px;
 
-        // Titlebar
-        Rectangle {
-            min-height: 41px;
-            max-height: 41px;
-            background: Theme.palette().surface;
-
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 12px;
-                padding-right: 12px;
-                Icon {
-                    icon: "layers";
-                    size: 18px;
-                    tint: Theme.palette().accent;
-                    y: (parent.height - 18px) / 2;
-                }
-                Text {
-                    text: "Loom Studio — " + root.song-title + " (" + root.workspace-mode + ")";
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    vertical-alignment: center;
-                }
-            }
+        AppHeader {
+            app-name: "Loom Studio";
+            document-title: root.song-title;
+            icon: "audio";
+            context: root.tempo-text + " · " + root.workspace-mode;
+            state-text: root.audio-available ? "Audio online" : "Audio unavailable";
+            state-tone: root.audio-available ? 2 : 3;
         }
 
-        // Toolbar
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
-
-            HorizontalLayout {
-                height: parent.height;
-                cross-axis-alignment: center;
-                spacing: 6px;
-                padding-left: 8px;
-                padding-right: 8px;
-
-                ToolButton { icon: "new"; text: "New Song"; clicked => { root.new-song(); } }
-                ToolButton { icon: "open"; text: "Open"; clicked => { root.open-song(); } }
-                ToolButton { icon: "save"; text: "Save"; clicked => { root.save-song(); } }
-                ToolButton { icon: "add"; text: "+ Track"; clicked => { root.add-track(); } }
-                ToolButton { icon: "settings"; text: "Switch Mode"; clicked => { root.toggle-workspace(); } }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                IconButton { icon: "export"; label: "Export Mix"; clicked => { root.export-audio(); } }
+        WorkspaceToolbar {
+            ToolButton { icon: "new"; text: "New"; clicked => { root.new-song(); } }
+            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-song(); } }
+            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-song(); } }
+            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            TransportButton {
+                icon: root.is-playing ? "pause" : "play";
+                label: root.is-playing ? "Pause" : "Play";
+                enabled: root.audio-available;
+                active: root.is-playing;
+                clicked => { root.play-pause(); }
             }
+            TransportButton { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
+            TransportButton {
+                icon: "record";
+                label: root.is-recording ? "Stop recording" : "Record";
+                enabled: root.input-available;
+                active: root.is-recording;
+                clicked => { root.toggle-record(); }
+            }
+            TransportButton { icon: "link"; label: "Loop"; active: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+            TransportButton { icon: "clock"; label: "Metronome"; active: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
+            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
+            MetricChip { label: "Tempo"; value: Math.round(root.bpm-val) + " BPM"; }
+            Slider { label: "Tempo in beats per minute"; width: root.compact-layout ? 96px : 130px; minimum: 40; maximum: 240; value <=> root.bpm-val; changed(value) => { root.bpm-changed(value); } }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            SegmentedControl {
+                items: ["Quick", "Pro"];
+                current <=> root.workspace-mode-index;
+                selected(index) => { root.set-workspace-mode(index); }
+            }
+            PrimaryButton { text: "Bounce"; clicked => { root.export-mix(root.export-path); } }
         }
 
-        // Multitrack Workspace & DAW Mixer View
         HorizontalLayout {
             spacing: 0px;
             vertical-stretch: 1;
 
-            // Multitrack Arrangement Area
-            Rectangle {
+            SidebarSurface {
+                width: root.compact-layout ? 190px : 248px;
+                title: "Library";
+                detail: root.track-labels.length + " tracks";
+                VerticalLayout {
+                    spacing: 10px;
+                    padding: 12px;
+                    Text { text: "Audio file"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                    Field { label: "WAV path"; placeholder: "/path/to/recording.wav"; value <=> root.import-path; }
+                    ToolButton { icon: "import"; text: "Import WAV"; enabled: root.import-path != ""; clicked => { root.import-audio(root.import-path); } }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
+                    Text { text: "MIDI input"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                    if root.midi-ports.length > 0 : SegmentedControl {
+                        items: root.midi-ports;
+                        current <=> root.selected-midi-port;
+                    }
+                    ToolButton { icon: "keyboard"; text: "Connect MIDI"; enabled: root.midi-ports.length > 0; clicked => { root.connect-midi(root.selected-midi-port); } }
+                    StatusPill { text: root.midi-status; tone: root.midi-ports.length > 0 ? 1 : 0; }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
+                    Text { text: "Audio devices"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                    Text { text: root.output-device; wrap: word-wrap; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
+                    Text { text: root.input-device; wrap: word-wrap; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    ToolButton { icon: "plus"; text: "Add Track"; clicked => { root.add-track(); } }
+                }
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            VerticalLayout {
+                spacing: 0px;
                 horizontal-stretch: 1;
-                background: Theme.palette().canvas;
 
-                VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
-
-                    Text {
-                        text: "MULTITRACK DAW ARRANGER (" + root.tempo-text + ")";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink-secondary;
+                Rectangle {
+                    height: 50px;
+                    background: Theme.palette().surface;
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 10px;
+                        Text { text: format_time(root.playhead-seconds); width: 86px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; font-weight: 700; vertical-alignment: center; }
+                        Slider { label: "Playhead"; horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.duration-seconds); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
+                        Text { text: format_time(root.duration-seconds); width: 86px; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; horizontal-alignment: right; vertical-alignment: center; }
                     }
+                }
+                Rectangle { height: 1px; background: Theme.palette().border; }
 
-                    Rectangle {
-                        height: 44px;
-                        background: Theme.palette().surface;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
-
+                Rectangle {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    background: Theme.palette().canvas;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 7px;
                         HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-
-                            Text {
-                                text: "Track 1: Vocal Guide (Audio) • 0.0 dB";
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
+                            spacing: 8px;
+                            Text { text: "ARRANGEMENT"; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; font-weight: 700; }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            Text { text: root.duration-seconds > 0 ? Math.round(root.duration-seconds * 10) / 10 + " seconds" : "Empty project"; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; }
+                        }
+                        for label[index] in root.track-labels : WorkspaceRow {
+                            height: root.workspace-mode-index == 1 ? 78px : 64px;
+                            selected: index == root.active-track-index;
+                            clicked => { root.select-track(index); }
+                            HorizontalLayout {
+                                spacing: 0px;
+                                Rectangle {
+                                    width: root.compact-layout ? 136px : 174px;
+                                    background: Theme.palette().surface;
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        spacing: 5px;
+                                        ToolButton { text: "M"; checked: root.track-mutes[index]; clicked => { root.toggle-mute(index); } }
+                                        ToolButton { text: "S"; checked: root.track-solos[index]; clicked => { root.toggle-solo(index); } }
+                                        ToolButton { text: "R"; checked: root.track-arms[index]; enabled: root.input-available; clicked => { root.toggle-rec-arm(index); } }
+                                        VerticalLayout {
+                                            spacing: 1px;
+                                            Text { text: label; color: Theme.palette().ink; font-size: 11px; font-weight: 650; overflow: elide; }
+                                            Text { text: root.track-kinds[index] + " · " + root.track-region-counts[index] + " regions"; color: Theme.palette().ink-secondary; font-size: 9px; overflow: elide; }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    background: Math.mod(index, 2) == 0 ? Theme.palette().media-stage : Theme.palette().media-stage;
+                                    if root.track-region-counts[index] > 0 : Rectangle {
+                                        x: parent.width * root.track-region-starts[index] / Math.max(0.01, root.duration-seconds);
+                                        width: Math.max(54px, parent.width * root.track-region-durations[index] / Math.max(0.01, root.duration-seconds));
+                                        y: 8px;
+                                        height: parent.height - 16px;
+                                        border-radius: 7px;
+                                        background: index == root.active-track-index ? Theme.palette().content-accent : Theme.palette().content-cool;
+                                        border-width: 1px;
+                                        border-color: index == root.active-track-index ? Theme.palette().content-accent : Theme.palette().content-cool;
+                                        HorizontalLayout {
+                                            padding-left: 8px;
+                                            spacing: 7px;
+                                            Icon { icon: root.track-kinds[index] == "MIDI" ? "keyboard" : "waveform"; size: 18px; tint: Theme.palette().paper; }
+                                            Text { text: label; color: Theme.palette().paper; font-size: Theme.tokens.typography.micro; font-weight: 650; overflow: elide; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-
-                    Rectangle {
-                        height: 44px;
-                        background: Theme.palette().surface;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
-
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-
-                            Text {
-                                text: "Track 2: Acoustic Guitar (Audio) • 0.0 dB";
-                                color: Theme.palette().ink-secondary;
-                                font-size: Theme.tokens.typography.body;
-                                vertical-alignment: center;
-                            }
-                        }
+                        Rectangle { vertical-stretch: 1; background: transparent; }
                     }
                 }
             }
 
-            // Studio Mixer Sidebar
-            Rectangle {
-                width: 220px;
-                background: Theme.palette().surface;
+            Rectangle { width: 1px; background: Theme.palette().border; }
 
+            InspectorSurface {
+                width: root.compact-layout ? 232px : 292px;
+                title: "Mixer";
+                detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
                 VerticalLayout {
+                    spacing: 12px;
                     padding: 12px;
-                    spacing: 8px;
-
                     Text {
-                        text: "MIXER CHANNELS";
+                        text: "CHANNEL STRIP";
                         font-size: Theme.tokens.typography.caption;
                         font-weight: 700;
                         color: Theme.palette().ink-secondary;
                     }
-
-                    Rectangle {
-                        height: 120px;
-                        background: Theme.palette().surface-sunken;
-                        border-radius: 4px;
-
-                        VerticalLayout {
-                            alignment: center;
-
-                            Text {
-                                text: "Master Out";
-                                color: Theme.palette().accent;
-                                font-size: Theme.tokens.typography.body;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: "0.0 dB • Peak -0.3";
-                                color: Theme.palette().ink;
-                                font-size: Theme.tokens.typography.caption;
-                                horizontal-alignment: center;
-                            }
+                    if root.active-track-index < root.track-labels.length : VerticalLayout {
+                        spacing: 9px;
+                        Text { text: "Channel strip"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                        Text { text: "Volume  " + Math.round(root.track-volumes[root.active-track-index] * 10) / 10 + " dB"; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
+                        Slider { label: "Volume"; minimum: -60; maximum: 6; value: root.track-volumes[root.active-track-index]; changed(value) => { root.volume-changed(root.active-track-index, value); } }
+                        Text { text: "Pan  " + Math.round(root.track-pans[root.active-track-index] * 100) + "%"; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
+                        Slider { label: "Pan"; minimum: -1; maximum: 1; value: root.track-pans[root.active-track-index]; changed(value) => { root.pan-changed(root.active-track-index, value); } }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            ToolButton { text: "Mute"; checked: root.track-mutes[root.active-track-index]; clicked => { root.toggle-mute(root.active-track-index); } }
+                            ToolButton { text: "Solo"; checked: root.track-solos[root.active-track-index]; clicked => { root.toggle-solo(root.active-track-index); } }
+                            ToolButton { text: "Arm"; checked: root.track-arms[root.active-track-index]; enabled: root.input-available; clicked => { root.toggle-rec-arm(root.active-track-index); } }
                         }
                     }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
+                    Text { text: "Bounce destination"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                    Field { label: "WAV destination"; value <=> root.export-path; }
+                    PrimaryButton { text: "Export WAV"; clicked => { root.export-mix(root.export-path); } }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    Text { text: "Third-party CLAP/VST3 hosting is not enabled in this build. No plugin is loaded or executed implicitly."; wrap: word-wrap; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; }
                 }
             }
         }
 
-        StatusBar {
-            status-left: root.status-left;
-            status-right: root.status-right;
+        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => {
+            root.palette-invoked(idx);
         }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => {
+            root.palette-move(delta);
+        }
+        key-text(text) => {
+            root.palette-key-text(text);
+        }
+        backspace => {
+            root.palette-backspace();
+        }
+        close-requested => {
+            root.palette-open = false;
+            app-focus.focus();
+        }
+    }
+    }
+
+    pure function format_time(seconds: float) -> string {
+        return Math.floor(seconds / 60) + ":" + (Math.mod(Math.floor(seconds), 60) < 10 ? "0" : "") + (Math.mod(Math.floor(seconds), 60));
     }
 }
