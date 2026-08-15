@@ -1865,6 +1865,11 @@ impl WriterDocument {
         matches
     }
 
+    /// Counts total occurrences of a query string across all blocks.
+    pub fn count_matches(&self, query: &str, case_sensitive: bool) -> usize {
+        self.find_all(query, case_sensitive).len()
+    }
+
     /// Replaces literal text in every block while remapping style runs.
     pub fn replace_all(&mut self, query: &str, replacement: &str, case_sensitive: bool) -> usize {
         if query.is_empty() {
@@ -2501,5 +2506,21 @@ mod tests {
         assert_eq!(toc[2].level, 3);
         assert_eq!(toc[3].title, "Conclusion");
         assert_eq!(toc[3].level, 1);
+    }
+
+    #[test]
+    fn count_matches_counts_occurrences() {
+        let mut doc = WriterDocument::new("doc-search", "Search Test");
+        doc.push(RichBlock::new(
+            1,
+            "p",
+            "The quick brown fox jumps over the lazy dog.",
+        ));
+        doc.push(RichBlock::new(2, "p", "The dog was very lazy and slow."));
+
+        assert_eq!(doc.count_matches("dog", true), 2);
+        assert_eq!(doc.count_matches("the", true), 1);
+        assert_eq!(doc.count_matches("the", false), 3);
+        assert_eq!(doc.count_matches("cat", false), 0);
     }
 }

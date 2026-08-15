@@ -565,6 +565,17 @@ impl VideoProject {
     pub fn timecode_at(&self, time_secs: f64) -> Timecode {
         Timecode::from_seconds(time_secs, self.frame_rate)
     }
+
+    /// Converts timeline seconds to pixel coordinate based on zoom level (pixels per second).
+    pub fn seconds_to_pixels(seconds: f64, pixels_per_second: f64) -> f64 {
+        seconds.max(0.0) * pixels_per_second.max(1.0)
+    }
+
+    /// Converts timeline pixel coordinate to seconds based on zoom level (pixels per second).
+    pub fn pixels_to_seconds(pixels: f64, pixels_per_second: f64) -> f64 {
+        pixels.max(0.0) / pixels_per_second.max(1.0)
+    }
+
     /// Timeline duration across every enabled clip and caption.
     pub fn duration(&self) -> f64 {
         let clips = self
@@ -1497,5 +1508,18 @@ mod tests {
         clip.set_speed(0.5);
         assert_eq!(clip.playback_rate, 0.5);
         assert_eq!(clip.duration, 20.0);
+    }
+
+    #[test]
+    fn timeline_zoom_and_clip_count() {
+        let mut project = VideoProject::new("proj-zoom", "Zoom Project");
+        assert_eq!(project.total_clips(), 0);
+
+        project.tracks[0].add_clip(Clip::new("c1", "Shot 1", 5.0));
+        assert_eq!(project.total_clips(), 1);
+
+        // 100 pixels per second
+        assert_eq!(VideoProject::seconds_to_pixels(5.5, 100.0), 550.0);
+        assert_eq!(VideoProject::pixels_to_seconds(550.0, 100.0), 5.5);
     }
 }

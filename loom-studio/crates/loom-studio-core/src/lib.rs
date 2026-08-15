@@ -205,6 +205,41 @@ impl StudioProject {
     pub fn total_regions(&self) -> usize {
         self.tracks.iter().map(|t| t.regions.len()).sum()
     }
+
+    /// Number of audio samples in one quarter note beat.
+    pub fn samples_per_beat(&self) -> f64 {
+        let bpm = if self.bpm > 0.0 {
+            self.bpm as f64
+        } else {
+            120.0
+        };
+        (60.0 / bpm) * (self.sample_rate as f64)
+    }
+
+    /// Number of audio samples in one musical measure (bar).
+    pub fn samples_per_bar(&self, beats_per_bar: u32) -> f64 {
+        self.samples_per_beat() * (beats_per_bar.max(1) as f64)
+    }
+
+    /// Converts musical beats to seconds.
+    pub fn beat_to_seconds(&self, beat: f64) -> f64 {
+        let bpm = if self.bpm > 0.0 {
+            self.bpm as f64
+        } else {
+            120.0
+        };
+        beat * (60.0 / bpm)
+    }
+
+    /// Converts playback seconds to musical beats.
+    pub fn seconds_to_beat(&self, seconds: f64) -> f64 {
+        let bpm = if self.bpm > 0.0 {
+            self.bpm as f64
+        } else {
+            120.0
+        };
+        seconds * (bpm / 60.0)
+    }
 }
 
 pub fn save_studio_project(proj: &StudioProject) -> Result<Vec<u8>, String> {
@@ -1250,5 +1285,20 @@ mod studio_runtime_tests {
         // -6 dB volume
         track.volume_db = -6.0206;
         assert!((track.linear_volume() - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn musical_bpm_and_beat_conversions() {
+        let mut proj = StudioProject::new("proj-bpm", "Tempo Test");
+        proj.bpm = 120.0;
+        proj.sample_rate = 48000;
+
+        // At 120 BPM, 1 beat = 0.5s = 24,000 samples
+        assert_eq!(proj.samples_per_beat(), 24000.0);
+        // 4 beats per bar = 2.0s = 96,000 samples
+        assert_eq!(proj.samples_per_bar(4), 96000.0);
+
+        assert_eq!(proj.beat_to_seconds(4.0), 2.0);
+        assert_eq!(proj.seconds_to_beat(2.0), 4.0);
     }
 }

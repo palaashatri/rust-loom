@@ -373,6 +373,20 @@ impl CompositionDocument {
         true
     }
 
+    /// Counts total keyframes across all properties of all layers in the composition.
+    pub fn total_keyframes(&self) -> usize {
+        self.layers
+            .iter()
+            .map(|l| {
+                l.position_x_keys.len()
+                    + l.position_y_keys.len()
+                    + l.opacity_keys.len()
+                    + l.scale_keys.len()
+                    + l.rotation_keys.len()
+            })
+            .sum()
+    }
+
     /// Validates timing, ids, dimensions, and keyframe values.
     pub fn validate(&self) -> Vec<MotionIssue> {
         let mut issues = Vec::new();
@@ -745,5 +759,17 @@ mod tests {
         assert_eq!(easing_progress("cubic-in", 0.5), 0.125);
         assert_eq!(easing_progress("cubic-out", 0.5), 0.875);
         assert_eq!(easing_progress("hold", 0.5), 0.0);
+    }
+
+    #[test]
+    fn total_keyframes_counts_all_layer_properties() {
+        let mut doc = CompositionDocument::new("comp-k", "Keyframes Count");
+        let mut l1 = MotionLayer::new("l1", "Layer 1", "VectorShape");
+        l1.add_keyframe("x", 0.0, 10.0);
+        l1.add_keyframe("x", 1.0, 50.0);
+        l1.add_keyframe("y", 0.0, 0.0);
+        doc.add_layer(l1);
+
+        assert_eq!(doc.total_keyframes(), 3);
     }
 }

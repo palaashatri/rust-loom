@@ -951,6 +951,22 @@ fn apply_adjustment(
                 adjusted[0] += warm;
                 adjusted[2] -= warm;
             }
+            "tint" => {
+                let tint = value.clamp(-1.0, 1.0) * 50.0;
+                adjusted[1] += tint;
+            }
+            "sepia" => {
+                let r = original[0];
+                let g = original[1];
+                let b = original[2];
+                let sepia_r = (0.393 * r + 0.769 * g + 0.189 * b).min(255.0);
+                let sepia_g = (0.349 * r + 0.686 * g + 0.168 * b).min(255.0);
+                let sepia_b = (0.272 * r + 0.534 * g + 0.131 * b).min(255.0);
+                let t = value.clamp(0.0, 1.0);
+                adjusted[0] = r + (sepia_r - r) * t;
+                adjusted[1] = g + (sepia_g - g) * t;
+                adjusted[2] = b + (sepia_b - b) * t;
+            }
             _ => {
                 let offset = value.clamp(-1.0, 1.0) * 255.0;
                 for channel in &mut adjusted {
@@ -1184,5 +1200,21 @@ mod tests {
             img.aspect_crop_bounds(CropAspectRatio::Standard4x3),
             (240, 0, 1440, 1080)
         );
+    }
+
+    #[test]
+    fn tint_and_sepia_adjustments() {
+        let mut img = RgbaImage::solid(1, 1, [100, 100, 100, 255]).unwrap();
+        apply_adjustment(&mut img, "tint", 0.5, 1.0, None);
+        let pix = img.pixel(0, 0).unwrap();
+        assert_eq!(pix[0], 100);
+        assert_eq!(pix[1], 125);
+        assert_eq!(pix[2], 100);
+
+        let mut sepia_img = RgbaImage::solid(1, 1, [100, 100, 100, 255]).unwrap();
+        apply_adjustment(&mut sepia_img, "sepia", 1.0, 1.0, None);
+        let sepia_pix = sepia_img.pixel(0, 0).unwrap();
+        assert!(sepia_pix[0] > 130); // Red is enhanced in sepia
+        assert!(sepia_pix[2] < 100); // Blue is reduced in sepia
     }
 }

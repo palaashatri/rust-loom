@@ -199,6 +199,10 @@ pub struct Sheet {
     pub cells: BTreeMap<CellRef, Cell>,
     /// Sheet name.
     pub name: String,
+    /// Frozen top rows count.
+    pub freeze_rows: u32,
+    /// Frozen left columns count.
+    pub freeze_cols: u32,
 }
 
 impl Sheet {
@@ -207,7 +211,21 @@ impl Sheet {
         Self {
             name: name.to_string(),
             cells: BTreeMap::new(),
+            freeze_rows: 0,
+            freeze_cols: 0,
         }
+    }
+
+    /// Freeze a number of top rows and left columns.
+    pub fn freeze_panes(&mut self, rows: u32, cols: u32) {
+        self.freeze_rows = rows;
+        self.freeze_cols = cols;
+    }
+
+    /// Unfreeze all panes.
+    pub fn unfreeze_panes(&mut self) {
+        self.freeze_rows = 0;
+        self.freeze_cols = 0;
     }
 
     /// Set a cell. Coordinates A1-style.
@@ -2394,5 +2412,20 @@ mod tests {
         let semi_records = parse_csv_records(semi_csv, ';');
         assert_eq!(semi_records.len(), 2);
         assert_eq!(semi_records[1], vec!["1", "2", "3"]);
+    }
+
+    #[test]
+    fn freeze_panes_configuration_and_unfreeze() {
+        let mut sheet = Sheet::new("Dashboard");
+        assert_eq!(sheet.freeze_rows, 0);
+        assert_eq!(sheet.freeze_cols, 0);
+
+        sheet.freeze_panes(2, 1);
+        assert_eq!(sheet.freeze_rows, 2);
+        assert_eq!(sheet.freeze_cols, 1);
+
+        sheet.unfreeze_panes();
+        assert_eq!(sheet.freeze_rows, 0);
+        assert_eq!(sheet.freeze_cols, 0);
     }
 }
