@@ -13,6 +13,7 @@ path = "src/main.rs"
 loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
 loom-photo-core = { path = "../loom-photo-core" }
 loom-production = { path = "../../../loom-core/crates/loom-production" }
+loom-storage = { path = "../../../loom-core/crates/loom-storage" }
 loom-test-support.workspace = true
 loom-ui.workspace = true
 slint = "1.7"

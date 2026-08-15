@@ -2762,6 +2762,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-storage"
+version = "0.1.0"
+dependencies = [
+ "loom-package",
+]
+
+[[package]]
 name = "loom-test-support"
 version = "0.1.0"
 dependencies = [
@@ -2784,6 +2791,7 @@ version = "0.1.0"
 dependencies = [
  "loom-desktop",
  "loom-production",
+ "loom-storage",
  "loom-test-support",
  "loom-ui",
  "loom-video-core",

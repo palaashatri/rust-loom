@@ -262,6 +262,121 @@ impl WriterDocument {
         }
         out
     }
+
+    /// Estimate long-form document metrics including page count, word count, character count, and reading time.
+    pub fn estimate_pagination(&self) -> PaginationMetrics {
+        let plain = self.plain_text();
+        let words = plain.split_whitespace().count();
+        let characters = plain.chars().count();
+        let pages_by_words = words.div_ceil(250);
+        let pages_by_chars = characters.div_ceil(1500);
+        let total_pages = pages_by_words.max(pages_by_chars).max(1);
+        let reading_time_minutes = (words as f32 / 200.0).max(0.1);
+        PaginationMetrics {
+            total_pages,
+            words,
+            characters,
+            reading_time_minutes,
+        }
+    }
+
+    /// Split a block at byte offset, creating a new block with remaining text and preserving styles.
+    pub fn split_block(&mut self, block_id: u64, byte_offset: usize) -> Result<u64, WriterError> {
+        let index = self
+            .blocks
+            .iter()
+            .position(|b| b.id == block_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
+        let block = &self.blocks[index];
+        let text_len = block.text.as_str().len();
+        let offset = byte_offset.min(text_len);
+
+        let first_text = &block.text.as_str()[..offset];
+        let second_text = &block.text.as_str()[offset..];
+
+        let new_id = self.next_id();
+        let mut first_block = RichBlock::new(block.id, &block.kind, first_text);
+        first_block.style = block.style.clone();
+        for run in &block.runs {
+            if run.start < offset {
+                first_block.runs.push(loom_text::StyleRun {
+                    start: run.start,
+                    end: run.end.min(offset),
+                    style: run.style.clone(),
+                });
+            }
+        }
+
+        let mut second_block = RichBlock::new(new_id, &block.kind, second_text);
+        second_block.style = block.style.clone();
+        for run in &block.runs {
+            if run.end > offset {
+                let start = run.start.saturating_sub(offset);
+                let end = run.end - offset;
+                second_block.runs.push(loom_text::StyleRun {
+                    start,
+                    end,
+                    style: run.style.clone(),
+                });
+            }
+        }
+
+        self.blocks[index] = first_block;
+        self.blocks.insert(index + 1, second_block);
+        Ok(new_id)
+    }
+
+    /// Merge two adjacent blocks.
+    pub fn merge_blocks(&mut self, first_id: u64, second_id: u64) -> Result<(), WriterError> {
+        let first_index = self
+            .blocks
+            .iter()
+            .position(|b| b.id == first_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {first_id} not found")))?;
+        let second_index = self
+            .blocks
+            .iter()
+            .position(|b| b.id == second_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {second_id} not found")))?;
+        if second_index != first_index + 1 {
+            return Err(WriterError::Invalid(
+                "blocks must be adjacent to merge".into(),
+            ));
+        }
+
+        let first = &self.blocks[first_index];
+        let second = &self.blocks[second_index];
+        let first_len = first.text.as_str().len();
+        let combined_text = format!("{}{}", first.text.as_str(), second.text.as_str());
+
+        let mut combined_block = RichBlock::new(first.id, &first.kind, &combined_text);
+        combined_block.style = first.style.clone();
+        combined_block.runs.extend(first.runs.clone());
+        for run in &second.runs {
+            combined_block.runs.push(loom_text::StyleRun {
+                start: run.start + first_len,
+                end: run.end + first_len,
+                style: run.style.clone(),
+            });
+        }
+
+        self.blocks[first_index] = combined_block;
+        self.blocks.remove(second_index);
+        Ok(())
+    }
+}
+
+/// Long-form document pagination and reading metrics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaginationMetrics {
+    /// Estimated total formatted pages.
+    pub total_pages: usize,
+    /// Total word count.
+    pub words: usize,
+    /// Total character count.
+    pub characters: usize,
+    /// Estimated reading time in minutes.
+    pub reading_time_minutes: f32,
 }
 
 fn alignment_name(alignment: loom_text::Alignment) -> &'static str {
@@ -2145,5 +2260,52 @@ mod tests {
             .as_str()
             .contains("Name"));
         assert!(workspace.validate().is_empty());
+    }
+
+    #[test]
+    fn split_and_merge_blocks_preserves_content_and_runs() {
+        let mut doc = WriterDocument::new("doc-split", "Split Test");
+        let mut block = RichBlock::new(1, "paragraph", "Hello Beautiful World");
+        block.runs.push(loom_text::StyleRun {
+            start: 6,
+            end: 15,
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        });
+        doc.push(block);
+
+        let new_id = doc.split_block(1, 6).unwrap();
+        assert_eq!(doc.len(), 2);
+        assert_eq!(doc.blocks[0].text.as_str(), "Hello ");
+        assert_eq!(doc.blocks[1].id, new_id);
+        assert_eq!(doc.blocks[1].text.as_str(), "Beautiful World");
+        assert_eq!(doc.blocks[1].runs.len(), 1);
+        assert_eq!(doc.blocks[1].runs[0].start, 0);
+        assert_eq!(doc.blocks[1].runs[0].end, 9);
+        assert_eq!(
+            doc.blocks[1].runs[0].style.weight,
+            loom_text::FontWeight::Bold
+        );
+
+        doc.merge_blocks(1, new_id).unwrap();
+        assert_eq!(doc.len(), 1);
+        assert_eq!(doc.blocks[0].text.as_str(), "Hello Beautiful World");
+        assert_eq!(doc.blocks[0].runs.len(), 1);
+        assert_eq!(doc.blocks[0].runs[0].start, 6);
+        assert_eq!(doc.blocks[0].runs[0].end, 15);
+    }
+
+    #[test]
+    fn estimate_pagination_calculates_pages_and_metrics() {
+        let mut doc = WriterDocument::new("doc-page", "Page Metric Test");
+        let paragraph =
+            "Loom Writer provides calm, focused, and professional typographic layout. ".repeat(40);
+        doc.push(RichBlock::new(1, "paragraph", &paragraph));
+        let metrics = doc.estimate_pagination();
+        assert!(metrics.words > 300);
+        assert!(metrics.total_pages >= 2);
+        assert!(metrics.reading_time_minutes > 1.0);
     }
 }

@@ -170,7 +170,8 @@ fn save_sheet(path: &Path, sheet: &Sheet) -> Result<(), String> {
     arch.add("manifest.json", manifest_str.into_bytes())
         .map_err(|e| e.to_string())?;
     let bytes = arch.to_bytes().map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|error| format!("write {}: {error}", path.display()))
+    loom_storage::atomic_write(path, &bytes)
+        .map_err(|error| format!("atomic write {}: {error}", path.display()))
 }
 
 fn cell_value(
@@ -581,7 +582,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 match state.dialogs.save_file(&export_request(&state)) {
                     Ok(Some(path)) => {
                         let csv = to_csv(&state.current.borrow());
-                        match std::fs::write(&path, csv) {
+                        match loom_storage::atomic_write(&path, csv.as_bytes()) {
                             Ok(()) => app.set_status_left(SharedString::from(format!(
                                 "Exported {}",
                                 path.display()

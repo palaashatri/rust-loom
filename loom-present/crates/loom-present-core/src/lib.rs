@@ -52,6 +52,101 @@ impl Slide {
     pub fn add_element(&mut self, elem: SlideElement) {
         self.elements.push(elem);
     }
+
+    pub fn remove_element(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
+            self.elements.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn bring_to_front(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
+            let elem = self.elements.remove(pos);
+            self.elements.push(elem);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn send_to_back(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
+            let elem = self.elements.remove(pos);
+            self.elements.insert(0, elem);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn bring_forward(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
+            if pos + 1 < self.elements.len() {
+                self.elements.swap(pos, pos + 1);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn send_backward(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
+            if pos > 0 {
+                self.elements.swap(pos, pos - 1);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn align_left(&mut self, ids: &[&str]) {
+        let min_x = ids
+            .iter()
+            .filter_map(|id| self.elements.iter().find(|e| &e.id == id))
+            .map(|e| e.x)
+            .fold(f32::INFINITY, f32::min);
+        if min_x.is_finite() {
+            for e in &mut self.elements {
+                if ids.contains(&e.id.as_str()) {
+                    e.x = min_x;
+                }
+            }
+        }
+    }
+
+    pub fn align_center(&mut self, ids: &[&str]) {
+        let centers: Vec<f32> = ids
+            .iter()
+            .filter_map(|id| self.elements.iter().find(|e| &e.id == id))
+            .map(|e| e.x + e.width / 2.0)
+            .collect();
+        if !centers.is_empty() {
+            let avg_center = centers.iter().sum::<f32>() / centers.len() as f32;
+            for e in &mut self.elements {
+                if ids.contains(&e.id.as_str()) {
+                    e.x = avg_center - e.width / 2.0;
+                }
+            }
+        }
+    }
+
+    pub fn align_top(&mut self, ids: &[&str]) {
+        let min_y = ids
+            .iter()
+            .filter_map(|id| self.elements.iter().find(|e| &e.id == id))
+            .map(|e| e.y)
+            .fold(f32::INFINITY, f32::min);
+        if min_y.is_finite() {
+            for e in &mut self.elements {
+                if ids.contains(&e.id.as_str()) {
+                    e.y = min_y;
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -754,5 +849,42 @@ mod tests {
         assert!(session.can_undo());
         session.undo();
         assert!(session.can_redo());
+    }
+
+    #[test]
+    fn slide_element_ordering_and_alignment_operations() {
+        let mut slide = Slide::new("slide-test", "Test Slide", "blank");
+        slide.add_element(SlideElement {
+            id: "e1".into(),
+            element_type: ElementType::Title,
+            content: "First".into(),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 50.0,
+        });
+        slide.add_element(SlideElement {
+            id: "e2".into(),
+            element_type: ElementType::BodyText,
+            content: "Second".into(),
+            x: 150.0,
+            y: 200.0,
+            width: 200.0,
+            height: 50.0,
+        });
+
+        assert_eq!(slide.elements.len(), 2);
+        assert!(slide.bring_to_front("e1"));
+        assert_eq!(slide.elements[1].id, "e1");
+
+        assert!(slide.send_to_back("e1"));
+        assert_eq!(slide.elements[0].id, "e1");
+
+        slide.align_left(&["e1", "e2"]);
+        assert_eq!(slide.elements[0].x, 50.0);
+        assert_eq!(slide.elements[1].x, 50.0);
+
+        assert!(slide.remove_element("e1"));
+        assert_eq!(slide.elements.len(), 1);
     }
 }

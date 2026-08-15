@@ -136,7 +136,8 @@ fn load_file(path: &Path) -> Result<WriterDocument, String> {
 
 fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
     let bytes = loom_writer_core::save_document(doc).map_err(|error| error.to_string())?;
-    std::fs::write(path, bytes).map_err(|error| format!("write {}: {error}", path.display()))
+    loom_storage::atomic_write(path, &bytes)
+        .map_err(|error| format!("atomic write {}: {error}", path.display()))
 }
 
 /// Commands exposed through the command palette. Each palette entry maps to
@@ -728,7 +729,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 match state.dialogs.save_file(&writer_export_request(&state)) {
                     Ok(Some(path)) => {
                         let bytes = loom_writer_core::export_pdf(&state.current.borrow());
-                        match std::fs::write(&path, bytes) {
+                        match loom_storage::atomic_write(&path, &bytes) {
                             Ok(()) => app.set_status_left(SharedString::from(format!(
                                 "Exported {}",
                                 path.display()

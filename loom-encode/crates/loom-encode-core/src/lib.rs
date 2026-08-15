@@ -116,6 +116,65 @@ impl EncodeQueue {
             .filter(|j| matches!(j.status, JobStatus::Queued))
             .count()
     }
+
+    pub fn remove_job(&mut self, index: usize) -> Option<EncodeJob> {
+        if index < self.jobs.len() {
+            let job = self.jobs.remove(index);
+            self.active_job_index = self.active_job_index.min(self.jobs.len().saturating_sub(1));
+            Some(job)
+        } else {
+            None
+        }
+    }
+
+    pub fn move_job(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.jobs.len() || to >= self.jobs.len() || from == to {
+            return false;
+        }
+        let job = self.jobs.remove(from);
+        self.jobs.insert(to, job);
+        self.active_job_index = to;
+        true
+    }
+
+    pub fn retry_failed_jobs(&mut self) -> usize {
+        let mut retried = 0;
+        for job in &mut self.jobs {
+            if matches!(job.status, JobStatus::Failed(_)) {
+                job.status = JobStatus::Queued;
+                retried += 1;
+            }
+        }
+        retried
+    }
+
+    pub fn clear_completed_jobs(&mut self) -> usize {
+        let before = self.jobs.len();
+        self.jobs
+            .retain(|j| !matches!(j.status, JobStatus::Complete));
+        self.active_job_index = self.active_job_index.min(self.jobs.len().saturating_sub(1));
+        before - self.jobs.len()
+    }
+
+    pub fn add_multi_destination_batch(
+        &mut self,
+        source: impl Into<String>,
+        base_output_path: &str,
+        presets: &[EncodePreset],
+    ) {
+        let source = source.into();
+        for (i, preset) in presets.iter().enumerate() {
+            let id = format!("job-{}-{}", self.jobs.len() + 1, i + 1);
+            let out_file = format!(
+                "{}_{}.{}",
+                base_output_path,
+                preset.name.to_lowercase().replace(' ', "_"),
+                preset.container
+            );
+            self.jobs
+                .push(EncodeJob::new(id, source.clone(), out_file, preset.clone()));
+        }
+    }
 }
 
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
@@ -731,5 +790,31 @@ mod tests {
     #[test]
     fn cancellation_error_is_explicit() {
         assert_eq!(EncodeError::Cancelled.to_string(), "encoding cancelled");
+    }
+
+    #[test]
+    fn queue_batch_reorder_and_retry_operations() {
+        let mut queue = EncodeQueue::new("batch-q", "Batch Queue");
+        queue.jobs.clear();
+        let presets = vec![EncodePreset::h264_1080p(), EncodePreset::prores_master()];
+        queue.add_multi_destination_batch("source.mov", "/export/master", &presets);
+        assert_eq!(queue.jobs.len(), 2);
+        assert_eq!(queue.pending_count(), 2);
+
+        // Reorder
+        assert!(queue.move_job(0, 1));
+        assert_eq!(queue.active_job_index, 1);
+
+        // Fail and retry
+        queue.jobs[0].status = JobStatus::Failed("timeout".into());
+        queue.jobs[1].status = JobStatus::Complete;
+        assert_eq!(queue.pending_count(), 0);
+
+        assert_eq!(queue.retry_failed_jobs(), 1);
+        assert_eq!(queue.pending_count(), 1);
+
+        // Clear completed
+        assert_eq!(queue.clear_completed_jobs(), 1);
+        assert_eq!(queue.jobs.len(), 1);
     }
 }

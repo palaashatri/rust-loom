@@ -58,6 +58,77 @@ impl StudioTrack {
     pub fn add_region(&mut self, region: AudioRegion) {
         self.regions.push(region);
     }
+
+    pub fn remove_region(&mut self, region_id: &str) -> Option<AudioRegion> {
+        if let Some(pos) = self.regions.iter().position(|r| r.id == region_id) {
+            Some(self.regions.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    pub fn split_region(
+        &mut self,
+        region_id: &str,
+        split_sample: u64,
+    ) -> Result<(String, String), String> {
+        let pos = self
+            .regions
+            .iter()
+            .position(|r| r.id == region_id)
+            .ok_or_else(|| format!("region '{region_id}' not found"))?;
+        let reg = &self.regions[pos];
+        if split_sample <= reg.start_sample || split_sample >= reg.start_sample + reg.length_samples
+        {
+            return Err("split sample must be within region bounds".into());
+        }
+        let left_len = split_sample - reg.start_sample;
+        let right_len = reg.length_samples - left_len;
+        let left_id = format!("{}-a", reg.id);
+        let right_id = format!("{}-b", reg.id);
+
+        let mut left = reg.clone();
+        left.id = left_id.clone();
+        left.length_samples = left_len;
+
+        let mut right = reg.clone();
+        right.id = right_id.clone();
+        right.start_sample = split_sample;
+        right.length_samples = right_len;
+
+        self.regions.remove(pos);
+        self.regions.insert(pos, left);
+        self.regions.insert(pos + 1, right);
+        Ok((left_id, right_id))
+    }
+
+    pub fn trim_region_start(&mut self, region_id: &str, new_start: u64) -> Result<(), String> {
+        let reg = self
+            .regions
+            .iter_mut()
+            .find(|r| r.id == region_id)
+            .ok_or_else(|| format!("region '{region_id}' not found"))?;
+        let end = reg.start_sample + reg.length_samples;
+        if new_start >= end {
+            return Err("new start sample must be before region end".into());
+        }
+        reg.length_samples = end - new_start;
+        reg.start_sample = new_start;
+        Ok(())
+    }
+
+    pub fn trim_region_end(&mut self, region_id: &str, new_end: u64) -> Result<(), String> {
+        let reg = self
+            .regions
+            .iter_mut()
+            .find(|r| r.id == region_id)
+            .ok_or_else(|| format!("region '{region_id}' not found"))?;
+        if new_end <= reg.start_sample {
+            return Err("new end sample must be after region start".into());
+        }
+        reg.length_samples = new_end - reg.start_sample;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -991,5 +1062,40 @@ mod studio_runtime_tests {
         assert_eq!(session.project.tracks[0].volume_db, 0.0);
         assert!(session.redo());
         assert_eq!(session.project.tracks[0].volume_db, -12.0);
+    }
+
+    #[test]
+    fn region_split_trim_and_remove_operations() {
+        let mut track = StudioTrack::new("t1", "Audio", TrackKind::Audio);
+        track.add_region(AudioRegion {
+            id: "r1".into(),
+            name: "take1.wav".into(),
+            start_sample: 1000,
+            length_samples: 4000,
+        });
+
+        // Split at sample 2500
+        let (left_id, right_id) = track.split_region("r1", 2500).unwrap();
+        assert_eq!(track.regions.len(), 2);
+        assert_eq!(track.regions[0].id, left_id);
+        assert_eq!(track.regions[0].start_sample, 1000);
+        assert_eq!(track.regions[0].length_samples, 1500);
+        assert_eq!(track.regions[1].id, right_id);
+        assert_eq!(track.regions[1].start_sample, 2500);
+        assert_eq!(track.regions[1].length_samples, 2500);
+
+        // Trim start of right region to 3000
+        track.trim_region_start(&right_id, 3000).unwrap();
+        assert_eq!(track.regions[1].start_sample, 3000);
+        assert_eq!(track.regions[1].length_samples, 2000);
+
+        // Trim end of right region to 4500
+        track.trim_region_end(&right_id, 4500).unwrap();
+        assert_eq!(track.regions[1].length_samples, 1500);
+
+        // Remove left region
+        let removed = track.remove_region(&left_id);
+        assert!(removed.is_some());
+        assert_eq!(track.regions.len(), 1);
     }
 }

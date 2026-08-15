@@ -374,8 +374,8 @@ fn save_current_deck(
     };
 
     let bytes = save_presentation_session(&state.session.borrow())?;
-    std::fs::write(&path, &bytes)
-        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    loom_storage::atomic_write(&path, &bytes)
+        .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
@@ -880,7 +880,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.save_file(&export_request(&state)) {
                     Ok(Some(path)) => {
-                        match std::fs::write(&path, export_pdf(&state.session.borrow().document)) {
+                        let pdf_bytes = export_pdf(&state.session.borrow().document);
+                        match loom_storage::atomic_write(&path, &pdf_bytes) {
                             Ok(()) => set_status(&app, format!("Exported {}", path.display())),
                             Err(error) => set_status(&app, format!("Export failed: {error}")),
                         }

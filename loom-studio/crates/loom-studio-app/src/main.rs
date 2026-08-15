@@ -591,7 +591,7 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     let session = state.session.borrow();
                     let assets = state.assets.borrow();
                     match save_studio_bundle(&session.project, &assets).and_then(|bytes| {
-                        std::fs::write(&path, &bytes)
+                        loom_storage::atomic_write(&path, &bytes)
                             .map_err(|error| error.to_string())
                             .and_then(|_| checkpoint_snapshot_recovery(bytes))
                     }) {
@@ -625,7 +625,7 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                         let session = state.session.borrow();
                         let assets = state.assets.borrow();
                         match save_studio_bundle(&session.project, &assets).and_then(|bytes| {
-                            std::fs::write(&path, &bytes)
+                            loom_storage::atomic_write(&path, &bytes)
                                 .map_err(|error| error.to_string())
                                 .and_then(|_| checkpoint_snapshot_recovery(bytes))
                         }) {
@@ -1050,7 +1050,8 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
 
                 let result = mix_current(&state).and_then(|mix| {
                     let wav_bytes = mix.to_wav_pcm16()?;
-                    std::fs::write(&chosen_path, wav_bytes).map_err(|error| error.to_string())
+                    loom_storage::atomic_write(&chosen_path, &wav_bytes)
+                        .map_err(|error| error.to_string())
                 });
                 match result {
                     Ok(()) => app.set_status_left(

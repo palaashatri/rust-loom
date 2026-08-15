@@ -2766,6 +2766,7 @@ dependencies = [
  "loom-package",
  "loom-production",
  "loom-sheets-core",
+ "loom-storage",
  "loom-test-support",
  "loom-ui",
  "slint",
@@ -2785,6 +2786,13 @@ name = "loom-sheets-core"
 version = "0.1.0"
 dependencies = [
  "loom-command",
+ "loom-package",
+]
+
+[[package]]
+name = "loom-storage"
+version = "0.1.0"
+dependencies = [
  "loom-package",
 ]
 

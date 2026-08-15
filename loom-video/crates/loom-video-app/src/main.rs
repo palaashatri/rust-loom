@@ -545,7 +545,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 if let Some(path) = path_to_save {
                     let result =
                         save_video_project(&lock(&state.session).project).and_then(|bytes| {
-                            std::fs::write(&path, &bytes)
+                            loom_storage::atomic_write(&path, &bytes)
                                 .map_err(|error| error.to_string())
                                 .and_then(|_| checkpoint_snapshot_recovery(bytes))
                         });
@@ -577,7 +577,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     Ok(Some(path)) => {
                         let result =
                             save_video_project(&lock(&state.session).project).and_then(|bytes| {
-                                std::fs::write(&path, &bytes)
+                                loom_storage::atomic_write(&path, &bytes)
                                     .map_err(|error| error.to_string())
                                     .and_then(|_| checkpoint_snapshot_recovery(bytes))
                             });

@@ -167,7 +167,8 @@ fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
 }
 
 fn write_svg_frame(doc: &CompositionDocument, path: impl AsRef<Path>) -> Result<(), String> {
-    std::fs::write(path, export_svg_frame(doc, 0.0)).map_err(|error| error.to_string())
+    let svg = export_svg_frame(doc, 0.0);
+    loom_storage::atomic_write(path.as_ref(), svg.as_bytes()).map_err(|error| error.to_string())
 }
 
 fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
@@ -569,8 +570,8 @@ fn persist_current_motion(
     };
 
     let bytes = save_motion(&state.current.borrow())?;
-    std::fs::write(&path, &bytes)
-        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    loom_storage::atomic_write(&path, &bytes)
+        .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
     Ok(Some((path, bytes)))
 }

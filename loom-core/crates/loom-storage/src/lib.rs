@@ -119,6 +119,16 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
         .ok_or_else(|| StorageError::UnsafePath(path.display().to_string()))?;
     fs::create_dir_all(parent)?;
 
+    if path.exists() {
+        let meta = fs::metadata(path)?;
+        if meta.permissions().readonly() {
+            return Err(StorageError::Io(format!(
+                "destination '{}' is read-only",
+                path.display()
+            )));
+        }
+    }
+
     check_fail_point(FailPoint::BeforeTempCreate)?;
 
     let file_name = path

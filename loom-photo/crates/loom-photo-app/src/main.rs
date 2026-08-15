@@ -574,8 +574,8 @@ fn save_current_project(
     };
     let path = ensure_extension(path, "loomphoto");
     let bytes = save_photo_canvas(&state.session.borrow().canvas)?;
-    std::fs::write(&path, &bytes)
-        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    loom_storage::atomic_write(&path, &bytes)
+        .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
@@ -609,8 +609,8 @@ fn export_current_image(
         ExportKind::Png => encode_png(&image)?,
         ExportKind::Jpeg => encode_jpeg(&image, 92)?,
     };
-    std::fs::write(&path, bytes)
-        .map_err(|error| format!("failed to write '{}': {error}", path.display()))?;
+    loom_storage::atomic_write(&path, &bytes)
+        .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     set_status(app, format!("Exported {}", path.display()));
     Ok(true)
 }

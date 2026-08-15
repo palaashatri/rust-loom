@@ -2763,6 +2763,7 @@ dependencies = [
  "loom-desktop",
  "loom-photo-core",
  "loom-production",
+ "loom-storage",
  "loom-test-support",
  "loom-ui",
  "slint",
@@ -2795,6 +2796,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "loom-storage"
+version = "0.1.0"
+dependencies = [
+ "loom-package",
 ]
 
 [[package]]

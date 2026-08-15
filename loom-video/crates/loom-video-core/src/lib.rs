@@ -447,6 +447,49 @@ impl Track {
         }
         overlaps
     }
+
+    /// Slips the source content of a clip by delta seconds without changing its timeline position or duration.
+    pub fn slip_clip(&mut self, clip_id: &str, delta_secs: f64) -> Result<(), TimelineError> {
+        if self.locked {
+            return Err(TimelineError::TrackLocked);
+        }
+        let clip = self
+            .clips
+            .iter_mut()
+            .find(|c| c.id == clip_id)
+            .ok_or(TimelineError::ClipNotFound)?;
+        let new_in = clip.in_point + delta_secs;
+        let new_out = clip.out_point + delta_secs;
+        if new_in < 0.0 || new_out <= new_in {
+            return Err(TimelineError::InvalidTiming(
+                "slip would result in negative or invalid in/out points".into(),
+            ));
+        }
+        clip.in_point = new_in;
+        clip.out_point = new_out;
+        clip.sync_duration()
+    }
+
+    /// Slides a clip along the timeline by delta seconds without changing its duration.
+    pub fn slide_clip(&mut self, clip_id: &str, delta_secs: f64) -> Result<(), TimelineError> {
+        if self.locked {
+            return Err(TimelineError::TrackLocked);
+        }
+        let clip = self
+            .clips
+            .iter_mut()
+            .find(|c| c.id == clip_id)
+            .ok_or(TimelineError::ClipNotFound)?;
+        let new_start = clip.start_time + delta_secs;
+        if new_start < 0.0 {
+            return Err(TimelineError::InvalidTiming(
+                "slide would result in negative start time".into(),
+            ));
+        }
+        clip.start_time = new_start;
+        self.sort_clips();
+        Ok(())
+    }
 }
 
 impl VideoProject {
@@ -1228,5 +1271,29 @@ mod tests {
             .any(|argument| argument.contains("concat=n=1")));
         assert!(plan.arguments.iter().any(|argument| argument == "libx264"));
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn slip_and_slide_clip_operations() {
+        let mut track = Track::new("v1", "Video", TrackType::Video);
+        let mut clip = Clip::new("c1", "Clip 1", 5.0);
+        clip.start_time = 2.0;
+        clip.in_point = 1.0;
+        clip.out_point = 6.0;
+        track.insert_clip(clip).unwrap();
+
+        // Slip by +1.0 sec
+        track.slip_clip("c1", 1.0).unwrap();
+        let c = &track.clips[0];
+        assert_eq!(c.start_time, 2.0);
+        assert_eq!(c.in_point, 2.0);
+        assert_eq!(c.out_point, 7.0);
+
+        // Slide by +3.0 sec
+        track.slide_clip("c1", 3.0).unwrap();
+        let c = &track.clips[0];
+        assert_eq!(c.start_time, 5.0);
+        assert_eq!(c.in_point, 2.0);
+        assert_eq!(c.out_point, 7.0);
     }
 }

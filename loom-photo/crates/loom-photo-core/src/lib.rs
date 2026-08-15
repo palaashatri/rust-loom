@@ -277,6 +277,54 @@ impl RgbaImage {
         Ok(output)
     }
 
+    /// Flips the image horizontally.
+    pub fn flip_horizontal(&self) -> Result<Self, String> {
+        let mut output = Self::transparent(self.width, self.height)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let pixel = self.pixel(x, y).expect("pixel within bounds");
+                output.set_pixel(self.width - 1 - x, y, pixel);
+            }
+        }
+        Ok(output)
+    }
+
+    /// Flips the image vertically.
+    pub fn flip_vertical(&self) -> Result<Self, String> {
+        let mut output = Self::transparent(self.width, self.height)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let pixel = self.pixel(x, y).expect("pixel within bounds");
+                output.set_pixel(x, self.height - 1 - y, pixel);
+            }
+        }
+        Ok(output)
+    }
+
+    /// Rotates the image 90 degrees clockwise (swapping width and height).
+    pub fn rotate_90_cw(&self) -> Result<Self, String> {
+        let mut output = Self::transparent(self.height, self.width)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let pixel = self.pixel(x, y).expect("pixel within bounds");
+                output.set_pixel(self.height - 1 - y, x, pixel);
+            }
+        }
+        Ok(output)
+    }
+
+    /// Rotates the image 180 degrees.
+    pub fn rotate_180(&self) -> Result<Self, String> {
+        let mut output = Self::transparent(self.width, self.height)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let pixel = self.pixel(x, y).expect("pixel within bounds");
+                output.set_pixel(self.width - 1 - x, self.height - 1 - y, pixel);
+            }
+        }
+        Ok(output)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -960,5 +1008,27 @@ mod tests {
         assert_eq!(session.canvas.document.layers.len(), 1);
         assert!(session.redo());
         assert_eq!(session.canvas.document.layers.len(), 2);
+    }
+
+    #[test]
+    fn image_transforms_flip_and_rotate_correctly() {
+        let mut img = RgbaImage::transparent(2, 2).unwrap();
+        img.set_pixel(0, 0, [255, 0, 0, 255]);
+        img.set_pixel(1, 0, [0, 255, 0, 255]);
+        img.set_pixel(0, 1, [0, 0, 255, 255]);
+        img.set_pixel(1, 1, [255, 255, 255, 255]);
+
+        let h_flipped = img.flip_horizontal().unwrap();
+        assert_eq!(h_flipped.pixel(0, 0).unwrap(), [0, 255, 0, 255]);
+        assert_eq!(h_flipped.pixel(1, 0).unwrap(), [255, 0, 0, 255]);
+
+        let v_flipped = img.flip_vertical().unwrap();
+        assert_eq!(v_flipped.pixel(0, 0).unwrap(), [0, 0, 255, 255]);
+        assert_eq!(v_flipped.pixel(0, 1).unwrap(), [255, 0, 0, 255]);
+
+        let rotated = img.rotate_90_cw().unwrap();
+        assert_eq!(rotated.width, 2);
+        assert_eq!(rotated.height, 2);
+        assert_eq!(rotated.pixel(1, 0).unwrap(), [255, 0, 0, 255]);
     }
 }

@@ -243,9 +243,52 @@ impl Workbook {
         }
     }
 
+    /// Number of sheets in workbook.
+    pub fn len(&self) -> usize {
+        self.sheets.len()
+    }
+
+    /// Whether empty.
+    pub fn is_empty(&self) -> bool {
+        self.sheets.is_empty()
+    }
+
     /// Get a sheet by index.
     pub fn sheet(&self, i: usize) -> Option<&Sheet> {
         self.sheets.get(i)
+    }
+
+    /// Get mutable reference to a sheet by index.
+    pub fn sheet_mut(&mut self, i: usize) -> Option<&mut Sheet> {
+        self.sheets.get_mut(i)
+    }
+
+    /// Add a new empty sheet.
+    pub fn add_sheet(&mut self, name: &str) -> usize {
+        self.sheets.push(Sheet::new(name));
+        self.sheets.len() - 1
+    }
+
+    /// Remove a sheet by index if more than one sheet exists.
+    pub fn remove_sheet(&mut self, index: usize) -> Result<(), String> {
+        if self.sheets.len() <= 1 {
+            return Err("workbook must contain at least one sheet".into());
+        }
+        if index >= self.sheets.len() {
+            return Err(format!("sheet index {index} out of bounds"));
+        }
+        self.sheets.remove(index);
+        Ok(())
+    }
+
+    /// Rename a sheet by index.
+    pub fn rename_sheet(&mut self, index: usize, new_name: &str) -> Result<(), String> {
+        let sheet = self
+            .sheets
+            .get_mut(index)
+            .ok_or_else(|| format!("sheet index {index} out of bounds"))?;
+        sheet.name = new_name.to_string();
+        Ok(())
     }
 }
 
@@ -886,6 +929,99 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                 }
             }
             Value::Text(s)
+        }
+        "COUNT" => {
+            let mut count = 0.0;
+            for v in &values {
+                if let Value::Number(_) = v {
+                    count += 1.0;
+                }
+            }
+            Value::Number(count)
+        }
+        "COUNTA" => {
+            let mut count = 0.0;
+            for v in &values {
+                if *v != Value::Empty {
+                    count += 1.0;
+                }
+            }
+            Value::Number(count)
+        }
+        "IF" => {
+            if values.len() < 2 || values.len() > 3 {
+                return Value::Error(CalcError::Value);
+            }
+            let condition = match &values[0] {
+                Value::Bool(b) => *b,
+                Value::Number(n) => *n != 0.0,
+                Value::Text(s) => !s.is_empty(),
+                Value::Empty => false,
+                Value::Error(_) => return values[0].clone(),
+            };
+            if condition {
+                values[1].clone()
+            } else if values.len() == 3 {
+                values[2].clone()
+            } else {
+                Value::Bool(false)
+            }
+        }
+        "AND" => {
+            if values.is_empty() {
+                return Value::Error(CalcError::Value);
+            }
+            for v in &values {
+                match v {
+                    Value::Bool(b) => {
+                        if !b {
+                            return Value::Bool(false);
+                        }
+                    }
+                    Value::Number(n) => {
+                        if *n == 0.0 {
+                            return Value::Bool(false);
+                        }
+                    }
+                    Value::Error(_) => return v.clone(),
+                    _ => return Value::Error(CalcError::Value),
+                }
+            }
+            Value::Bool(true)
+        }
+        "OR" => {
+            if values.is_empty() {
+                return Value::Error(CalcError::Value);
+            }
+            let mut any_true = false;
+            for v in &values {
+                match v {
+                    Value::Bool(b) => {
+                        if *b {
+                            any_true = true;
+                        }
+                    }
+                    Value::Number(n) => {
+                        if *n != 0.0 {
+                            any_true = true;
+                        }
+                    }
+                    Value::Error(_) => return v.clone(),
+                    _ => return Value::Error(CalcError::Value),
+                }
+            }
+            Value::Bool(any_true)
+        }
+        "NOT" => {
+            if values.len() != 1 {
+                return Value::Error(CalcError::Value);
+            }
+            match &values[0] {
+                Value::Bool(b) => Value::Bool(!b),
+                Value::Number(n) => Value::Bool(*n == 0.0),
+                Value::Error(_) => values[0].clone(),
+                _ => Value::Error(CalcError::Value),
+            }
         }
         _ => Value::Error(CalcError::Name),
     }
@@ -1994,5 +2130,64 @@ mod tests {
             cache.values.get(&CellRef::parse("C1").unwrap()),
             Some(&Value::Number(12.0))
         );
+    }
+
+    #[test]
+    fn extended_formula_functions_evaluate_correctly() {
+        let mut sheet = Sheet::new("Formulas");
+        sheet.set_str("A1", "10");
+        sheet.set_str("A2", "20");
+        sheet.set_str("A3", "30");
+        sheet.set_str("B1", "=COUNT(A1:A3)");
+        sheet.set_str("B2", "=IF(A1>5, \"High\", \"Low\")");
+        sheet.set_str("B3", "=IF(A1>15, \"High\", \"Low\")");
+        sheet.set_str("B4", "=AND(A1>5, A2>15)");
+        sheet.set_str("B5", "=OR(A1>100, A2>15)");
+        sheet.set_str("B6", "=NOT(A1>100)");
+
+        let vals = evaluate(&sheet);
+        assert_eq!(
+            vals.get(&CellRef::parse("B1").unwrap()),
+            Some(&Value::Number(3.0))
+        );
+        assert_eq!(
+            vals.get(&CellRef::parse("B2").unwrap()),
+            Some(&Value::Text("High".into()))
+        );
+        assert_eq!(
+            vals.get(&CellRef::parse("B3").unwrap()),
+            Some(&Value::Text("Low".into()))
+        );
+        assert_eq!(
+            vals.get(&CellRef::parse("B4").unwrap()),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            vals.get(&CellRef::parse("B5").unwrap()),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            vals.get(&CellRef::parse("B6").unwrap()),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn workbook_sheet_management_operations() {
+        let mut wb = Workbook::with_sheet("Summary");
+        assert_eq!(wb.len(), 1);
+        assert!(!wb.is_empty());
+
+        let idx2 = wb.add_sheet("Expenses");
+        assert_eq!(idx2, 1);
+        assert_eq!(wb.len(), 2);
+        assert_eq!(wb.sheet(1).unwrap().name, "Expenses");
+
+        wb.rename_sheet(1, "Q1 Expenses").unwrap();
+        assert_eq!(wb.sheet(1).unwrap().name, "Q1 Expenses");
+
+        wb.remove_sheet(1).unwrap();
+        assert_eq!(wb.len(), 1);
+        assert!(wb.remove_sheet(0).is_err()); // Cannot remove only remaining sheet
     }
 }

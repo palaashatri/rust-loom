@@ -2975,6 +2975,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-storage"
+version = "0.1.0"
+dependencies = [
+ "loom-package",
+]
+
+[[package]]
 name = "loom-studio-app"
 version = "0.1.0"
 dependencies = [
@@ -2983,6 +2990,7 @@ dependencies = [
  "crossbeam-queue",
  "loom-desktop",
  "loom-production",
+ "loom-storage",
  "loom-studio-core",
  "loom-test-support",
  "loom-ui",

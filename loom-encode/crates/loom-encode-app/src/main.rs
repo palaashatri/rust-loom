@@ -570,7 +570,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 if let Some(path) = path_to_save {
                     let queue = snapshot(&state);
                     let result = save_encode_queue(&queue).and_then(|bytes| {
-                        std::fs::write(&path, &bytes)
+                        loom_storage::atomic_write(&path, &bytes)
                             .map_err(|error| error.to_string())
                             .and_then(|_| checkpoint_snapshot_recovery(bytes))
                     });
@@ -616,7 +616,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     Ok(Some(path)) => {
                         let queue = snapshot(&state);
                         let result = save_encode_queue(&queue).and_then(|bytes| {
-                            std::fs::write(&path, &bytes)
+                            loom_storage::atomic_write(&path, &bytes)
                                 .map_err(|error| error.to_string())
                                 .and_then(|_| checkpoint_snapshot_recovery(bytes))
                         });
