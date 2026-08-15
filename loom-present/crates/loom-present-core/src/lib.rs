@@ -214,6 +214,39 @@ impl PresentationDocument {
             false
         }
     }
+
+    pub fn duplicate_slide(&mut self, index: usize) -> Option<usize> {
+        if index < self.slides.len() {
+            let mut dup = self.slides[index].clone();
+            dup.id = format!("slide-{}-copy", self.slides.len() + 1);
+            let new_index = index + 1;
+            self.slides.insert(new_index, dup);
+            self.active_index = new_index;
+            Some(new_index)
+        } else {
+            None
+        }
+    }
+
+    pub fn remove_slide(&mut self, index: usize) -> Option<Slide> {
+        if self.slides.len() > 1 && index < self.slides.len() {
+            let slide = self.slides.remove(index);
+            self.active_index = self.active_index.min(self.slides.len() - 1);
+            Some(slide)
+        } else {
+            None
+        }
+    }
+
+    pub fn move_slide(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.slides.len() || to >= self.slides.len() || from == to {
+            return false;
+        }
+        let slide = self.slides.remove(from);
+        self.slides.insert(to, slide);
+        self.active_index = to;
+        true
+    }
 }
 
 pub fn save_presentation(doc: &PresentationDocument) -> Result<Vec<u8>, String> {
@@ -886,5 +919,27 @@ mod tests {
 
         assert!(slide.remove_element("e1"));
         assert_eq!(slide.elements.len(), 1);
+    }
+
+    #[test]
+    fn slide_deck_duplicate_move_and_remove() {
+        let mut doc = PresentationDocument::new("deck-ops", "Deck Operations");
+        assert_eq!(doc.len(), 1);
+        doc.add_slide("Slide 2", "bullets");
+        assert_eq!(doc.len(), 2);
+
+        // Duplicate slide 0
+        let dup_idx = doc.duplicate_slide(0).unwrap();
+        assert_eq!(dup_idx, 1);
+        assert_eq!(doc.len(), 3);
+
+        // Move slide 0 to 2
+        assert!(doc.move_slide(0, 2));
+        assert_eq!(doc.active_index, 2);
+
+        // Remove slide 1
+        let removed = doc.remove_slide(1);
+        assert!(removed.is_some());
+        assert_eq!(doc.len(), 2);
     }
 }

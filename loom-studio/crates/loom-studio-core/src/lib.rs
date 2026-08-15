@@ -390,6 +390,26 @@ impl AudioBuffer {
         }
         Ok(output)
     }
+
+    /// Scales all samples by a linear gain factor.
+    pub fn apply_gain(&mut self, gain: f32) {
+        for sample in &mut self.samples {
+            *sample *= gain;
+        }
+    }
+
+    /// Normalizes peak amplitude to the given target peak (e.g., 0.99 for -0.1 dBFS).
+    pub fn normalize(&mut self, target_peak: f32) -> Result<f32, String> {
+        self.validate()?;
+        let current_peak = self.samples.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+        if current_peak <= 1e-6 {
+            return Ok(1.0);
+        }
+        let target = target_peak.clamp(0.0, 1.0);
+        let factor = target / current_peak;
+        self.apply_gain(factor);
+        Ok(factor)
+    }
 }
 
 /// MIDI note used by the built-in deterministic reference synthesizer.
@@ -1097,5 +1117,30 @@ mod studio_runtime_tests {
         let removed = track.remove_region(&left_id);
         assert!(removed.is_some());
         assert_eq!(track.regions.len(), 1);
+    }
+
+    #[test]
+    fn audio_gain_and_normalization_operations() {
+        let mut buffer = AudioBuffer::sine(48_000, 1, 440.0, 0.01, 0.5).unwrap();
+        assert!((buffer.samples[0] - 0.0).abs() < 1e-4);
+
+        // Apply gain 2.0
+        buffer.apply_gain(2.0);
+        let max_sample = buffer
+            .samples
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+        assert!((max_sample - 1.0).abs() < 0.05);
+
+        // Normalize to 0.5
+        let factor = buffer.normalize(0.5).unwrap();
+        assert!((factor - 0.5).abs() < 0.05);
+        let normalized_max = buffer
+            .samples
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+        assert!((normalized_max - 0.5).abs() < 0.02);
     }
 }

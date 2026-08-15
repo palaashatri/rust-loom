@@ -226,6 +226,46 @@ impl Sheet {
     pub fn raw(&self, r: CellRef) -> Option<&str> {
         self.cells.get(&r).map(|c| c.raw.as_str())
     }
+
+    /// Clear a cell at coordinate.
+    pub fn clear_cell(&mut self, r: CellRef) -> Option<String> {
+        self.cells.remove(&r).map(|c| c.raw)
+    }
+
+    /// Clear all cells in a rectangular range.
+    pub fn clear_range(&mut self, start: CellRef, end: CellRef) -> usize {
+        let min_col = start.col.min(end.col);
+        let max_col = start.col.max(end.col);
+        let min_row = start.row.min(end.row);
+        let max_row = start.row.max(end.row);
+        let mut cleared = 0;
+        for col in min_col..=max_col {
+            for row in min_row..=max_row {
+                if self.cells.remove(&CellRef { col, row }).is_some() {
+                    cleared += 1;
+                }
+            }
+        }
+        cleared
+    }
+
+    /// Return bounding box of used cells: (min_col, min_row, max_col, max_row), if non-empty.
+    pub fn used_range(&self) -> Option<(u32, u32, u32, u32)> {
+        if self.cells.is_empty() {
+            return None;
+        }
+        let mut min_col = u32::MAX;
+        let mut min_row = u32::MAX;
+        let mut max_col = 0;
+        let mut max_row = 0;
+        for r in self.cells.keys() {
+            min_col = min_col.min(r.col);
+            min_row = min_row.min(r.row);
+            max_col = max_col.max(r.col);
+            max_row = max_row.max(r.row);
+        }
+        Some((min_col, min_row, max_col, max_row))
+    }
 }
 
 /// A workbook = multiple sheets (single sheet used by engine core for now).
@@ -2189,5 +2229,22 @@ mod tests {
         wb.remove_sheet(1).unwrap();
         assert_eq!(wb.len(), 1);
         assert!(wb.remove_sheet(0).is_err()); // Cannot remove only remaining sheet
+    }
+
+    #[test]
+    fn sheet_clear_and_used_range_operations() {
+        let mut sheet = Sheet::new("Data");
+        assert_eq!(sheet.used_range(), None);
+
+        sheet.set_str("B2", "10");
+        sheet.set_str("D5", "20");
+        let bounds = sheet.used_range().unwrap();
+        assert_eq!(bounds, (1, 1, 3, 4));
+
+        let c1 = CellRef::parse("B2").unwrap();
+        let c2 = CellRef::parse("D5").unwrap();
+        let cleared = sheet.clear_range(c1, c2);
+        assert_eq!(cleared, 2);
+        assert_eq!(sheet.used_range(), None);
     }
 }

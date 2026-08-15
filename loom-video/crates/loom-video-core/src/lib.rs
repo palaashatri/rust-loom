@@ -608,6 +608,63 @@ impl VideoProject {
         Ok(())
     }
 
+    /// Deletes a clip from a track without rippling.
+    pub fn delete_clip(
+        &mut self,
+        track_index: usize,
+        clip_id: &str,
+    ) -> Result<Clip, TimelineError> {
+        let track = self
+            .tracks
+            .get_mut(track_index)
+            .ok_or(TimelineError::InvalidTrack)?;
+        if track.locked {
+            return Err(TimelineError::TrackLocked);
+        }
+        let pos = track
+            .clips
+            .iter()
+            .position(|c| c.id == clip_id)
+            .ok_or(TimelineError::ClipNotFound)?;
+        Ok(track.clips.remove(pos))
+    }
+
+    /// Ripple deletes a clip from a track, closing the gap by shifting following clips left.
+    pub fn ripple_delete_clip(
+        &mut self,
+        track_index: usize,
+        clip_id: &str,
+    ) -> Result<Clip, TimelineError> {
+        let track = self
+            .tracks
+            .get_mut(track_index)
+            .ok_or(TimelineError::InvalidTrack)?;
+        if track.locked {
+            return Err(TimelineError::TrackLocked);
+        }
+        let pos = track
+            .clips
+            .iter()
+            .position(|c| c.id == clip_id)
+            .ok_or(TimelineError::ClipNotFound)?;
+        let removed = track.clips.remove(pos);
+        let removed_duration = removed.duration;
+        for following in &mut track.clips[pos..] {
+            following.start_time = (following.start_time - removed_duration).max(0.0);
+        }
+        Ok(removed)
+    }
+
+    /// Removes a timeline marker by id.
+    pub fn remove_marker(&mut self, marker_id: &str) -> bool {
+        if let Some(pos) = self.markers.iter().position(|m| m.id == marker_id) {
+            self.markers.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Builds the decoder/render plan for all enabled, unlocked media clips.
     pub fn render_plan(&self) -> Vec<RenderSegment> {
         let solo_active = self.tracks.iter().any(|track| track.solo);
@@ -1295,5 +1352,48 @@ mod tests {
         assert_eq!(c.start_time, 5.0);
         assert_eq!(c.in_point, 2.0);
         assert_eq!(c.out_point, 7.0);
+    }
+
+    #[test]
+    fn clip_delete_and_ripple_delete_operations() {
+        let mut project = VideoProject::new("v-test", "Video Test");
+        let mut c1 = Clip::new("c1", "Clip 1", 3.0);
+        c1.start_time = 0.0;
+        let mut c2 = Clip::new("c2", "Clip 2", 4.0);
+        c2.start_time = 3.0;
+        let mut c3 = Clip::new("c3", "Clip 3", 2.0);
+        c3.start_time = 7.0;
+
+        project.tracks[0].clips.clear();
+        project.tracks[0].add_clip(c1);
+        project.tracks[0].add_clip(c2);
+        project.tracks[0].add_clip(c3);
+        assert_eq!(project.tracks[0].clips.len(), 3);
+
+        // Ripple delete middle clip (c2, duration 4.0)
+        let removed = project.ripple_delete_clip(0, "c2").unwrap();
+        assert_eq!(removed.id, "c2");
+        assert_eq!(project.tracks[0].clips.len(), 2);
+        // c3 start_time should ripple from 7.0 to 3.0
+        assert_eq!(project.tracks[0].clips[1].id, "c3");
+        assert_eq!(project.tracks[0].clips[1].start_time, 3.0);
+
+        // Delete first clip without rippling
+        let removed1 = project.delete_clip(0, "c1").unwrap();
+        assert_eq!(removed1.id, "c1");
+        assert_eq!(project.tracks[0].clips.len(), 1);
+
+        // Marker removal
+        project
+            .add_marker(TimelineMarker {
+                id: "m1".into(),
+                time: 2.5,
+                label: "Cut".into(),
+                color: "#ff0000".into(),
+            })
+            .unwrap();
+        assert_eq!(project.markers.len(), 1);
+        assert!(project.remove_marker("m1"));
+        assert_eq!(project.markers.len(), 0);
     }
 }

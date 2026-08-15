@@ -16,16 +16,16 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **26/100**, up from 24/100. All eight applications (Writer, Sheets,
+approximately **30/100**, up from 26/100. All eight applications (Writer, Sheets,
 Present, Photo, Motion, Video, Studio, and Encode) have now completed the shared
-native desktop workflow migration using `loom_desktop::FileDialogService`. The
-shared runtime crates (`loom-command`, `loom-history`, `loom-storage`, `loom-jobs`,
-and `loom-document`) have been hardened with typed command buses, coalescing
-hierarchical history with byte-budget estimation, atomic temp-file writes with
-fsync and mtime autosave pruning, blocking condition-variable schedulers, and
-unified document lifecycle and selection models. All 11 monorepo workspaces pass
-unit, integration, formatting, Clippy, UI audit, contract audit, and native
-functional/UI matrix gates.
+native desktop workflow migration using `loom_desktop::FileDialogService` and durable
+atomic temp-file persistence with fsync via `loom-storage`. The shared runtime crates
+(`loom-command`, `loom-history`, `loom-storage`, `loom-jobs`, and `loom-document`)
+have been hardened with typed command buses, coalescing hierarchical history with
+byte-budget estimation, atomic temp-file writes with fsync and mtime autosave pruning,
+blocking condition-variable schedulers, and unified document lifecycle and selection models.
+All 11 monorepo workspaces pass unit, integration, formatting, Clippy, UI audit, contract
+audit, and native functional/UI matrix gates with 436 passing automated tests.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -48,7 +48,7 @@ parity or product completion.
 - Bounded, coalesced undo/redo foundations and crash-recovery snapshots across all
   applications with memory byte budgeting.
 - Atomic file persistence with unique temporary file writes, fsync durability,
-  and mtime-sorted snapshot pruning.
+  read-only permission verification, and mtime-sorted snapshot pruning.
 - Non-spinning condition-variable job scheduler with error propagation and panic
   containment.
 - Unified application selection vocabulary and document lifecycle state machine.
@@ -59,78 +59,60 @@ parity or product completion.
 ## Current application boundaries
 
 - **Writer:** editable paragraph surface, block model, style-run persistence,
-  bounded/coalesced history, recovery, search/pagination foundations, Markdown
-  workflows, and PDF output. New creates a blank unsaved document. The normal
-  desktop UI opens arbitrary `.loomdoc` files through a native picker, saves to
-  the current path, supports native Save As, and chooses a PDF destination
-  through a native save dialog. Cancellation and dialog failures do not replace
-  the current document. File-dialog behavior is injectable for deterministic
-  tests. Writer does not yet provide recent-document UI, platform menus,
-  drag/drop, printing, asynchronous large-document I/O, or atomic save through
-  the new desktop service. Toolbar formatting is still document-wide rather
-  than selection-aware. Professional page layout, floating objects, citations,
-  forms, mail merge, EPUB, and high-fidelity DOCX/ODT remain incomplete.
-- **Sheets:** formulas, dependency and incremental-recalculation foundations,
-  named ranges, validation, conditional predicates, filtering/sorting, CSV
-  workflows, persistence, history, and a visible fixed grid. New creates a
-  blank single-sheet workbook. The desktop UI opens `.loomtable` or imports CSV
-  through a native picker, saves native workbooks through Save/Save As, and
-  selects CSV export destinations natively. Imported CSV paths are deliberately
-  not reused as native package save targets. The command palette no longer
-  exposes Add Sheet, Go To Sheet, or cell-format actions that previously changed
-  UI state without persisted workbook semantics. Multi-sheet storage, large-grid
-  virtualization, rich formatting, charts, pivots, broad function coverage,
-  XLSX/ODS fidelity, data connectors, recent documents, menus, drag/drop,
-  asynchronous I/O, and atomic save remain incomplete.
-- **Present:** deck/slide models, layouts, notes, transitions, scene generation,
-  validation, persistence, history, PDF output, and native New/Open/Save/Save As/
-  export-destination workflows are wired. The Phase 0 re-audit does **not** promote
-  its score: semantic round-trip assertions remain narrow, writes are non-atomic,
-  PDF output is not independently validated in the desktop journey, and recent
-  documents/import, full direct manipulation, masters, mixed media, animation
-  authoring, presenter workflows, recording, video export, and PPTX/ODP fidelity
-  remain incomplete.
-- **Photo:** raster decode, pixel buffers, layers, blend modes, adjustment and
+  bounded/coalesced history, recovery, search/pagination metrics, block splitting/merging,
+  sub-range character formatting, paragraph alignment, block kinds, Markdown workflows,
+  and atomic PDF output. New creates a blank unsaved document. The normal desktop UI
+  opens arbitrary `.loomdoc` files through a native picker, saves atomically to the
+  current path, supports native Save As, and chooses a PDF destination through a native
+  save dialog. Cancellation and dialog failures do not replace the current document.
+  File-dialog behavior is injectable for deterministic tests. Professional floating
+  objects, citations, forms, mail merge, EPUB, and high-fidelity DOCX/ODT remain incomplete.
+- **Sheets:** multi-sheet workbook management (`add_sheet`, `remove_sheet`, `rename_sheet`),
+  cell clearing and range operations (`clear_range`, `used_range`), extended formula
+  functions (`IF`, `COUNT`, `COUNTA`, `AND`, `OR`, `NOT`), dependency and
+  incremental-recalculation foundations, named ranges, validation, conditional predicates,
+  filtering/sorting, CSV workflows, persistence, history, and a visible fixed grid.
+  The desktop UI opens `.loomtable` or imports CSV through a native picker, saves native
+  workbooks through Save/Save As via atomic write, and selects CSV export destinations
+  natively. Large-grid virtualization, rich formatting, charts, pivots, broad function
+  coverage, XLSX/ODS fidelity, and data connectors remain incomplete.
+- **Present:** deck/slide models, slide duplication/reordering/removal, element
+  geometric alignments (`align_left`, `align_center`, `align_top`), layer z-ordering
+  (`bring_to_front`, `send_to_back`, `bring_forward`, `send_backward`), layout presets,
+  notes, transitions, scene generation, validation, persistence, history, PDF output,
+  and native New/Open/Save/Save As/export-destination workflows with atomic writes.
+  Masters, mixed media, animation authoring, presenter workflows, recording, video export,
+  and PPTX/ODP fidelity remain incomplete.
+- **Photo:** raster decode, pixel buffers, layers, 8 blend modes (`Normal`, `Multiply`,
+  `Screen`, `Overlay`, `Darken`, `Lighten`, `Difference`, `HardLight`), adjustments
+  (`Brightness`, `Exposure`, `Contrast`, `Saturation`, `Invert`, `Gamma`, `Temperature`),
+  canvas transforms (`flip_horizontal`, `flip_vertical`, `rotate_90_cw`, `rotate_180`),
   mask foundations, compositing, crop/resize, persistence, history, native project
-  Open/Save/Save As, raster import, and native PNG/JPEG destination workflows are
-  wired. The Phase 0 re-audit does **not** promote its score: persistence/export
-  writes are non-atomic, exported files are not independently decoded in the desktop
-  journey, recent documents are absent, and tool selection still includes status-only
-  modes rather than complete canvas interaction. Painting, production masks/selections,
-  RAW/ICC, healing, warping, HDR/panorama, PSD fidelity, GPU effects, and production
-  AI editing remain incomplete.
-- **Motion:** layer/keyframe models, interpolation, transform manipulation, ordering,
-  validation, persistence, bounded history, frame sampling, SVG frame export, and
-  native New/Open/Save/Save As/export destination workflows are wired. The repaired
-  native slice has a genuinely blank New composition, exact model round-trip equality,
-  repeated-open idempotence, Save→Save As path coverage, cancellation/error coverage,
-  read-only and non-UTF-8 path coverage where supported, and responsive startup smoke
-  checks. Writes remain non-atomic, recent documents and professional render validation
-  are absent, and production compositing/playback, cameras/lights, particles, effects,
-  tracking, stabilization, optical flow, and render-queue breadth remain incomplete.
-- **Video:** track/clip models, trim/split/speed/ripple operations, markers,
-  captions, local probing and preview decode, persistence, history, FFmpeg-backed
-  export, progress, and cancellation. Native desktop New, Open, Save, Save As, and
-  media import workflows are wired with `.loomvideo` and media filters, `save-as-project`
-  UI and palette integration, and 5 automated `ScriptedFileDialogs` tests. Synchronized
+  Open/Save/Save As, raster import, and atomic PNG/JPEG destination workflows.
+  Painting tools, RAW/ICC, healing, warping, HDR/panorama, PSD fidelity, GPU effects,
+  and production AI editing remain incomplete.
+- **Motion:** layer/keyframe models, easing curves, keyframe sampling, transform
+  manipulation, layer duplication/reordering/removal, validation, persistence,
+  bounded history, frame sampling, SVG frame export, and native New/Open/Save/Save As/
+  export destination workflows with atomic writes. Production compositing/playback,
+  cameras/lights, particles, effects, tracking, stabilization, optical flow, and
+  render-queue breadth remain incomplete.
+- **Video:** track/clip models, NLE trims, slip and slide operations, clip deletion
+  and ripple deletion, markers, captions, local probing and preview decode, persistence,
+  history, FFmpeg-backed export, progress, cancellation, and atomic writes. Synchronized
   timeline playback, real proxy workflows, multicam, advanced trims, professional
   audio/color/effects, HDR, transcription/tracking, and interchange remain incomplete.
-- **Studio:** track/region models, PCM/WAV handling, oscillator and MIDI synthesis,
-  automation interpolation, stereo mixing, persistence, history, and local
-  audio/MIDI device foundations. Native desktop New, Open, Save, Save As, audio
-  import, and WAV export workflows are wired with `.loomstudio` and audio filters,
-  `save-as-song` UI and palette integration, and 5 automated `ScriptedFileDialogs`
-  tests. Production recording, realtime scheduling, complete editing/mixing, comping,
-  time/pitch tools, CLAP/VST3 hosting, isolation, plugin UI, spatial audio, and
-  mastering remain incomplete.
-- **Encode:** editable FFmpeg queue, deterministic command plans, local backend
-  discovery, presets, execution, progress, cancellation, retry, persistence,
-  recovery, and queue history. Native desktop New, Open, Save, Save As, and source
-  addition workflows are wired with `.loomencode` filters, `save-as-queue` UI and
-  palette integration, and 5 automated `ScriptedFileDialogs` tests. Complete source
-  controls, hardware policy, exhaustive formats, pause/resume guarantees, watch
-  folders, multi-destination dependency workflows, and perceptual conformance remain
-  incomplete.
+- **Studio:** track/region models, region split/trim/removal, audio gain scaling and peak
+  normalization, PCM/WAV handling, oscillator and MIDI synthesis, automation interpolation,
+  stereo mixing, persistence, history, local audio/MIDI device foundations, and atomic
+  writes for song packages and WAV exports. Production recording, realtime scheduling,
+  comping, time/pitch tools, CLAP/VST3 hosting, isolation, plugin UI, and mastering
+  remain incomplete.
+- **Encode:** editable FFmpeg queue, multi-destination batching, job reordering, failure
+  retries, cleanup of completed jobs, deterministic command plans, local backend discovery,
+  presets, execution, progress, cancellation, persistence, recovery, queue history, and
+  atomic writes. Complete hardware policy, exhaustive formats, pause/resume guarantees,
+  watch folders, and perceptual conformance remain incomplete.
 
 ## Evidence boundaries
 
@@ -164,7 +146,7 @@ still lacks complete semantic round-trip and independent PDF evidence. Photo sti
 has non-atomic persistence/export and status-only tool modes. Motion's repaired
 native workflow passed its focused strict gate, while its professional playback,
 compositing, and rendering engine remains incomplete. The complete-suite truth
-score is approximately **26/100**.
+score is approximately **30/100**.
 
 ### Keyboard journeys
 

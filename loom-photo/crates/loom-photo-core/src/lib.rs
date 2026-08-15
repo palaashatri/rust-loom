@@ -23,6 +23,10 @@ pub enum BlendMode {
     Multiply,
     Screen,
     Overlay,
+    Darken,
+    Lighten,
+    Difference,
+    HardLight,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -805,6 +809,16 @@ fn blend_channel(source: f32, destination: f32, mode: &BlendMode) -> f32 {
                 1.0 - 2.0 * (1.0 - source) * (1.0 - destination)
             }
         }
+        BlendMode::Darken => source.min(destination),
+        BlendMode::Lighten => source.max(destination),
+        BlendMode::Difference => (source - destination).abs(),
+        BlendMode::HardLight => {
+            if source <= 0.5 {
+                2.0 * source * destination
+            } else {
+                1.0 - 2.0 * (1.0 - source) * (1.0 - destination)
+            }
+        }
     }
 }
 
@@ -845,6 +859,22 @@ fn apply_adjustment(
                 for channel in &mut adjusted {
                     *channel = luma + (*channel - luma) * factor;
                 }
+            }
+            "invert" => {
+                for channel in &mut adjusted {
+                    *channel = 255.0 - *channel;
+                }
+            }
+            "gamma" => {
+                let exponent = 1.0 / value.clamp(0.1, 10.0);
+                for channel in &mut adjusted {
+                    *channel = ((*channel / 255.0).powf(exponent)) * 255.0;
+                }
+            }
+            "temperature" => {
+                let warm = value.clamp(-1.0, 1.0) * 50.0;
+                adjusted[0] += warm;
+                adjusted[2] -= warm;
             }
             _ => {
                 let offset = value.clamp(-1.0, 1.0) * 255.0;
@@ -1030,5 +1060,17 @@ mod tests {
         assert_eq!(rotated.width, 2);
         assert_eq!(rotated.height, 2);
         assert_eq!(rotated.pixel(1, 0).unwrap(), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn blend_modes_and_adjustments_evaluate_correctly() {
+        assert_eq!(blend_channel(0.4, 0.6, &BlendMode::Darken), 0.4);
+        assert_eq!(blend_channel(0.4, 0.6, &BlendMode::Lighten), 0.6);
+        assert!((blend_channel(0.4, 0.6, &BlendMode::Difference) - 0.2).abs() < 1e-5);
+        assert!((blend_channel(0.4, 0.6, &BlendMode::HardLight) - 0.48).abs() < 1e-5);
+
+        let mut img = RgbaImage::solid(1, 1, [100, 150, 200, 255]).unwrap();
+        apply_adjustment(&mut img, "invert", 1.0, 1.0, None);
+        assert_eq!(img.pixel(0, 0).unwrap(), [155, 105, 55, 255]);
     }
 }

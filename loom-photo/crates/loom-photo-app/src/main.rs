@@ -216,6 +216,10 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
                 BlendMode::Multiply => "Multiply",
                 BlendMode::Screen => "Screen",
                 BlendMode::Overlay => "Overlay",
+                BlendMode::Darken => "Darken",
+                BlendMode::Lighten => "Lighten",
+                BlendMode::Difference => "Difference",
+                BlendMode::HardLight => "Hard Light",
             }
             .into(),
         );
@@ -934,6 +938,10 @@ fn main() -> Result<(), String> {
                         "Multiply" => BlendMode::Multiply,
                         "Screen" => BlendMode::Screen,
                         "Overlay" => BlendMode::Overlay,
+                        "Darken" => BlendMode::Darken,
+                        "Lighten" => BlendMode::Lighten,
+                        "Difference" => BlendMode::Difference,
+                        "Hard Light" => BlendMode::HardLight,
                         _ => BlendMode::Normal,
                     };
                 }

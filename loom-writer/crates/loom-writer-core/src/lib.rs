@@ -364,6 +364,63 @@ impl WriterDocument {
         self.blocks.remove(second_index);
         Ok(())
     }
+
+    /// Formats a sub-range within a block with a given character style.
+    pub fn format_block_range(
+        &mut self,
+        block_id: u64,
+        start_byte: usize,
+        end_byte: usize,
+        style: loom_text::CharacterStyle,
+    ) -> Result<(), WriterError> {
+        let block = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == block_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
+        let text_len = block.text.as_str().len();
+        let start = start_byte.min(text_len);
+        let end = end_byte.min(text_len);
+        if start >= end {
+            return Ok(());
+        }
+        block
+            .runs
+            .retain(|run| run.end <= start || run.start >= end);
+        block.runs.push(loom_text::StyleRun { start, end, style });
+        block.runs.sort_by_key(|run| run.start);
+        Ok(())
+    }
+
+    /// Sets paragraph alignment for a specific block.
+    pub fn set_block_alignment(
+        &mut self,
+        block_id: u64,
+        alignment: loom_text::Alignment,
+    ) -> Result<(), WriterError> {
+        let block = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == block_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
+        block.style.alignment = alignment;
+        Ok(())
+    }
+
+    /// Sets block kind (e.g. "heading1", "paragraph", "quote", "bullet").
+    pub fn set_block_kind(
+        &mut self,
+        block_id: u64,
+        kind: impl Into<String>,
+    ) -> Result<(), WriterError> {
+        let block = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == block_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
+        block.kind = kind.into();
+        Ok(())
+    }
 }
 
 /// Long-form document pagination and reading metrics.
@@ -2307,5 +2364,43 @@ mod tests {
         assert!(metrics.words > 300);
         assert!(metrics.total_pages >= 2);
         assert!(metrics.reading_time_minutes > 1.0);
+    }
+
+    #[test]
+    fn block_formatting_and_alignment_operations() {
+        let mut doc = WriterDocument::new("doc-fmt", "Formatting Test");
+        let block = RichBlock::new(
+            1,
+            "paragraph",
+            "The quick brown fox jumps over the lazy dog",
+        );
+        doc.push(block);
+
+        // Format "brown fox" as italic
+        doc.format_block_range(
+            1,
+            10,
+            19,
+            loom_text::CharacterStyle {
+                italic: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let b = &doc.blocks[0];
+        assert_eq!(b.runs.len(), 1);
+        assert_eq!(b.runs[0].start, 10);
+        assert_eq!(b.runs[0].end, 19);
+        assert!(b.runs[0].style.italic);
+
+        // Set alignment to Center
+        doc.set_block_alignment(1, loom_text::Alignment::Center)
+            .unwrap();
+        assert_eq!(doc.blocks[0].style.alignment, loom_text::Alignment::Center);
+
+        // Set block kind to heading1
+        doc.set_block_kind(1, "heading1").unwrap();
+        assert_eq!(doc.blocks[0].kind, "heading1");
     }
 }

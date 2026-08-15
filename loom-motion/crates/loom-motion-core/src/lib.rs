@@ -116,6 +116,20 @@ impl CompositionDocument {
         self.active_layer_index = index;
         true
     }
+
+    pub fn duplicate_layer(&mut self, index: usize) -> Option<usize> {
+        if index < self.layers.len() {
+            let mut dup = self.layers[index].clone();
+            dup.id = format!("{}-copy", dup.id);
+            dup.name = format!("{} Copy", dup.name);
+            let new_index = index + 1;
+            self.layers.insert(new_index, dup);
+            self.active_layer_index = new_index;
+            Some(new_index)
+        } else {
+            None
+        }
+    }
 }
 
 pub fn save_motion(doc: &CompositionDocument) -> Result<Vec<u8>, String> {
@@ -633,5 +647,27 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.message.contains("not strictly ordered")));
+    }
+
+    #[test]
+    fn layer_duplicate_move_remove_operations() {
+        let mut doc = CompositionDocument::new("comp-layers", "Layers Test");
+        doc.add_layer(MotionLayer::new("l1", "Layer 1", "Shape"));
+        doc.add_layer(MotionLayer::new("l2", "Layer 2", "Text"));
+        assert_eq!(doc.len(), 2);
+
+        // Duplicate layer 0
+        let dup_idx = doc.duplicate_layer(0).unwrap();
+        assert_eq!(dup_idx, 1);
+        assert_eq!(doc.len(), 3);
+        assert_eq!(doc.layers[1].name, "Layer 1 Copy");
+
+        // Move layer 0 to 2
+        assert!(doc.move_layer(0, 2));
+        assert_eq!(doc.active_layer_index, 2);
+
+        // Remove layer 1
+        assert!(doc.remove_layer(1));
+        assert_eq!(doc.len(), 2);
     }
 }
