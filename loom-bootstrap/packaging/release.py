@@ -334,20 +334,19 @@ def package_linux(
 
 def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> str:
     del architecture  # Architecture is selected by `wix build -arch`.
-    components: list[str] = []
+    install_components: list[str] = []
+    shortcut_components: list[str] = []
     refs: list[str] = []
     for app, source in binaries.items():
         component_id = f"Component_{app}"
         association_id = f"Association_{app}"
+        shortcut_id = f"ShortcutComponent_{app}"
         file_id = f"File_{app}"
         extension, _mime, description = DOCUMENT_TYPES[app]
         display = DISPLAY_NAMES[app]
-        components.append(
+        install_components.append(
             f'''<Component Id="{component_id}" Guid="*">
               <File Id="{file_id}" Source="{xml_escape(str(source))}" KeyPath="yes" />
-              <Shortcut Id="Shortcut_{app}" Directory="ApplicationProgramsFolder"
-                        Name="{xml_escape(display)}" Target="[INSTALLFOLDER]loom-{app}.exe"
-                        WorkingDirectory="INSTALLFOLDER" />
             </Component>
             <Component Id="{association_id}" Guid="*">
               <RegistryValue Root="HKCR" Key=".{extension}" Value="Loom.{app}" Type="string" KeyPath="yes" />
@@ -356,8 +355,19 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
                              Value="&quot;[INSTALLFOLDER]loom-{app}.exe&quot; &quot;%1&quot;" Type="string" />
             </Component>'''
         )
+        shortcut_components.append(
+            f'''<Component Id="{shortcut_id}" Guid="*">
+              <Shortcut Id="Shortcut_{app}" Directory="ApplicationProgramsFolder"
+                        Name="{xml_escape(display)}" Target="[INSTALLFOLDER]loom-{app}.exe"
+                        WorkingDirectory="INSTALLFOLDER" />
+              <RemoveFolder Id="RemoveFolder_{app}" Directory="ApplicationProgramsFolder" On="uninstall" />
+              <RegistryValue Root="HKLM" Key="Software\\Loom\\Loom Creator Suite\\Shortcuts"
+                             Name="{app}" Value="1" Type="integer" KeyPath="yes" />
+            </Component>'''
+        )
         refs.append(f'<ComponentRef Id="{component_id}" />')
         refs.append(f'<ComponentRef Id="{association_id}" />')
+        refs.append(f'<ComponentRef Id="{shortcut_id}" />')
     upgrade_code = str(uuid.uuid5(uuid.NAMESPACE_URL, "https://loom.local/creator-suite")).upper()
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
@@ -367,11 +377,13 @@ def wix_source(binaries: dict[str, Path], version: str, architecture: str) -> st
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Loom Creator Suite">
-        {''.join(components)}
+        {''.join(install_components)}
       </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="Loom Creator Suite" />
+    <StandardDirectory Id="CommonProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Loom Creator Suite">
+        {''.join(shortcut_components)}
+      </Directory>
     </StandardDirectory>
     <Feature Id="MainFeature" Title="Loom Creator Suite" Level="1">
       {''.join(refs)}

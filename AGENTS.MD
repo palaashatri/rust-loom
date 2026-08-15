@@ -9,7 +9,7 @@ Loom is not a greenfield project. It is a working functional alpha containing ei
 The active integration branch is:
 
 ```text
-chatgpt/loom-ui-functional-audit-2
+cline-implementation
 ```
 
 Do not create long-lived implementation branches, duplicate roadmaps, issue sprawl, or parallel sources of truth. Parallel agents may work in isolated local worktrees or produce patch sets, but the coordinator must serialize reviewed commits onto the active integration branch.
@@ -1380,4 +1380,4 @@ Do not respond to this file by writing another roadmap.
 
 Inspect the current branch, choose the highest-priority incomplete epic from section 14 whose dependencies are satisfied, implement a complete vertical slice, test it, run the affected native evidence, update `TRUTH.md`, and report the new truth score.
 
-Continue on `chatgpt/loom-ui-functional-audit-2` until the programme is integrated or the repository owner explicitly changes the branch policy.
+Continue on `cline-implementation` until the programme is integrated or the repository owner explicitly changes the branch policy.

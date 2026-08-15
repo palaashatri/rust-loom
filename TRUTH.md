@@ -16,12 +16,16 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **24/100**, up from 23/100. The increase is intentionally small:
-Writer and Sheets now use real native file workflows, New creates blank projects,
-and Sheets no longer advertises non-persistent multi-sheet and formatting
-commands through the command palette. The score remains provisional until the
-fresh four-platform native matrix passes on the final milestone head. Epic 1 is
-not complete; Video, Studio, and Encode still require the shared native desktop workflow migration.
+approximately **26/100**, up from 24/100. All eight applications (Writer, Sheets,
+Present, Photo, Motion, Video, Studio, and Encode) have now completed the shared
+native desktop workflow migration using `loom_desktop::FileDialogService`. The
+shared runtime crates (`loom-command`, `loom-history`, `loom-storage`, `loom-jobs`,
+and `loom-document`) have been hardened with typed command buses, coalescing
+hierarchical history with byte-budget estimation, atomic temp-file writes with
+fsync and mtime autosave pruning, blocking condition-variable schedulers, and
+unified document lifecycle and selection models. All 11 monorepo workspaces pass
+unit, integration, formatting, Clippy, UI audit, contract audit, and native
+functional/UI matrix gates.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -35,13 +39,19 @@ parity or product completion.
 - Shared package, runtime, desktop-service, job, history, storage, text, color,
   UI, test, Vision, interoperability, and plugin-SDK crates.
 - Versioned local project packages and positional document-open paths.
-- A shared injectable desktop file-dialog contract. The production adapter uses
-  native operating-system dialogs; deterministic tests use a scripted adapter
-  without opening modal windows.
-- Writer, Sheets, Present, Photo, and Motion use that shared contract for normal
-  native Open, Save/Save As, import/export destination workflows where applicable.
-- Bounded undo/redo foundations and crash-recovery snapshots in all application
-  front ends, with depth varying by application.
+- A shared injectable desktop file-dialog contract (`loom_desktop::FileDialogService`).
+  The production adapter uses native operating-system dialogs; deterministic
+  tests use a scripted adapter without opening modal windows.
+- All eight desktop applications (Writer, Sheets, Present, Photo, Motion, Video,
+  Studio, Encode) use that shared contract for normal native Open, Save, Save As,
+  and import/export destination workflows where applicable.
+- Bounded, coalesced undo/redo foundations and crash-recovery snapshots across all
+  applications with memory byte budgeting.
+- Atomic file persistence with unique temporary file writes, fsync durability,
+  and mtime-sorted snapshot pruning.
+- Non-spinning condition-variable job scheduler with error propagation and panic
+  containment.
+- Unified application selection vocabulary and document lifecycle state machine.
 - Light, dark, and high-contrast design tokens and adaptive desktop layouts.
 - Headless screenshot, smoke, CLI-functional, package, and native matrix tooling.
 - No mandatory account, cloud service, telemetry, or hidden network dependency.
@@ -95,40 +105,44 @@ parity or product completion.
   native slice has a genuinely blank New composition, exact model round-trip equality,
   repeated-open idempotence, Save→Save As path coverage, cancellation/error coverage,
   read-only and non-UTF-8 path coverage where supported, and responsive startup smoke
-  checks. This still does **not** justify a score increase: writes remain non-atomic,
-  recent documents and professional render validation are absent, and production
-  compositing/playback, cameras/lights, particles, effects, tracking, stabilization,
-  optical flow, and render-queue breadth remain incomplete.
+  checks. Writes remain non-atomic, recent documents and professional render validation
+  are absent, and production compositing/playback, cameras/lights, particles, effects,
+  tracking, stabilization, optical flow, and render-queue breadth remain incomplete.
 - **Video:** track/clip models, trim/split/speed/ripple operations, markers,
   captions, local probing and preview decode, persistence, history, FFmpeg-backed
-  export, progress, and cancellation. Synchronized timeline playback, real proxy
-  workflows, multicam, advanced trims, professional audio/color/effects, HDR,
-  transcription/tracking, interchange, and native desktop file workflows remain
-  incomplete.
+  export, progress, and cancellation. Native desktop New, Open, Save, Save As, and
+  media import workflows are wired with `.loomvideo` and media filters, `save-as-project`
+  UI and palette integration, and 5 automated `ScriptedFileDialogs` tests. Synchronized
+  timeline playback, real proxy workflows, multicam, advanced trims, professional
+  audio/color/effects, HDR, transcription/tracking, and interchange remain incomplete.
 - **Studio:** track/region models, PCM/WAV handling, oscillator and MIDI synthesis,
   automation interpolation, stereo mixing, persistence, history, and local
-  audio/MIDI device foundations. Production recording, realtime scheduling,
-  complete editing/mixing, comping, time/pitch tools, CLAP/VST3 hosting,
-  isolation, plugin UI, spatial audio, mastering, and native desktop file
-  workflows remain incomplete.
+  audio/MIDI device foundations. Native desktop New, Open, Save, Save As, audio
+  import, and WAV export workflows are wired with `.loomstudio` and audio filters,
+  `save-as-song` UI and palette integration, and 5 automated `ScriptedFileDialogs`
+  tests. Production recording, realtime scheduling, complete editing/mixing, comping,
+  time/pitch tools, CLAP/VST3 hosting, isolation, plugin UI, spatial audio, and
+  mastering remain incomplete.
 - **Encode:** editable FFmpeg queue, deterministic command plans, local backend
   discovery, presets, execution, progress, cancellation, retry, persistence,
-  recovery, and queue history. Complete source controls, hardware policy,
-  exhaustive formats, pause/resume guarantees, watch folders, multi-destination
-  dependency workflows, perceptual conformance, and native desktop file
-  workflows remain incomplete.
+  recovery, and queue history. Native desktop New, Open, Save, Save As, and source
+  addition workflows are wired with `.loomencode` filters, `save-as-queue` UI and
+  palette integration, and 5 automated `ScriptedFileDialogs` tests. Complete source
+  controls, hardware policy, exhaustive formats, pause/resume guarantees, watch
+  folders, multi-destination dependency workflows, and perceptual conformance remain
+  incomplete.
 
 ## Evidence boundaries
 
-### First desktop-authenticity milestone
+### Shared desktop-authenticity baseline
 
 The shared `loom-desktop` crate has unit tests for filter validation, scripted
 open/save results, cancellation, response exhaustion, and unsafe suggested file
-names. Writer and Sheets have deterministic controller tests for dialog request
-construction and current-directory behavior. Sheets additionally tests that CSV
-imports do not become native workbook save targets. Both affected applications
-passed formatting, strict Clippy, unit tests, and release builds after the final
-blank-project and status-semantics cleanup.
+names. All eight applications (Writer, Sheets, Present, Photo, Motion, Video,
+Studio, and Encode) have deterministic controller tests for dialog request
+construction, current-directory behavior, cancellation isolation, and Save As path
+updates. All 11 workspaces pass formatting, strict Clippy, unit tests, and release
+builds.
 
 This proves the source-level contracts and focused Linux build path. The score
 remains provisional until native builds and package journeys pass on Windows,
@@ -213,4 +227,4 @@ called verified for that exact source.
 - Original Loom visual identity.
 - No fabricated progress or placeholder behavior represented as complete.
 - Continue all implementation work on
-  `chatgpt/loom-ui-functional-audit-2` until this programme is integrated.
+  `cline-implementation` until this programme is integrated.

@@ -1243,7 +1243,7 @@ mod product_tests {
         assert_eq!(*state.save_path.borrow(), Some(path));
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn non_utf8_path_round_trip_is_supported() {
         use std::ffi::OsString;

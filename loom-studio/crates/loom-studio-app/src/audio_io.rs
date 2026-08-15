@@ -301,6 +301,7 @@ impl AudioIo {
         Ok(name)
     }
 
+    #[allow(dead_code)]
     pub fn drain_midi_events(&self) -> Vec<MidiEvent> {
         let mut events = Vec::new();
         while let Some(event) = self.midi_events.pop() {

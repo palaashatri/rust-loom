@@ -6,6 +6,20 @@
 //! application-specific engines (rich text, spreadsheet grid, etc.) layer on
 //! top of these primitives.
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+/// Explicit document lifecycle state machine.
+pub mod lifecycle;
+/// Shared selection vocabulary and direct-manipulation models.
+pub mod selection;
+
+pub use lifecycle::{DocumentLifecycle, LifecycleError};
+pub use selection::{
+    AudioSelection, CaretAffinity, CellCoord, CellRange, GridSelection, LayerSelection,
+    QueueSelection, SceneSelection, Selection, TextSelection, TimelineSelection, TransformHandle,
+};
+
 use std::sync::Arc;
 
 /// A binary-safe character index into a `Text`.

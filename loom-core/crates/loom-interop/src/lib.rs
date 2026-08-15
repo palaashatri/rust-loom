@@ -766,7 +766,10 @@ mod tests {
             .arguments
             .iter()
             .any(|argument| argument == "--headless"));
-        assert_eq!(plan.destination, destination);
+        let expected_destination = fs::canonicalize(temporary.path())
+            .expect("canonicalize")
+            .join("out.odt");
+        assert_eq!(plan.destination, expected_destination);
     }
 
     #[test]

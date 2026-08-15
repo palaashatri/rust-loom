@@ -1,50 +1,135 @@
-//! `loom-history` implements a transactional undo/redo history on top of
-//! commands. Supports atomic edits, compound operations, coalescing, named
-//! undo, memory budgets, and deterministic replay.
+//! `loom-history` provides transactional undo/redo history for Loom applications.
+//! Supports atomic edits, compound operations, nested groups, coalescing, named
+//! undo/redo descriptions, memory budgets, and deterministic replay.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use loom_command::{CommandId, InvocationSource};
 
-/// A single recorded history entry.
-#[derive(Debug, Clone)]
-pub struct HistoryEntry {
-    /// Command id (may be a synthetic aggregate).
-    pub id: CommandId,
-    /// Undo description.
-    pub name: String,
-    /// Undo closure data; applications store their own domain payload.
-    pub undo: HistoryPayload,
-    /// Redo payload.
-    pub redo: HistoryPayload,
-    /// Whether this entry is an atomic leaf or a compound group.
-    pub is_group: bool,
-}
-
 /// Opaque payload describing an undoable/redoable change.
-///
-/// Applications translate domain edits into these payloads. To keep
-/// `loom-history` dependency-free, payloads are byte blobs plus a tag that
-/// the application interprets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryPayload {
-    /// Tag identifying the payload type (e.g. "writer-text-edit").
+    /// Tag identifying the payload type (e.g. `"writer.text_delta"`, `"sheets.cell_edit"`).
     pub kind: &'static str,
-    /// Opaque bytes.
+    /// Serialized delta or mutation bytes.
     pub data: Vec<u8>,
 }
 
 impl HistoryPayload {
-    /// Create a payload.
+    /// Create a new payload.
     pub fn new(kind: &'static str, data: Vec<u8>) -> Self {
         Self { kind, data }
     }
+
+    /// Number of bytes in the payload.
+    pub fn byte_size(&self) -> usize {
+        self.data.len()
+    }
 }
 
-/// Policy for how far history may grow in memory.
-#[derive(Debug, Clone, Copy)]
+/// A single recorded history entry: either an atomic leaf edit or a compound group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HistoryEntry {
+    /// An atomic leaf edit.
+    Leaf {
+        /// Command identifier.
+        id: CommandId,
+        /// Short human-readable description for undo.
+        name: String,
+        /// Undo payload (reverts document from post-state to pre-state).
+        undo: HistoryPayload,
+        /// Redo payload (advances document from pre-state to post-state).
+        redo: HistoryPayload,
+    },
+    /// A compound group that preserves child boundaries, payload types, and order.
+    Group {
+        /// Group command identifier.
+        id: CommandId,
+        /// Group name.
+        name: String,
+        /// Children in forward execution order.
+        children: Vec<HistoryEntry>,
+    },
+}
+
+impl HistoryEntry {
+    /// Command identifier.
+    pub fn id(&self) -> &CommandId {
+        match self {
+            Self::Leaf { id, .. } => id,
+            Self::Group { id, .. } => id,
+        }
+    }
+
+    /// User-visible operation name.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Leaf { name, .. } => name.as_str(),
+            Self::Group { name, .. } => name.as_str(),
+        }
+    }
+
+    /// Whether this entry is a compound group.
+    pub fn is_group(&self) -> bool {
+        matches!(self, Self::Group { .. })
+    }
+
+    /// Total payload memory occupied by this entry in bytes.
+    pub fn byte_size(&self) -> usize {
+        match self {
+            Self::Leaf { undo, redo, .. } => undo.byte_size() + redo.byte_size(),
+            Self::Group { children, .. } => children.iter().map(HistoryEntry::byte_size).sum(),
+        }
+    }
+
+    /// Unroll undo actions in reverse chronological order.
+    pub fn unroll_undo(&self) -> Vec<(&CommandId, &str, &HistoryPayload)> {
+        let mut ops = Vec::new();
+        self.collect_undo_ops(&mut ops);
+        ops
+    }
+
+    fn collect_undo_ops<'a>(&'a self, out: &mut Vec<(&'a CommandId, &'a str, &'a HistoryPayload)>) {
+        match self {
+            Self::Leaf { id, name, undo, .. } => {
+                out.push((id, name.as_str(), undo));
+            }
+            Self::Group { children, .. } => {
+                for child in children.iter().rev() {
+                    child.collect_undo_ops(out);
+                }
+            }
+        }
+    }
+
+    /// Unroll redo actions in forward chronological order.
+    pub fn unroll_redo(&self) -> Vec<(&CommandId, &str, &HistoryPayload)> {
+        let mut ops = Vec::new();
+        self.collect_redo_ops(&mut ops);
+        ops
+    }
+
+    fn collect_redo_ops<'a>(&'a self, out: &mut Vec<(&'a CommandId, &'a str, &'a HistoryPayload)>) {
+        match self {
+            Self::Leaf { id, name, redo, .. } => {
+                out.push((id, name.as_str(), redo));
+            }
+            Self::Group { children, .. } => {
+                for child in children.iter() {
+                    child.collect_redo_ops(out);
+                }
+            }
+        }
+    }
+}
+
+/// Budget constraints for undo/redo history in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HistoryBudget {
-    /// Maximum number of entries.
+    /// Maximum number of undo entries retained.
     pub max_entries: usize,
-    /// Maximum total payload bytes.
+    /// Maximum total payload bytes retained.
     pub max_bytes: usize,
 }
 
@@ -57,211 +142,231 @@ impl Default for HistoryBudget {
     }
 }
 
-/// Coalescing policy for adjacent same-command edits.
+/// Coalescing policy for high-frequency adjacent edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Coalesce {
-    /// Never coalesce.
+    /// Never coalesce entries.
     Never,
-    /// Coalesce adjacent entries with the same command id when they are
-    /// both atomic leaves.
+    /// Coalesce adjacent leaf entries with identical command ID.
     #[default]
     SameCommandAdjacent,
 }
 
-/// Transactional history for undo/redo.
+/// In-progress group builder on the group stack.
+#[derive(Debug, Clone)]
+struct GroupBuilder {
+    id: CommandId,
+    name: String,
+    children: Vec<HistoryEntry>,
+}
+
+/// Transactional undo/redo history manager.
 #[derive(Debug, Clone)]
 pub struct History {
     undo_stack: Vec<HistoryEntry>,
     redo_stack: Vec<HistoryEntry>,
     budget: HistoryBudget,
     coalesce: Coalesce,
-    next_group: Option<GroupBuilder>,
-    total_bytes: usize,
-}
-
-/// Helper to build a compound (grouped) operation.
-#[derive(Debug, Clone)]
-pub struct GroupBuilder {
-    id: CommandId,
-    name: String,
-    children: Vec<HistoryEntry>,
+    group_stack: Vec<GroupBuilder>,
     total_bytes: usize,
 }
 
 impl History {
-    /// New history.
+    /// Create a new history manager with default budget.
     pub fn new() -> Self {
         Self {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             budget: HistoryBudget::default(),
             coalesce: Coalesce::default(),
-            next_group: None,
+            group_stack: Vec::new(),
             total_bytes: 0,
         }
     }
 
-    /// New history with a budget.
+    /// Create a new history manager with a custom memory budget.
     pub fn with_budget(budget: HistoryBudget) -> Self {
         Self {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             budget,
             coalesce: Coalesce::default(),
-            next_group: None,
+            group_stack: Vec::new(),
             total_bytes: 0,
         }
     }
 
-    /// Begin a compound operation group.
-    pub fn begin_group(&mut self, id: CommandId, name: impl Into<String>) {
-        self.next_group = Some(GroupBuilder {
-            id,
+    /// Configure coalescing policy.
+    pub fn set_coalesce(&mut self, coalesce: Coalesce) {
+        self.coalesce = coalesce;
+    }
+
+    /// Begin a compound operation group. Supports nested groups.
+    pub fn begin_group(&mut self, id: impl Into<CommandId>, name: impl Into<String>) {
+        self.group_stack.push(GroupBuilder {
+            id: id.into(),
             name: name.into(),
             children: Vec::new(),
-            total_bytes: 0,
         });
     }
 
-    /// End the current group, committing it as one history entry.
+    /// End the current compound group.
+    /// Does not create empty history entries if the group had no children.
     pub fn end_group(&mut self) {
-        if let Some(g) = self.next_group.take() {
-            // Merge children into a single aggregate entry that redo/undo all
-            // children in order/reverse order.
-            let undo = // Reverse-order undo payload.
-                g.children
-                    .iter()
-                    .rev()
-                    .flat_map(|c| c.undo.data.clone())
-                    .collect::<Vec<u8>>();
-            let redo = g
-                .children
-                .iter()
-                .flat_map(|c| c.redo.data.clone())
-                .collect::<Vec<u8>>();
-            let _ = &undo;
-            // Instead of a dedicated aggregate payload, we store a compound
-            // entry whose payload is the concatenation; the application's
-            // undo/redo executor knows how to split it by reading the group
-            // children in this struct (kept here for exactness).
-            let aggregate = HistoryEntry {
-                id: g.id,
-                name: g.name,
-                undo: HistoryPayload::new("loom-history.aggregate", undo),
-                redo: HistoryPayload::new("loom-history.aggregate", redo),
-                is_group: true,
+        if let Some(builder) = self.group_stack.pop() {
+            if builder.children.is_empty() {
+                // Empty groups do not generate fake history
+                return;
+            }
+            let group_entry = HistoryEntry::Group {
+                id: builder.id,
+                name: builder.name,
+                children: builder.children,
             };
-            self.push_entry(aggregate);
+
+            if let Some(parent) = self.group_stack.last_mut() {
+                // Nested group: attach to parent builder
+                parent.children.push(group_entry);
+            } else {
+                // Top-level group: push to undo stack
+                self.push_entry(group_entry);
+            }
         }
     }
 
     /// Record a leaf edit.
     pub fn record(
         &mut self,
-        id: CommandId,
+        id: impl Into<CommandId>,
         name: impl Into<String>,
         undo: HistoryPayload,
         redo: HistoryPayload,
     ) {
-        let entry = HistoryEntry {
-            id,
+        let entry = HistoryEntry::Leaf {
+            id: id.into(),
             name: name.into(),
             undo,
             redo,
-            is_group: false,
         };
-        // If inside a group, append to the group instead.
-        if let Some(g) = self.next_group.as_mut() {
-            g.total_bytes += entry.undo.data.len() + entry.redo.data.len();
-            g.children.push(entry);
+
+        if let Some(current_group) = self.group_stack.last_mut() {
+            current_group.children.push(entry);
             return;
         }
+
         self.push_entry(entry);
     }
 
     fn push_entry(&mut self, entry: HistoryEntry) {
-        let bytes = entry.undo.data.len() + entry.redo.data.len();
-        // Coalescing.
-        if self.coalesce == Coalesce::SameCommandAdjacent
-            && !entry.is_group
-            && !self.undo_stack.is_empty()
-        {
-            let last = self.undo_stack.last_mut().unwrap();
-            if last.id == entry.id && !last.is_group {
-                last.undo.data = entry.undo.data;
-                last.redo = entry.redo;
-                last.name = entry.name;
-                return;
+        // Any new edit ALWAYS invalidates the redo stack
+        self.redo_stack.clear();
+
+        // Check coalescing: preserve earliest undo state, update to latest redo state
+        if self.coalesce == Coalesce::SameCommandAdjacent {
+            if let HistoryEntry::Leaf {
+                ref id,
+                ref name,
+                ref redo,
+                ..
+            } = entry
+            {
+                if let Some(HistoryEntry::Leaf {
+                    id: ref last_id,
+                    name: ref mut last_name,
+                    undo: ref _last_undo,
+                    redo: ref mut last_redo,
+                }) = self.undo_stack.last_mut()
+                {
+                    if last_id == id {
+                        // Crucial correctness: Keep earliest undo, update to latest redo
+                        let old_bytes = last_redo.byte_size();
+                        let new_bytes = redo.byte_size();
+                        *last_redo = redo.clone();
+                        *last_name = name.clone();
+                        if new_bytes >= old_bytes {
+                            self.total_bytes += new_bytes - old_bytes;
+                        } else {
+                            self.total_bytes -= old_bytes - new_bytes;
+                        }
+                        return;
+                    }
+                }
             }
         }
+
+        let bytes = entry.byte_size();
         self.total_bytes += bytes;
         self.undo_stack.push(entry);
-        // Enforce budget.
+
+        // Enforce memory & count budgets
         while self.undo_stack.len() > self.budget.max_entries
             || (self.total_bytes > self.budget.max_bytes && self.undo_stack.len() > 1)
         {
             let popped = self.undo_stack.remove(0);
-            self.total_bytes -= popped.undo.data.len() + popped.redo.data.len();
+            self.total_bytes -= popped.byte_size();
         }
-        // Any new edit invalidates the redo stack.
-        self.redo_stack.clear();
     }
 
-    /// Undo the most recent entry; returns the entry that was undone, if any.
+    /// Undo the most recent operation; moves it to redo stack and returns the entry.
     pub fn undo(&mut self) -> Option<HistoryEntry> {
         let e = self.undo_stack.pop()?;
-        self.total_bytes -= e.undo.data.len() + e.redo.data.len();
+        self.total_bytes -= e.byte_size();
         self.redo_stack.push(e.clone());
         Some(e)
     }
 
-    /// Redo the most recently undone entry.
+    /// Redo the most recently undone operation; moves it back to undo stack and returns it.
     pub fn redo(&mut self) -> Option<HistoryEntry> {
         let e = self.redo_stack.pop()?;
-        self.total_bytes += e.undo.data.len() + e.redo.data.len();
+        self.total_bytes += e.byte_size();
         self.undo_stack.push(e.clone());
         Some(e)
     }
 
-    /// Can we undo?
+    /// Whether an undo operation is currently available.
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
     }
 
-    /// Can we redo?
+    /// Whether a redo operation is currently available.
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
 
-    /// Number of undoable entries.
+    /// Number of operations on the undo stack.
     pub fn undo_len(&self) -> usize {
         self.undo_stack.len()
     }
 
-    /// Number of redoable entries.
+    /// Number of operations on the redo stack.
     pub fn redo_len(&self) -> usize {
         self.redo_stack.len()
     }
 
-    /// Current total payload bytes.
+    /// Description of the next undoable operation, if available.
+    pub fn undo_name(&self) -> Option<&str> {
+        self.undo_stack.last().map(HistoryEntry::name)
+    }
+
+    /// Description of the next redoable operation, if available.
+    pub fn redo_name(&self) -> Option<&str> {
+        self.redo_stack.last().map(HistoryEntry::name)
+    }
+
+    /// Current total payload memory occupied in bytes.
     pub fn total_bytes(&self) -> usize {
         self.total_bytes
     }
 
-    /// Clear history.
+    /// Clear all undo, redo, and in-progress group state.
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.group_stack.clear();
         self.total_bytes = 0;
-        self.next_group = None;
     }
 
-    /// Apply a recorded undo/redo decision to derived data.
-    ///
-    /// Applications that need deterministic replay can model their domain
-    /// state as a function of the history; this method exposes the canonical
-    /// interaction: undo returns the `undo` payload, redo returns the `redo`
-    /// payload.
+    /// Dispatch helper for invocation source handling.
     pub fn dispatch(&mut self, source: InvocationSource) -> Option<HistoryEntry> {
         match source {
             InvocationSource::Plugin => None,
@@ -276,49 +381,49 @@ impl Default for History {
     }
 }
 
-/// A viewer over history for UI (inspectors, palettes).
+/// A read-only view over history for UI inspectors and history panels.
 #[derive(Debug)]
 pub struct HistoryView<'a> {
     history: &'a History,
 }
 
 impl<'a> HistoryView<'a> {
-    /// Create a view.
+    /// Create a new history view.
     pub fn new(history: &'a History) -> Self {
         Self { history }
     }
 
-    /// Undo list (most recent first).
-    pub fn undo_list(&self) -> Vec<&HistoryEntry> {
+    /// List of undoable operations in reverse order (most recent first).
+    pub fn undo_list(&self) -> Vec<&'a HistoryEntry> {
         self.history.undo_stack.iter().rev().collect()
     }
 
-    /// Redo list (most recent first).
-    pub fn redo_list(&self) -> Vec<&HistoryEntry> {
+    /// List of redoable operations in reverse order (most recent first).
+    pub fn redo_list(&self) -> Vec<&'a HistoryEntry> {
         self.history.redo_stack.iter().rev().collect()
     }
 }
 
-/// A deterministic replay harness for testing history behavior.
+/// Deterministic replay harness for testing history and state recovery.
 #[derive(Debug, Default)]
 pub struct Replay {
-    /// Sequence of applied edit names.
+    /// Sequence of applied events.
     pub applied: Vec<String>,
 }
 
 impl Replay {
-    /// Apply an undo and record it.
+    /// Apply an undo step and record it.
     pub fn apply_undo(&mut self, h: &mut History) -> Option<String> {
         let e = h.undo()?;
-        self.applied.push(format!("undo:{}", e.name));
-        Some(e.name)
+        self.applied.push(format!("undo:{}", e.name()));
+        Some(e.name().to_string())
     }
 
-    /// Apply a redo.
+    /// Apply a redo step and record it.
     pub fn apply_redo(&mut self, h: &mut History) -> Option<String> {
         let e = h.redo()?;
-        self.applied.push(format!("redo:{}", e.name));
-        Some(e.name)
+        self.applied.push(format!("redo:{}", e.name()));
+        Some(e.name().to_string())
     }
 }
 
@@ -326,95 +431,213 @@ impl Replay {
 mod tests {
     use super::*;
 
-    fn payload(n: u8) -> HistoryPayload {
-        HistoryPayload::new("test", vec![n])
+    fn payload(kind: &'static str, data: &[u8]) -> HistoryPayload {
+        HistoryPayload::new(kind, data.to_vec())
     }
 
     #[test]
     fn undo_redo_roundtrip() {
         let mut h = History::new();
-        h.record(CommandId::new("a"), "A", payload(1), payload(2));
-        h.record(CommandId::new("b"), "B", payload(3), payload(4));
+        h.record("edit.a", "A", payload("t", &[1]), payload("t", &[2]));
+        h.record("edit.b", "B", payload("t", &[3]), payload("t", &[4]));
+
         assert!(h.can_undo());
         assert_eq!(h.undo_len(), 2);
+        assert_eq!(h.undo_name(), Some("B"));
+
         let u = h.undo().unwrap();
-        assert_eq!(u.name, "B");
+        assert_eq!(u.name(), "B");
         assert_eq!(h.undo_len(), 1);
         assert_eq!(h.redo_len(), 1);
+        assert_eq!(h.redo_name(), Some("B"));
+
         let r = h.redo().unwrap();
-        assert_eq!(r.name, "B");
+        assert_eq!(r.name(), "B");
         assert_eq!(h.undo_len(), 2);
         assert_eq!(h.redo_len(), 0);
     }
 
     #[test]
-    fn new_edit_clears_redo() {
+    fn new_edit_clears_redo_even_when_coalesced() {
         let mut h = History::new();
-        h.record(CommandId::new("a"), "A", payload(1), payload(2));
+        h.record(
+            "edit.type",
+            "Type A",
+            payload("t", &[0]),
+            payload("t", &[1]),
+        );
         h.undo();
         assert!(h.can_redo());
-        h.record(CommandId::new("b"), "B", payload(3), payload(4));
+
+        // Coalescing new edit must clear redo stack
+        h.record(
+            "edit.type",
+            "Type B",
+            payload("t", &[1]),
+            payload("t", &[2]),
+        );
         assert!(!h.can_redo());
     }
 
     #[test]
-    fn compound_group() {
+    fn coalescing_preserves_earliest_undo_state() {
         let mut h = History::new();
-        h.begin_group(CommandId::new("compound"), "Compound");
-        h.record(CommandId::new("c1"), "C1", payload(1), payload(10));
-        h.record(CommandId::new("c2"), "C2", payload(2), payload(20));
+        // State 0 -> 1
+        h.record(
+            "edit.type",
+            "Type 'h'",
+            payload("t", &[0]),
+            payload("t", &[1]),
+        );
+        // State 1 -> 2
+        h.record(
+            "edit.type",
+            "Type 'he'",
+            payload("t", &[1]),
+            payload("t", &[2]),
+        );
+        // State 2 -> 3
+        h.record(
+            "edit.type",
+            "Type 'hel'",
+            payload("t", &[2]),
+            payload("t", &[3]),
+        );
+
+        assert_eq!(h.undo_len(), 1);
+        let entry = h.undo().unwrap();
+        assert_eq!(entry.name(), "Type 'hel'");
+
+        if let HistoryEntry::Leaf { undo, redo, .. } = entry {
+            // Must preserve EARLIEST undo state (0), not intermediate (2)
+            assert_eq!(undo.data, vec![0]);
+            // Must preserve LATEST redo state (3)
+            assert_eq!(redo.data, vec![3]);
+        } else {
+            panic!("expected leaf entry");
+        }
+    }
+
+    #[test]
+    fn compound_group_preserves_children_boundaries_and_types() {
+        let mut h = History::new();
+        h.begin_group("format.bold_and_color", "Format Text");
+        h.record(
+            "format.bold",
+            "Bold",
+            payload("writer.bold", &[0]),
+            payload("writer.bold", &[1]),
+        );
+        h.record(
+            "format.color",
+            "Color",
+            payload("writer.color", &[255, 0, 0]),
+            payload("writer.color", &[0, 255, 0]),
+        );
         h.end_group();
+
         assert_eq!(h.undo_len(), 1);
-        let u = h.undo().unwrap();
-        assert!(u.is_group);
-        assert_eq!(u.name, "Compound");
+        let entry = h.undo().unwrap();
+        assert!(entry.is_group());
+        assert_eq!(entry.name(), "Format Text");
+
+        // Undo unrolls in reverse order (color then bold)
+        let undo_ops = entry.unroll_undo();
+        assert_eq!(undo_ops.len(), 2);
+        assert_eq!(undo_ops[0].1, "Color");
+        assert_eq!(undo_ops[0].2.kind, "writer.color");
+        assert_eq!(undo_ops[1].1, "Bold");
+        assert_eq!(undo_ops[1].2.kind, "writer.bold");
+
+        // Redo unrolls in forward order (bold then color)
+        let redo_ops = entry.unroll_redo();
+        assert_eq!(redo_ops.len(), 2);
+        assert_eq!(redo_ops[0].1, "Bold");
+        assert_eq!(redo_ops[1].1, "Color");
     }
 
     #[test]
-    fn coalesces_adjacent_same_command() {
+    fn nested_groups_supported_without_overwriting() {
         let mut h = History::new();
-        h.record(CommandId::new("t"), "T1", payload(1), payload(2));
-        h.record(CommandId::new("t"), "T2", payload(3), payload(4));
+        h.begin_group("outer", "Outer Group");
+        h.record("item.1", "Item 1", payload("t", &[1]), payload("t", &[2]));
+
+        h.begin_group("inner", "Inner Group");
+        h.record("item.2", "Item 2", payload("t", &[3]), payload("t", &[4]));
+        h.end_group(); // Ends inner group
+
+        h.record("item.3", "Item 3", payload("t", &[5]), payload("t", &[6]));
+        h.end_group(); // Ends outer group
+
         assert_eq!(h.undo_len(), 1);
-        let u = h.undo().unwrap();
-        assert_eq!(u.name, "T2");
+        let outer = h.undo().unwrap();
+        assert_eq!(outer.name(), "Outer Group");
+
+        let undo_ops = outer.unroll_undo();
+        assert_eq!(undo_ops.len(), 3);
+        assert_eq!(undo_ops[0].1, "Item 3");
+        assert_eq!(undo_ops[1].1, "Item 2");
+        assert_eq!(undo_ops[2].1, "Item 1");
     }
 
     #[test]
-    fn budget_drops_oldest() {
-        let mut h = History::with_budget(HistoryBudget {
-            max_entries: 2,
-            ..Default::default()
-        });
-        h.record(CommandId::new("a"), "A", payload(1), payload(2));
-        h.record(CommandId::new("b"), "B", payload(3), payload(4));
-        h.record(CommandId::new("c"), "C", payload(5), payload(6));
-        assert_eq!(h.undo_len(), 2);
-        assert_eq!(h.undo().unwrap().name, "C");
-        assert_eq!(h.undo().unwrap().name, "B");
+    fn empty_groups_do_not_generate_fake_history() {
+        let mut h = History::new();
+        h.begin_group("empty", "Empty Group");
+        h.end_group();
+        assert_eq!(h.undo_len(), 0);
         assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn byte_budget_accounting_with_groups() {
+        let mut h = History::with_budget(HistoryBudget {
+            max_entries: 10,
+            max_bytes: 20,
+        });
+
+        h.begin_group("g1", "Group 1");
+        h.record("a", "A", payload("t", &[1; 5]), payload("t", &[2; 5])); // 10 bytes
+        h.end_group();
+        assert_eq!(h.total_bytes(), 10);
+
+        h.begin_group("g2", "Group 2");
+        h.record("b", "B", payload("t", &[3; 8]), payload("t", &[4; 8])); // 16 bytes (total 26 > 20)
+        h.end_group();
+
+        // Old group dropped due to byte budget
+        assert_eq!(h.undo_len(), 1);
+        assert_eq!(h.undo_name(), Some("Group 2"));
+        assert_eq!(h.total_bytes(), 16);
     }
 
     #[test]
     fn deterministic_replay() {
         let mut h = History::new();
-        h.record(CommandId::new("a"), "A", payload(1), payload(2));
-        h.record(CommandId::new("b"), "B", payload(3), payload(4));
-        let mut r1 = Replay::default();
-        r1.apply_undo(&mut h);
-        r1.apply_redo(&mut h);
-        r1.apply_undo(&mut h);
-        assert_eq!(r1.applied, vec!["undo:B", "redo:B", "undo:B"]);
+        h.record("a", "Edit A", payload("t", &[1]), payload("t", &[2]));
+        h.record("b", "Edit B", payload("t", &[3]), payload("t", &[4]));
+
+        let mut replay = Replay::default();
+        replay.apply_undo(&mut h);
+        replay.apply_redo(&mut h);
+        replay.apply_undo(&mut h);
+
+        assert_eq!(
+            replay.applied,
+            vec!["undo:Edit B", "redo:Edit B", "undo:Edit B"]
+        );
     }
 
     #[test]
-    fn history_view() {
+    fn history_view_ordering() {
         let mut h = History::new();
-        h.record(CommandId::new("a"), "A", payload(1), payload(2));
-        h.record(CommandId::new("b"), "B", payload(3), payload(4));
-        let v = HistoryView::new(&h);
-        let undo_list = v.undo_list();
-        assert_eq!(undo_list[0].name, "B");
-        assert_eq!(undo_list[1].name, "A");
+        h.record("a", "First", payload("t", &[1]), payload("t", &[2]));
+        h.record("b", "Second", payload("t", &[3]), payload("t", &[4]));
+
+        let view = HistoryView::new(&h);
+        let list = view.undo_list();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name(), "Second");
+        assert_eq!(list[1].name(), "First");
     }
 }

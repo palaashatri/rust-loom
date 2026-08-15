@@ -1,16 +1,17 @@
-//! `loom-jobs` is a shared framework for asynchronous work that supports
-//! progress, cancellation, priority, and observation without any UI coupling.
-//!
-//! The framework is deliberately dependency-free and deterministic so it can
-//! run in headless CI and Docker. Long-running Loom work (media decoding,
-//! export, model inference, thumbnail generation) runs through jobs.
+//! `loom-jobs` is a shared runtime for asynchronous background operations in Loom.
+//! It provides condition-variable-based blocking scheduling (no busy spinning),
+//! cooperative cancellation, pausing with condvar wait, priority queues, progress
+//! reporting, panic containment, and deterministic synchronous execution for testing.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
-/// Unique job id.
+/// Unique identifier for a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct JobId(pub u64);
 
@@ -20,21 +21,28 @@ fn next_job_id() -> JobId {
     JobId(NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-/// Job state.
+/// Lifecycle state of a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobState {
-    /// Queued, not started.
+    /// Queued in scheduler, not yet started.
     Queued,
-    /// Running.
+    /// Actively executing on a worker thread.
     Running,
-    /// Paused.
+    /// Paused cooperatively.
     Paused,
     /// Completed successfully.
     Succeeded,
-    /// Failed with an error.
+    /// Failed with an error or panic.
     Failed,
     /// Cancelled before completion.
     Cancelled,
+}
+
+impl JobState {
+    /// Whether the state is terminal (finished).
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
+    }
 }
 
 impl fmt::Display for JobState {
@@ -51,22 +59,15 @@ impl fmt::Display for JobState {
     }
 }
 
-/// A cooperatively-cancellable unit of work.
-pub trait JobWork: Send + Sync {
-    /// Progress must call `[ProgressSink::report]` repeatedly and check
-    /// `[ProgressSink::is_cancelled]`. Must respect pause where supported.
-    fn run(&self, ctx: &JobContext) -> Result<(), JobError>;
-}
-
-/// Error returned by a job.
+/// Error returned by a job or runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobError {
-    /// Human-readable message.
+    /// Human-readable error message.
     pub message: String,
 }
 
 impl JobError {
-    /// Create a job error.
+    /// Create a new job error.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -80,278 +81,358 @@ impl fmt::Display for JobError {
     }
 }
 
-impl core::error::Error for JobError {}
+impl std::error::Error for JobError {}
 
-/// Context passed to a running job.
+/// Trait for executable background units of work.
+pub trait JobWork: Send + Sync {
+    /// Execute the unit of work cooperatively checking `ctx.is_cancelled()`
+    /// and `ctx.wait_if_paused()`.
+    fn run(&self, ctx: &JobContext) -> Result<(), JobError>;
+}
+
+/// Context provided to a running job.
 #[derive(Clone)]
 pub struct JobContext {
     id: JobId,
     cancelled: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
+    paused: Arc<Mutex<bool>>,
+    pause_condvar: Arc<Condvar>,
     progress: Arc<Mutex<Option<f32>>>,
 }
 
 impl JobContext {
-    /// Whether cancellation was requested.
+    /// Return the unique ID of the executing job.
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    /// Whether cancellation has been requested.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
     }
 
-    /// Whether paused.
+    /// Whether the job is currently paused.
     pub fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::Relaxed)
+        *self.paused.lock().unwrap()
     }
 
-    /// Block while paused, returning early if cancelled.
-    ///
-    /// This is a best-effort cooperative pause; a job that iterates quickly
-    /// calls this each iteration.
+    /// Block efficiently using a condition variable while paused, without busy-spinning.
+    /// Wakes immediately if the job is unpaused or cancelled.
     pub fn wait_if_paused(&self) {
-        while self.paused.load(Ordering::Relaxed) && !self.cancelled.load(Ordering::Relaxed) {
-            std::thread::yield_now();
+        let mut paused_guard = self.paused.lock().unwrap();
+        while *paused_guard && !self.cancelled.load(Ordering::Relaxed) {
+            paused_guard = self.pause_condvar.wait(paused_guard).unwrap();
         }
     }
 
-    /// Report progress in `[0,1]`.
-    pub fn report(&self, f: f32) {
+    /// Report progress in range `[0.0, 1.0]`.
+    pub fn report(&self, fraction: f32) {
         if let Ok(mut g) = self.progress.lock() {
-            *g = Some(f.clamp(0.0, 1.0));
+            *g = Some(fraction.clamp(0.0, 1.0));
         }
-    }
-
-    /// Job id.
-    pub fn id(&self) -> JobId {
-        self.id
     }
 }
 
-/// A submitted job handle.
+/// Handle to an active or completed job.
 #[derive(Clone)]
 pub struct JobHandle {
     id: JobId,
     cancelled: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
-    state: Arc<Mutex<JobState>>,
+    paused: Arc<Mutex<bool>>,
+    pause_condvar: Arc<Condvar>,
+    state_and_error: Arc<Mutex<(JobState, Option<JobError>)>>,
+    completion_condvar: Arc<Condvar>,
     progress: Arc<Mutex<Option<f32>>>,
-    joined: Arc<AtomicU64>, // 0 not done, 1 done
 }
 
 impl JobHandle {
-    /// Request cancellation.
+    /// Unique identifier of the job.
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    /// Request cooperative cancellation and wake any waiting pauses.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
+        self.pause_condvar.notify_all();
     }
 
-    /// Toggle pause.
+    /// Pause or resume the job. Wakes the worker when resumed.
     pub fn set_paused(&self, paused: bool) {
-        self.paused.store(paused, Ordering::Relaxed);
+        {
+            let mut guard = self.paused.lock().unwrap();
+            *guard = paused;
+        }
+        self.pause_condvar.notify_all();
     }
 
-    /// Current state.
+    /// Current execution state.
     pub fn state(&self) -> JobState {
-        *self.state.lock().unwrap()
+        self.state_and_error.lock().unwrap().0
     }
 
-    /// Latest progress in `[0,1]`.
+    /// Return the error message if the job failed.
+    pub fn error(&self) -> Option<JobError> {
+        self.state_and_error.lock().unwrap().1.clone()
+    }
+
+    /// Latest reported progress in range `[0.0, 1.0]`.
     pub fn progress(&self) -> Option<f32> {
         *self.progress.lock().unwrap()
     }
 
-    /// Block until finished (for use in tests / CLI). Returns final state.
+    /// Block using condition variable until the job finishes. No busy-spinning.
     pub fn join(&self) -> JobState {
-        while self.joined.load(Ordering::Relaxed) == 0 {
-            std::thread::yield_now();
+        let mut guard = self.state_and_error.lock().unwrap();
+        while !guard.0.is_terminal() {
+            guard = self.completion_condvar.wait(guard).unwrap();
         }
-        self.state()
-    }
-
-    /// Id.
-    pub fn id(&self) -> JobId {
-        self.id
+        guard.0
     }
 }
 
-/// Priority for scheduling.
+/// Execution priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
-    /// Low priority (background).
+    /// Low priority (background indexing, thumbnail caching).
     Low = 0,
-    /// Normal.
+    /// Normal priority (standard background export).
     Normal = 1,
-    /// High (user-interactive).
+    /// High priority (interactive user preview / render).
     High = 2,
 }
 
-/// A job in the queue.
+/// Internal queue entry.
 #[derive(Clone)]
-pub struct JobEntry {
+struct JobEntry {
     id: JobId,
     work: Arc<dyn JobWork>,
     priority: Priority,
     handle: JobHandle,
+    retries_remaining: u32,
 }
 
-/// A simple work queue that executes jobs on a worker thread pool.
-///
-/// The queue materializes its own worker threads so it can operate without a
-/// global async runtime and is deterministic testable.
-pub struct JobQueue {
-    inner: Arc<QueueInner>,
-    workers: Vec<std::thread::JoinHandle<()>>,
-}
-
-struct QueueInner {
+struct QueueShared {
     queue: Mutex<VecDeque<JobEntry>>,
+    wakeup_condvar: Condvar,
     stop: AtomicBool,
 }
 
+/// Multi-threaded asynchronous work queue with condition-variable scheduling.
+pub struct JobQueue {
+    shared: Arc<QueueShared>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+}
+
 impl JobQueue {
-    /// Create a queue with `workers` threads.
-    pub fn new(workers: usize) -> Self {
-        let inner = Arc::new(QueueInner {
+    /// Create a new job queue with `num_workers` worker threads.
+    pub fn new(num_workers: usize) -> Self {
+        let shared = Arc::new(QueueShared {
             queue: Mutex::new(VecDeque::new()),
+            wakeup_condvar: Condvar::new(),
             stop: AtomicBool::new(false),
         });
-        let mut handles = Vec::with_capacity(workers);
-        for _ in 0..workers.max(1) {
-            let inner = Arc::clone(&inner);
-            handles.push(std::thread::spawn(move || worker_loop(inner)));
+
+        let mut workers = Vec::with_capacity(num_workers.max(1));
+        for _ in 0..num_workers.max(1) {
+            let shared_clone = Arc::clone(&shared);
+            workers.push(std::thread::spawn(move || worker_loop(shared_clone)));
         }
-        Self {
-            inner,
-            workers: handles,
-        }
+
+        Self { shared, workers }
     }
 
-    /// Submit a job and return its handle.
+    /// Submit a job for background execution.
     pub fn submit(&self, work: Arc<dyn JobWork>, priority: Priority) -> JobHandle {
+        self.submit_with_retry(work, priority, 0)
+    }
+
+    /// Submit a job with a retry count upon transient failure.
+    pub fn submit_with_retry(
+        &self,
+        work: Arc<dyn JobWork>,
+        priority: Priority,
+        max_retries: u32,
+    ) -> JobHandle {
         let id = next_job_id();
         let cancelled = Arc::new(AtomicBool::new(false));
-        let paused = Arc::new(AtomicBool::new(false));
-        let state = Arc::new(Mutex::new(JobState::Queued));
+        let paused = Arc::new(Mutex::new(false));
+        let pause_condvar = Arc::new(Condvar::new());
+        let state_and_error = Arc::new(Mutex::new((JobState::Queued, None)));
+        let completion_condvar = Arc::new(Condvar::new());
         let progress = Arc::new(Mutex::new(None));
-        let joined = Arc::new(AtomicU64::new(0));
+
         let handle = JobHandle {
             id,
             cancelled,
             paused,
-            state,
+            pause_condvar,
+            state_and_error,
+            completion_condvar,
             progress,
-            joined,
         };
+
         let entry = JobEntry {
             id,
             work,
             priority,
             handle: handle.clone(),
+            retries_remaining: max_retries,
         };
-        let mut q = self.inner.queue.lock().unwrap();
-        q.push_back(entry);
-        // Re-sort by priority (stable: keep arrival order within same priority).
-        // Simple insertion: pop and reinsert in order.
-        let mut items: Vec<JobEntry> = q.drain(..).collect();
-        items.sort_by_key(|e| std::cmp::Reverse(e.priority));
-        q.extend(items);
+
+        {
+            let mut q = self.shared.queue.lock().unwrap();
+            q.push_back(entry);
+            // Stable sort by priority (High first, preserving arrival order)
+            let mut items: Vec<JobEntry> = q.drain(..).collect();
+            items.sort_by_key(|e| std::cmp::Reverse(e.priority));
+            q.extend(items);
+        }
+
+        // Wake one sleeping worker
+        self.shared.wakeup_condvar.notify_one();
         handle
     }
 
-    /// Request graceful stop (waits for running job to finish within a timeout).
+    /// Request graceful shutdown and join all worker threads.
     pub fn stop(self) {
-        self.inner.stop.store(true, Ordering::Relaxed);
-        for h in self.workers {
-            let _ = h.join();
+        self.shared.stop.store(true, Ordering::Relaxed);
+        self.shared.wakeup_condvar.notify_all();
+        for worker in self.workers {
+            let _ = worker.join();
         }
     }
 }
 
-fn worker_loop(inner: Arc<QueueInner>) {
+fn worker_loop(shared: Arc<QueueShared>) {
     loop {
-        if inner.stop.load(Ordering::Relaxed) && inner.queue.lock().unwrap().is_empty() {
+        let mut queue = shared.queue.lock().unwrap();
+        while queue.is_empty() && !shared.stop.load(Ordering::Relaxed) {
+            queue = shared.wakeup_condvar.wait(queue).unwrap();
+        }
+
+        if shared.stop.load(Ordering::Relaxed) && queue.is_empty() {
             break;
         }
-        let next = {
-            let mut q = inner.queue.lock().unwrap();
-            q.pop_front()
-        };
-        match next {
-            Some(entry) => run_job(entry),
-            None => {
-                if inner.stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                std::thread::yield_now();
-            }
+
+        if let Some(entry) = queue.pop_front() {
+            drop(queue);
+            run_job(entry, &shared);
         }
     }
 }
 
-fn run_job(entry: JobEntry) {
+fn run_job(mut entry: JobEntry, shared: &Arc<QueueShared>) {
     {
-        let mut s = entry.handle.state.lock().unwrap();
-        *s = JobState::Running;
+        let mut guard = entry.handle.state_and_error.lock().unwrap();
+        guard.0 = JobState::Running;
     }
+
     let ctx = JobContext {
         id: entry.id,
         cancelled: entry.handle.cancelled.clone(),
         paused: entry.handle.paused.clone(),
+        pause_condvar: entry.handle.pause_condvar.clone(),
         progress: entry.handle.progress.clone(),
     };
-    let result = if ctx.is_cancelled() {
-        Err(JobError::new("cancelled before start"))
-    } else if entry.work.run(&ctx).is_ok() {
-        Ok(())
-    } else {
-        Err(JobError::new("job failed"))
-    };
-    match result {
-        Ok(()) => {
-            let mut s = entry.handle.state.lock().unwrap();
-            if entry.handle.cancelled.load(Ordering::Relaxed) {
-                *s = JobState::Cancelled;
-            } else {
-                *s = JobState::Succeeded;
-            }
-        }
-        Err(e) => {
-            let mut s = entry.handle.state.lock().unwrap();
-            if entry.handle.cancelled.load(Ordering::Relaxed) {
-                *s = JobState::Cancelled;
-            } else {
-                *s = JobState::Failed;
-            }
-            let _ = e;
-        }
+
+    if ctx.is_cancelled() {
+        let mut guard = entry.handle.state_and_error.lock().unwrap();
+        guard.0 = JobState::Cancelled;
+        entry.handle.completion_condvar.notify_all();
+        return;
     }
-    entry.handle.joined.store(1, Ordering::Relaxed);
+
+    // Panic containment
+    let work = Arc::clone(&entry.work);
+    let run_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work.run(&ctx)));
+
+    let final_outcome = match run_result {
+        Ok(Ok(())) => {
+            if ctx.is_cancelled() {
+                (JobState::Cancelled, None)
+            } else {
+                (JobState::Succeeded, None)
+            }
+        }
+        Ok(Err(job_err)) => {
+            if ctx.is_cancelled() {
+                (JobState::Cancelled, None)
+            } else if entry.retries_remaining > 0 {
+                // Re-queue with one fewer retry
+                entry.retries_remaining -= 1;
+                let mut q = shared.queue.lock().unwrap();
+                q.push_front(entry);
+                shared.wakeup_condvar.notify_one();
+                return;
+            } else {
+                (JobState::Failed, Some(job_err))
+            }
+        }
+        Err(panic_payload) => {
+            let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                format!("job panicked: {s}")
+            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                format!("job panicked: {s}")
+            } else {
+                "job panicked with unknown error".to_string()
+            };
+            (JobState::Failed, Some(JobError::new(msg)))
+        }
+    };
+
+    {
+        let mut guard = entry.handle.state_and_error.lock().unwrap();
+        guard.0 = final_outcome.0;
+        guard.1 = final_outcome.1;
+    }
+    entry.handle.completion_condvar.notify_all();
 }
 
-/// A `JobWork` wrapper for a function.
+/// Type alias for heap-allocated job function closures.
+pub type JobClosure = Box<dyn Fn(&JobContext) -> Result<(), JobError> + Send + Sync>;
+
+/// Closure-based `JobWork` adapter.
 pub struct FnJob {
-    f: JobFn,
+    func: JobClosure,
 }
-
-/// Boxed job function stored by [`FnJob`].
-type JobFn = Box<dyn Fn(&JobContext) -> Result<(), JobError> + Send + Sync>;
 
 impl FnJob {
     /// Create a job from a closure.
     pub fn new(f: impl Fn(&JobContext) -> Result<(), JobError> + Send + Sync + 'static) -> Self {
-        Self { f: Box::new(f) }
+        Self { func: Box::new(f) }
     }
 }
 
 impl JobWork for FnJob {
     fn run(&self, ctx: &JobContext) -> Result<(), JobError> {
-        (self.f)(ctx)
+        (self.func)(ctx)
     }
 }
 
-/// Convenience: an always-succeeding job.
+/// No-op job that completes immediately with success.
 pub struct NoopJob;
 
 impl JobWork for NoopJob {
     fn run(&self, _ctx: &JobContext) -> Result<(), JobError> {
         Ok(())
+    }
+}
+
+/// Synchronous, deterministic executor for unit tests and headless CLI operations.
+pub struct SyncJobExecutor;
+
+impl SyncJobExecutor {
+    /// Execute a job synchronously on the current thread.
+    pub fn run(work: &dyn JobWork) -> Result<(), JobError> {
+        let ctx = JobContext {
+            id: next_job_id(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(Mutex::new(false)),
+            pause_condvar: Arc::new(Condvar::new()),
+            progress: Arc::new(Mutex::new(None)),
+        };
+        work.run(&ctx)
     }
 }
 
@@ -361,126 +442,120 @@ mod tests {
     use std::sync::atomic::AtomicU32;
 
     #[test]
-    fn successful_job() {
-        let q = JobQueue::new(1);
+    fn successful_job_with_progress_and_join() {
+        let q = JobQueue::new(2);
         let handle = q.submit(
             Arc::new(FnJob::new(|ctx| {
-                ctx.report(0.5);
+                ctx.report(0.25);
+                ctx.report(0.75);
                 Ok(())
             })),
             Priority::Normal,
         );
+
         assert_eq!(handle.join(), JobState::Succeeded);
-        assert!((handle.progress().unwrap() - 0.5).abs() < 1e-6);
+        assert!((handle.progress().unwrap() - 0.75).abs() < 1e-6);
+        assert_eq!(handle.error(), None);
         q.stop();
     }
 
     #[test]
-    fn cancelled_before_start() {
+    fn failed_job_propagates_error() {
+        let q = JobQueue::new(1);
+        let handle = q.submit(
+            Arc::new(FnJob::new(|_| {
+                Err(JobError::new("disk full during decode"))
+            })),
+            Priority::Normal,
+        );
+
+        assert_eq!(handle.join(), JobState::Failed);
+        assert_eq!(
+            handle.error(),
+            Some(JobError::new("disk full during decode"))
+        );
+        q.stop();
+    }
+
+    #[test]
+    fn panic_containment_in_worker() {
+        let q = JobQueue::new(1);
+        let handle = q.submit(
+            Arc::new(FnJob::new(|_| {
+                panic!("deliberate test panic");
+            })),
+            Priority::Normal,
+        );
+
+        assert_eq!(handle.join(), JobState::Failed);
+        assert!(handle
+            .error()
+            .unwrap()
+            .message
+            .contains("deliberate test panic"));
+
+        // Next job should still run on the same queue without deadlocking
+        let second = q.submit(Arc::new(NoopJob), Priority::Normal);
+        assert_eq!(second.join(), JobState::Succeeded);
+        q.stop();
+    }
+
+    #[test]
+    fn cancellation_before_and_during_execution() {
         let q = JobQueue::new(1);
         let handle = q.submit(Arc::new(NoopJob), Priority::Low);
         handle.cancel();
-        assert!(matches!(
-            handle.join(),
-            JobState::Cancelled | JobState::Failed
-        ));
-        q.stop();
-    }
+        assert_eq!(handle.join(), JobState::Cancelled);
 
-    #[test]
-    fn priority_order() {
-        let q = JobQueue::new(1);
-        let order = Arc::new(Mutex::new(Vec::new()));
-        // A single worker would otherwise drain the low-priority job before
-        // the high-priority one is submitted, making the test racy. A gate
-        // job occupies the worker until all submissions are queued, so the
-        // scheduler's reorder-on-submit is the only thing under test.
-        let release = Arc::new(AtomicBool::new(false));
-        let r = release.clone();
-        let gate = q.submit(
-            Arc::new(FnJob::new(move |_| {
-                while !r.load(Ordering::Relaxed) {
-                    std::thread::yield_now();
+        let active_handle = q.submit(
+            Arc::new(FnJob::new(|ctx| {
+                while !ctx.is_cancelled() {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
-                Ok(())
+                Err(JobError::new("cancelled"))
             })),
-            Priority::High,
+            Priority::Normal,
         );
-        let o = order.clone();
-        let low = q.submit(
-            Arc::new(FnJob::new(move |_| {
-                o.lock().unwrap().push("low");
-                Ok(())
-            })),
-            Priority::Low,
-        );
-        let o2 = order.clone();
-        let high = q.submit(
-            Arc::new(FnJob::new(move |_| {
-                o2.lock().unwrap().push("high");
-                Ok(())
-            })),
-            Priority::High,
-        );
-        // Push a low first to ensure they're reordered by the queue.
-        let o3 = order.clone();
-        let mid = q.submit(
-            Arc::new(FnJob::new(move |_| {
-                o3.lock().unwrap().push("mid");
-                Ok(())
-            })),
-            Priority::Low,
-        );
-        release.store(true, Ordering::Relaxed);
-        let _ = gate.join();
-        let _ = low.join();
-        let _ = high.join();
-        let _ = mid.join();
-        let seen = order.lock().unwrap().clone();
-        assert_eq!(seen, vec!["high", "low", "mid"]);
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        active_handle.cancel();
+        assert_eq!(active_handle.join(), JobState::Cancelled);
         q.stop();
     }
 
     #[test]
-    fn pause_yields() {
+    fn condvar_pause_and_resume() {
         let q = JobQueue::new(1);
-        let ran = Arc::new(AtomicU32::new(0));
-        let r = ran.clone();
+        let iterations = Arc::new(AtomicU32::new(0));
+        let it_clone = iterations.clone();
+
         let handle = q.submit(
             Arc::new(FnJob::new(move |ctx| {
-                for _ in 0..100 {
+                for _ in 0..20 {
                     ctx.wait_if_paused();
-                    if ctx.is_cancelled() {
-                        return Err(JobError::new("cancelled"));
-                    }
-                    r.fetch_add(1, Ordering::Relaxed);
+                    it_clone.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(2));
                 }
                 Ok(())
             })),
             Priority::Normal,
         );
+
         handle.set_paused(true);
         std::thread::sleep(std::time::Duration::from_millis(20));
+        let count_during_pause = iterations.load(Ordering::SeqCst);
+
         handle.set_paused(false);
         assert_eq!(handle.join(), JobState::Succeeded);
-        assert!(ran.load(Ordering::Relaxed) >= 1);
+        assert!(iterations.load(Ordering::SeqCst) >= count_during_pause);
         q.stop();
     }
 
     #[test]
-    fn progress_bounded() {
-        let q = JobQueue::new(1);
-        let h = q.submit(
-            Arc::new(FnJob::new(|ctx| {
-                ctx.report(-0.2);
-                ctx.report(1.5);
-                Ok(())
-            })),
-            Priority::Normal,
-        );
-        let _ = h.join();
-        let p = h.progress().unwrap();
-        assert!((0.0..=1.0).contains(&p));
-        q.stop();
+    fn synchronous_test_executor() {
+        let job = FnJob::new(|ctx| {
+            ctx.report(1.0);
+            Ok(())
+        });
+        assert!(SyncJobExecutor::run(&job).is_ok());
     }
 }

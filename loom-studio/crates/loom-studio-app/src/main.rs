@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use audio_io::{AudioIo, MidiEvent};
+use audio_io::AudioIo;
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_studio_core::{
     decode_wav, load_studio_bundle, save_studio_bundle, synthesize_notes, AudioAssetStore,
     AudioBuffer, AudioRegion, MidiNote, StudioProject, StudioSession, StudioTrack, TrackKind,
@@ -22,7 +25,6 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const SAVE_FILENAME: &str = "song.loomstudio";
 
 loom_production::define_snapshot_recovery!(STUDIO_RECOVERY, "org.loom.studio", "loom.studio/1");
 
@@ -74,11 +76,17 @@ fn parse_args() -> Result<Args, String> {
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
             }
-
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(args)
+}
+
+fn empty_session() -> (StudioSession, AudioAssetStore) {
+    (
+        StudioSession::new(StudioProject::new("untitled-studio", "Untitled Session")),
+        AudioAssetStore::default(),
+    )
 }
 
 fn sample_session() -> Result<(StudioSession, AudioAssetStore), String> {
@@ -158,32 +166,98 @@ fn sample_session() -> Result<(StudioSession, AudioAssetStore), String> {
     Ok((StudioSession::new(project), assets))
 }
 
-fn initial_session(args: &Args) -> Result<(StudioSession, AudioAssetStore), String> {
+fn initial_session(
+    args: &Args,
+) -> Result<((StudioSession, AudioAssetStore), Option<PathBuf>), String> {
     match args.open.as_deref() {
         Some(path) => {
-            let bytes = std::fs::read(path)
+            let p = PathBuf::from(path);
+            let bytes = std::fs::read(&p)
                 .map_err(|error| format!("failed to read Studio project '{path}': {error}"))?;
             let (project, assets) = load_studio_bundle(&bytes)
                 .map_err(|error| format!("failed to load Studio project '{path}': {error}"))?;
-            Ok((StudioSession::new(project), assets))
+            Ok(((StudioSession::new(project), assets), Some(p)))
         }
-        None => sample_session(),
+        None => Ok((sample_session()?, None)),
     }
 }
 
 struct GuiState {
+    record_arms: RefCell<Vec<bool>>,
     session: RefCell<StudioSession>,
     assets: RefCell<AudioAssetStore>,
-    record_arms: RefCell<Vec<bool>>,
+    save_path: RefCell<Option<PathBuf>>,
+    dialogs: Rc<dyn FileDialogService>,
     audio: RefCell<Option<AudioIo>>,
     midi_status: RefCell<String>,
+}
+
+fn studio_filter() -> FileFilter {
+    FileFilter {
+        name: "Loom Studio Project (*.loomstudio)".into(),
+        extensions: vec!["loomstudio".into()],
+    }
+}
+
+fn audio_filter() -> FileFilter {
+    FileFilter {
+        name: "Audio Files (*.wav, *.aif, *.flac, *.mp3)".into(),
+        extensions: vec![
+            "wav".into(),
+            "aif".into(),
+            "aiff".into(),
+            "flac".into(),
+            "mp3".into(),
+        ],
+    }
+}
+
+fn open_studio_request(save_path: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Studio Project".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![studio_filter()],
+    }
+}
+
+fn save_studio_request(save_path: Option<&Path>) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Save Studio Project".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: save_path
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| Some("Untitled.loomstudio".into())),
+        filters: vec![studio_filter()],
+    }
+}
+
+fn open_audio_request(save_path: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Import Audio".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![audio_filter()],
+    }
+}
+
+fn export_audio_request(save_path: Option<&Path>) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Audio Mix".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: Some("Mixdown.wav".into()),
+        filters: vec![FileFilter {
+            name: "WAV Audio (*.wav)".into(),
+            extensions: vec!["wav".into()],
+        }],
+    }
 }
 
 fn refresh(app: &StudioApp, state: &GuiState) {
     let session = state.session.borrow();
     let project = &session.project;
     app.set_song_title(project.name.as_str().into());
-    app.set_tempo_text(format!("{:.0} BPM · {} Hz", project.bpm, project.sample_rate).into());
     app.set_bpm_val(project.bpm);
     let (mode, mode_index) = match project.mode {
         WorkspaceMode::Quick => ("Quick", 0),
@@ -202,13 +276,11 @@ fn refresh(app: &StudioApp, state: &GuiState) {
         project
             .tracks
             .iter()
-            .map(|track| {
-                SharedString::from(match track.kind {
-                    TrackKind::Audio => "AUDIO",
-                    TrackKind::Midi => "MIDI",
-                    TrackKind::Drummer => "DRUMMER",
-                    TrackKind::Bus => "BUS",
-                })
+            .map(|track| match track.kind {
+                TrackKind::Audio => SharedString::from("Audio"),
+                TrackKind::Midi => SharedString::from("MIDI"),
+                TrackKind::Drummer => SharedString::from("Drummer"),
+                TrackKind::Bus => SharedString::from("Bus"),
             })
             .collect::<Vec<_>>(),
     )));
@@ -305,6 +377,21 @@ fn refresh(app: &StudioApp, state: &GuiState) {
         app.set_status_right("Audio unavailable".into());
     }
     app.set_midi_status(state.midi_status.borrow().as_str().into());
+    let path_label = state
+        .save_path
+        .borrow()
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Untitled".into());
+    app.set_status_left(
+        format!(
+            "{path_label} · {} tracks · {} audio assets",
+            project.tracks.len(),
+            state.assets.borrow().names().count()
+        )
+        .into(),
+    );
     if let Ok(bytes) = save_studio_bundle(project, &state.assets.borrow()) {
         let _ = record_snapshot_recovery("studio state", bytes);
     }
@@ -328,11 +415,13 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
-    let (session, assets) = initial_session(args)?;
+    let ((session, assets), save_path) = initial_session(args)?;
     let state = GuiState {
         record_arms: RefCell::new(vec![false; session.project.tracks.len()]),
         session: RefCell::new(session),
         assets: RefCell::new(assets),
+        save_path: RefCell::new(save_path),
+        dialogs: Rc::new(NativeFileDialogs),
         audio: RefCell::new(None),
         midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
     };
@@ -354,11 +443,13 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
-    let (session, assets) = initial_session(args)?;
+    let ((session, assets), save_path) = initial_session(args)?;
     let state = GuiState {
         record_arms: RefCell::new(vec![false; session.project.tracks.len()]),
         session: RefCell::new(session),
         assets: RefCell::new(assets),
+        save_path: RefCell::new(save_path),
+        dialogs: Rc::new(NativeFileDialogs),
         audio: RefCell::new(None),
         midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
     };
@@ -402,72 +493,7 @@ impl PaletteProbe for StudioApp {
     }
 }
 
-fn midi_event_label(event: MidiEvent) -> String {
-    if event.len >= 3 {
-        match event.bytes[0] & 0xF0 {
-            0x90 if event.bytes[2] > 0 => {
-                format!("Note on · {} · velocity {}", event.bytes[1], event.bytes[2])
-            }
-            0x80 | 0x90 => format!("Note off · {}", event.bytes[1]),
-            0xB0 => format!("Controller {} · {}", event.bytes[1], event.bytes[2]),
-            _ => format!(
-                "MIDI {:02X} {:02X} {:02X}",
-                event.bytes[0], event.bytes[1], event.bytes[2]
-            ),
-        }
-    } else {
-        "MIDI message".into()
-    }
-}
-
-fn main() -> Result<(), String> {
-    let args = parse_args()?;
-    if let Some(output) = &args.screenshot {
-        return render_headless(&args, output);
-    }
-    if args.smoke {
-        let output =
-            std::env::temp_dir().join(format!("loom-studio-smoke-{}.png", std::process::id()));
-        return render_headless(&args, &output.to_string_lossy());
-    }
-    if let Some(out_dir) = &args.journey {
-        return run_journey(&args, out_dir);
-    }
-
-    let app = StudioApp::new().map_err(|error| error.to_string())?;
-    apply_theme(&app, &args.theme);
-    app.window()
-        .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let recovered = initialize_snapshot_recovery()?;
-    let (session, assets) = if args.open.is_some() {
-        initial_session(&args)?
-    } else {
-        recovered
-            .as_deref()
-            .and_then(|bytes| load_studio_bundle(bytes).ok())
-            .map(|(project, assets)| (StudioSession::new(project), assets))
-            .unwrap_or(initial_session(&args)?)
-    };
-    let audio = AudioIo::open_default().ok();
-    let midi_ports = AudioIo::midi_ports().unwrap_or_default();
-    app.set_midi_ports(ModelRc::new(VecModel::from(
-        midi_ports
-            .iter()
-            .map(|port| SharedString::from(port.as_str()))
-            .collect::<Vec<_>>(),
-    )));
-    let state = Rc::new(GuiState {
-        record_arms: RefCell::new(vec![false; session.project.tracks.len()]),
-        session: RefCell::new(session),
-        assets: RefCell::new(assets),
-        audio: RefCell::new(audio),
-        midi_status: RefCell::new(if midi_ports.is_empty() {
-            "No MIDI input ports".into()
-        } else {
-            "MIDI input available".into()
-        }),
-    });
-
+fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
     macro_rules! edit_project {
         ($callback:ident, $body:expr) => {{
             let state = state.clone();
@@ -489,21 +515,16 @@ fn main() -> Result<(), String> {
         let weak = app.as_weak();
         app.on_new_song(move || {
             if let Some(app) = weak.upgrade() {
-                match sample_session() {
-                    Ok((session, assets)) => {
-                        *state.session.borrow_mut() = session;
-                        *state.assets.borrow_mut() = assets;
-                        state.record_arms.borrow_mut().clear();
-                        if let Some(audio) = state.audio.borrow().as_ref() {
-                            audio.stop();
-                        }
-                        refresh(&app, &state);
-                        app.set_status_left("Created a new local Studio project".into());
-                    }
-                    Err(error) => {
-                        app.set_status_left(format!("New project failed: {error}").into())
-                    }
+                let (session, assets) = empty_session();
+                *state.session.borrow_mut() = session;
+                *state.assets.borrow_mut() = assets;
+                *state.save_path.borrow_mut() = None;
+                state.record_arms.borrow_mut().clear();
+                if let Some(audio) = state.audio.borrow().as_ref() {
+                    audio.stop();
                 }
+                refresh(&app, &state);
+                app.set_status_left("Created a new untitled Studio project".into());
             }
         });
     }
@@ -512,18 +533,32 @@ fn main() -> Result<(), String> {
         let weak = app.as_weak();
         app.on_open_song(move || {
             if let Some(app) = weak.upgrade() {
-                match std::fs::read(SAVE_FILENAME)
-                    .map_err(|error| error.to_string())
-                    .and_then(|bytes| load_studio_bundle(&bytes))
-                {
-                    Ok((project, assets)) => {
-                        *state.session.borrow_mut() = StudioSession::new(project);
-                        *state.assets.borrow_mut() = assets;
-                        state.record_arms.borrow_mut().clear();
-                        refresh(&app, &state);
-                        app.set_status_left(format!("Opened {SAVE_FILENAME}").into());
+                let current_path = state.save_path.borrow().clone();
+                let request = open_studio_request(current_path.as_deref());
+                match state.dialogs.open_file(&request) {
+                    Ok(Some(path)) => match std::fs::read(&path)
+                        .map_err(|error| error.to_string())
+                        .and_then(|bytes| load_studio_bundle(&bytes))
+                    {
+                        Ok((project, assets)) => {
+                            *state.session.borrow_mut() = StudioSession::new(project);
+                            *state.assets.borrow_mut() = assets;
+                            *state.save_path.borrow_mut() = Some(path.clone());
+                            state.record_arms.borrow_mut().clear();
+                            refresh(&app, &state);
+                            app.set_status_left(
+                                format!("Opened {}", path.file_name().unwrap().to_string_lossy())
+                                    .into(),
+                            );
+                        }
+                        Err(error) => app.set_status_left(format!("Open failed: {error}").into()),
+                    },
+                    Ok(None) => {
+                        app.set_status_left("Open cancelled".into());
                     }
-                    Err(error) => app.set_status_left(format!("Open failed: {error}").into()),
+                    Err(error) => {
+                        app.set_status_left(format!("Open dialog failed: {error}").into());
+                    }
                 }
             }
         });
@@ -533,17 +568,91 @@ fn main() -> Result<(), String> {
         let weak = app.as_weak();
         app.on_save_song(move || {
             if let Some(app) = weak.upgrade() {
-                let session = state.session.borrow();
-                let assets = state.assets.borrow();
-                match save_studio_bundle(&session.project, &assets).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, &bytes)
-                        .map_err(|error| error.to_string())
-                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
-                }) {
-                    Ok(()) => app.set_status_left(
-                        format!("Saved {SAVE_FILENAME} with embedded audio").into(),
-                    ),
-                    Err(error) => app.set_status_left(format!("Save failed: {error}").into()),
+                let current_path = state.save_path.borrow().clone();
+                let path_to_save = match current_path {
+                    Some(p) => Some(p),
+                    None => {
+                        let req = save_studio_request(None);
+                        match state.dialogs.save_file(&req) {
+                            Ok(Some(p)) => Some(p),
+                            Ok(None) => {
+                                app.set_status_left("Save cancelled".into());
+                                return;
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Save dialog failed: {error}").into());
+                                return;
+                            }
+                        }
+                    }
+                };
+
+                if let Some(path) = path_to_save {
+                    let session = state.session.borrow();
+                    let assets = state.assets.borrow();
+                    match save_studio_bundle(&session.project, &assets).and_then(|bytes| {
+                        std::fs::write(&path, &bytes)
+                            .map_err(|error| error.to_string())
+                            .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                    }) {
+                        Ok(()) => {
+                            drop(session);
+                            drop(assets);
+                            *state.save_path.borrow_mut() = Some(path.clone());
+                            refresh(&app, &state);
+                            app.set_status_left(
+                                format!("Saved {}", path.file_name().unwrap().to_string_lossy())
+                                    .into(),
+                            );
+                        }
+                        Err(error) => {
+                            app.set_status_left(format!("Save failed: {error}").into());
+                        }
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let weak = app.as_weak();
+        app.on_save_as_song(move || {
+            if let Some(app) = weak.upgrade() {
+                let current_path = state.save_path.borrow().clone();
+                let req = save_studio_request(current_path.as_deref());
+                match state.dialogs.save_file(&req) {
+                    Ok(Some(path)) => {
+                        let session = state.session.borrow();
+                        let assets = state.assets.borrow();
+                        match save_studio_bundle(&session.project, &assets).and_then(|bytes| {
+                            std::fs::write(&path, &bytes)
+                                .map_err(|error| error.to_string())
+                                .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                        }) {
+                            Ok(()) => {
+                                drop(session);
+                                drop(assets);
+                                *state.save_path.borrow_mut() = Some(path.clone());
+                                refresh(&app, &state);
+                                app.set_status_left(
+                                    format!(
+                                        "Saved As {}",
+                                        path.file_name().unwrap().to_string_lossy()
+                                    )
+                                    .into(),
+                                );
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Save As failed: {error}").into());
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        app.set_status_left("Save As cancelled".into());
+                    }
+                    Err(error) => {
+                        app.set_status_left(format!("Save As dialog failed: {error}").into());
+                    }
                 }
             }
         });
@@ -568,26 +677,27 @@ fn main() -> Result<(), String> {
             }
         });
     }
+
     edit_project!(on_add_track, |project: &mut StudioProject| {
-        let number = project.tracks.len() + 1;
+        let count = project.tracks.len() + 1;
         project.add_track(StudioTrack::new(
-            format!("track-{number}"),
-            format!("Track {number}"),
+            format!("track-{count}"),
+            format!("Track {count}"),
             TrackKind::Audio,
         ));
-        project.active_track_index = project.tracks.len() - 1;
     });
+
     {
         let state = state.clone();
         let weak = app.as_weak();
         app.on_select_track(move |index| {
             if let Some(app) = weak.upgrade() {
                 if index >= 0 {
-                    state
-                        .session
-                        .borrow_mut()
-                        .project
-                        .select_track(index as usize);
+                    let mut session = state.session.borrow_mut();
+                    if (index as usize) < session.project.tracks.len() {
+                        session.project.active_track_index = index as usize;
+                    }
+                    drop(session);
                     refresh(&app, &state);
                 }
             }
@@ -600,10 +710,9 @@ fn main() -> Result<(), String> {
             if let Some(app) = weak.upgrade() {
                 let mut session = state.session.borrow_mut();
                 session.checkpoint();
-                session.project.mode = if index == 1 {
-                    WorkspaceMode::Pro
-                } else {
-                    WorkspaceMode::Quick
+                session.project.mode = match index {
+                    1 => WorkspaceMode::Pro,
+                    _ => WorkspaceMode::Quick,
                 };
                 drop(session);
                 refresh(&app, &state);
@@ -763,49 +872,55 @@ fn main() -> Result<(), String> {
             }
         });
     }
-    for action in 0..3 {
+    {
         let state = state.clone();
         let weak = app.as_weak();
-        match action {
-            0 => app.on_toggle_mute(move |index| {
-                if let Some(app) = weak.upgrade() {
-                    if index >= 0 {
-                        let mut session = state.session.borrow_mut();
-                        session.checkpoint();
-                        if let Some(track) = session.project.tracks.get_mut(index as usize) {
-                            track.mute = !track.mute;
-                        }
-                        drop(session);
-                        refresh(&app, &state);
+        app.on_toggle_mute(move |index| {
+            if let Some(app) = weak.upgrade() {
+                if index >= 0 {
+                    let mut session = state.session.borrow_mut();
+                    session.checkpoint();
+                    if let Some(track) = session.project.tracks.get_mut(index as usize) {
+                        track.mute = !track.mute;
                     }
+                    drop(session);
+                    refresh(&app, &state);
                 }
-            }),
-            1 => app.on_toggle_solo(move |index| {
-                if let Some(app) = weak.upgrade() {
-                    if index >= 0 {
-                        let mut session = state.session.borrow_mut();
-                        session.checkpoint();
-                        if let Some(track) = session.project.tracks.get_mut(index as usize) {
-                            track.solo = !track.solo;
-                        }
-                        drop(session);
-                        refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let weak = app.as_weak();
+        app.on_toggle_solo(move |index| {
+            if let Some(app) = weak.upgrade() {
+                if index >= 0 {
+                    let mut session = state.session.borrow_mut();
+                    session.checkpoint();
+                    if let Some(track) = session.project.tracks.get_mut(index as usize) {
+                        track.solo = !track.solo;
                     }
+                    drop(session);
+                    refresh(&app, &state);
                 }
-            }),
-            _ => app.on_toggle_rec_arm(move |index| {
-                if let Some(app) = weak.upgrade() {
-                    if index >= 0 {
-                        let mut arms = state.record_arms.borrow_mut();
-                        if let Some(armed) = arms.get_mut(index as usize) {
-                            *armed = !*armed;
-                        }
-                        drop(arms);
-                        refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let weak = app.as_weak();
+        app.on_toggle_rec_arm(move |index| {
+            if let Some(app) = weak.upgrade() {
+                if index >= 0 {
+                    let mut arms = state.record_arms.borrow_mut();
+                    if let Some(armed) = arms.get_mut(index as usize) {
+                        *armed = !*armed;
                     }
+                    drop(arms);
+                    refresh(&app, &state);
                 }
-            }),
-        }
+            }
+        });
     }
     {
         let state = state.clone();
@@ -846,8 +961,25 @@ fn main() -> Result<(), String> {
         let weak = app.as_weak();
         app.on_import_audio(move |path| {
             if let Some(app) = weak.upgrade() {
-                let path = PathBuf::from(path.trim());
-                let result = std::fs::read(&path)
+                let chosen_path = if path.trim().is_empty() {
+                    let current_dir = state.save_path.borrow().clone();
+                    let req = open_audio_request(current_dir.as_deref());
+                    match state.dialogs.open_file(&req) {
+                        Ok(Some(p)) => p,
+                        Ok(None) => {
+                            app.set_status_left("Audio import cancelled".into());
+                            return;
+                        }
+                        Err(e) => {
+                            app.set_status_left(format!("Audio import dialog failed: {e}").into());
+                            return;
+                        }
+                    }
+                } else {
+                    PathBuf::from(path.trim())
+                };
+
+                let result = std::fs::read(&chosen_path)
                     .map_err(|error| error.to_string())
                     .and_then(|bytes| decode_wav(&bytes))
                     .and_then(|buffer| {
@@ -859,7 +991,7 @@ fn main() -> Result<(), String> {
                     });
                 match result {
                     Ok(buffer) => {
-                        let name = path
+                        let name = chosen_path
                             .file_name()
                             .and_then(|name| name.to_str())
                             .unwrap_or("Imported Audio.wav")
@@ -882,7 +1014,7 @@ fn main() -> Result<(), String> {
                         }
                         drop(session);
                         refresh(&app, &state);
-                        app.set_status_left(format!("Imported {}", path.display()).into());
+                        app.set_status_left(format!("Imported {}", chosen_path.display()).into());
                     }
                     Err(error) => app.set_status_left(format!("Import failed: {error}").into()),
                 }
@@ -894,19 +1026,40 @@ fn main() -> Result<(), String> {
         let weak = app.as_weak();
         app.on_export_mix(move |path| {
             if let Some(app) = weak.upgrade() {
-                let mut output = PathBuf::from(path.trim());
-                if output.as_os_str().is_empty() {
-                    output = "loom-studio-mix.wav".into();
-                }
-                if output.extension().is_none() {
-                    output.set_extension("wav");
-                }
-                match mix_current(&state)
-                    .and_then(|mix| mix.to_wav_pcm16())
-                    .and_then(|bytes| {
-                        std::fs::write(&output, bytes).map_err(|error| error.to_string())
-                    }) {
-                    Ok(()) => app.set_status_left(format!("Exported {}", output.display()).into()),
+                let chosen_path = if path.trim().is_empty() {
+                    let current_dir = state.save_path.borrow().clone();
+                    let req = export_audio_request(current_dir.as_deref());
+                    match state.dialogs.save_file(&req) {
+                        Ok(Some(p)) => p,
+                        Ok(None) => {
+                            app.set_status_left("Export cancelled".into());
+                            return;
+                        }
+                        Err(e) => {
+                            app.set_status_left(format!("Export dialog failed: {e}").into());
+                            return;
+                        }
+                    }
+                } else {
+                    let mut output = PathBuf::from(path.trim());
+                    if output.extension().is_none() {
+                        output.set_extension("wav");
+                    }
+                    output
+                };
+
+                let result = mix_current(&state).and_then(|mix| {
+                    let wav_bytes = mix.to_wav_pcm16()?;
+                    std::fs::write(&chosen_path, wav_bytes).map_err(|error| error.to_string())
+                });
+                match result {
+                    Ok(()) => app.set_status_left(
+                        format!(
+                            "Exported mix to {}",
+                            chosen_path.file_name().unwrap().to_string_lossy()
+                        )
+                        .into(),
+                    ),
                     Err(error) => app.set_status_left(format!("Export failed: {error}").into()),
                 }
             }
@@ -935,43 +1088,98 @@ fn main() -> Result<(), String> {
             }
         });
     }
+}
 
-    let timer_state = state.clone();
-    let timer_weak = app.as_weak();
+fn main() -> Result<(), String> {
+    let args = parse_args()?;
+    if let Some(output) = &args.screenshot {
+        return render_headless(&args, output);
+    }
+    if args.smoke {
+        let output =
+            std::env::temp_dir().join(format!("loom-studio-smoke-{}.png", std::process::id()));
+        return render_headless(&args, &output.to_string_lossy());
+    }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
+    }
+
+    let app = StudioApp::new().map_err(|error| error.to_string())?;
+    apply_theme(&app, &args.theme);
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let recovered = initialize_snapshot_recovery()?;
+    let ((session, assets), save_path) = if args.open.is_some() {
+        initial_session(&args)?
+    } else {
+        match recovered
+            .as_deref()
+            .and_then(|bytes| load_studio_bundle(bytes).ok())
+        {
+            Some((project, assets)) => ((StudioSession::new(project), assets), None),
+            None => initial_session(&args)?,
+        }
+    };
+    let audio = AudioIo::open_default().ok();
+    let midi_ports = AudioIo::midi_ports().unwrap_or_default();
+    app.set_midi_ports(ModelRc::new(VecModel::from(
+        midi_ports
+            .iter()
+            .map(|port| SharedString::from(port.as_str()))
+            .collect::<Vec<_>>(),
+    )));
+    let state = Rc::new(GuiState {
+        record_arms: RefCell::new(vec![false; session.project.tracks.len()]),
+        session: RefCell::new(session),
+        assets: RefCell::new(assets),
+        save_path: RefCell::new(save_path),
+        dialogs: Rc::new(NativeFileDialogs),
+        audio: RefCell::new(audio),
+        midi_status: RefCell::new(if midi_ports.is_empty() {
+            "No MIDI input ports".into()
+        } else {
+            "MIDI input available".into()
+        }),
+    });
+
+    wire_application(&app, state.clone());
+
     let ui_timer = Timer::default();
-    ui_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
-        if let Some(app) = timer_weak.upgrade() {
-            if let Some(audio) = timer_state.audio.borrow().as_ref() {
-                app.set_playhead_seconds(audio.position_seconds() as f32);
-                app.set_is_playing(audio.is_playing());
-                app.set_is_recording(audio.is_recording());
-                let events = audio.drain_midi_events();
-                if let Some(event) = events.last().copied() {
-                    let label = midi_event_label(event);
-                    *timer_state.midi_status.borrow_mut() = label.clone();
-                    app.set_midi_status(label.into());
+    {
+        let weak = app.as_weak();
+        let state = state.clone();
+        ui_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
+            if let Some(app) = weak.upgrade() {
+                let audio = state.audio.borrow();
+                if let Some(audio) = audio.as_ref() {
+                    let playing = audio.is_playing();
+                    let recording = audio.is_recording();
+                    if app.get_is_playing() != playing {
+                        app.set_is_playing(playing);
+                    }
+                    if app.get_is_recording() != recording {
+                        app.set_is_recording(recording);
+                    }
+                    let pos = audio.position_seconds();
+                    app.set_playhead_seconds(pos as f32);
                 }
             }
-        }
-    });
+        });
+    }
 
     wire_palette(&app);
     refresh(&app, &state);
-    app.set_status_left("Real-time local audio engine initialized".into());
     app.show().map_err(|error| error.to_string())?;
-    slint::run_event_loop().map_err(|error| error.to_string())?;
-    drop(ui_timer);
-    Ok(())
+    slint::run_event_loop().map_err(|error| error.to_string())
 }
 
-/// Commands exposed through the command palette. Each palette entry maps to
-/// one of the application callbacks, so palette invocation and toolbar clicks
-/// share a single dispatch path.
+/// Commands exposed through the command palette.
 #[derive(Debug, Clone)]
 enum PaletteAction {
     NewSong,
     OpenSong,
     SaveSong,
+    SaveAsSong,
     Undo,
     Redo,
     AddTrack,
@@ -992,10 +1200,7 @@ struct PaletteCommand {
     shortcut: &'static str,
 }
 
-/// Best-effort local WAV used when the palette invokes the import command
-/// without a typed path. `on_import_audio` reports a missing file gracefully
-/// through the status line, so the command is safe to run unconditionally.
-const PALETTE_IMPORT_WAV: &str = "audio/loop.wav";
+const PALETTE_IMPORT_WAV: &str = "";
 
 fn master_palette(app: &StudioApp) -> Vec<PaletteCommand> {
     vec![
@@ -1018,6 +1223,12 @@ fn master_palette(app: &StudioApp) -> Vec<PaletteCommand> {
             shortcut: "Ctrl+S",
         },
         PaletteCommand {
+            action: PaletteAction::SaveAsSong,
+            id: "studio.save-as",
+            label: "Save Song As",
+            shortcut: "Ctrl+Shift+S",
+        },
+        PaletteCommand {
             action: PaletteAction::Undo,
             id: "studio.undo",
             label: "Undo",
@@ -1031,7 +1242,7 @@ fn master_palette(app: &StudioApp) -> Vec<PaletteCommand> {
         },
         PaletteCommand {
             action: PaletteAction::AddTrack,
-            id: "studio.add-track",
+            id: "studio.track.add",
             label: "Add Track",
             shortcut: "Ctrl+T",
         },
@@ -1125,9 +1336,6 @@ fn rebuild_palette(app: &StudioApp, query: &str) {
     }
 }
 
-/// Connect the command-palette callbacks. Invocation dispatches through the
-/// same application callbacks as the toolbar, so palette and toolbar behave
-/// identically, and the query model stays in Rust for testability.
 fn wire_palette(app: &StudioApp) {
     {
         let app_ref = app.as_weak();
@@ -1209,6 +1417,7 @@ fn wire_palette(app: &StudioApp) {
                         PaletteAction::NewSong => app.invoke_new_song(),
                         PaletteAction::OpenSong => app.invoke_open_song(),
                         PaletteAction::SaveSong => app.invoke_save_song(),
+                        PaletteAction::SaveAsSong => app.invoke_save_as_song(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddTrack => app.invoke_add_track(),
@@ -1228,5 +1437,119 @@ fn wire_palette(app: &StudioApp) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_desktop::ScriptedFileDialogs;
+
+    fn test_app_and_state(scripted: ScriptedFileDialogs) -> (StudioApp, Rc<GuiState>) {
+        set_platform();
+        let app = StudioApp::new().expect("create StudioApp");
+        let (session, assets) = sample_session().expect("sample_session");
+        let state = Rc::new(GuiState {
+            record_arms: RefCell::new(vec![false; session.project.tracks.len()]),
+            session: RefCell::new(session),
+            assets: RefCell::new(assets),
+            save_path: RefCell::new(None),
+            dialogs: Rc::new(scripted),
+            audio: RefCell::new(None),
+            midi_status: RefCell::new("Test MIDI harness".into()),
+        });
+        wire_application(&app, state.clone());
+        refresh(&app, &state);
+        (app, state)
+    }
+
+    #[test]
+    fn new_song_creates_untitled_clean_state() {
+        let scripted = ScriptedFileDialogs::default();
+        let (app, state) = test_app_and_state(scripted);
+        *state.save_path.borrow_mut() = Some(PathBuf::from("/tmp/existing.loomstudio"));
+
+        app.invoke_new_song();
+        assert_eq!(*state.save_path.borrow(), None);
+        assert_eq!(state.session.borrow().project.name, "Untitled Session");
+        assert_eq!(app.get_song_title().as_str(), "Untitled Session");
+    }
+
+    #[test]
+    fn open_song_with_dialog_loads_path_and_updates_state() {
+        let dir = std::env::temp_dir().join(format!("loom-studio-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("open_test.loomstudio");
+
+        let mut proj = StudioProject::new("loaded-proj", "Loaded Studio Project");
+        proj.tracks.clear();
+        let assets = AudioAssetStore::default();
+        let bytes = save_studio_bundle(&proj, &assets).unwrap();
+        std::fs::write(&file, bytes).unwrap();
+
+        let scripted = ScriptedFileDialogs::new(vec![Some(file.clone())], vec![]);
+
+        let (app, state) = test_app_and_state(scripted);
+        app.invoke_open_song();
+
+        assert_eq!(*state.save_path.borrow(), Some(file));
+        assert_eq!(state.session.borrow().project.name, "Loaded Studio Project");
+        assert_eq!(app.get_song_title().as_str(), "Loaded Studio Project");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancelled_open_leaves_current_session_untouched() {
+        let scripted = ScriptedFileDialogs::new(vec![None], vec![]);
+
+        let (app, state) = test_app_and_state(scripted);
+        let original_name = state.session.borrow().project.name.clone();
+
+        app.invoke_open_song();
+        assert_eq!(state.session.borrow().project.name, original_name);
+        assert_eq!(app.get_status_left().as_str(), "Open cancelled");
+    }
+
+    #[test]
+    fn save_untitled_prompts_dialog_and_writes_file() {
+        let dir = std::env::temp_dir().join(format!("loom-studio-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("saved_project.loomstudio");
+
+        let scripted = ScriptedFileDialogs::new(vec![], vec![Some(file.clone())]);
+
+        let (app, state) = test_app_and_state(scripted);
+        assert_eq!(*state.save_path.borrow(), None);
+
+        app.invoke_save_song();
+
+        assert_eq!(*state.save_path.borrow(), Some(file.clone()));
+        assert!(file.is_file());
+        let read_bytes = std::fs::read(&file).unwrap();
+        let (loaded_proj, _) = load_studio_bundle(&read_bytes).unwrap();
+        assert_eq!(loaded_proj.name, "Loom Studio Session");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_as_prompts_dialog_and_updates_path() {
+        let dir = std::env::temp_dir().join(format!("loom-studio-saveas-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_v1 = dir.join("v1.loomstudio");
+        let file_v2 = dir.join("v2.loomstudio");
+
+        let scripted = ScriptedFileDialogs::new(vec![], vec![Some(file_v2.clone())]);
+
+        let (app, state) = test_app_and_state(scripted);
+        *state.save_path.borrow_mut() = Some(file_v1);
+
+        app.invoke_save_as_song();
+
+        assert_eq!(*state.save_path.borrow(), Some(file_v2.clone()));
+        assert!(file_v2.is_file());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

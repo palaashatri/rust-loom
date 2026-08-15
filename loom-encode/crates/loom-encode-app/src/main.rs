@@ -5,6 +5,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_encode_core::{
     discover_ffmpeg, execute_job_with_cancel, load_encode_queue, probe_duration, save_encode_queue,
     EncodeJob, EncodePreset, EncodeQueue, EncoderBackend, ExecutionPolicy, JobStatus,
@@ -16,7 +19,6 @@ use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecMode
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const SAVE_FILENAME: &str = "batch.loomencode";
 const HISTORY_LIMIT: usize = 128;
 
 loom_production::define_snapshot_recovery!(ENCODE_RECOVERY, "org.loom.encode", "loom.encode/1");
@@ -76,6 +78,10 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+fn empty_queue() -> EncodeQueue {
+    EncodeQueue::new("untitled-queue", "Untitled Batch Queue")
+}
+
 fn sample_queue() -> EncodeQueue {
     let mut queue = EncodeQueue::new("encode-sample", "Local Delivery Queue");
     queue.jobs.clear();
@@ -88,12 +94,17 @@ fn sample_queue() -> EncodeQueue {
     queue
 }
 
-fn initial_queue(args: &Args) -> Result<EncodeQueue, String> {
+fn initial_queue(args: &Args) -> Result<(EncodeQueue, Option<PathBuf>), String> {
     match args.open.as_deref() {
-        Some(path) => std::fs::read(path)
-            .map_err(|error| format!("failed to read encode queue '{path}': {error}"))
-            .and_then(|bytes| load_encode_queue(&bytes)),
-        None => Ok(sample_queue()),
+        Some(path) => {
+            let p = PathBuf::from(path);
+            let bytes = std::fs::read(&p)
+                .map_err(|error| format!("failed to read encode queue '{path}': {error}"))?;
+            let queue = load_encode_queue(&bytes)
+                .map_err(|error| format!("failed to parse encode queue '{path}': {error}"))?;
+            Ok((queue, Some(p)))
+        }
+        None => Ok((sample_queue(), None)),
     }
 }
 
@@ -114,6 +125,34 @@ fn av1_preset() -> EncodePreset {
         video_codec: "av1".into(),
         audio_codec: "aac".into(),
         bitrate_kbps: 5000,
+    }
+}
+
+fn encode_filter() -> FileFilter {
+    FileFilter {
+        name: "Loom Encode Queue (*.loomencode)".into(),
+        extensions: vec!["loomencode".into()],
+    }
+}
+
+fn open_queue_request(save_path: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Encode Queue".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![encode_filter()],
+    }
+}
+
+fn save_queue_request(save_path: Option<&Path>) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Save Encode Queue".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: save_path
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| Some("Untitled.loomencode".into())),
+        filters: vec![encode_filter()],
     }
 }
 
@@ -248,7 +287,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
-    let queue = initial_queue(args)?;
+    let (queue, _) = initial_queue(args)?;
     let backend = discover_ffmpeg(&[]).ok();
     refresh(&app, &queue, backend.as_ref(), false);
     if args.palette {
@@ -268,7 +307,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
-    let queue = initial_queue(args)?;
+    let (queue, _) = initial_queue(args)?;
     let backend = discover_ffmpeg(&[]).ok();
     refresh(&app, &queue, backend.as_ref(), false);
     wire_palette(&app);
@@ -347,6 +386,8 @@ impl QueueHistory {
 struct AppState {
     queue: Mutex<EncodeQueue>,
     history: Mutex<QueueHistory>,
+    save_path: Mutex<Option<PathBuf>>,
+    dialogs: Arc<dyn FileDialogService + Send + Sync>,
     backend: Option<EncoderBackend>,
     cancel: AtomicBool,
     running: AtomicBool,
@@ -390,43 +431,7 @@ fn post_refresh(weak: &slint::Weak<EncodeApp>, state: &Arc<AppState>, message: S
     });
 }
 
-fn main() -> Result<(), String> {
-    let args = parse_args()?;
-    if let Some(output) = &args.screenshot {
-        return render_headless(&args, output);
-    }
-    if args.smoke {
-        let output =
-            std::env::temp_dir().join(format!("loom-encode-smoke-{}.png", std::process::id()));
-        return render_headless(&args, &output.to_string_lossy());
-    }
-    if let Some(out_dir) = &args.journey {
-        return run_journey(&args, out_dir);
-    }
-
-    let app = EncodeApp::new().map_err(|error| error.to_string())?;
-    apply_theme(&app, &args.theme);
-    app.window()
-        .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let backend = discover_ffmpeg(&[]).ok();
-    let recovered = initialize_snapshot_recovery()?;
-    let mut initial = if args.open.is_some() {
-        initial_queue(&args)?
-    } else {
-        recovered
-            .as_deref()
-            .and_then(|bytes| load_encode_queue(bytes).ok())
-            .unwrap_or(initial_queue(&args)?)
-    };
-    initial.recover_interrupted();
-    let state = Arc::new(AppState {
-        queue: Mutex::new(initial),
-        history: Mutex::new(QueueHistory::default()),
-        backend,
-        cancel: AtomicBool::new(false),
-        running: AtomicBool::new(false),
-    });
-
+fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
     macro_rules! queue_callback {
         ($method:ident, $operation:expr) => {{
             let state = state.clone();
@@ -451,35 +456,85 @@ fn main() -> Result<(), String> {
         }};
     }
 
-    queue_callback!(on_new_queue, |queue: &mut EncodeQueue| {
-        *queue = sample_queue();
-    });
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_new_queue(move || {
+            if let Some(app) = app_ref.upgrade() {
+                *state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = empty_queue();
+                *state
+                    .history
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = QueueHistory::default();
+                *state
+                    .save_path
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+                let queue = snapshot(&state);
+                refresh(&app, &queue, state.backend.as_ref(), false);
+                update_history_controls(&app, &state);
+                app.set_status_left("Created a new untitled batch queue".into());
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_open_queue(move || {
             if let Some(app) = app_ref.upgrade() {
-                match std::fs::read(SAVE_FILENAME)
-                    .map_err(|error| error.to_string())
-                    .and_then(|bytes| load_encode_queue(&bytes))
-                {
-                    Ok(mut queue) => {
-                        queue.recover_interrupted();
-                        *state
-                            .queue
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = queue;
-                        *state
-                            .history
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                            QueueHistory::default();
-                        let queue = snapshot(&state);
-                        refresh(&app, &queue, state.backend.as_ref(), false);
-                        update_history_controls(&app, &state);
-                        app.set_status_left(format!("Opened {SAVE_FILENAME}").into());
+                let current_path = state
+                    .save_path
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                let request = open_queue_request(current_path.as_deref());
+                match state.dialogs.open_file(&request) {
+                    Ok(Some(path)) => {
+                        match std::fs::read(&path)
+                            .map_err(|error| error.to_string())
+                            .and_then(|bytes| load_encode_queue(&bytes))
+                        {
+                            Ok(mut queue) => {
+                                queue.recover_interrupted();
+                                *state
+                                    .queue
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = queue;
+                                *state
+                                    .history
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                    QueueHistory::default();
+                                *state
+                                    .save_path
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                    Some(path.clone());
+                                let queue = snapshot(&state);
+                                refresh(&app, &queue, state.backend.as_ref(), false);
+                                update_history_controls(&app, &state);
+                                app.set_status_left(
+                                    format!(
+                                        "Opened {}",
+                                        path.file_name().unwrap().to_string_lossy()
+                                    )
+                                    .into(),
+                                );
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Open failed: {error}").into())
+                            }
+                        }
                     }
-                    Err(error) => app.set_status_left(format!("Open failed: {error}").into()),
+                    Ok(None) => {
+                        app.set_status_left("Open cancelled".into());
+                    }
+                    Err(error) => {
+                        app.set_status_left(format!("Open dialog failed: {error}").into());
+                    }
                 }
             }
         });
@@ -489,18 +544,116 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_queue(move || {
             if let Some(app) = app_ref.upgrade() {
-                let result = save_encode_queue(&snapshot(&state)).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, &bytes)
-                        .map_err(|error| error.to_string())
-                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
-                });
-                app.set_status_left(
-                    match result {
-                        Ok(()) => format!("Saved {SAVE_FILENAME}"),
-                        Err(error) => format!("Save failed: {error}"),
+                let current_path = state
+                    .save_path
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                let path_to_save = match current_path {
+                    Some(p) => Some(p),
+                    None => {
+                        let req = save_queue_request(None);
+                        match state.dialogs.save_file(&req) {
+                            Ok(Some(p)) => Some(p),
+                            Ok(None) => {
+                                app.set_status_left("Save cancelled".into());
+                                return;
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Save dialog failed: {error}").into());
+                                return;
+                            }
+                        }
                     }
-                    .into(),
-                );
+                };
+
+                if let Some(path) = path_to_save {
+                    let queue = snapshot(&state);
+                    let result = save_encode_queue(&queue).and_then(|bytes| {
+                        std::fs::write(&path, &bytes)
+                            .map_err(|error| error.to_string())
+                            .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                    });
+                    match result {
+                        Ok(()) => {
+                            *state
+                                .save_path
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                Some(path.clone());
+                            refresh(
+                                &app,
+                                &queue,
+                                state.backend.as_ref(),
+                                state.running.load(Ordering::Relaxed),
+                            );
+                            update_history_controls(&app, &state);
+                            app.set_status_left(
+                                format!("Saved {}", path.file_name().unwrap().to_string_lossy())
+                                    .into(),
+                            );
+                        }
+                        Err(error) => {
+                            app.set_status_left(format!("Save failed: {error}").into());
+                        }
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_queue(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current_path = state
+                    .save_path
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                let req = save_queue_request(current_path.as_deref());
+                match state.dialogs.save_file(&req) {
+                    Ok(Some(path)) => {
+                        let queue = snapshot(&state);
+                        let result = save_encode_queue(&queue).and_then(|bytes| {
+                            std::fs::write(&path, &bytes)
+                                .map_err(|error| error.to_string())
+                                .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                        });
+                        match result {
+                            Ok(()) => {
+                                *state
+                                    .save_path
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                    Some(path.clone());
+                                refresh(
+                                    &app,
+                                    &queue,
+                                    state.backend.as_ref(),
+                                    state.running.load(Ordering::Relaxed),
+                                );
+                                update_history_controls(&app, &state);
+                                app.set_status_left(
+                                    format!(
+                                        "Saved As {}",
+                                        path.file_name().unwrap().to_string_lossy()
+                                    )
+                                    .into(),
+                                );
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Save As failed: {error}").into());
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        app.set_status_left("Save As cancelled".into());
+                    }
+                    Err(error) => {
+                        app.set_status_left(format!("Save As dialog failed: {error}").into());
+                    }
+                }
             }
         });
     }
@@ -657,12 +810,10 @@ fn main() -> Result<(), String> {
                     let queue = snapshot(&state);
                     refresh(&app, &queue, state.backend.as_ref(), false);
                     update_history_controls(&app, &state);
-                    app.set_status_left("Undid queue edit".into());
                 }
             }
         });
     }
-
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -686,7 +837,6 @@ fn main() -> Result<(), String> {
                     let queue = snapshot(&state);
                     refresh(&app, &queue, state.backend.as_ref(), false);
                     update_history_controls(&app, &state);
-                    app.set_status_left("Redid queue edit".into());
                 }
             }
         });
@@ -817,57 +967,78 @@ fn main() -> Result<(), String> {
             });
         });
     }
+
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_cancel_queue(move || {
+            state.cancel.store(true, Ordering::SeqCst);
             if let Some(app) = app_ref.upgrade() {
-                state.cancel.store(true, Ordering::SeqCst);
-                app.set_status_left("Cancelling active encoder process…".into());
+                app.set_status_left("Cancelling active encode...".into());
             }
         });
     }
+}
 
+fn main() -> Result<(), String> {
+    let args = parse_args()?;
+    if let Some(output) = &args.screenshot {
+        return render_headless(&args, output);
+    }
+    if args.smoke {
+        let output =
+            std::env::temp_dir().join(format!("loom-encode-smoke-{}.png", std::process::id()));
+        return render_headless(&args, &output.to_string_lossy());
+    }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
+    }
+
+    let app = EncodeApp::new().map_err(|error| error.to_string())?;
+    apply_theme(&app, &args.theme);
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let backend = discover_ffmpeg(&[]).ok();
+    let recovered = initialize_snapshot_recovery()?;
+    let (mut initial, save_path) = if args.open.is_some() {
+        initial_queue(&args)?
+    } else {
+        match recovered
+            .as_deref()
+            .and_then(|bytes| load_encode_queue(bytes).ok())
+        {
+            Some(queue) => (queue, None),
+            None => initial_queue(&args)?,
+        }
+    };
+    initial.recover_interrupted();
+    let state = Arc::new(AppState {
+        queue: Mutex::new(initial),
+        history: Mutex::new(QueueHistory::default()),
+        save_path: Mutex::new(save_path),
+        dialogs: Arc::new(NativeFileDialogs),
+        backend,
+        cancel: AtomicBool::new(false),
+        running: AtomicBool::new(false),
+    });
+
+    wire_application(&app, state.clone());
     wire_palette(&app);
     let queue = snapshot(&state);
     refresh(&app, &queue, state.backend.as_ref(), false);
     update_history_controls(&app, &state);
-    app.set_status_left("Edit a source/output path, then start the local queue".into());
+    app.set_status_left("Queue ready · double click a source to edit".into());
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
-mod product_tests {
-    use super::*;
-
-    #[test]
-    fn queue_history_undoes_and_redoes_edits() {
-        let mut queue = sample_queue();
-        let original_len = queue.jobs.len();
-        let mut history = QueueHistory::default();
-        history.checkpoint(&queue);
-        queue.add_job(EncodeJob::new(
-            "extra",
-            "extra.mov",
-            "extra.mp4",
-            EncodePreset::h264_1080p(),
-        ));
-        assert!(history.undo(&mut queue));
-        assert_eq!(queue.jobs.len(), original_len);
-        assert!(history.redo(&mut queue));
-        assert_eq!(queue.jobs.len(), original_len + 1);
-    }
-}
-
-/// Commands exposed through the command palette. Each palette entry maps to
-/// one of the application callbacks, so palette invocation and toolbar clicks
-/// share a single dispatch path.
+/// Commands exposed through the command palette.
 #[derive(Debug, Clone)]
 enum PaletteAction {
     NewQueue,
     OpenQueue,
     SaveQueue,
+    SaveAsQueue,
     Undo,
     Redo,
     AddJob,
@@ -903,6 +1074,12 @@ fn master_palette(app: &EncodeApp) -> Vec<PaletteCommand> {
             id: "encode.save",
             label: "Save Queue",
             shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveAsQueue,
+            id: "encode.save-as",
+            label: "Save Queue As",
+            shortcut: "Ctrl+Shift+S",
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -982,9 +1159,6 @@ fn rebuild_palette(app: &EncodeApp, query: &str) {
     }
 }
 
-/// Connect the command-palette callbacks. Invocation dispatches through the
-/// same application callbacks as the toolbar, so palette and toolbar behave
-/// identically, and the query model stays in Rust for testability.
 fn wire_palette(app: &EncodeApp) {
     {
         let app_ref = app.as_weak();
@@ -1066,6 +1240,7 @@ fn wire_palette(app: &EncodeApp) {
                         PaletteAction::NewQueue => app.invoke_new_queue(),
                         PaletteAction::OpenQueue => app.invoke_open_queue(),
                         PaletteAction::SaveQueue => app.invoke_save_queue(),
+                        PaletteAction::SaveAsQueue => app.invoke_save_as_queue(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::AddJob => app.invoke_add_job(),
@@ -1077,5 +1252,119 @@ fn wire_palette(app: &EncodeApp) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_desktop::ScriptedFileDialogs;
+
+    fn test_app_and_state(scripted: ScriptedFileDialogs) -> (EncodeApp, Arc<AppState>) {
+        set_platform();
+        let app = EncodeApp::new().expect("create EncodeApp");
+        let queue = sample_queue();
+        let state = Arc::new(AppState {
+            queue: Mutex::new(queue.clone()),
+            history: Mutex::new(QueueHistory::default()),
+            save_path: Mutex::new(None),
+            dialogs: Arc::new(scripted),
+            backend: None,
+            cancel: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+        });
+        wire_application(&app, state.clone());
+        refresh(&app, &queue, None, false);
+        update_history_controls(&app, &state);
+        (app, state)
+    }
+
+    #[test]
+    fn new_queue_creates_untitled_clean_state() {
+        let scripted = ScriptedFileDialogs::default();
+        let (app, state) = test_app_and_state(scripted);
+        *state.save_path.lock().unwrap() = Some(PathBuf::from("/tmp/existing.loomencode"));
+
+        app.invoke_new_queue();
+        assert_eq!(*state.save_path.lock().unwrap(), None);
+        assert_eq!(state.queue.lock().unwrap().name, "Untitled Batch Queue");
+        assert_eq!(app.get_queue_name().as_str(), "Untitled Batch Queue");
+    }
+
+    #[test]
+    fn open_queue_with_dialog_loads_path_and_updates_state() {
+        let dir = std::env::temp_dir().join(format!("loom-encode-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("open_test.loomencode");
+
+        let mut q = EncodeQueue::new("loaded-queue", "Loaded Batch Queue");
+        q.jobs.clear();
+        let bytes = save_encode_queue(&q).unwrap();
+        std::fs::write(&file, bytes).unwrap();
+
+        let scripted = ScriptedFileDialogs::new(vec![Some(file.clone())], vec![]);
+
+        let (app, state) = test_app_and_state(scripted);
+        app.invoke_open_queue();
+
+        assert_eq!(*state.save_path.lock().unwrap(), Some(file));
+        assert_eq!(state.queue.lock().unwrap().name, "Loaded Batch Queue");
+        assert_eq!(app.get_queue_name().as_str(), "Loaded Batch Queue");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancelled_open_leaves_current_queue_untouched() {
+        let scripted = ScriptedFileDialogs::new(vec![None], vec![]);
+
+        let (app, state) = test_app_and_state(scripted);
+        let original_name = state.queue.lock().unwrap().name.clone();
+
+        app.invoke_open_queue();
+        assert_eq!(state.queue.lock().unwrap().name, original_name);
+        assert_eq!(app.get_status_left().as_str(), "Open cancelled");
+    }
+
+    #[test]
+    fn save_untitled_prompts_dialog_and_writes_file() {
+        let dir = std::env::temp_dir().join(format!("loom-encode-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("saved_queue.loomencode");
+
+        let scripted = ScriptedFileDialogs::new(vec![], vec![Some(file.clone())]);
+
+        let (app, state) = test_app_and_state(scripted);
+        assert_eq!(*state.save_path.lock().unwrap(), None);
+
+        app.invoke_save_queue();
+
+        assert_eq!(*state.save_path.lock().unwrap(), Some(file.clone()));
+        assert!(file.is_file());
+        let read_bytes = std::fs::read(&file).unwrap();
+        let loaded = load_encode_queue(&read_bytes).unwrap();
+        assert_eq!(loaded.name, "Local Delivery Queue");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_as_prompts_dialog_and_updates_path() {
+        let dir = std::env::temp_dir().join(format!("loom-encode-saveas-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_v1 = dir.join("v1.loomencode");
+        let file_v2 = dir.join("v2.loomencode");
+
+        let scripted = ScriptedFileDialogs::new(vec![], vec![Some(file_v2.clone())]);
+
+        let (app, state) = test_app_and_state(scripted);
+        *state.save_path.lock().unwrap() = Some(file_v1);
+
+        app.invoke_save_as_queue();
+
+        assert_eq!(*state.save_path.lock().unwrap(), Some(file_v2.clone()));
+        assert!(file_v2.is_file());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

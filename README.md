@@ -36,7 +36,7 @@ save orchestration remain incomplete.
 All current implementation work is integrated on:
 
 ```text
-chatgpt/loom-ui-functional-audit-2
+cline-implementation
 ```
 
 ## Build and test

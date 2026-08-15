@@ -6,6 +6,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use loom_desktop::{
+    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+};
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_video_core::{
@@ -21,7 +24,6 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const SAVE_FILENAME: &str = "project.loomvideo";
 
 loom_production::define_snapshot_recovery!(VIDEO_RECOVERY, "org.loom.video", "loom.video/1");
 
@@ -34,6 +36,7 @@ struct Args {
     theme: String,
     open: Option<String>,
 }
+
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         screenshot: None,
@@ -72,11 +75,14 @@ fn parse_args() -> Result<Args, String> {
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
             }
-
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(args)
+}
+
+fn empty_project() -> VideoProject {
+    VideoProject::new("untitled-project", "Untitled Project")
 }
 
 fn sample_project() -> VideoProject {
@@ -90,18 +96,23 @@ fn sample_project() -> VideoProject {
     project
 }
 
-fn initial_session(args: &Args) -> Result<VideoSession, String> {
+fn initial_session(args: &Args) -> Result<(VideoSession, Option<PathBuf>), String> {
     match args.open.as_deref() {
-        Some(path) => std::fs::read(path)
-            .map_err(|error| format!("failed to read video project '{path}': {error}"))
-            .and_then(|bytes| load_video_project(&bytes))
-            .map(VideoSession::new),
-        None => Ok(VideoSession::new(sample_project())),
+        Some(path) => {
+            let p = PathBuf::from(path);
+            let bytes = std::fs::read(&p)
+                .map_err(|error| format!("failed to read video project '{path}': {error}"))?;
+            let project = load_video_project(&bytes)?;
+            Ok((VideoSession::new(project), Some(p)))
+        }
+        None => Ok((VideoSession::new(sample_project()), None)),
     }
 }
 
 struct AppState {
     session: Mutex<VideoSession>,
+    save_path: Mutex<Option<PathBuf>>,
+    dialogs: Arc<dyn FileDialogService>,
     selected_clip: Mutex<usize>,
     preview: Mutex<Option<VideoFrame>>,
     tools: Option<MediaTools>,
@@ -113,6 +124,57 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn video_filter() -> FileFilter {
+    FileFilter {
+        name: "Loom Video Project (*.loomvideo)".into(),
+        extensions: vec!["loomvideo".into()],
+    }
+}
+
+fn media_filter() -> FileFilter {
+    FileFilter {
+        name: "Supported Media (*.mp4, *.mov, *.mkv, *.avi, *.wav, *.mp3)".into(),
+        extensions: vec![
+            "mp4".into(),
+            "mov".into(),
+            "mkv".into(),
+            "avi".into(),
+            "wav".into(),
+            "mp3".into(),
+        ],
+    }
+}
+
+fn open_video_request(save_path: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Open Video Project".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![video_filter()],
+    }
+}
+
+fn save_video_request(save_path: Option<&Path>) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Save Video Project".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: save_path
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| Some("Untitled.loomvideo".into())),
+        filters: vec![video_filter()],
+    }
+}
+
+fn open_media_request(save_path: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Import Media".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![media_filter()],
+    }
 }
 
 fn timeline_clips(project: &VideoProject) -> Vec<&Clip> {
@@ -260,9 +322,14 @@ fn refresh(app: &VideoApp, state: &AppState) {
         }
         .into(),
     );
+    let path_label = lock(&state.save_path)
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Untitled".into());
     app.set_status_left(
         format!(
-            "{} tracks · {} clips · {} markers",
+            "{path_label} · {} tracks · {} clips · {} markers",
             project.tracks.len(),
             project.total_clips(),
             project.markers.len()
@@ -281,12 +348,16 @@ fn refresh(app: &VideoApp, state: &AppState) {
 fn apply_theme(app: &VideoApp, theme: &str) {
     Theme::get(app).set_active_theme(theme.into());
 }
+
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    let (initial_proj, initial_path) = initial_session(args)?;
     let state = AppState {
-        session: Mutex::new(initial_session(args)?),
+        session: Mutex::new(initial_proj),
+        save_path: Mutex::new(initial_path),
+        dialogs: Arc::new(NativeFileDialogs),
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
         tools: discover_media_tools().ok(),
@@ -310,8 +381,11 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    let (initial_proj, initial_path) = initial_session(args)?;
     let state = AppState {
-        session: Mutex::new(initial_session(args)?),
+        session: Mutex::new(initial_proj),
+        save_path: Mutex::new(initial_path),
+        dialogs: Arc::new(NativeFileDialogs),
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
         tools: discover_media_tools().ok(),
@@ -396,51 +470,18 @@ fn request_preview(state: Arc<AppState>, weak: slint::Weak<VideoApp>, timeline_t
     );
 }
 
-fn main() -> Result<(), String> {
-    let args = parse_args()?;
-    if let Some(output) = &args.screenshot {
-        return render_headless(&args, output);
-    }
-    if args.smoke {
-        let output =
-            std::env::temp_dir().join(format!("loom-video-smoke-{}.png", std::process::id()));
-        return render_headless(&args, &output.to_string_lossy());
-    }
-    if let Some(out_dir) = &args.journey {
-        return run_journey(&args, out_dir);
-    }
-    let app = VideoApp::new().map_err(|error| error.to_string())?;
-    apply_theme(&app, &args.theme);
-    app.window()
-        .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let recovered = initialize_snapshot_recovery()?;
-    let initial = if args.open.is_some() {
-        initial_session(&args)?
-    } else {
-        recovered
-            .as_deref()
-            .and_then(|bytes| load_video_project(bytes).ok())
-            .map(VideoSession::new)
-            .unwrap_or(initial_session(&args)?)
-    };
-    let state = Arc::new(AppState {
-        session: Mutex::new(initial),
-        selected_clip: Mutex::new(0),
-        preview: Mutex::new(Some(procedural_preview())),
-        tools: discover_media_tools().ok(),
-        player: Mutex::new(None),
-        exporting: AtomicBool::new(false),
-    });
-
+fn wire_application(app: &VideoApp, state: Arc<AppState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_new_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                *lock(&state.session) = VideoSession::new(sample_project());
+                *lock(&state.session) = VideoSession::new(empty_project());
+                *lock(&state.save_path) = None;
                 *lock(&state.selected_clip) = 0;
                 *lock(&state.preview) = Some(procedural_preview());
                 refresh(&app, &state);
+                app.set_status_left("New untitled project created".into());
             }
         });
     }
@@ -449,16 +490,30 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_open_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                match std::fs::read(SAVE_FILENAME)
-                    .map_err(|error| error.to_string())
-                    .and_then(|bytes| load_video_project(&bytes))
-                {
-                    Ok(project) => {
-                        *lock(&state.session) = VideoSession::new(project);
-                        refresh(&app, &state);
-                        app.set_status_left(format!("Opened {SAVE_FILENAME}").into());
+                let current_path = lock(&state.save_path).clone();
+                let request = open_video_request(current_path.as_deref());
+                match state.dialogs.open_file(&request) {
+                    Ok(Some(path)) => match std::fs::read(&path)
+                        .map_err(|error| error.to_string())
+                        .and_then(|bytes| load_video_project(&bytes))
+                    {
+                        Ok(project) => {
+                            *lock(&state.session) = VideoSession::new(project);
+                            *lock(&state.save_path) = Some(path.clone());
+                            refresh(&app, &state);
+                            app.set_status_left(
+                                format!("Opened {}", path.file_name().unwrap().to_string_lossy())
+                                    .into(),
+                            );
+                        }
+                        Err(error) => app.set_status_left(format!("Open failed: {error}").into()),
+                    },
+                    Ok(None) => {
+                        app.set_status_left("Open cancelled".into());
                     }
-                    Err(error) => app.set_status_left(format!("Open failed: {error}").into()),
+                    Err(error) => {
+                        app.set_status_left(format!("Open dialog failed: {error}").into());
+                    }
                 }
             }
         });
@@ -468,18 +523,88 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_save_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                let result = save_video_project(&lock(&state.session).project).and_then(|bytes| {
-                    std::fs::write(SAVE_FILENAME, &bytes)
-                        .map_err(|error| error.to_string())
-                        .and_then(|_| checkpoint_snapshot_recovery(bytes))
-                });
-                app.set_status_left(
-                    match result {
-                        Ok(()) => format!("Saved {SAVE_FILENAME}"),
-                        Err(error) => format!("Save failed: {error}"),
+                let target_path = lock(&state.save_path).clone();
+                let path_to_save = match target_path {
+                    Some(p) => Some(p),
+                    None => {
+                        let req = save_video_request(None);
+                        match state.dialogs.save_file(&req) {
+                            Ok(Some(p)) => Some(p),
+                            Ok(None) => {
+                                app.set_status_left("Save cancelled".into());
+                                return;
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Save dialog failed: {error}").into());
+                                return;
+                            }
+                        }
                     }
-                    .into(),
-                );
+                };
+
+                if let Some(path) = path_to_save {
+                    let result =
+                        save_video_project(&lock(&state.session).project).and_then(|bytes| {
+                            std::fs::write(&path, &bytes)
+                                .map_err(|error| error.to_string())
+                                .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                        });
+                    match result {
+                        Ok(()) => {
+                            *lock(&state.save_path) = Some(path.clone());
+                            refresh(&app, &state);
+                            app.set_status_left(
+                                format!("Saved {}", path.file_name().unwrap().to_string_lossy())
+                                    .into(),
+                            );
+                        }
+                        Err(error) => {
+                            app.set_status_left(format!("Save failed: {error}").into());
+                        }
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_project(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current_path = lock(&state.save_path).clone();
+                let req = save_video_request(current_path.as_deref());
+                match state.dialogs.save_file(&req) {
+                    Ok(Some(path)) => {
+                        let result =
+                            save_video_project(&lock(&state.session).project).and_then(|bytes| {
+                                std::fs::write(&path, &bytes)
+                                    .map_err(|error| error.to_string())
+                                    .and_then(|_| checkpoint_snapshot_recovery(bytes))
+                            });
+                        match result {
+                            Ok(()) => {
+                                *lock(&state.save_path) = Some(path.clone());
+                                refresh(&app, &state);
+                                app.set_status_left(
+                                    format!(
+                                        "Saved As {}",
+                                        path.file_name().unwrap().to_string_lossy()
+                                    )
+                                    .into(),
+                                );
+                            }
+                            Err(error) => {
+                                app.set_status_left(format!("Save As failed: {error}").into());
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        app.set_status_left("Save As cancelled".into());
+                    }
+                    Err(error) => {
+                        app.set_status_left(format!("Save As dialog failed: {error}").into());
+                    }
+                }
             }
         });
     }
@@ -512,8 +637,25 @@ fn main() -> Result<(), String> {
                     app.set_status_left("FFmpeg tools are unavailable".into());
                     return;
                 };
-                let path = PathBuf::from(path.trim());
-                match probe_media(tools, &path) {
+                let chosen_path = if path.trim().is_empty() {
+                    let current_dir = lock(&state.save_path).clone();
+                    let req = open_media_request(current_dir.as_deref());
+                    match state.dialogs.open_file(&req) {
+                        Ok(Some(p)) => p,
+                        Ok(None) => {
+                            app.set_status_left("Import cancelled".into());
+                            return;
+                        }
+                        Err(e) => {
+                            app.set_status_left(format!("Import dialog failed: {e}").into());
+                            return;
+                        }
+                    }
+                } else {
+                    PathBuf::from(path.trim())
+                };
+
+                match probe_media(tools, &chosen_path) {
                     Ok(probe) => {
                         let mut session = lock(&state.session);
                         session.checkpoint();
@@ -529,12 +671,13 @@ fn main() -> Result<(), String> {
                         let count = session.project.total_clips() + 1;
                         let mut clip = Clip::new(
                             format!("clip-{count}"),
-                            path.file_name()
+                            chosen_path
+                                .file_name()
                                 .and_then(|name| name.to_str())
                                 .unwrap_or("Imported Clip"),
                             probe.duration.max(0.001),
                         );
-                        clip.source_path = path.to_string_lossy().into_owned();
+                        clip.source_path = chosen_path.to_string_lossy().into_owned();
                         clip.start_time = start;
                         session.project.width = probe.width.max(1);
                         session.project.height = probe.height.max(1);
@@ -548,12 +691,15 @@ fn main() -> Result<(), String> {
                             .saturating_sub(1);
                         drop(session);
                         refresh(&app, &state);
-                        request_preview(state.clone(), app.as_weak(), start);
                         app.set_status_left(
-                            format!("Imported {} · {:.2}s", path.display(), probe.duration).into(),
+                            format!(
+                                "Imported {}",
+                                chosen_path.file_name().unwrap().to_string_lossy()
+                            )
+                            .into(),
                         );
                     }
-                    Err(error) => app.set_status_left(format!("Import failed: {error}").into()),
+                    Err(error) => app.set_status_left(format!("Probe failed: {error}").into()),
                 }
             }
         });
@@ -564,46 +710,49 @@ fn main() -> Result<(), String> {
         app.on_select_track(move |index| {
             if let Some(app) = app_ref.upgrade() {
                 if index >= 0 {
-                    lock(&state.session).project.select_track(index as usize);
+                    let mut session = lock(&state.session);
+                    if (index as usize) < session.project.tracks.len() {
+                        session.project.active_track_index = index as usize;
+                    }
+                    drop(session);
                     refresh(&app, &state);
                 }
             }
         });
     }
-    for solo in [false, true] {
+    {
         let state = state.clone();
         let app_ref = app.as_weak();
-        if solo {
-            app.on_toggle_track_solo(move |index| {
-                if let Some(app) = app_ref.upgrade() {
-                    if index >= 0 {
-                        let mut session = lock(&state.session);
-                        if (index as usize) < session.project.tracks.len() {
-                            session.checkpoint();
-                            session.project.tracks[index as usize].solo =
-                                !session.project.tracks[index as usize].solo;
-                        }
-                        drop(session);
-                        refresh(&app, &state);
+        app.on_toggle_track_mute(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index >= 0 {
+                    let mut session = lock(&state.session);
+                    session.checkpoint();
+                    if let Some(track) = session.project.tracks.get_mut(index as usize) {
+                        track.muted = !track.muted;
                     }
+                    drop(session);
+                    refresh(&app, &state);
                 }
-            });
-        } else {
-            app.on_toggle_track_mute(move |index| {
-                if let Some(app) = app_ref.upgrade() {
-                    if index >= 0 {
-                        let mut session = lock(&state.session);
-                        if (index as usize) < session.project.tracks.len() {
-                            session.checkpoint();
-                            session.project.tracks[index as usize].muted =
-                                !session.project.tracks[index as usize].muted;
-                        }
-                        drop(session);
-                        refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_toggle_track_solo(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                if index >= 0 {
+                    let mut session = lock(&state.session);
+                    session.checkpoint();
+                    if let Some(track) = session.project.tracks.get_mut(index as usize) {
+                        track.solo = !track.solo;
                     }
+                    drop(session);
+                    refresh(&app, &state);
                 }
-            });
-        }
+            }
+        });
     }
     {
         let state = state.clone();
@@ -884,21 +1033,62 @@ fn main() -> Result<(), String> {
             }
         });
     }
+}
 
+fn main() -> Result<(), String> {
+    let args = parse_args()?;
+    if let Some(output) = &args.screenshot {
+        return render_headless(&args, output);
+    }
+    if args.smoke {
+        let output =
+            std::env::temp_dir().join(format!("loom-video-smoke-{}.png", std::process::id()));
+        return render_headless(&args, &output.to_string_lossy());
+    }
+    if let Some(out_dir) = &args.journey {
+        return run_journey(&args, out_dir);
+    }
+    let app = VideoApp::new().map_err(|error| error.to_string())?;
+    apply_theme(&app, &args.theme);
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let recovered = initialize_snapshot_recovery()?;
+    let (initial_proj, initial_path) = if args.open.is_some() {
+        initial_session(&args)?
+    } else {
+        match recovered
+            .as_deref()
+            .and_then(|bytes| load_video_project(bytes).ok())
+        {
+            Some(p) => (VideoSession::new(p), None),
+            None => initial_session(&args)?,
+        }
+    };
+    let state = Arc::new(AppState {
+        session: Mutex::new(initial_proj),
+        save_path: Mutex::new(initial_path),
+        dialogs: Arc::new(NativeFileDialogs),
+        selected_clip: Mutex::new(0),
+        preview: Mutex::new(Some(procedural_preview())),
+        tools: discover_media_tools().ok(),
+        player: Mutex::new(None),
+        exporting: AtomicBool::new(false),
+    });
+
+    wire_application(&app, state.clone());
     wire_palette(&app);
     refresh(&app, &state);
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
 }
 
-/// Commands exposed through the command palette. Each palette entry maps to
-/// one of the application callbacks, so palette invocation and toolbar clicks
-/// share a single dispatch path.
+/// Commands exposed through the command palette.
 #[derive(Debug, Clone)]
 enum PaletteAction {
     NewProject,
     OpenProject,
     SaveProject,
+    SaveAsProject,
     Undo,
     Redo,
     ImportMedia,
@@ -917,10 +1107,7 @@ struct PaletteCommand {
     shortcut: &'static str,
 }
 
-/// Best-effort local source used when the palette invokes the import command
-/// without a typed path. `on_import_media` reports a missing file gracefully
-/// through the status line, so the command is safe to run unconditionally.
-const PALETTE_IMPORT_SOURCE: &str = "media/sample.mov";
+const PALETTE_IMPORT_SOURCE: &str = "";
 
 fn master_palette(app: &VideoApp) -> Vec<PaletteCommand> {
     vec![
@@ -941,6 +1128,12 @@ fn master_palette(app: &VideoApp) -> Vec<PaletteCommand> {
             id: "video.save",
             label: "Save Project",
             shortcut: "Ctrl+S",
+        },
+        PaletteCommand {
+            action: PaletteAction::SaveAsProject,
+            id: "video.save-as",
+            label: "Save Project As",
+            shortcut: "Ctrl+Shift+S",
         },
         PaletteCommand {
             action: PaletteAction::Undo,
@@ -1032,9 +1225,6 @@ fn rebuild_palette(app: &VideoApp, query: &str) {
     }
 }
 
-/// Connect the command-palette callbacks. Invocation dispatches through the
-/// same application callbacks as the toolbar, so palette and toolbar behave
-/// identically, and the query model stays in Rust for testability.
 fn wire_palette(app: &VideoApp) {
     {
         let app_ref = app.as_weak();
@@ -1116,6 +1306,7 @@ fn wire_palette(app: &VideoApp) {
                         PaletteAction::NewProject => app.invoke_new_project(),
                         PaletteAction::OpenProject => app.invoke_open_project(),
                         PaletteAction::SaveProject => app.invoke_save_project(),
+                        PaletteAction::SaveAsProject => app.invoke_save_as_project(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
                         PaletteAction::ImportMedia => {
@@ -1131,5 +1322,118 @@ fn wire_palette(app: &VideoApp) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_desktop::ScriptedFileDialogs;
+
+    fn test_app_and_state(scripted: ScriptedFileDialogs) -> (VideoApp, Arc<AppState>) {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+        let state = Arc::new(AppState {
+            session: Mutex::new(VideoSession::new(sample_project())),
+            save_path: Mutex::new(None),
+            dialogs: Arc::new(scripted),
+            selected_clip: Mutex::new(0),
+            preview: Mutex::new(Some(procedural_preview())),
+            tools: None,
+            player: Mutex::new(None),
+            exporting: AtomicBool::new(false),
+        });
+        wire_application(&app, state.clone());
+        refresh(&app, &state);
+        (app, state)
+    }
+
+    #[test]
+    fn new_project_creates_untitled_clean_state() {
+        let scripted = ScriptedFileDialogs::default();
+        let (app, state) = test_app_and_state(scripted);
+        *lock(&state.save_path) = Some(PathBuf::from("/tmp/existing.loomvideo"));
+
+        app.invoke_new_project();
+        assert_eq!(*lock(&state.save_path), None);
+        assert_eq!(lock(&state.session).project.name, "Untitled Project");
+        assert_eq!(app.get_project_name().as_str(), "Untitled Project");
+    }
+
+    #[test]
+    fn open_project_with_dialog_loads_path_and_updates_state() {
+        let dir = std::env::temp_dir().join(format!("loom-video-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("open_test.loomvideo");
+
+        let mut proj = VideoProject::new("loaded-proj", "Loaded Video Project");
+        proj.tracks[0].clips.clear();
+        let bytes = save_video_project(&proj).unwrap();
+        std::fs::write(&file, bytes).unwrap();
+
+        let scripted = ScriptedFileDialogs::new(vec![Some(file.clone())], vec![]);
+
+        let (app, state) = test_app_and_state(scripted);
+        app.invoke_open_project();
+
+        assert_eq!(*lock(&state.save_path), Some(file));
+        assert_eq!(lock(&state.session).project.name, "Loaded Video Project");
+        assert_eq!(app.get_project_name().as_str(), "Loaded Video Project");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancelled_open_leaves_current_session_untouched() {
+        let scripted = ScriptedFileDialogs::new(vec![None], vec![]); // User clicked Cancel in native open dialog
+
+        let (app, state) = test_app_and_state(scripted);
+        let original_name = lock(&state.session).project.name.clone();
+
+        app.invoke_open_project();
+        assert_eq!(lock(&state.session).project.name, original_name);
+        assert_eq!(app.get_status_left().as_str(), "Open cancelled");
+    }
+
+    #[test]
+    fn save_untitled_prompts_dialog_and_writes_file() {
+        let dir = std::env::temp_dir().join(format!("loom-video-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("saved_project.loomvideo");
+
+        let scripted = ScriptedFileDialogs::new(vec![], vec![Some(file.clone())]);
+
+        let (app, state) = test_app_and_state(scripted);
+        assert_eq!(*lock(&state.save_path), None);
+
+        app.invoke_save_project();
+
+        assert_eq!(*lock(&state.save_path), Some(file.clone()));
+        assert!(file.is_file());
+        let read_bytes = std::fs::read(&file).unwrap();
+        let loaded = load_video_project(&read_bytes).unwrap();
+        assert_eq!(loaded.name, "Documentary Assembly");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_as_prompts_dialog_and_updates_path() {
+        let dir = std::env::temp_dir().join(format!("loom-video-saveas-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_v1 = dir.join("v1.loomvideo");
+        let file_v2 = dir.join("v2.loomvideo");
+
+        let scripted = ScriptedFileDialogs::new(vec![], vec![Some(file_v2.clone())]);
+
+        let (app, state) = test_app_and_state(scripted);
+        *lock(&state.save_path) = Some(file_v1);
+
+        app.invoke_save_as_project();
+
+        assert_eq!(*lock(&state.save_path), Some(file_v2.clone()));
+        assert!(file_v2.is_file());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
