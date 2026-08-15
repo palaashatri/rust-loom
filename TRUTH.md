@@ -164,7 +164,7 @@ still lacks complete semantic round-trip and independent PDF evidence. Photo sti
 has non-atomic persistence/export and status-only tool modes. Motion's repaired
 native workflow passed its focused strict gate, while its professional playback,
 compositing, and rendering engine remains incomplete. The complete-suite truth
-score therefore remains approximately **24/100**.
+score is approximately **26/100**.
 
 ### Keyboard journeys
 
