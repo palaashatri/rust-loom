@@ -13,6 +13,40 @@ pub struct Keyframe {
     pub easing: String,
 }
 
+/// Vector shape geometry for motion graphic shapes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VectorShape {
+    /// Axis-aligned rectangle with corner radius.
+    Rectangle {
+        width: f32,
+        height: f32,
+        corner_radius: f32,
+    },
+    /// Circle or ellipse.
+    Ellipse { radius_x: f32, radius_y: f32 },
+    /// Regular polygon with N sides.
+    Polygon { sides: u32, radius: f32 },
+    /// Star with points, outer radius, and inner radius.
+    Star {
+        points: u32,
+        outer_radius: f32,
+        inner_radius: f32,
+    },
+}
+
+impl VectorShape {
+    /// Computes approximate bounding box `(width, height)`.
+    pub fn bounding_box(&self) -> (f32, f32) {
+        match self {
+            VectorShape::Rectangle { width, height, .. } => (*width, *height),
+            VectorShape::Ellipse { radius_x, radius_y } => (radius_x * 2.0, radius_y * 2.0),
+            VectorShape::Polygon { radius, .. } => (radius * 2.0, radius * 2.0),
+            VectorShape::Star { outer_radius, .. } => (outer_radius * 2.0, outer_radius * 2.0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MotionLayer {
     pub id: String,
@@ -669,5 +703,21 @@ mod tests {
         // Remove layer 1
         assert!(doc.remove_layer(1));
         assert_eq!(doc.len(), 2);
+    }
+
+    #[test]
+    fn vector_shape_bounding_box_calculations() {
+        let rect = VectorShape::Rectangle {
+            width: 200.0,
+            height: 100.0,
+            corner_radius: 8.0,
+        };
+        assert_eq!(rect.bounding_box(), (200.0, 100.0));
+
+        let ellipse = VectorShape::Ellipse {
+            radius_x: 50.0,
+            radius_y: 30.0,
+        };
+        assert_eq!(ellipse.bounding_box(), (100.0, 60.0));
     }
 }

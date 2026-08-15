@@ -492,7 +492,61 @@ impl Track {
     }
 }
 
+/// SMPTE timecode representation (HH:MM:SS:FF).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Timecode {
+    /// Hours [0..].
+    pub hours: u32,
+    /// Minutes [0..=59].
+    pub minutes: u32,
+    /// Seconds [0..=59].
+    pub seconds: u32,
+    /// Frames [0..frame_rate).
+    pub frames: u32,
+}
+
+impl Timecode {
+    /// Formats seconds to a standard SMPTE timecode `HH:MM:SS:FF` given a frame rate.
+    pub fn from_seconds(seconds: f64, frame_rate: f64) -> Self {
+        let fps = if frame_rate > 0.0 { frame_rate } else { 30.0 };
+        let total_frames = (seconds.max(0.0) * fps).round() as u64;
+        let fps_u64 = fps.round().max(1.0) as u64;
+        let frames = (total_frames % fps_u64) as u32;
+        let total_seconds = total_frames / fps_u64;
+        let sec = (total_seconds % 60) as u32;
+        let total_minutes = total_seconds / 60;
+        let min = (total_minutes % 60) as u32;
+        let hrs = (total_minutes / 60) as u32;
+        Timecode {
+            hours: hrs,
+            minutes: min,
+            seconds: sec,
+            frames,
+        }
+    }
+
+    /// Converts this timecode to total seconds given a frame rate.
+    pub fn to_seconds(&self, frame_rate: f64) -> f64 {
+        let fps = if frame_rate > 0.0 { frame_rate } else { 30.0 };
+        let total_seconds =
+            (self.hours as f64) * 3600.0 + (self.minutes as f64) * 60.0 + (self.seconds as f64);
+        total_seconds + (self.frames as f64) / fps
+    }
+
+    /// Formats as a display string `HH:MM:SS:FF`.
+    pub fn format_smpte(&self) -> String {
+        format!(
+            "{:02}:{:02}:{:02}:{:02}",
+            self.hours, self.minutes, self.seconds, self.frames
+        )
+    }
+}
+
 impl VideoProject {
+    /// Returns the current timecode at the given playhead time in seconds.
+    pub fn timecode_at(&self, time_secs: f64) -> Timecode {
+        Timecode::from_seconds(time_secs, self.frame_rate)
+    }
     /// Timeline duration across every enabled clip and caption.
     pub fn duration(&self) -> f64 {
         let clips = self
@@ -1395,5 +1449,18 @@ mod tests {
         assert_eq!(project.markers.len(), 1);
         assert!(project.remove_marker("m1"));
         assert_eq!(project.markers.len(), 0);
+    }
+
+    #[test]
+    fn timecode_formatting_and_smpte_conversions() {
+        let tc = Timecode::from_seconds(3665.5, 30.0);
+        assert_eq!(tc.hours, 1);
+        assert_eq!(tc.minutes, 1);
+        assert_eq!(tc.seconds, 5);
+        assert_eq!(tc.frames, 15);
+        assert_eq!(tc.format_smpte(), "01:01:05:15");
+
+        let secs = tc.to_seconds(30.0);
+        assert!((secs - 3665.5).abs() < 1e-4);
     }
 }

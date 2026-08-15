@@ -342,6 +342,40 @@ impl RgbaImage {
         }
         output
     }
+
+    /// Computes 256-bin histograms for R, G, B, and Luminance channels.
+    pub fn compute_histogram(&self) -> ImageHistogram {
+        let mut r = [0u32; 256];
+        let mut g = [0u32; 256];
+        let mut b = [0u32; 256];
+        let mut luma = [0u32; 256];
+        for pixel in self.pixels.chunks_exact(4) {
+            let pr = pixel[0] as usize;
+            let pg = pixel[1] as usize;
+            let pb = pixel[2] as usize;
+            let y = (0.2126 * pixel[0] as f32 + 0.7152 * pixel[1] as f32 + 0.0722 * pixel[2] as f32)
+                .round()
+                .clamp(0.0, 255.0) as usize;
+            r[pr] += 1;
+            g[pg] += 1;
+            b[pb] += 1;
+            luma[y] += 1;
+        }
+        ImageHistogram { r, g, b, luma }
+    }
+}
+
+/// 256-bin color channel and luminance histograms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageHistogram {
+    /// Red channel bins [0..=255].
+    pub r: [u32; 256],
+    /// Green channel bins [0..=255].
+    pub g: [u32; 256],
+    /// Blue channel bins [0..=255].
+    pub b: [u32; 256],
+    /// Rec. 709 Luminance bins [0..=255].
+    pub luma: [u32; 256],
 }
 
 fn image_byte_len(width: u32, height: u32) -> Result<usize, String> {
@@ -1072,5 +1106,20 @@ mod tests {
         let mut img = RgbaImage::solid(1, 1, [100, 150, 200, 255]).unwrap();
         apply_adjustment(&mut img, "invert", 1.0, 1.0, None);
         assert_eq!(img.pixel(0, 0).unwrap(), [155, 105, 55, 255]);
+    }
+
+    #[test]
+    fn compute_histogram_counts_channel_distributions() {
+        let mut img = RgbaImage::transparent(2, 2).unwrap();
+        img.set_pixel(0, 0, [255, 0, 0, 255]);
+        img.set_pixel(1, 0, [0, 255, 0, 255]);
+        img.set_pixel(0, 1, [0, 0, 255, 255]);
+        img.set_pixel(1, 1, [255, 255, 255, 255]);
+
+        let hist = img.compute_histogram();
+        assert_eq!(hist.r[255], 2);
+        assert_eq!(hist.r[0], 2);
+        assert_eq!(hist.g[255], 2);
+        assert_eq!(hist.b[255], 2);
     }
 }

@@ -147,6 +147,128 @@ impl Slide {
             }
         }
     }
+
+    /// Applies a layout preset, configuring placeholder elements with standard positions.
+    pub fn apply_layout_preset(&mut self, preset: SlideLayoutPreset) {
+        self.elements.clear();
+        match preset {
+            SlideLayoutPreset::TitleSlide => {
+                self.layout = "title".into();
+                self.add_element(SlideElement {
+                    id: "title-1".into(),
+                    element_type: ElementType::Title,
+                    content: self.title.clone(),
+                    x: 100.0,
+                    y: 250.0,
+                    width: 1720.0,
+                    height: 120.0,
+                });
+                self.add_element(SlideElement {
+                    id: "sub-1".into(),
+                    element_type: ElementType::Subtitle,
+                    content: "Subtitle or author name".into(),
+                    x: 100.0,
+                    y: 400.0,
+                    width: 1720.0,
+                    height: 80.0,
+                });
+            }
+            SlideLayoutPreset::TitleAndContent => {
+                self.layout = "title_content".into();
+                self.add_element(SlideElement {
+                    id: "title-1".into(),
+                    element_type: ElementType::Title,
+                    content: self.title.clone(),
+                    x: 80.0,
+                    y: 60.0,
+                    width: 1760.0,
+                    height: 100.0,
+                });
+                self.add_element(SlideElement {
+                    id: "body-1".into(),
+                    element_type: ElementType::BodyText,
+                    content: "• Key point one\n• Key point two\n• Key point three".into(),
+                    x: 80.0,
+                    y: 200.0,
+                    width: 1760.0,
+                    height: 780.0,
+                });
+            }
+            SlideLayoutPreset::TwoColumn => {
+                self.layout = "two_column".into();
+                self.add_element(SlideElement {
+                    id: "title-1".into(),
+                    element_type: ElementType::Title,
+                    content: self.title.clone(),
+                    x: 80.0,
+                    y: 60.0,
+                    width: 1760.0,
+                    height: 100.0,
+                });
+                self.add_element(SlideElement {
+                    id: "col-1".into(),
+                    element_type: ElementType::BodyText,
+                    content: "Column 1 notes and content".into(),
+                    x: 80.0,
+                    y: 200.0,
+                    width: 850.0,
+                    height: 780.0,
+                });
+                self.add_element(SlideElement {
+                    id: "col-2".into(),
+                    element_type: ElementType::BodyText,
+                    content: "Column 2 notes and content".into(),
+                    x: 990.0,
+                    y: 200.0,
+                    width: 850.0,
+                    height: 780.0,
+                });
+            }
+            SlideLayoutPreset::Quote => {
+                self.layout = "quote".into();
+                self.add_element(SlideElement {
+                    id: "quote-1".into(),
+                    element_type: ElementType::Title,
+                    content: "\"Inspiring creative suite quotation\"".into(),
+                    x: 150.0,
+                    y: 350.0,
+                    width: 1620.0,
+                    height: 200.0,
+                });
+            }
+            SlideLayoutPreset::BigStat => {
+                self.layout = "big_stat".into();
+                self.add_element(SlideElement {
+                    id: "stat-1".into(),
+                    element_type: ElementType::StatCard,
+                    content: "99.9%".into(),
+                    x: 200.0,
+                    y: 200.0,
+                    width: 1520.0,
+                    height: 250.0,
+                });
+                self.add_element(SlideElement {
+                    id: "label-1".into(),
+                    element_type: ElementType::Subtitle,
+                    content: "System Reliability".into(),
+                    x: 200.0,
+                    y: 500.0,
+                    width: 1520.0,
+                    height: 100.0,
+                });
+            }
+        }
+    }
+}
+
+/// Predefined layout templates for presentation slides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlideLayoutPreset {
+    TitleSlide,
+    TitleAndContent,
+    TwoColumn,
+    Quote,
+    BigStat,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -941,5 +1063,22 @@ mod tests {
         let removed = doc.remove_slide(1);
         assert!(removed.is_some());
         assert_eq!(doc.len(), 2);
+    }
+
+    #[test]
+    fn slide_layout_presets_configure_elements() {
+        let mut slide = Slide::new("slide-p", "Q3 Review", "blank");
+        slide.apply_layout_preset(SlideLayoutPreset::TitleSlide);
+        assert_eq!(slide.layout, "title");
+        assert_eq!(slide.elements.len(), 2);
+        assert_eq!(slide.elements[0].content, "Q3 Review");
+
+        slide.apply_layout_preset(SlideLayoutPreset::TwoColumn);
+        assert_eq!(slide.layout, "two_column");
+        assert_eq!(slide.elements.len(), 3);
+
+        slide.apply_layout_preset(SlideLayoutPreset::BigStat);
+        assert_eq!(slide.layout, "big_stat");
+        assert_eq!(slide.elements.len(), 2);
     }
 }

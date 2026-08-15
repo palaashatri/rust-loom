@@ -263,6 +263,31 @@ impl WriterDocument {
         out
     }
 
+    /// Render document content to semantic HTML markup.
+    pub fn to_html_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str("<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>");
+        out.push_str(&self.title);
+        out.push_str("</title>\n</head>\n<body>\n");
+        for b in &self.blocks {
+            let tag = match b.kind.as_str() {
+                "heading1" => "h1",
+                "heading2" => "h2",
+                "heading3" => "h3",
+                "heading4" => "h4",
+                "heading5" => "h5",
+                "heading6" => "h6",
+                "quote" => "blockquote",
+                _ => "p",
+            };
+            out.push_str(&format!("<{tag}>"));
+            out.push_str(b.text.as_str());
+            out.push_str(&format!("</{tag}>\n"));
+        }
+        out.push_str("</body>\n</html>\n");
+        out
+    }
+
     /// Estimate long-form document metrics including page count, word count, character count, and reading time.
     pub fn estimate_pagination(&self) -> PaginationMetrics {
         let plain = self.plain_text();
@@ -2402,5 +2427,20 @@ mod tests {
         // Set block kind to heading1
         doc.set_block_kind(1, "heading1").unwrap();
         assert_eq!(doc.blocks[0].kind, "heading1");
+    }
+
+    #[test]
+    fn to_html_string_generates_semantic_markup() {
+        let mut doc = WriterDocument::new("doc-html", "HTML Document");
+        doc.push(RichBlock::new(1, "heading1", "Document Title"));
+        doc.push(RichBlock::new(2, "paragraph", "First paragraph body text."));
+        doc.push(RichBlock::new(3, "quote", "A quoted passage."));
+
+        let html = doc.to_html_string();
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("<title>HTML Document</title>"));
+        assert!(html.contains("<h1>Document Title</h1>"));
+        assert!(html.contains("<p>First paragraph body text.</p>"));
+        assert!(html.contains("<blockquote>A quoted passage.</blockquote>"));
     }
 }

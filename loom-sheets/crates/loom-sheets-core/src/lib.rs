@@ -1063,6 +1063,83 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                 _ => Value::Error(CalcError::Value),
             }
         }
+        "SQRT" => {
+            if values.len() != 1 {
+                return Value::Error(CalcError::Value);
+            }
+            match num(&values[0]) {
+                Ok(n) => {
+                    if n < 0.0 {
+                        Value::Error(CalcError::Value)
+                    } else {
+                        Value::Number(n.sqrt())
+                    }
+                }
+                Err(_) => Value::Error(CalcError::Value),
+            }
+        }
+        "POWER" => {
+            if values.len() != 2 {
+                return Value::Error(CalcError::Value);
+            }
+            match (num(&values[0]), num(&values[1])) {
+                (Ok(base), Ok(exp)) => Value::Number(base.powf(exp)),
+                _ => Value::Error(CalcError::Value),
+            }
+        }
+        "MOD" => {
+            if values.len() != 2 {
+                return Value::Error(CalcError::Value);
+            }
+            match (num(&values[0]), num(&values[1])) {
+                (Ok(n), Ok(d)) => {
+                    if d == 0.0 {
+                        Value::Error(CalcError::DivZero)
+                    } else {
+                        Value::Number(n % d)
+                    }
+                }
+                _ => Value::Error(CalcError::Value),
+            }
+        }
+        "FLOOR" => {
+            if values.len() != 1 {
+                return Value::Error(CalcError::Value);
+            }
+            match num(&values[0]) {
+                Ok(n) => Value::Number(n.floor()),
+                Err(_) => Value::Error(CalcError::Value),
+            }
+        }
+        "CEILING" => {
+            if values.len() != 1 {
+                return Value::Error(CalcError::Value);
+            }
+            match num(&values[0]) {
+                Ok(n) => Value::Number(n.ceil()),
+                Err(_) => Value::Error(CalcError::Value),
+            }
+        }
+        "MEDIAN" => {
+            let mut numbers: Vec<f64> = Vec::new();
+            for v in &values {
+                match v {
+                    Value::Number(x) => numbers.push(*x),
+                    Value::Empty => {}
+                    _ => return Value::Error(CalcError::Value),
+                }
+            }
+            if numbers.is_empty() {
+                return Value::Error(CalcError::NA);
+            }
+            numbers.sort_by(|a, b| a.total_cmp(b));
+            let mid = numbers.len() / 2;
+            if numbers.len() % 2 == 0 {
+                Value::Number((numbers[mid - 1] + numbers[mid]) / 2.0)
+            } else {
+                Value::Number(numbers[mid])
+            }
+        }
         _ => Value::Error(CalcError::Name),
     }
 }
@@ -2246,5 +2323,42 @@ mod tests {
         let cleared = sheet.clear_range(c1, c2);
         assert_eq!(cleared, 2);
         assert_eq!(sheet.used_range(), None);
+    }
+
+    #[test]
+    fn math_and_statistical_functions_evaluate_correctly() {
+        let mut sheet = Sheet::new("Math");
+        sheet.set_str("A1", "=SQRT(16)");
+        sheet.set_str("A2", "=POWER(2, 8)");
+        sheet.set_str("A3", "=MOD(17, 5)");
+        sheet.set_str("A4", "=FLOOR(3.7)");
+        sheet.set_str("A5", "=CEILING(3.2)");
+        sheet.set_str("A6", "=MEDIAN(10, 20, 30, 40, 50)");
+
+        let evaluated = evaluate(&sheet);
+        assert_eq!(
+            evaluated.get(&CellRef::parse("A1").unwrap()),
+            Some(&Value::Number(4.0))
+        );
+        assert_eq!(
+            evaluated.get(&CellRef::parse("A2").unwrap()),
+            Some(&Value::Number(256.0))
+        );
+        assert_eq!(
+            evaluated.get(&CellRef::parse("A3").unwrap()),
+            Some(&Value::Number(2.0))
+        );
+        assert_eq!(
+            evaluated.get(&CellRef::parse("A4").unwrap()),
+            Some(&Value::Number(3.0))
+        );
+        assert_eq!(
+            evaluated.get(&CellRef::parse("A5").unwrap()),
+            Some(&Value::Number(4.0))
+        );
+        assert_eq!(
+            evaluated.get(&CellRef::parse("A6").unwrap()),
+            Some(&Value::Number(30.0))
+        );
     }
 }

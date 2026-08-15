@@ -410,6 +410,57 @@ impl AudioBuffer {
         self.apply_gain(factor);
         Ok(factor)
     }
+
+    /// Measures peak, RMS, and clipping state across the buffer.
+    pub fn meter(&self) -> AudioMeter {
+        if self.samples.is_empty() {
+            return AudioMeter {
+                peak_db: -100.0,
+                rms_db: -100.0,
+                clipped: false,
+            };
+        }
+        let mut peak: f32 = 0.0;
+        let mut sum_sq: f64 = 0.0;
+        let mut clipped = false;
+        for &s in &self.samples {
+            let abs_s = s.abs();
+            if abs_s > 1.0 {
+                clipped = true;
+            }
+            if abs_s > peak {
+                peak = abs_s;
+            }
+            sum_sq += (s as f64) * (s as f64);
+        }
+        let rms = (sum_sq / self.samples.len() as f64).sqrt() as f32;
+        let peak_db = if peak > 1e-5 {
+            20.0 * peak.log10()
+        } else {
+            -100.0
+        };
+        let rms_db = if rms > 1e-5 {
+            20.0 * rms.log10()
+        } else {
+            -100.0
+        };
+        AudioMeter {
+            peak_db: peak_db.max(-100.0),
+            rms_db: rms_db.max(-100.0),
+            clipped,
+        }
+    }
+}
+
+/// Audio level metrics for metering and loudness analysis.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioMeter {
+    /// Peak amplitude in dBFS (0.0 dBFS max).
+    pub peak_db: f32,
+    /// Root-mean-square amplitude in dBFS.
+    pub rms_db: f32,
+    /// Whether any sample clipped (exceeded ±1.0).
+    pub clipped: bool,
 }
 
 /// MIDI note used by the built-in deterministic reference synthesizer.
@@ -1142,5 +1193,21 @@ mod studio_runtime_tests {
             .map(|s| s.abs())
             .fold(0.0_f32, f32::max);
         assert!((normalized_max - 0.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn audio_metering_computes_peak_and_rms_dbfs() {
+        let mut buffer = AudioBuffer::sine(48_000, 1, 1000.0, 0.05, 1.0).unwrap();
+        let m1 = buffer.meter();
+        assert!((m1.peak_db - 0.0).abs() < 0.5);
+        assert!(!m1.clipped);
+        assert!(m1.rms_db < 0.0);
+        assert!(m1.rms_db > -10.0); // Sine wave RMS is -3.01 dBFS
+
+        // Test clipped signal
+        buffer.samples[10] = 1.5;
+        let m2 = buffer.meter();
+        assert!(m2.clipped);
+        assert!(m2.peak_db > 0.0);
     }
 }

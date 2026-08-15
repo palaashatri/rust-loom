@@ -43,6 +43,46 @@ impl EncodePreset {
             bitrate_kbps: 220000,
         }
     }
+
+    pub fn hevc_4k() -> Self {
+        Self {
+            name: "HEVC / H.265 4K UHD".to_string(),
+            container: "mp4".to_string(),
+            video_codec: "hevc".to_string(),
+            audio_codec: "aac".to_string(),
+            bitrate_kbps: 20000,
+        }
+    }
+
+    pub fn vp9_web() -> Self {
+        Self {
+            name: "VP9 WebM 1080p".to_string(),
+            container: "webm".to_string(),
+            video_codec: "vp9".to_string(),
+            audio_codec: "opus".to_string(),
+            bitrate_kbps: 6000,
+        }
+    }
+
+    pub fn audio_flac() -> Self {
+        Self {
+            name: "FLAC Lossless Audio".to_string(),
+            container: "flac".to_string(),
+            video_codec: "none".to_string(),
+            audio_codec: "flac".to_string(),
+            bitrate_kbps: 0,
+        }
+    }
+
+    pub fn audio_mp3() -> Self {
+        Self {
+            name: "MP3 Audio 320k".to_string(),
+            container: "mp3".to_string(),
+            video_codec: "none".to_string(),
+            audio_codec: "mp3".to_string(),
+            bitrate_kbps: 320,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -816,5 +856,23 @@ mod tests {
         // Clear completed
         assert_eq!(queue.clear_completed_jobs(), 1);
         assert_eq!(queue.jobs.len(), 1);
+    }
+
+    #[test]
+    fn preset_definitions_are_valid() {
+        let hevc = EncodePreset::hevc_4k();
+        assert_eq!(hevc.video_codec, "hevc");
+        assert_eq!(hevc.bitrate_kbps, 20000);
+
+        let vp9 = EncodePreset::vp9_web();
+        assert_eq!(vp9.container, "webm");
+        assert_eq!(vp9.audio_codec, "opus");
+
+        let flac = EncodePreset::audio_flac();
+        assert_eq!(flac.video_codec, "none");
+        assert_eq!(flac.container, "flac");
+
+        let mp3 = EncodePreset::audio_mp3();
+        assert_eq!(mp3.bitrate_kbps, 320);
     }
 }
