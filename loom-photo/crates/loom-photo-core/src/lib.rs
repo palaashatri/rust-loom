@@ -262,6 +262,24 @@ impl RgbaImage {
         Ok(output)
     }
 
+    /// Computes maximum centered crop bounds fitting within this image for the target aspect ratio.
+    pub fn aspect_crop_bounds(&self, aspect: CropAspectRatio) -> (u32, u32, u32, u32) {
+        if let Some(target_ratio) = aspect.ratio() {
+            let current_ratio = self.width as f32 / self.height as f32;
+            if current_ratio > target_ratio {
+                let target_w = (self.height as f32 * target_ratio).round() as u32;
+                let x = (self.width.saturating_sub(target_w)) / 2;
+                (x, 0, target_w.min(self.width), self.height)
+            } else {
+                let target_h = (self.width as f32 / target_ratio).round() as u32;
+                let y = (self.height.saturating_sub(target_h)) / 2;
+                (0, y, self.width, target_h.min(self.height))
+            }
+        } else {
+            (0, 0, self.width, self.height)
+        }
+    }
+
     /// Nearest-neighbour resize used by deterministic previews and tests.
     pub fn resize_nearest(&self, width: u32, height: u32) -> Result<Self, String> {
         if width == 0 || height == 0 {
@@ -362,6 +380,29 @@ impl RgbaImage {
             luma[y] += 1;
         }
         ImageHistogram { r, g, b, luma }
+    }
+}
+
+/// Standard crop aspect ratio presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CropAspectRatio {
+    Free,
+    Square1x1,
+    Standard4x3,
+    Widescreen16x9,
+    Photo3x2,
+}
+
+impl CropAspectRatio {
+    /// Ratio of width / height.
+    pub fn ratio(&self) -> Option<f32> {
+        match self {
+            CropAspectRatio::Free => None,
+            CropAspectRatio::Square1x1 => Some(1.0),
+            CropAspectRatio::Standard4x3 => Some(4.0 / 3.0),
+            CropAspectRatio::Widescreen16x9 => Some(16.0 / 9.0),
+            CropAspectRatio::Photo3x2 => Some(3.0 / 2.0),
+        }
     }
 }
 
@@ -1121,5 +1162,27 @@ mod tests {
         assert_eq!(hist.r[0], 2);
         assert_eq!(hist.g[255], 2);
         assert_eq!(hist.b[255], 2);
+    }
+
+    #[test]
+    fn aspect_ratio_crop_bounds_calculate_centered_rectangles() {
+        let img = RgbaImage::transparent(1920, 1080).unwrap();
+        // 16:9 on 1920x1080 -> exact match
+        assert_eq!(
+            img.aspect_crop_bounds(CropAspectRatio::Widescreen16x9),
+            (0, 0, 1920, 1080)
+        );
+
+        // 1:1 on 1920x1080 -> centered 1080x1080, x = (1920-1080)/2 = 420
+        assert_eq!(
+            img.aspect_crop_bounds(CropAspectRatio::Square1x1),
+            (420, 0, 1080, 1080)
+        );
+
+        // 4:3 on 1920x1080 -> width = 1080 * 4/3 = 1440, x = (1920-1440)/2 = 240
+        assert_eq!(
+            img.aspect_crop_bounds(CropAspectRatio::Standard4x3),
+            (240, 0, 1440, 1080)
+        );
     }
 }

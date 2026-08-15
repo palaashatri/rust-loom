@@ -1299,15 +1299,62 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
+/// Robust RFC 4180 CSV parser supporting multiline quoted fields and configurable delimiters.
+pub fn parse_csv_records(csv: &str, delimiter: char) -> Vec<Vec<String>> {
+    let mut records = Vec::new();
+    let mut current_row = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = csv.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    field.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                field.push(c);
+            }
+        } else if c == '"' {
+            in_quotes = true;
+        } else if c == delimiter {
+            current_row.push(field.clone());
+            field.clear();
+        } else if c == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            current_row.push(field.clone());
+            field.clear();
+            records.push(current_row.clone());
+            current_row.clear();
+        } else if c == '\n' {
+            current_row.push(field.clone());
+            field.clear();
+            records.push(current_row.clone());
+            current_row.clear();
+        } else {
+            field.push(c);
+        }
+    }
+
+    if !field.is_empty() || !current_row.is_empty() {
+        current_row.push(field);
+        records.push(current_row);
+    }
+
+    records
+}
+
 /// Import a CSV into a sheet.
 pub fn from_csv(name: &str, csv: &str) -> Sheet {
     let mut sheet = Sheet::new(name);
-    for (row, line) in csv.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        // Parse simple CSV (quoted fields, comma).
-        let fields = parse_csv_line(line);
+    let records = parse_csv_records(csv, ',');
+    for (row, fields) in records.iter().enumerate() {
         for (col, f) in fields.iter().enumerate() {
             let cr = CellRef {
                 row: row as u32,
@@ -1317,36 +1364,6 @@ pub fn from_csv(name: &str, csv: &str) -> Sheet {
         }
     }
     sheet
-}
-
-fn parse_csv_line(line: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-    while let Some(c) = chars.next() {
-        if in_quotes {
-            if c == '"' {
-                if chars.peek() == Some(&'"') {
-                    cur.push('"');
-                    chars.next();
-                } else {
-                    in_quotes = false;
-                }
-            } else {
-                cur.push(c);
-            }
-        } else if c == '"' {
-            in_quotes = true;
-        } else if c == ',' {
-            out.push(cur.clone());
-            cur.clear();
-        } else {
-            cur.push(c);
-        }
-    }
-    out.push(cur);
-    out
 }
 
 /// Serialize a sheet to the `.loomtable` content JSON.
@@ -2360,5 +2377,22 @@ mod tests {
             evaluated.get(&CellRef::parse("A6").unwrap()),
             Some(&Value::Number(30.0))
         );
+    }
+
+    #[test]
+    fn parse_csv_records_handles_multiline_quotes_and_custom_delimiters() {
+        let csv_text =
+            "Name,Description,Value\n\"Item 1\",\"Line 1\nLine 2\",100\n\"Item 2\",\"Simple\",200";
+        let records = parse_csv_records(csv_text, ',');
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0], vec!["Name", "Description", "Value"]);
+        assert_eq!(records[1], vec!["Item 1", "Line 1\nLine 2", "100"]);
+        assert_eq!(records[2], vec!["Item 2", "Simple", "200"]);
+
+        // Semicolon delimiter
+        let semi_csv = "A;B;C\n1;2;3";
+        let semi_records = parse_csv_records(semi_csv, ';');
+        assert_eq!(semi_records.len(), 2);
+        assert_eq!(semi_records[1], vec!["1", "2", "3"]);
     }
 }

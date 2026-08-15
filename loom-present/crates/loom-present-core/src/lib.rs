@@ -369,6 +369,26 @@ impl PresentationDocument {
         self.active_index = to;
         true
     }
+
+    /// Extracts all speaker notes into an organized Markdown document for rehearsal and export.
+    pub fn speaker_notes_markdown(&self) -> String {
+        let mut out = format!("# Speaker Notes: {}\n\n", self.title);
+        for (i, slide) in self.slides.iter().enumerate() {
+            out.push_str(&format!("## Slide {} — {}\n", i + 1, slide.title));
+            if slide.speaker_notes.trim().is_empty() {
+                out.push_str("*(No notes)*\n\n");
+            } else {
+                out.push_str(slide.speaker_notes.trim());
+                out.push_str("\n\n");
+            }
+        }
+        out
+    }
+
+    /// Counts the total number of elements across all slides in the deck.
+    pub fn total_elements(&self) -> usize {
+        self.slides.iter().map(|s| s.elements.len()).sum()
+    }
 }
 
 pub fn save_presentation(doc: &PresentationDocument) -> Result<Vec<u8>, String> {
@@ -1080,5 +1100,22 @@ mod tests {
         slide.apply_layout_preset(SlideLayoutPreset::BigStat);
         assert_eq!(slide.layout, "big_stat");
         assert_eq!(slide.elements.len(), 2);
+    }
+
+    #[test]
+    fn speaker_notes_markdown_and_total_elements() {
+        let mut doc = PresentationDocument::new("deck-notes", "Keynote 2026");
+        doc.slides[0].speaker_notes = "Welcome the audience.".to_string();
+        doc.add_slide("Product Demo", "content");
+        doc.slides[1].speaker_notes = "Show live preview.".to_string();
+
+        assert_eq!(doc.total_elements(), 1); // 1 on title slide, 0 on new slide
+
+        let md = doc.speaker_notes_markdown();
+        assert!(md.contains("# Speaker Notes: Keynote 2026"));
+        assert!(md.contains("## Slide 1 — Title Slide"));
+        assert!(md.contains("Welcome the audience."));
+        assert!(md.contains("## Slide 2 — Product Demo"));
+        assert!(md.contains("Show live preview."));
     }
 }

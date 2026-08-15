@@ -129,6 +129,25 @@ impl StudioTrack {
         reg.length_samples = new_end - reg.start_sample;
         Ok(())
     }
+
+    /// Calculates left and right linear gains for the track's pan setting (-1.0 left to +1.0 right).
+    /// Uses standard constant-power (-3 dB center) pan law.
+    pub fn stereo_pan_gains(&self) -> (f32, f32) {
+        let p = self.pan.clamp(-1.0, 1.0);
+        let angle = (p + 1.0) * (std::f32::consts::PI / 4.0);
+        let left_gain = angle.cos();
+        let right_gain = angle.sin();
+        (left_gain, right_gain)
+    }
+
+    /// Linear volume gain converted from volume_db.
+    pub fn linear_volume(&self) -> f32 {
+        if self.volume_db <= -90.0 {
+            0.0
+        } else {
+            10.0_f32.powf(self.volume_db / 20.0)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1209,5 +1228,27 @@ mod studio_runtime_tests {
         let m2 = buffer.meter();
         assert!(m2.clipped);
         assert!(m2.peak_db > 0.0);
+    }
+
+    #[test]
+    fn track_pan_laws_and_linear_volume() {
+        let mut track = StudioTrack::new("t1", "Audio 1", TrackKind::Audio);
+        track.pan = 0.0;
+        track.volume_db = 0.0;
+        let (l_center, r_center) = track.stereo_pan_gains();
+        // At center (0.0), constant-power gain is cos(pi/4) = FRAC_1_SQRT_2 (-3 dB)
+        assert!((l_center - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert!((r_center - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert!((track.linear_volume() - 1.0).abs() < 1e-4);
+
+        // Hard Left
+        track.pan = -1.0;
+        let (l_left, r_left) = track.stereo_pan_gains();
+        assert!((l_left - 1.0).abs() < 1e-4);
+        assert!(r_left < 1e-4);
+
+        // -6 dB volume
+        track.volume_db = -6.0206;
+        assert!((track.linear_volume() - 0.5).abs() < 1e-3);
     }
 }

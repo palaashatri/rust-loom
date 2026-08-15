@@ -487,14 +487,31 @@ fn sample_keys(keys: &[Keyframe], time: f32, default: f32) -> f32 {
 }
 
 fn easing_progress(name: &str, progress: f32) -> f32 {
+    let t = progress.clamp(0.0, 1.0);
     match name.trim().to_ascii_lowercase().as_str() {
-        "linear" => progress,
-        "ease-in" => progress * progress,
-        "ease-out" => 1.0 - (1.0 - progress) * (1.0 - progress),
+        "linear" => t,
+        "ease-in" | "quad-in" => t * t,
+        "ease-out" | "quad-out" => 1.0 - (1.0 - t) * (1.0 - t),
+        "cubic-in" => t * t * t,
+        "cubic-out" => 1.0 - (1.0 - t).powi(3),
+        "expo-in" => {
+            if t == 0.0 {
+                0.0
+            } else {
+                2.0_f32.powf(10.0 * (t - 1.0))
+            }
+        }
+        "expo-out" => {
+            if t == 1.0 {
+                1.0
+            } else {
+                1.0 - 2.0_f32.powf(-10.0 * t)
+            }
+        }
         "hold" | "step" => 0.0,
         _ => {
             // Smoothstep: deterministic ease-in-out without an external spline crate.
-            progress * progress * (3.0 - 2.0 * progress)
+            t * t * (3.0 - 2.0 * t)
         }
     }
 }
@@ -719,5 +736,14 @@ mod tests {
             radius_y: 30.0,
         };
         assert_eq!(ellipse.bounding_box(), (100.0, 60.0));
+    }
+
+    #[test]
+    fn easing_progress_curves_evaluate_expected_values() {
+        assert_eq!(easing_progress("linear", 0.5), 0.5);
+        assert_eq!(easing_progress("ease-in", 0.5), 0.25);
+        assert_eq!(easing_progress("cubic-in", 0.5), 0.125);
+        assert_eq!(easing_progress("cubic-out", 0.5), 0.875);
+        assert_eq!(easing_progress("hold", 0.5), 0.0);
     }
 }

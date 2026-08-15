@@ -81,6 +81,24 @@ impl Clip {
             effects: Vec::new(),
         }
     }
+
+    /// Returns the effective timeline duration of the clip accounting for playback_rate.
+    pub fn effective_timeline_duration(&self) -> f64 {
+        let rate = if self.playback_rate.abs() > 1e-4 {
+            self.playback_rate.abs()
+        } else {
+            1.0
+        };
+        (self.out_point - self.in_point).max(0.0) / rate
+    }
+
+    /// Sets playback speed rate, scaling timeline duration proportionally.
+    pub fn set_speed(&mut self, rate: f64) {
+        if rate > 0.0 && rate.is_finite() {
+            self.playback_rate = rate;
+            self.duration = self.effective_timeline_duration();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1462,5 +1480,22 @@ mod tests {
 
         let secs = tc.to_seconds(30.0);
         assert!((secs - 3665.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn clip_speed_and_effective_duration_scaling() {
+        let mut clip = Clip::new("c1", "Shot 1", 10.0);
+        assert_eq!(clip.duration, 10.0);
+        assert_eq!(clip.effective_timeline_duration(), 10.0);
+
+        // 2x Fast Forward
+        clip.set_speed(2.0);
+        assert_eq!(clip.playback_rate, 2.0);
+        assert_eq!(clip.duration, 5.0);
+
+        // 0.5x Slow Motion
+        clip.set_speed(0.5);
+        assert_eq!(clip.playback_rate, 0.5);
+        assert_eq!(clip.duration, 20.0);
     }
 }

@@ -217,6 +217,47 @@ impl EncodeQueue {
     }
 }
 
+/// Progress and throughput metrics for a running encoding job.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EncodeProgressMetrics {
+    /// Fraction of frames encoded [0.0..=1.0].
+    pub progress: f32,
+    /// Current encoding throughput in frames per second.
+    pub fps: f32,
+    /// Estimated time remaining in seconds.
+    pub eta_seconds: f32,
+}
+
+impl EncodeProgressMetrics {
+    /// Estimates remaining time from encoded frames, total frames, and elapsed seconds.
+    pub fn estimate(encoded_frames: u64, total_frames: u64, elapsed_seconds: f32) -> Self {
+        if total_frames == 0 {
+            return Self {
+                progress: 1.0,
+                fps: 0.0,
+                eta_seconds: 0.0,
+            };
+        }
+        let progress = (encoded_frames as f32 / total_frames as f32).clamp(0.0, 1.0);
+        let fps = if elapsed_seconds > 1e-4 {
+            encoded_frames as f32 / elapsed_seconds
+        } else {
+            0.0
+        };
+        let remaining_frames = total_frames.saturating_sub(encoded_frames);
+        let eta_seconds = if fps > 1e-4 {
+            remaining_frames as f32 / fps
+        } else {
+            0.0
+        };
+        Self {
+            progress,
+            fps,
+            eta_seconds,
+        }
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -874,5 +915,19 @@ mod tests {
 
         let mp3 = EncodePreset::audio_mp3();
         assert_eq!(mp3.bitrate_kbps, 320);
+    }
+
+    #[test]
+    fn progress_metrics_throughput_and_eta_estimation() {
+        // 500 out of 1000 frames in 10 seconds -> 50 fps, ETA = 10s
+        let m = EncodeProgressMetrics::estimate(500, 1000, 10.0);
+        assert!((m.progress - 0.5).abs() < 1e-4);
+        assert!((m.fps - 50.0).abs() < 1e-4);
+        assert!((m.eta_seconds - 10.0).abs() < 1e-4);
+
+        // Finished job
+        let m_done = EncodeProgressMetrics::estimate(1000, 1000, 20.0);
+        assert!((m_done.progress - 1.0).abs() < 1e-4);
+        assert_eq!(m_done.eta_seconds, 0.0);
     }
 }

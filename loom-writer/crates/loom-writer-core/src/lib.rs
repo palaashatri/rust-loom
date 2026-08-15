@@ -288,6 +288,33 @@ impl WriterDocument {
         out
     }
 
+    /// Extracts a table of contents outline from all heading blocks.
+    pub fn generate_toc(&self) -> Vec<TocEntry> {
+        let mut entries = Vec::new();
+        for b in &self.blocks {
+            let level = match b.kind.as_str() {
+                "heading1" => Some(1),
+                "heading2" => Some(2),
+                "heading3" => Some(3),
+                "heading4" => Some(4),
+                "heading5" => Some(5),
+                "heading6" => Some(6),
+                _ => None,
+            };
+            if let Some(lvl) = level {
+                let trimmed = b.text.as_str().trim();
+                if !trimmed.is_empty() {
+                    entries.push(TocEntry {
+                        block_id: b.id,
+                        title: trimmed.to_string(),
+                        level: lvl,
+                    });
+                }
+            }
+        }
+        entries
+    }
+
     /// Estimate long-form document metrics including page count, word count, character count, and reading time.
     pub fn estimate_pagination(&self) -> PaginationMetrics {
         let plain = self.plain_text();
@@ -446,6 +473,17 @@ impl WriterDocument {
         block.kind = kind.into();
         Ok(())
     }
+}
+
+/// An entry in the document's table of contents outline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TocEntry {
+    /// ID of the heading block.
+    pub block_id: u64,
+    /// Heading text content.
+    pub title: String,
+    /// Level (1 for h1, 2 for h2, ..., 6 for h6).
+    pub level: u8,
 }
 
 /// Long-form document pagination and reading metrics.
@@ -2442,5 +2480,26 @@ mod tests {
         assert!(html.contains("<h1>Document Title</h1>"));
         assert!(html.contains("<p>First paragraph body text.</p>"));
         assert!(html.contains("<blockquote>A quoted passage.</blockquote>"));
+    }
+
+    #[test]
+    fn generate_toc_extracts_hierarchical_headings() {
+        let mut doc = WriterDocument::new("doc-toc", "TOC Test");
+        doc.push(RichBlock::new(1, "heading1", "Introduction"));
+        doc.push(RichBlock::new(2, "paragraph", "Introductory content."));
+        doc.push(RichBlock::new(3, "heading2", "Background"));
+        doc.push(RichBlock::new(4, "heading3", "Prior Work"));
+        doc.push(RichBlock::new(5, "heading1", "Conclusion"));
+
+        let toc = doc.generate_toc();
+        assert_eq!(toc.len(), 4);
+        assert_eq!(toc[0].title, "Introduction");
+        assert_eq!(toc[0].level, 1);
+        assert_eq!(toc[1].title, "Background");
+        assert_eq!(toc[1].level, 2);
+        assert_eq!(toc[2].title, "Prior Work");
+        assert_eq!(toc[2].level, 3);
+        assert_eq!(toc[3].title, "Conclusion");
+        assert_eq!(toc[3].level, 1);
     }
 }
