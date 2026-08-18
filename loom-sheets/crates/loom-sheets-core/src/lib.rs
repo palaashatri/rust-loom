@@ -669,6 +669,116 @@ impl DataValidationRule {
     }
 }
 
+/// Performs a vertical lookup (VLOOKUP) across the first column of a 2D table.
+pub fn vlookup(
+    lookup_value: &str,
+    table: &[Vec<String>],
+    col_index_1based: usize,
+    exact_match: bool,
+) -> Result<String, String> {
+    if table.is_empty() || col_index_1based == 0 {
+        return Err("table is empty or invalid column index".into());
+    }
+    let target_col = col_index_1based - 1;
+
+    for row in table {
+        if row.is_empty() {
+            continue;
+        }
+        let first_cell = &row[0];
+        let matches = if exact_match {
+            first_cell.eq_ignore_ascii_case(lookup_value)
+        } else {
+            first_cell
+                .to_lowercase()
+                .contains(&lookup_value.to_lowercase())
+        };
+
+        if matches {
+            if target_col < row.len() {
+                return Ok(row[target_col].clone());
+            } else {
+                return Ok(String::new());
+            }
+        }
+    }
+
+    Err(format!("#N/A: value '{lookup_value}' not found in table"))
+}
+
+/// Performs a horizontal lookup (HLOOKUP) across the first row of a 2D table.
+pub fn hlookup(
+    lookup_value: &str,
+    table: &[Vec<String>],
+    row_index_1based: usize,
+    exact_match: bool,
+) -> Result<String, String> {
+    if table.is_empty() || row_index_1based == 0 || row_index_1based > table.len() {
+        return Err("table is empty or invalid row index".into());
+    }
+    let first_row = &table[0];
+    let target_row_idx = row_index_1based - 1;
+
+    for (col_idx, header) in first_row.iter().enumerate() {
+        let matches = if exact_match {
+            header.eq_ignore_ascii_case(lookup_value)
+        } else {
+            header.to_lowercase().contains(&lookup_value.to_lowercase())
+        };
+
+        if matches {
+            let row = &table[target_row_idx];
+            if col_idx < row.len() {
+                return Ok(row[col_idx].clone());
+            } else {
+                return Ok(String::new());
+            }
+        }
+    }
+
+    Err(format!("#N/A: value '{lookup_value}' not found in row"))
+}
+
+/// Finds the 1-based relative position of a value within a 1D slice (MATCH).
+pub fn match_lookup(
+    lookup_value: &str,
+    array: &[String],
+    exact_match: bool,
+) -> Result<usize, String> {
+    for (idx, item) in array.iter().enumerate() {
+        let matches = if exact_match {
+            item.eq_ignore_ascii_case(lookup_value)
+        } else {
+            item.to_lowercase().contains(&lookup_value.to_lowercase())
+        };
+
+        if matches {
+            return Ok(idx + 1);
+        }
+    }
+    Err(format!("#N/A: item '{lookup_value}' not found"))
+}
+
+/// Retrieves a value at 1-based (row, col) coordinates from a 2D matrix (INDEX).
+pub fn index_lookup(
+    table: &[Vec<String>],
+    row_1based: usize,
+    col_1based: usize,
+) -> Result<String, String> {
+    if row_1based == 0 || col_1based == 0 {
+        return Err("#VALUE!: row and col index must be >= 1".into());
+    }
+    let r = row_1based - 1;
+    let c = col_1based - 1;
+
+    if let Some(row) = table.get(r) {
+        if let Some(val) = row.get(c) {
+            return Ok(val.clone());
+        }
+    }
+    Err("#REF!: cell coordinates out of range".into())
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -3017,5 +3127,31 @@ mod tests {
         assert!(num_rule.validate("50").is_ok());
         assert!(num_rule.validate("101").is_err());
         assert!(num_rule.validate("abc").is_err());
+    }
+
+    #[test]
+    fn vlookup_hlookup_and_index_match() {
+        let table = vec![
+            vec!["ID".into(), "Name".into(), "Price".into()],
+            vec!["P101".into(), "Widget".into(), "9.99".into()],
+            vec!["P102".into(), "Gadget".into(), "19.99".into()],
+            vec!["P103".into(), "Doohickey".into(), "4.99".into()],
+        ];
+
+        // VLOOKUP P102 -> Col 2 (Name) = "Gadget"
+        assert_eq!(vlookup("P102", &table, 2, true).unwrap(), "Gadget");
+        // VLOOKUP P103 -> Col 3 (Price) = "4.99"
+        assert_eq!(vlookup("P103", &table, 3, true).unwrap(), "4.99");
+        assert!(vlookup("P999", &table, 2, true).is_err());
+
+        // HLOOKUP Price -> Row 3 (P102's price) = "19.99"
+        assert_eq!(hlookup("Price", &table, 3, true).unwrap(), "19.99");
+
+        // MATCH Gadget in Col 2
+        let names = vec!["Widget".into(), "Gadget".into(), "Doohickey".into()];
+        assert_eq!(match_lookup("Gadget", &names, true).unwrap(), 2);
+
+        // INDEX table row 2 (P101), col 2 (Name) = "Widget"
+        assert_eq!(index_lookup(&table, 2, 2).unwrap(), "Widget");
     }
 }

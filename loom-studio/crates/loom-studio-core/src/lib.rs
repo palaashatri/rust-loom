@@ -673,6 +673,90 @@ pub fn generate_oscillator_tone(
     })
 }
 
+/// Algorithmic digital reverberation effect using comb and all-pass diffusion networks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReverbEffect {
+    /// Acoustic room dimensions and feedback decay in `[0.0, 1.0]`.
+    pub room_size: f32,
+    /// High-frequency absorption and acoustic damping in `[0.0, 1.0]`.
+    pub damping: f32,
+    /// Wet reverberant signal mix in `[0.0, 1.0]`.
+    pub wet_mix: f32,
+    /// Dry direct signal mix in `[0.0, 1.0]`.
+    pub dry_mix: f32,
+}
+
+impl Default for ReverbEffect {
+    fn default() -> Self {
+        Self {
+            room_size: 0.7,
+            damping: 0.3,
+            wet_mix: 0.35,
+            dry_mix: 0.8,
+        }
+    }
+}
+
+impl ReverbEffect {
+    /// In-place acoustic reverberation processing.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() {
+            return;
+        }
+
+        let num_samples = buffer.samples.len();
+        let feedback = (self.room_size * 0.28 + 0.7).clamp(0.0, 0.98);
+        let damp = self.damping.clamp(0.0, 1.0);
+
+        // 4 comb filter delay lines (tuned prime delay lengths)
+        let delay_lengths = [1116, 1188, 1277, 1356];
+        let mut comb_buffers: Vec<Vec<f32>> =
+            delay_lengths.iter().map(|&len| vec![0.0; len]).collect();
+        let mut filter_stores = [0.0f32; 4];
+        let mut comb_indices = [0usize; 4];
+
+        let mut wet_out = vec![0.0f32; num_samples];
+
+        for (i, &input) in buffer.samples.iter().enumerate() {
+            let mut comb_sum = 0.0f32;
+            for (c_idx, &len) in delay_lengths.iter().enumerate() {
+                let pos = comb_indices[c_idx];
+                let out = comb_buffers[c_idx][pos];
+                filter_stores[c_idx] = out * (1.0 - damp) + filter_stores[c_idx] * damp;
+                comb_buffers[c_idx][pos] = input + filter_stores[c_idx] * feedback;
+                comb_indices[c_idx] = (pos + 1) % len;
+                comb_sum += out;
+            }
+            wet_out[i] = comb_sum * 0.25;
+        }
+
+        // 2 series all-pass diffusors (lengths 225 and 556)
+        let ap_lengths = [225, 556];
+        let mut ap_buffers: Vec<Vec<f32>> = ap_lengths.iter().map(|&len| vec![0.0; len]).collect();
+        let mut ap_indices = [0usize; 2];
+        let ap_feedback = 0.5f32;
+
+        for wet_sample in &mut wet_out {
+            let mut current = *wet_sample;
+
+            for (a_idx, &len) in ap_lengths.iter().enumerate() {
+                let pos = ap_indices[a_idx];
+                let buf_out = ap_buffers[a_idx][pos];
+                let new_val = current + buf_out * ap_feedback;
+                ap_buffers[a_idx][pos] = new_val;
+                ap_indices[a_idx] = (pos + 1) % len;
+                current = -current + buf_out;
+            }
+            *wet_sample = current;
+        }
+
+        // Mix wet and dry signals into the buffer
+        for (i, sample) in buffer.samples.iter_mut().enumerate() {
+            *sample = *sample * self.dry_mix + wet_out[i] * self.wet_mix;
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1835,5 +1919,26 @@ mod studio_runtime_tests {
         let square_tone =
             generate_oscillator_tone(OscillatorWaveform::Square, 100.0, 0.05, 44100, 0.5).unwrap();
         assert!(square_tone.samples[0] > 0.49);
+    }
+
+    #[test]
+    fn reverb_effect_dsp_processing() {
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 1,
+            // Single impulse sample followed by silence
+            samples: {
+                let mut s = vec![0.0f32; 2000];
+                s[0] = 1.0;
+                s
+            },
+        };
+
+        let reverb = ReverbEffect::default();
+        reverb.process(&mut buffer);
+
+        // Later samples in the buffer should now contain reverberation tail
+        let tail_energy: f32 = buffer.samples[1200..1800].iter().map(|s| s.abs()).sum();
+        assert!(tail_energy > 0.05);
     }
 }

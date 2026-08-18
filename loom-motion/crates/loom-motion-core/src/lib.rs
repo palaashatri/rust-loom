@@ -830,6 +830,59 @@ pub fn smooth_spatial_path(
     Ok(result)
 }
 
+/// Motion blur shutter angle and sub-frame temporal sampling configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShutterConfig {
+    /// Shutter opening angle in degrees [0.0, 360.0]. Standard cinema is 180.0°.
+    pub shutter_angle_deg: f32,
+    /// Shutter phase angle in degrees [-180.0, 180.0]. Default is -90.0° (centered).
+    pub shutter_phase_deg: f32,
+    /// Number of sub-frame temporal samples evaluated for motion blur accumulation.
+    pub samples_per_frame: usize,
+    /// Enable or disable motion blur simulation for this composition.
+    pub enabled: bool,
+}
+
+impl Default for ShutterConfig {
+    fn default() -> Self {
+        Self {
+            shutter_angle_deg: 180.0,
+            shutter_phase_deg: -90.0,
+            samples_per_frame: 16,
+            enabled: false,
+        }
+    }
+}
+
+impl ShutterConfig {
+    /// Calculates the effective camera sensor exposure duration in seconds.
+    pub fn exposure_duration_seconds(&self, fps: f64) -> f64 {
+        if fps <= 0.0 {
+            return 0.0;
+        }
+        (self.shutter_angle_deg as f64 / 360.0) / fps
+    }
+
+    /// Generates temporal sub-frame sample offsets in seconds relative to current frame time.
+    pub fn sample_offsets(&self, fps: f64) -> Vec<f64> {
+        let n = self.samples_per_frame.max(1);
+        let exposure = self.exposure_duration_seconds(fps);
+        let phase_offset = (self.shutter_phase_deg as f64 / 360.0) / fps;
+
+        let mut offsets = Vec::with_capacity(n);
+        if n == 1 {
+            offsets.push(phase_offset);
+            return offsets;
+        }
+
+        for i in 0..n {
+            let t = i as f64 / (n - 1) as f64;
+            offsets.push(phase_offset + (t - 0.5) * exposure);
+        }
+        offsets
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1196,5 +1249,26 @@ mod tests {
 
         // Error with fewer than 2 points
         assert!(smooth_spatial_path(&[[0.0, 0.0]], 4).is_err());
+    }
+
+    #[test]
+    fn shutter_angle_motion_blur_sampling() {
+        let shutter = ShutterConfig {
+            shutter_angle_deg: 180.0,
+            shutter_phase_deg: 0.0,
+            samples_per_frame: 5,
+            enabled: true,
+        };
+
+        // At 24 fps, 180° = 1/48th of a second
+        let exp = shutter.exposure_duration_seconds(24.0);
+        assert!((exp - (1.0 / 48.0)).abs() < 1e-6);
+
+        let offsets = shutter.sample_offsets(24.0);
+        assert_eq!(offsets.len(), 5);
+        // Middle sample should be at 0.0 offset
+        assert!(offsets[2].abs() < 1e-6);
+        // First and last should be symmetric
+        assert!((offsets[0] + offsets[4]).abs() < 1e-6);
     }
 }

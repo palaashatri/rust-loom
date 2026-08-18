@@ -825,6 +825,42 @@ impl AudioEnvelope {
     }
 }
 
+/// Ken Burns / dynamic pan-and-zoom motion effect across an image or video clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KenBurnsEffect {
+    /// Normalized starting crop box (x, y, width, height) in `[0.0, 1.0]`.
+    pub start_rect: (f32, f32, f32, f32),
+    /// Normalized ending crop box (x, y, width, height) in `[0.0, 1.0]`.
+    pub end_rect: (f32, f32, f32, f32),
+}
+
+impl Default for KenBurnsEffect {
+    fn default() -> Self {
+        Self {
+            start_rect: (0.0, 0.0, 1.0, 1.0),
+            end_rect: (0.1, 0.1, 0.8, 0.8),
+        }
+    }
+}
+
+impl KenBurnsEffect {
+    /// Computes interpolated crop rectangle at normalized time progress `t` in `[0.0, 1.0]` with smoothstep easing.
+    pub fn interpolate_crop_rect(&self, progress: f64) -> (f32, f32, f32, f32) {
+        let t = progress.clamp(0.0, 1.0) as f32;
+        let smooth_t = t * t * (3.0 - 2.0 * t); // smoothstep
+
+        let (sx, sy, sw, sh) = self.start_rect;
+        let (ex, ey, ew, eh) = self.end_rect;
+
+        (
+            sx + (ex - sx) * smooth_t,
+            sy + (ey - sy) * smooth_t,
+            sw + (ew - sw) * smooth_t,
+            sh + (eh - sh) * smooth_t,
+        )
+    }
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -2019,5 +2055,23 @@ mod tests {
         assert_eq!(env.evaluate_volume_db_at(1.0), -12.0); // halfway
         assert_eq!(env.evaluate_volume_db_at(2.0), 0.0);
         assert_eq!(env.evaluate_volume_db_at(5.0), 0.0);
+    }
+
+    #[test]
+    fn ken_burns_pan_and_zoom_interpolation() {
+        let effect = KenBurnsEffect {
+            start_rect: (0.0, 0.0, 1.0, 1.0),
+            end_rect: (0.2, 0.2, 0.6, 0.6),
+        };
+
+        let start = effect.interpolate_crop_rect(0.0);
+        assert_eq!(start, (0.0, 0.0, 1.0, 1.0));
+
+        let end = effect.interpolate_crop_rect(1.0);
+        assert_eq!(end, (0.2, 0.2, 0.6, 0.6));
+
+        let mid = effect.interpolate_crop_rect(0.5);
+        // At t=0.5, smoothstep(0.5) = 0.5
+        assert_eq!(mid, (0.1, 0.1, 0.8, 0.8));
     }
 }

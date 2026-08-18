@@ -595,6 +595,48 @@ impl RgbaImage {
         Ok(out)
     }
 
+    /// Applies a photographic vignette darkening or lightening image corners.
+    pub fn apply_vignette(&mut self, config: &VignetteConfig) {
+        if config.amount.abs() < 1e-4 {
+            return;
+        }
+
+        let cx = self.width as f32 / 2.0;
+        let cy = self.height as f32 / 2.0;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let dx = (x as f32 - cx) / cx;
+                let dy = (y as f32 - cy) / cy;
+
+                let r_dist = (dx * dx + dy * dy).sqrt();
+                let aspect_dist = dx.abs().max(dy.abs());
+                let dist = r_dist * config.roundness + aspect_dist * (1.0 - config.roundness);
+
+                let start = (config.midpoint * 0.8).clamp(0.0, 1.0);
+                let end = (start + config.feather * 0.8 + 0.2).clamp(start + 0.01, 2.0);
+
+                let factor = if dist <= start {
+                    0.0
+                } else if dist >= end {
+                    1.0
+                } else {
+                    let t = (dist - start) / (end - start);
+                    t * t * (3.0 - 2.0 * t) // smoothstep
+                };
+
+                let multiplier = (1.0 + config.amount * factor).clamp(0.0, 2.0);
+
+                if let Some(pixel) = self.pixel(x, y) {
+                    let r = (pixel[0] as f32 * multiplier).round().clamp(0.0, 255.0) as u8;
+                    let g = (pixel[1] as f32 * multiplier).round().clamp(0.0, 255.0) as u8;
+                    let b = (pixel[2] as f32 * multiplier).round().clamp(0.0, 255.0) as u8;
+                    self.set_pixel(x, y, [r, g, b, pixel[3]]);
+                }
+            }
+        }
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -776,7 +818,32 @@ impl Default for LiftGammaGain {
     }
 }
 
+/// Photographic lens vignette configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VignetteConfig {
+    /// Vignette intensity in `[-1.0, 1.0]`. Negative values darken corners; positive values lighten.
+    pub amount: f32,
+    /// Center clear radius in `[0.0, 1.0]`.
+    pub midpoint: f32,
+    /// Softness falloff width in `[0.0, 1.0]`.
+    pub feather: f32,
+    /// Shape roundness from 0.0 (aspect-ratio bound) to 1.0 (circular).
+    pub roundness: f32,
+}
+
+impl Default for VignetteConfig {
+    fn default() -> Self {
+        Self {
+            amount: -0.5,
+            midpoint: 0.5,
+            feather: 0.5,
+            roundness: 1.0,
+        }
+    }
+}
+
 /// 256-bin color channel and luminance histograms.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageHistogram {
     /// Red channel bins [0..=255].
@@ -1842,5 +1909,31 @@ mod tests {
         let usm = img.unsharp_mask(1, 1.0, 1.5, 5).unwrap();
         let usm_px = usm.pixel(1, 1).unwrap();
         assert_eq!(usm_px, [100, 100, 100, 255]); // Unchanged on flat area
+    }
+
+    #[test]
+    fn vignette_filter_application() {
+        let mut img = RgbaImage::transparent(10, 10).unwrap();
+        for y in 0..10 {
+            for x in 0..10 {
+                img.set_pixel(x, y, [200, 200, 200, 255]);
+            }
+        }
+        let vig = VignetteConfig {
+            amount: -0.6,
+            midpoint: 0.2,
+            feather: 0.5,
+            roundness: 1.0,
+        };
+        img.apply_vignette(&vig);
+
+        // Center pixel (5, 5) should stay bright
+        let center_px = img.pixel(5, 5).unwrap();
+        assert!(center_px[0] >= 190);
+
+        // Corner pixel (0, 0) should be darkened
+        let corner_px = img.pixel(0, 0).unwrap();
+        assert!(corner_px[0] < 120);
+        assert_eq!(corner_px[3], 255); // Alpha preserved
     }
 }

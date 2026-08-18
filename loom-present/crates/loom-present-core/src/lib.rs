@@ -646,6 +646,65 @@ pub fn calculate_smart_snapping(
     }
 }
 
+/// Live presentation session state tracking slide progression, timers, and display modes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresenterSession {
+    pub current_slide_index: usize,
+    pub total_slides: usize,
+    pub elapsed_seconds: f64,
+    pub is_paused: bool,
+    pub is_blanked: bool,
+}
+
+impl PresenterSession {
+    pub fn new(total_slides: usize) -> Self {
+        Self {
+            current_slide_index: 0,
+            total_slides: total_slides.max(1),
+            elapsed_seconds: 0.0,
+            is_paused: false,
+            is_blanked: false,
+        }
+    }
+
+    /// Advances to the next slide if not on the last slide.
+    pub fn advance_slide(&mut self) -> bool {
+        if self.current_slide_index + 1 < self.total_slides {
+            self.current_slide_index += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns to the previous slide if not on the first slide.
+    pub fn previous_slide(&mut self) -> bool {
+        if self.current_slide_index > 0 {
+            self.current_slide_index -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Toggles the elapsed presentation timer pause state.
+    pub fn toggle_pause(&mut self) {
+        self.is_paused = !self.is_paused;
+    }
+
+    /// Toggles screen blanking (e.g. audience focus on speaker).
+    pub fn toggle_blank(&mut self) {
+        self.is_blanked = !self.is_blanked;
+    }
+
+    /// Advances the presentation timer.
+    pub fn tick(&mut self, delta_seconds: f64) {
+        if !self.is_paused && delta_seconds > 0.0 {
+            self.elapsed_seconds += delta_seconds;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1623,5 +1682,25 @@ mod tests {
         assert_eq!(res.snapped_x, 100.0);
         assert_eq!(res.snapped_y, 100.0);
         assert_eq!(res.guides.len(), 2);
+    }
+
+    #[test]
+    fn presenter_session_navigation_and_timer() {
+        let mut session = PresenterSession::new(5);
+        assert_eq!(session.current_slide_index, 0);
+        assert_eq!(session.total_slides, 5);
+
+        assert!(session.advance_slide());
+        assert_eq!(session.current_slide_index, 1);
+
+        session.tick(1.5);
+        assert_eq!(session.elapsed_seconds, 1.5);
+
+        session.toggle_pause();
+        session.tick(2.0);
+        assert_eq!(session.elapsed_seconds, 1.5); // paused
+
+        session.toggle_blank();
+        assert!(session.is_blanked);
     }
 }

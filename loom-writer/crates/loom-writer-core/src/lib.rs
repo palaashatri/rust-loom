@@ -1899,6 +1899,33 @@ impl Default for LineNumberingConfig {
     }
 }
 
+/// Explicit page and section break kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakKind {
+    PageBreak,
+    SectionBreakNextPage,
+    SectionBreakContinuous,
+    ColumnBreak,
+}
+
+/// Section break configuration with layout overrides.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BreakConfig {
+    pub kind: BreakKind,
+    pub orientation_override: Option<PageOrientation>,
+    pub restart_page_numbering: bool,
+}
+
+impl BreakConfig {
+    pub fn new(kind: BreakKind) -> Self {
+        Self {
+            kind,
+            orientation_override: None,
+            restart_page_numbering: false,
+        }
+    }
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -3046,5 +3073,21 @@ mod tests {
         assert_eq!(line_num.start_number, 1);
         assert_eq!(line_num.count_by, 1);
         assert!(!line_num.restart_each_page);
+    }
+
+    #[test]
+    fn break_config_and_kinds() {
+        let page_break = BreakConfig::new(BreakKind::PageBreak);
+        assert_eq!(page_break.kind, BreakKind::PageBreak);
+        assert_eq!(page_break.orientation_override, None);
+
+        let mut section = BreakConfig::new(BreakKind::SectionBreakNextPage);
+        section.orientation_override = Some(PageOrientation::Landscape);
+        section.restart_page_numbering = true;
+        assert_eq!(
+            section.orientation_override,
+            Some(PageOrientation::Landscape)
+        );
+        assert!(section.restart_page_numbering);
     }
 }

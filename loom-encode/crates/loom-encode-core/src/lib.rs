@@ -572,6 +572,55 @@ impl LoudnessNormConfig {
     }
 }
 
+/// Positioning anchor presets for visual watermarks and logo overlays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum WatermarkPosition {
+    TopLeft,
+    #[default]
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Center,
+}
+
+/// Visual logo / graphic watermark overlay filter configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatermarkOverlayConfig {
+    pub image_path: String,
+    pub position: WatermarkPosition,
+    pub margin_px: u32,
+    pub opacity: f32,
+}
+
+impl Default for WatermarkOverlayConfig {
+    fn default() -> Self {
+        Self {
+            image_path: "logo.png".into(),
+            position: WatermarkPosition::BottomRight,
+            margin_px: 24,
+            opacity: 0.85,
+        }
+    }
+}
+
+impl WatermarkOverlayConfig {
+    /// Generates FFmpeg complex overlay filter expression.
+    pub fn generate_overlay_expr(&self) -> String {
+        let m = self.margin_px;
+        match self.position {
+            WatermarkPosition::TopLeft => format!("overlay={m}:{m}"),
+            WatermarkPosition::TopRight => format!("overlay=main_w-overlay_w-{m}:{m}"),
+            WatermarkPosition::BottomLeft => format!("overlay={m}:main_h-overlay_h-{m}"),
+            WatermarkPosition::BottomRight => {
+                format!("overlay=main_w-overlay_w-{m}:main_h-overlay_h-{m}")
+            }
+            WatermarkPosition::Center => {
+                "overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2".to_string()
+            }
+        }
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1373,5 +1422,27 @@ mod tests {
             ..Default::default()
         };
         assert!(disabled.generate_loudnorm_args().is_empty());
+    }
+
+    #[test]
+    fn watermark_overlay_filter_expression() {
+        let mut overlay = WatermarkOverlayConfig {
+            margin_px: 16,
+            position: WatermarkPosition::TopLeft,
+            ..Default::default()
+        };
+        assert_eq!(overlay.generate_overlay_expr(), "overlay=16:16");
+
+        overlay.position = WatermarkPosition::BottomRight;
+        assert_eq!(
+            overlay.generate_overlay_expr(),
+            "overlay=main_w-overlay_w-16:main_h-overlay_h-16"
+        );
+
+        overlay.position = WatermarkPosition::Center;
+        assert_eq!(
+            overlay.generate_overlay_expr(),
+            "overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+        );
     }
 }
