@@ -2044,6 +2044,53 @@ pub fn calculate_line_break_penalty(
     penalty
 }
 
+/// Numbering formats for footnote and endnote reference markers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FootnoteNumberingStyle {
+    /// Standard Arabic numerals: 1, 2, 3...
+    Numeric,
+    /// Lowercase Roman numerals: i, ii, iii, iv...
+    RomanLower,
+    /// Lowercase alphabetical letters: a, b, c...
+    AlphabeticalLower,
+    /// Traditional academic symbol sequence: *, †, ‡, §...
+    Symbols,
+}
+
+/// Generates the citation reference marker string for a given footnote index (1-based).
+pub fn calculate_footnote_marker(index: usize, style: FootnoteNumberingStyle) -> String {
+    let idx = index.max(1);
+    match style {
+        FootnoteNumberingStyle::Numeric => idx.to_string(),
+        FootnoteNumberingStyle::RomanLower => {
+            let roman_numerals = [(10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")];
+            let mut num = idx;
+            let mut res = String::new();
+            for &(val, sym) in &roman_numerals {
+                while num >= val {
+                    res.push_str(sym);
+                    num -= val;
+                }
+            }
+            if res.is_empty() {
+                "i".into()
+            } else {
+                res
+            }
+        }
+        FootnoteNumberingStyle::AlphabeticalLower => {
+            let char_code = ((idx - 1) % 26) as u8 + b'a';
+            (char_code as char).to_string()
+        }
+        FootnoteNumberingStyle::Symbols => {
+            let symbols = ["*", "†", "‡", "§", "‖", "¶"];
+            let sym = symbols[(idx - 1) % symbols.len()];
+            let repeat = (idx - 1) / symbols.len() + 1;
+            sym.repeat(repeat)
+        }
+    }
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -3239,5 +3286,52 @@ mod tests {
         // Widow/orphan line
         let widow = calculate_line_break_penalty(false, false, true, &config);
         assert_eq!(widow, 150);
+    }
+
+    #[test]
+    fn footnote_numbering_markers() {
+        assert_eq!(
+            calculate_footnote_marker(1, FootnoteNumberingStyle::Numeric),
+            "1"
+        );
+        assert_eq!(
+            calculate_footnote_marker(5, FootnoteNumberingStyle::Numeric),
+            "5"
+        );
+
+        assert_eq!(
+            calculate_footnote_marker(1, FootnoteNumberingStyle::RomanLower),
+            "i"
+        );
+        assert_eq!(
+            calculate_footnote_marker(4, FootnoteNumberingStyle::RomanLower),
+            "iv"
+        );
+        assert_eq!(
+            calculate_footnote_marker(9, FootnoteNumberingStyle::RomanLower),
+            "ix"
+        );
+
+        assert_eq!(
+            calculate_footnote_marker(1, FootnoteNumberingStyle::AlphabeticalLower),
+            "a"
+        );
+        assert_eq!(
+            calculate_footnote_marker(3, FootnoteNumberingStyle::AlphabeticalLower),
+            "c"
+        );
+
+        assert_eq!(
+            calculate_footnote_marker(1, FootnoteNumberingStyle::Symbols),
+            "*"
+        );
+        assert_eq!(
+            calculate_footnote_marker(2, FootnoteNumberingStyle::Symbols),
+            "†"
+        );
+        assert_eq!(
+            calculate_footnote_marker(7, FootnoteNumberingStyle::Symbols),
+            "**"
+        ); // Wrapped second pass
     }
 }

@@ -729,6 +729,41 @@ impl RgbaImage {
         Ok(out)
     }
 
+    /// Applies dual-tone color grading to shadows and highlights (Split Toning).
+    pub fn apply_split_toning(&self, config: &SplitToningConfig) -> Result<Self, String> {
+        let mut out = self.clone();
+        let s_rgb = hue_to_rgb(config.shadows_hue_deg);
+        let h_rgb = hue_to_rgb(config.highlights_hue_deg);
+        let balance_offset = config.balance.clamp(-1.0, 1.0) * 0.25;
+
+        for pixel in out.pixels.chunks_exact_mut(4) {
+            let r = pixel[0] as f32 / 255.0;
+            let g = pixel[1] as f32 / 255.0;
+            let b = pixel[2] as f32 / 255.0;
+            let luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).clamp(0.0, 1.0);
+
+            // Midpoint adjusted by balance
+            let mid = 0.5 + balance_offset;
+            let shadow_weight =
+                ((mid - luma) / mid).clamp(0.0, 1.0) * config.shadows_saturation.clamp(0.0, 1.0);
+            let highlight_weight = ((luma - mid) / (1.0 - mid).max(0.01)).clamp(0.0, 1.0)
+                * config.highlights_saturation.clamp(0.0, 1.0);
+
+            let r_toned = r * (1.0 - shadow_weight) + s_rgb[0] * shadow_weight;
+            let g_toned = g * (1.0 - shadow_weight) + s_rgb[1] * shadow_weight;
+            let b_toned = b * (1.0 - shadow_weight) + s_rgb[2] * shadow_weight;
+
+            let r_final = r_toned * (1.0 - highlight_weight) + h_rgb[0] * highlight_weight;
+            let g_final = g_toned * (1.0 - highlight_weight) + h_rgb[1] * highlight_weight;
+            let b_final = b_toned * (1.0 - highlight_weight) + h_rgb[2] * highlight_weight;
+
+            pixel[0] = (r_final * 255.0).round().clamp(0.0, 255.0) as u8;
+            pixel[1] = (g_final * 255.0).round().clamp(0.0, 255.0) as u8;
+            pixel[2] = (b_final * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+        Ok(out)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -972,6 +1007,52 @@ impl Default for ChromaticAberrationConfig {
             red_shift: (1.0, 0.0),
             blue_shift: (-1.0, 0.0),
             radial_fringe: 0.0,
+        }
+    }
+}
+
+/// Converts a hue angle in degrees [0, 360) to a normalized full-saturation RGB tuple.
+pub fn hue_to_rgb(hue_deg: f32) -> [f32; 3] {
+    let h = ((hue_deg % 360.0 + 360.0) % 360.0) / 60.0;
+    let x = 1.0 - (h % 2.0 - 1.0).abs();
+    if h < 1.0 {
+        [1.0, x, 0.0]
+    } else if h < 2.0 {
+        [x, 1.0, 0.0]
+    } else if h < 3.0 {
+        [0.0, 1.0, x]
+    } else if h < 4.0 {
+        [0.0, x, 1.0]
+    } else if h < 5.0 {
+        [x, 0.0, 1.0]
+    } else {
+        [1.0, 0.0, x]
+    }
+}
+
+/// Split toning / color balance dual-tone adjustment configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SplitToningConfig {
+    /// Shadows tint hue in degrees [0, 360).
+    pub shadows_hue_deg: f32,
+    /// Shadows tint saturation / strength [0.0, 1.0].
+    pub shadows_saturation: f32,
+    /// Highlights tint hue in degrees [0, 360).
+    pub highlights_hue_deg: f32,
+    /// Highlights tint saturation / strength [0.0, 1.0].
+    pub highlights_saturation: f32,
+    /// Balance shift between shadows and highlights [-1.0, 1.0].
+    pub balance: f32,
+}
+
+impl Default for SplitToningConfig {
+    fn default() -> Self {
+        Self {
+            shadows_hue_deg: 215.0, // Cool teal/blue
+            shadows_saturation: 0.25,
+            highlights_hue_deg: 35.0, // Warm amber/orange
+            highlights_saturation: 0.25,
+            balance: 0.0,
         }
     }
 }
@@ -2114,5 +2195,39 @@ mod tests {
         // Pixel (6, 5) should sample the shifted blue channel from (5, 5)
         let px6 = shifted.pixel(6, 5).unwrap();
         assert_eq!(px6[2], 255); // Blue shifted right to (6, 5)
+    }
+
+    #[test]
+    fn split_toning_color_balance() {
+        let mut img = RgbaImage::transparent(4, 4).unwrap();
+        // Top half dark/shadows (30, 30, 30), bottom half bright/highlights (220, 220, 220)
+        for y in 0..2 {
+            for x in 0..4 {
+                img.set_pixel(x, y, [30, 30, 30, 255]);
+            }
+        }
+        for y in 2..4 {
+            for x in 0..4 {
+                img.set_pixel(x, y, [220, 220, 220, 255]);
+            }
+        }
+
+        let config = SplitToningConfig {
+            shadows_hue_deg: 240.0, // Pure blue shadows
+            shadows_saturation: 0.5,
+            highlights_hue_deg: 0.0, // Pure red highlights
+            highlights_saturation: 0.5,
+            balance: 0.0,
+        };
+
+        let toned = img.apply_split_toning(&config).unwrap();
+        let shadow_px = toned.pixel(0, 0).unwrap();
+        let highlight_px = toned.pixel(0, 3).unwrap();
+
+        // Shadow pixel should have more blue than red
+        assert!(shadow_px[2] > shadow_px[0]);
+
+        // Highlight pixel should have more red than blue
+        assert!(highlight_px[0] > highlight_px[2]);
     }
 }

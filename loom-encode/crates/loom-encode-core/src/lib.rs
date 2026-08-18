@@ -782,6 +782,80 @@ pub fn generate_hdr10_x265_args(
     ]
 }
 
+/// Dithering algorithms for color palette quantization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DitherMode {
+    #[default]
+    FloydSteinberg,
+    Bayer,
+    None,
+}
+
+/// Target format for animated image sequence export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AnimatedFormat {
+    #[default]
+    Gif,
+    Webp,
+}
+
+/// Animated GIF / WebP transcode configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnimatedImageConfig {
+    pub format: AnimatedFormat,
+    pub fps: u32,
+    pub loop_count: i32, // 0 = infinite loop
+    pub dither: DitherMode,
+    pub max_colors: u32,
+}
+
+impl Default for AnimatedImageConfig {
+    fn default() -> Self {
+        Self {
+            format: AnimatedFormat::Gif,
+            fps: 15,
+            loop_count: 0,
+            dither: DitherMode::FloydSteinberg,
+            max_colors: 256,
+        }
+    }
+}
+
+impl AnimatedImageConfig {
+    /// Generates FFmpeg complex filter and encoding arguments for high-quality palette-quantized animations.
+    pub fn generate_animated_image_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        match self.format {
+            AnimatedFormat::Gif => {
+                let dither_str = match self.dither {
+                    DitherMode::FloydSteinberg => "floyd_steinberg",
+                    DitherMode::Bayer => "bayer",
+                    DitherMode::None => "none",
+                };
+                let filter = format!(
+                    "fps={},split[s0][s1];[s0]palettegen=max_colors={}[p];[s1][p]paletteuse=dither={}",
+                    self.fps.max(1),
+                    self.max_colors.clamp(2, 256),
+                    dither_str
+                );
+                args.push("-vf".into());
+                args.push(filter);
+                args.push("-loop".into());
+                args.push(self.loop_count.to_string());
+            }
+            AnimatedFormat::Webp => {
+                args.push("-vcodec".into());
+                args.push("libwebp".into());
+                args.push("-filter:v".into());
+                args.push(format!("fps={}", self.fps.max(1)));
+                args.push("-loop".into());
+                args.push(self.loop_count.to_string());
+            }
+        }
+        args
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1643,5 +1717,40 @@ mod tests {
         assert!(args[1].contains("hdr10=1"));
         assert!(args[1].contains("max-cll=1000,400"));
         assert!(args[1].contains("master-display="));
+    }
+
+    #[test]
+    fn animated_image_gif_webp_arguments() {
+        let gif_cfg = AnimatedImageConfig {
+            format: AnimatedFormat::Gif,
+            fps: 20,
+            loop_count: 0,
+            dither: DitherMode::FloydSteinberg,
+            max_colors: 128,
+        };
+
+        let gif_args = gif_cfg.generate_animated_image_args();
+        assert_eq!(gif_args[0], "-vf");
+        assert!(gif_args[1].contains("fps=20"));
+        assert!(gif_args[1].contains("palettegen=max_colors=128"));
+        assert!(gif_args[1].contains("paletteuse=dither=floyd_steinberg"));
+        assert_eq!(gif_args[2], "-loop");
+        assert_eq!(gif_args[3], "0");
+
+        let webp_cfg = AnimatedImageConfig {
+            format: AnimatedFormat::Webp,
+            fps: 24,
+            loop_count: 3,
+            dither: DitherMode::None,
+            max_colors: 256,
+        };
+
+        let webp_args = webp_cfg.generate_animated_image_args();
+        assert_eq!(webp_args[0], "-vcodec");
+        assert_eq!(webp_args[1], "libwebp");
+        assert_eq!(webp_args[2], "-filter:v");
+        assert_eq!(webp_args[3], "fps=24");
+        assert_eq!(webp_args[4], "-loop");
+        assert_eq!(webp_args[5], "3");
     }
 }

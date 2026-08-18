@@ -879,6 +879,72 @@ impl FlangerEffect {
     }
 }
 
+/// Modulation waveform shape for auto-pan effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AutoPanWaveform {
+    #[default]
+    Sine,
+    Triangle,
+}
+
+/// Dynamic stereo auto-panning modulation audio DSP effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoPanEffect {
+    /// Panning cycle rate in hertz (e.g. 1.0 Hz).
+    pub rate_hz: f32,
+    /// Panning width / depth [0.0, 1.0].
+    pub depth: f32,
+    /// LFO waveform shape.
+    pub waveform: AutoPanWaveform,
+}
+
+impl Default for AutoPanEffect {
+    fn default() -> Self {
+        Self {
+            rate_hz: 1.0,
+            depth: 0.8,
+            waveform: AutoPanWaveform::Sine,
+        }
+    }
+}
+
+impl AutoPanEffect {
+    /// In-place stereo auto-panning modulation on interleaved stereo buffers.
+    pub fn process_stereo(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() || buffer.sample_rate == 0 || buffer.channels != 2 {
+            return;
+        }
+
+        let frames = buffer.samples.len() / 2;
+        let depth = self.depth.clamp(0.0, 1.0);
+
+        for frame_idx in 0..frames {
+            let t = frame_idx as f32 / buffer.sample_rate as f32;
+            let lfo_val = match self.waveform {
+                AutoPanWaveform::Sine => (2.0 * std::f32::consts::PI * self.rate_hz * t).sin(),
+                AutoPanWaveform::Triangle => {
+                    let phase = (t * self.rate_hz).fract();
+                    if phase < 0.5 {
+                        4.0 * phase - 1.0
+                    } else {
+                        3.0 - 4.0 * phase
+                    }
+                }
+            };
+
+            let pan = lfo_val * depth; // in [-1.0, 1.0]
+            let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+            let left_gain = angle.cos();
+            let right_gain = angle.sin();
+
+            let l_idx = frame_idx * 2;
+            let r_idx = frame_idx * 2 + 1;
+            buffer.samples[l_idx] *= left_gain;
+            buffer.samples[r_idx] *= right_gain;
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -2107,5 +2173,31 @@ mod studio_runtime_tests {
         assert_eq!(buffer.samples.len(), 4410);
         let energy: f32 = buffer.samples.iter().map(|s| s.abs()).sum();
         assert!(energy > 100.0);
+    }
+
+    #[test]
+    fn autopan_stereo_modulation() {
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 2,
+            // 44100 stereo frames initialized to full amplitude 1.0 on both channels
+            samples: vec![1.0f32; 88200],
+        };
+
+        let autopan = AutoPanEffect {
+            rate_hz: 1.0,
+            depth: 1.0,
+            waveform: AutoPanWaveform::Sine,
+        };
+
+        autopan.process_stereo(&mut buffer);
+
+        // At t = 0.25s (frame 11025), sin(2*pi*1*0.25) = sin(pi/2) = 1.0 (panned hard right)
+        let f_idx = 11025;
+        let left_val = buffer.samples[f_idx * 2];
+        let right_val = buffer.samples[f_idx * 2 + 1];
+
+        assert!(right_val > 0.95);
+        assert!(left_val < 0.1);
     }
 }

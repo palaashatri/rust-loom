@@ -960,6 +960,61 @@ pub fn calculate_path_headings(path: &[[f32; 2]]) -> Vec<f32> {
     headings
 }
 
+/// Procedural motion turbulence and organic wiggle generator parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WiggleConfig {
+    /// Jitter oscillation rate in hertz (cycles per second).
+    pub frequency_hz: f32,
+    /// Maximum displacement magnitude.
+    pub amplitude: f32,
+    /// Detail harmonic octaves (1 to 4).
+    pub octaves: u32,
+    /// Seed phase offset.
+    pub seed: u64,
+}
+
+impl Default for WiggleConfig {
+    fn default() -> Self {
+        Self {
+            frequency_hz: 2.0,
+            amplitude: 50.0,
+            octaves: 2,
+            seed: 42,
+        }
+    }
+}
+
+/// Generates 1D procedural harmonic organic jitter displacement for keyframed parameters.
+pub fn wiggle_1d(time_seconds: f64, config: &WiggleConfig) -> f32 {
+    let mut total = 0.0f32;
+    let mut freq = config.frequency_hz;
+    let mut amp = config.amplitude;
+    let seed_phase = (config.seed as f32 * 1.6180339) % (2.0 * std::f32::consts::PI);
+
+    let octaves = config.octaves.clamp(1, 4);
+    for octave in 0..octaves {
+        let t = time_seconds as f32 * freq * 2.0 * std::f32::consts::PI
+            + seed_phase
+            + (octave as f32 * 1.7);
+        total += t.sin() * amp;
+        freq *= 2.0;
+        amp *= 0.5;
+    }
+    total
+}
+
+/// Generates 2D procedural organic position jitter displacement (dx, dy).
+pub fn wiggle_2d(
+    time_seconds: f64,
+    config_x: &WiggleConfig,
+    config_y: &WiggleConfig,
+) -> (f32, f32) {
+    (
+        wiggle_1d(time_seconds, config_x),
+        wiggle_1d(time_seconds, config_y),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1386,5 +1441,34 @@ mod tests {
         assert_eq!(headings.len(), 3);
         assert_eq!(headings[0], 0.0); // moving right
         assert_eq!(headings[1], 90.0); // moving down
+    }
+
+    #[test]
+    fn procedural_wiggle_jitter_generation() {
+        let config = WiggleConfig {
+            frequency_hz: 2.0,
+            amplitude: 100.0,
+            octaves: 2,
+            seed: 12345,
+        };
+
+        // Time 0.0 vs Time 0.25 should produce smooth but differing values
+        let w0 = wiggle_1d(0.0, &config);
+        let w1 = wiggle_1d(0.25, &config);
+        assert_ne!(w0, w1);
+
+        // Max magnitude should remain bounded by ~1.5 * amplitude (due to octaves)
+        assert!(w0.abs() <= 150.0);
+        assert!(w1.abs() <= 150.0);
+
+        let config_y = WiggleConfig {
+            frequency_hz: 1.5,
+            amplitude: 50.0,
+            octaves: 1,
+            seed: 67890,
+        };
+        let (dx, dy) = wiggle_2d(0.5, &config, &config_y);
+        assert!(dx.abs() <= 150.0);
+        assert!(dy.abs() <= 75.0);
     }
 }

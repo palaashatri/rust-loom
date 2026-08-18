@@ -892,6 +892,42 @@ pub fn averageif(range: &[f64], criteria_fn: impl Fn(f64) -> bool) -> Option<f64
     }
 }
 
+/// Calculates the payment for a loan based on constant payments and interest rate (PMT).
+pub fn pmt(rate: f64, nper: f64, pv: f64, fv: f64, end_of_period: bool) -> Result<f64, String> {
+    if nper == 0.0 {
+        return Err("#NUM!: nper cannot be zero".into());
+    }
+    if rate == 0.0 {
+        return Ok(-(pv + fv) / nper);
+    }
+    let pvif = (1.0 + rate).powf(nper);
+    let type_factor = if end_of_period { 1.0 } else { 1.0 + rate };
+    let pmt_val = -(rate * (fv + pv * pvif)) / (type_factor * (pvif - 1.0));
+    Ok(pmt_val)
+}
+
+/// Calculates the future value of an investment based on constant periodic payments and interest rate (FV).
+pub fn fv(rate: f64, nper: f64, pmt: f64, pv: f64, end_of_period: bool) -> Result<f64, String> {
+    if rate == 0.0 {
+        return Ok(-(pv + pmt * nper));
+    }
+    let pvif = (1.0 + rate).powf(nper);
+    let type_factor = if end_of_period { 1.0 } else { 1.0 + rate };
+    let fv_val = -pv * pvif - (pmt * type_factor * (pvif - 1.0) / rate);
+    Ok(fv_val)
+}
+
+/// Calculates the present value of an investment or loan (PV).
+pub fn pv(rate: f64, nper: f64, pmt: f64, fv: f64, end_of_period: bool) -> Result<f64, String> {
+    if rate == 0.0 {
+        return Ok(-(fv + pmt * nper));
+    }
+    let pvif = (1.0 + rate).powf(nper);
+    let type_factor = if end_of_period { 1.0 } else { 1.0 + rate };
+    let pv_val = (-fv - (pmt * type_factor * (pvif - 1.0) / rate)) / pvif;
+    Ok(pv_val)
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -3300,5 +3336,25 @@ mod tests {
 
         // AVERAGEIF sales < 200 -> (100 + 50 + 150) / 3 = 100.0
         assert_eq!(averageif(&sales, |v| v < 200.0), Some(100.0));
+    }
+
+    #[test]
+    fn financial_formula_pmt_fv_pv() {
+        // Loan of $10,000 at 5% annual interest (0.05/12 per month) for 36 months
+        let monthly_rate = 0.05 / 12.0;
+        let monthly_payment = pmt(monthly_rate, 36.0, 10000.0, 0.0, true).unwrap();
+        // PMT should be approximately -$299.71
+        assert!((monthly_payment - (-299.71)).abs() < 0.1);
+
+        // Future value of $100/mo at 6% annual for 10 years (120 months)
+        let rate_6 = 0.06 / 12.0;
+        let future_val = fv(rate_6, 120.0, -100.0, 0.0, true).unwrap();
+        // FV should be approximately $16,387.93
+        assert!((future_val - 16387.93).abs() < 1.0);
+
+        // Present value of $10,000 in 5 years at 5%
+        let present_val = pv(0.05, 5.0, 0.0, 10000.0, true).unwrap();
+        // PV should be approximately -$7,835.26
+        assert!((present_val - (-7835.26)).abs() < 1.0);
     }
 }

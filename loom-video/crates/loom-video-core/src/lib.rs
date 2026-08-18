@@ -46,6 +46,34 @@ fn default_true() -> bool {
     true
 }
 
+/// Visual color tag for timeline clip organization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ClipColorTag {
+    #[default]
+    Orange,
+    Blue,
+    Green,
+    Purple,
+    Yellow,
+    Teal,
+    Rose,
+}
+
+impl ClipColorTag {
+    /// Returns the standard hex color string for this tag.
+    pub fn hex_color(&self) -> &'static str {
+        match self {
+            ClipColorTag::Orange => "#f97316",
+            ClipColorTag::Blue => "#3b82f6",
+            ClipColorTag::Green => "#22c55e",
+            ClipColorTag::Purple => "#a855f7",
+            ClipColorTag::Yellow => "#eab308",
+            ClipColorTag::Teal => "#14b8a6",
+            ClipColorTag::Rose => "#f43f5e",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Clip {
     pub id: String,
@@ -59,6 +87,8 @@ pub struct Clip {
     pub playback_rate: f64,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub color_tag: ClipColorTag,
     #[serde(default)]
     pub proxy_path: Option<String>,
     #[serde(default)]
@@ -77,9 +107,15 @@ impl Clip {
             out_point: duration,
             playback_rate: 1.0,
             enabled: true,
+            color_tag: ClipColorTag::default(),
             proxy_path: None,
             effects: Vec::new(),
         }
+    }
+
+    /// Sets the color organization label for this clip.
+    pub fn set_color_tag(&mut self, tag: ClipColorTag) {
+        self.color_tag = tag;
     }
 
     /// Returns the effective timeline duration of the clip accounting for playback_rate.
@@ -2218,5 +2254,16 @@ mod tests {
             assert!(s <= ceiling_lin + 1e-5);
             assert!(s >= -ceiling_lin - 1e-5);
         }
+    }
+
+    #[test]
+    fn clip_color_tag_labeling() {
+        let mut clip = Clip::new("c1", "Intro B-Roll", 5.0);
+        assert_eq!(clip.color_tag, ClipColorTag::Orange);
+        assert_eq!(clip.color_tag.hex_color(), "#f97316");
+
+        clip.set_color_tag(ClipColorTag::Teal);
+        assert_eq!(clip.color_tag, ClipColorTag::Teal);
+        assert_eq!(clip.color_tag.hex_color(), "#14b8a6");
     }
 }

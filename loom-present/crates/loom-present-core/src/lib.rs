@@ -16,6 +16,17 @@ pub enum ElementType {
     StatCard,
 }
 
+/// Interactive click action trigger for presentation slides and elements.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlideActionTrigger {
+    NextSlide,
+    PreviousSlide,
+    FirstSlide,
+    LastSlide,
+    JumpToSlide(usize),
+    OpenUrl(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlideElement {
     pub id: String,
@@ -25,6 +36,8 @@ pub struct SlideElement {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    #[serde(default)]
+    pub action: Option<SlideActionTrigger>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +175,7 @@ impl Slide {
                     y: 250.0,
                     width: 1720.0,
                     height: 120.0,
+                    action: None,
                 });
                 self.add_element(SlideElement {
                     id: "sub-1".into(),
@@ -171,6 +185,7 @@ impl Slide {
                     y: 400.0,
                     width: 1720.0,
                     height: 80.0,
+                    action: None,
                 });
             }
             SlideLayoutPreset::TitleAndContent => {
@@ -183,6 +198,7 @@ impl Slide {
                     y: 60.0,
                     width: 1760.0,
                     height: 100.0,
+                    action: None,
                 });
                 self.add_element(SlideElement {
                     id: "body-1".into(),
@@ -192,6 +208,7 @@ impl Slide {
                     y: 200.0,
                     width: 1760.0,
                     height: 780.0,
+                    action: None,
                 });
             }
             SlideLayoutPreset::TwoColumn => {
@@ -204,6 +221,7 @@ impl Slide {
                     y: 60.0,
                     width: 1760.0,
                     height: 100.0,
+                    action: None,
                 });
                 self.add_element(SlideElement {
                     id: "col-1".into(),
@@ -213,6 +231,7 @@ impl Slide {
                     y: 200.0,
                     width: 850.0,
                     height: 780.0,
+                    action: None,
                 });
                 self.add_element(SlideElement {
                     id: "col-2".into(),
@@ -222,6 +241,7 @@ impl Slide {
                     y: 200.0,
                     width: 850.0,
                     height: 780.0,
+                    action: None,
                 });
             }
             SlideLayoutPreset::Quote => {
@@ -234,6 +254,7 @@ impl Slide {
                     y: 350.0,
                     width: 1620.0,
                     height: 200.0,
+                    action: None,
                 });
             }
             SlideLayoutPreset::BigStat => {
@@ -246,6 +267,7 @@ impl Slide {
                     y: 200.0,
                     width: 1520.0,
                     height: 250.0,
+                    action: None,
                 });
                 self.add_element(SlideElement {
                     id: "label-1".into(),
@@ -255,6 +277,7 @@ impl Slide {
                     y: 500.0,
                     width: 1520.0,
                     height: 100.0,
+                    action: None,
                 });
             }
         }
@@ -797,9 +820,47 @@ impl PresentationDocument {
             y: 200.0,
             width: 800.0,
             height: 100.0,
+            action: None,
         });
         doc.slides.push(cover);
         doc
+    }
+
+    /// Evaluates an interactive action trigger and returns the target slide index if navigation occurs.
+    pub fn execute_action(
+        &self,
+        action: &SlideActionTrigger,
+        current_slide_index: usize,
+    ) -> Option<usize> {
+        if self.slides.is_empty() {
+            return None;
+        }
+        match action {
+            SlideActionTrigger::NextSlide => {
+                if current_slide_index + 1 < self.slides.len() {
+                    Some(current_slide_index + 1)
+                } else {
+                    None
+                }
+            }
+            SlideActionTrigger::PreviousSlide => {
+                if current_slide_index > 0 {
+                    Some(current_slide_index - 1)
+                } else {
+                    None
+                }
+            }
+            SlideActionTrigger::FirstSlide => Some(0),
+            SlideActionTrigger::LastSlide => Some(self.slides.len() - 1),
+            SlideActionTrigger::JumpToSlide(idx) => {
+                if *idx < self.slides.len() {
+                    Some(*idx)
+                } else {
+                    None
+                }
+            }
+            SlideActionTrigger::OpenUrl(_) => None,
+        }
     }
 
     pub fn add_slide(&mut self, title: impl Into<String>, layout: impl Into<String>) {
@@ -1493,6 +1554,7 @@ mod tests {
             y: 20.0,
             width: 300.0,
             height: 60.0,
+            action: None,
         }));
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
         assert!(session.undo());
@@ -1512,7 +1574,9 @@ mod tests {
             y: 281.25,
             width: 250.0,
             height: 100.0,
+            action: None,
         });
+
         let mut session = PresentationSession::new(doc);
         session.set_transition("slide-1", TransitionKind::Dissolve);
         let scene = session.scene(0).expect("scene");
@@ -1557,6 +1621,7 @@ mod tests {
             y: 100.0,
             width: 200.0,
             height: 50.0,
+            action: None,
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -1566,6 +1631,7 @@ mod tests {
             y: 200.0,
             width: 200.0,
             height: 50.0,
+            action: None,
         });
 
         assert_eq!(slide.elements.len(), 2);
@@ -1650,6 +1716,7 @@ mod tests {
             y: 100.0,
             width: 200.0,
             height: 100.0,
+            action: None,
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -1659,6 +1726,7 @@ mod tests {
             y: 150.0,
             width: 150.0,
             height: 100.0,
+            action: None,
         });
 
         let bbox = slide.elements_bounding_box(&["e1", "e2"]).unwrap();
@@ -1830,5 +1898,52 @@ mod tests {
 
         let longest = report.longest_slide().unwrap();
         assert_eq!(longest, (1, 25.0)); // Slide 1 was longest
+    }
+
+    #[test]
+    fn slide_action_trigger_execution() {
+        let mut doc = PresentationDocument::new("deck-actions", "Interactive Deck");
+        doc.add_slide("Slide 2", "blank");
+        doc.add_slide("Slide 3", "blank");
+
+        // Next slide from 0 -> 1
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::NextSlide, 0),
+            Some(1)
+        );
+        // Next slide from 2 (last) -> None
+        assert_eq!(doc.execute_action(&SlideActionTrigger::NextSlide, 2), None);
+
+        // Previous slide from 1 -> 0
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::PreviousSlide, 1),
+            Some(0)
+        );
+        // Previous slide from 0 (first) -> None
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::PreviousSlide, 0),
+            None
+        );
+
+        // Jump to slide 2
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::JumpToSlide(2), 0),
+            Some(2)
+        );
+        // Invalid jump out of bounds -> None
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::JumpToSlide(10), 0),
+            None
+        );
+
+        // First / Last slide
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::FirstSlide, 2),
+            Some(0)
+        );
+        assert_eq!(
+            doc.execute_action(&SlideActionTrigger::LastSlide, 0),
+            Some(2)
+        );
     }
 }

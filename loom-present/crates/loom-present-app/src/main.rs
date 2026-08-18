@@ -95,6 +95,7 @@ fn text_element(
         y,
         width,
         height,
+        action: None,
     }
 }
 
