@@ -779,6 +779,72 @@ pub fn index_lookup(
     Err("#REF!: cell coordinates out of range".into())
 }
 
+/// Concatenates multiple strings into one (CONCATENATE).
+pub fn text_concatenate(parts: &[&str]) -> String {
+    parts.concat()
+}
+
+/// Returns the leftmost `count` characters of a string (LEFT).
+pub fn text_left(s: &str, count: usize) -> String {
+    s.chars().take(count).collect()
+}
+
+/// Returns the rightmost `count` characters of a string (RIGHT).
+pub fn text_right(s: &str, count: usize) -> String {
+    let char_count = s.chars().count();
+    let skip = char_count.saturating_sub(count);
+    s.chars().skip(skip).collect()
+}
+
+/// Returns `count` characters from `start_1based` (MID).
+pub fn text_mid(s: &str, start_1based: usize, count: usize) -> String {
+    if start_1based == 0 {
+        return String::new();
+    }
+    s.chars().skip(start_1based - 1).take(count).collect()
+}
+
+/// Returns the character length of a string (LEN).
+pub fn text_len(s: &str) -> usize {
+    s.chars().count()
+}
+
+/// Strips leading, trailing, and repeated whitespace (TRIM).
+pub fn text_trim(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+/// Converts string to UPPERCASE.
+pub fn text_upper(s: &str) -> String {
+    s.to_uppercase()
+}
+
+/// Converts string to lowercase.
+pub fn text_lower(s: &str) -> String {
+    s.to_lowercase()
+}
+
+/// Capitalizes the first letter of each word (PROPER).
+pub fn text_proper(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize_next = true;
+
+    for c in s.chars() {
+        if c.is_alphabetic() {
+            if capitalize_next {
+                result.extend(c.to_uppercase());
+                capitalize_next = false;
+            } else {
+                result.extend(c.to_lowercase());
+            }
+        } else {
+            result.push(c);
+            capitalize_next = true;
+        }
+    }
+    result
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -3153,5 +3219,18 @@ mod tests {
 
         // INDEX table row 2 (P101), col 2 (Name) = "Widget"
         assert_eq!(index_lookup(&table, 2, 2).unwrap(), "Widget");
+    }
+
+    #[test]
+    fn text_manipulation_formulas() {
+        assert_eq!(text_concatenate(&["Hello", " ", "World"]), "Hello World");
+        assert_eq!(text_left("Quarterly Report", 9), "Quarterly");
+        assert_eq!(text_right("Quarterly Report", 6), "Report");
+        assert_eq!(text_mid("Loom Studio 2026", 6, 6), "Studio");
+        assert_eq!(text_len("Supercalifragilistic"), 20);
+        assert_eq!(text_trim("   Too   many   spaces   "), "Too many spaces");
+        assert_eq!(text_upper("loom sheets"), "LOOM SHEETS");
+        assert_eq!(text_lower("LOOM SHEETS"), "loom sheets");
+        assert_eq!(text_proper("the quick brown fox"), "The Quick Brown Fox");
     }
 }

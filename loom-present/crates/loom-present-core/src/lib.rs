@@ -823,6 +823,29 @@ impl PresentationDocument {
     pub fn total_elements(&self) -> usize {
         self.slides.iter().map(|s| s.elements.len()).sum()
     }
+
+    /// Searches speaker notes across all slides for a query string, returning (slide_index, slide_title).
+    pub fn search_speaker_notes(&self, query: &str, case_sensitive: bool) -> Vec<(usize, String)> {
+        let q = if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+
+        let mut matches = Vec::new();
+        for (i, slide) in self.slides.iter().enumerate() {
+            let notes = if case_sensitive {
+                slide.speaker_notes.clone()
+            } else {
+                slide.speaker_notes.to_lowercase()
+            };
+
+            if notes.contains(&q) {
+                matches.push((i, slide.title.clone()));
+            }
+        }
+        matches
+    }
 }
 
 pub fn save_presentation(doc: &PresentationDocument) -> Result<Vec<u8>, String> {
@@ -1702,5 +1725,23 @@ mod tests {
 
         session.toggle_blank();
         assert!(session.is_blanked);
+    }
+
+    #[test]
+    fn speaker_notes_search_query() {
+        let mut doc = PresentationDocument::new("deck-1", "Q3 Review");
+        doc.slides[0].speaker_notes = "Welcome investors and stakeholders.".into();
+
+        let mut slide2 = Slide::new("s2", "Financials", "TitleAndContent");
+        slide2.speaker_notes = "Revenue grew by 25% year-over-year.".into();
+        doc.slides.push(slide2);
+
+        let matches = doc.search_speaker_notes("investors", false);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].0, 0); // Slide 1 (index 0)
+
+        let rev_matches = doc.search_speaker_notes("revenue", false);
+        assert_eq!(rev_matches.len(), 1);
+        assert_eq!(rev_matches[0].0, 1); // Slide 2 (index 1)
     }
 }

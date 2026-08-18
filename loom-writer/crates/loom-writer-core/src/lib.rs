@@ -1926,6 +1926,83 @@ impl BreakConfig {
     }
 }
 
+/// Text hyphenation configuration for justified long-form typesetting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HyphenationConfig {
+    /// Minimum length of word eligible for hyphenation.
+    pub min_word_length: usize,
+    /// Minimum characters before hyphen break.
+    pub min_leading_chars: usize,
+    /// Minimum characters after hyphen break.
+    pub min_trailing_chars: usize,
+    /// Hyphenation character (defaults to soft hyphen U+00AD).
+    pub hyphen_char: char,
+}
+
+impl Default for HyphenationConfig {
+    fn default() -> Self {
+        Self {
+            min_word_length: 6,
+            min_leading_chars: 3,
+            min_trailing_chars: 3,
+            hyphen_char: '\u{00AD}',
+        }
+    }
+}
+
+/// Identifies candidate hyphenation break positions in an English word based on syllable patterns.
+pub fn find_hyphenation_points(word: &str, config: &HyphenationConfig) -> Vec<usize> {
+    if word.chars().count() < config.min_word_length {
+        return Vec::new();
+    }
+
+    let is_vowel = |c: char| matches!(c.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u' | 'y');
+    let chars: Vec<(usize, char)> = word.char_indices().collect();
+    let char_count = chars.len();
+    let mut breaks = Vec::new();
+
+    for i in config.min_leading_chars..char_count.saturating_sub(config.min_trailing_chars) {
+        let prev_c = chars[i - 1].1;
+        let curr_c = chars[i].1;
+
+        // Vowel-Consonant / Consonant-Vowel transitions (basic syllable heuristic)
+        if (!is_vowel(prev_c) && is_vowel(curr_c))
+            || (is_vowel(prev_c)
+                && !is_vowel(curr_c)
+                && i + 1 < char_count
+                && !is_vowel(chars[i + 1].1))
+        {
+            breaks.push(chars[i].0);
+        }
+    }
+
+    breaks
+}
+
+/// Inserts soft hyphens into long words across a block of text.
+pub fn insert_soft_hyphens(text: &str, config: &HyphenationConfig) -> String {
+    let mut result = String::with_capacity(text.len() + 16);
+    for word in text.split_inclusive(|c: char| !c.is_alphabetic()) {
+        let alpha_part: String = word.chars().take_while(|c| c.is_alphabetic()).collect();
+        let trailing_part: String = word.chars().skip(alpha_part.chars().count()).collect();
+
+        let break_points = find_hyphenation_points(&alpha_part, config);
+        if break_points.is_empty() {
+            result.push_str(word);
+        } else {
+            let mut last = 0;
+            for pt in break_points {
+                result.push_str(&alpha_part[last..pt]);
+                result.push(config.hyphen_char);
+                last = pt;
+            }
+            result.push_str(&alpha_part[last..]);
+            result.push_str(&trailing_part);
+        }
+    }
+    result
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -3089,5 +3166,16 @@ mod tests {
             Some(PageOrientation::Landscape)
         );
         assert!(section.restart_page_numbering);
+    }
+
+    #[test]
+    fn text_hyphenation_and_soft_hyphens() {
+        let config = HyphenationConfig::default();
+        let pts = find_hyphenation_points("international", &config);
+        assert!(!pts.is_empty());
+
+        let text = "The international conference was outstanding.";
+        let hyphenated = insert_soft_hyphens(text, &config);
+        assert!(hyphenated.contains('\u{00AD}'));
     }
 }

@@ -883,6 +883,51 @@ impl ShutterConfig {
     }
 }
 
+/// Generated audio envelope amplitude keyframe for driving visual motion and effects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioAmplitudeKeyframe {
+    pub time_seconds: f64,
+    pub amplitude: f32,
+}
+
+/// Extracts frame-accurate audio amplitude keyframes from PCM samples to automate motion properties.
+pub fn generate_audio_driven_keyframes(
+    samples: &[f32],
+    sample_rate: u32,
+    target_fps: f64,
+    smoothing_factor: f32,
+) -> Vec<AudioAmplitudeKeyframe> {
+    if samples.is_empty() || sample_rate == 0 || target_fps <= 0.0 {
+        return Vec::new();
+    }
+
+    let samples_per_frame = (sample_rate as f64 / target_fps).round().max(1.0) as usize;
+    let num_frames = samples.len() / samples_per_frame;
+    let mut keyframes = Vec::with_capacity(num_frames);
+
+    let smooth = smoothing_factor.clamp(0.0, 0.95);
+    let mut current_envelope = 0.0f32;
+
+    for frame_idx in 0..num_frames {
+        let start = frame_idx * samples_per_frame;
+        let end = (start + samples_per_frame).min(samples.len());
+        let frame_samples = &samples[start..end];
+
+        let sum_sq: f32 = frame_samples.iter().map(|s| s * s).sum();
+        let rms = (sum_sq / frame_samples.len() as f32).sqrt();
+
+        // One-pole low-pass envelope smoothing
+        current_envelope = current_envelope * smooth + rms * (1.0 - smooth);
+
+        keyframes.push(AudioAmplitudeKeyframe {
+            time_seconds: frame_idx as f64 / target_fps,
+            amplitude: current_envelope.clamp(0.0, 1.0),
+        });
+    }
+
+    keyframes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1270,5 +1315,23 @@ mod tests {
         assert!(offsets[2].abs() < 1e-6);
         // First and last should be symmetric
         assert!((offsets[0] + offsets[4]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn audio_amplitude_keyframe_extraction() {
+        // 1 second of audio at 48000 Hz: 0.5s silence, 0.5s full volume sine burst
+        let mut samples = vec![0.0f32; 48000];
+        for (i, sample) in samples[24000..48000].iter_mut().enumerate() {
+            *sample = ((24000 + i) as f32 * 0.1).sin();
+        }
+
+        let keyframes = generate_audio_driven_keyframes(&samples, 48000, 30.0, 0.3);
+        assert_eq!(keyframes.len(), 30); // 30 frames for 1 second
+
+        // Early frames should have ~0 amplitude
+        assert!(keyframes[0].amplitude < 0.05);
+
+        // Later frames during sine burst should have substantial amplitude
+        assert!(keyframes[25].amplitude > 0.4);
     }
 }

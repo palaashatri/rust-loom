@@ -757,6 +757,62 @@ impl ReverbEffect {
     }
 }
 
+/// Dynamic noise gate processor for attenuating background noise and bleed below a dB threshold.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseGateEffect {
+    /// Noise gate opening threshold in decibels (e.g. -40.0 dB).
+    pub threshold_db: f32,
+    /// Maximum attenuation applied when gate is closed in decibels (e.g. -60.0 dB).
+    pub reduction_db: f32,
+    /// Gate opening attack time in milliseconds.
+    pub attack_ms: f32,
+    /// Gate closing release time in milliseconds.
+    pub release_ms: f32,
+}
+
+impl Default for NoiseGateEffect {
+    fn default() -> Self {
+        Self {
+            threshold_db: -40.0,
+            reduction_db: -60.0,
+            attack_ms: 5.0,
+            release_ms: 100.0,
+        }
+    }
+}
+
+impl NoiseGateEffect {
+    /// In-place dynamic noise gate processing.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() || buffer.sample_rate == 0 {
+            return;
+        }
+
+        let thresh_lin = 10.0f32.powf(self.threshold_db / 20.0);
+        let floor_lin = 10.0f32.powf(self.reduction_db / 20.0);
+
+        let attack_coeff =
+            (-1.0 / (self.attack_ms.max(0.1) * 0.001 * buffer.sample_rate as f32)).exp();
+        let release_coeff =
+            (-1.0 / (self.release_ms.max(0.1) * 0.001 * buffer.sample_rate as f32)).exp();
+
+        let mut gate_gain = floor_lin;
+
+        for sample in buffer.samples.iter_mut() {
+            let env = sample.abs();
+            let target_gain = if env >= thresh_lin { 1.0 } else { floor_lin };
+
+            if target_gain > gate_gain {
+                gate_gain = target_gain + attack_coeff * (gate_gain - target_gain);
+            } else {
+                gate_gain = target_gain + release_coeff * (gate_gain - target_gain);
+            }
+
+            *sample *= gate_gain;
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1940,5 +1996,33 @@ mod studio_runtime_tests {
         // Later samples in the buffer should now contain reverberation tail
         let tail_energy: f32 = buffer.samples[1200..1800].iter().map(|s| s.abs()).sum();
         assert!(tail_energy > 0.05);
+    }
+
+    #[test]
+    fn noise_gate_dynamics_processing() {
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 1,
+            // Low amplitude noise (0.001 = -60dB) followed by strong signal (0.5 = -6dB)
+            samples: {
+                let mut s = vec![0.001f32; 1000];
+                s.extend(vec![0.5f32; 1000]);
+                s
+            },
+        };
+
+        let gate = NoiseGateEffect {
+            threshold_db: -30.0,
+            reduction_db: -60.0,
+            attack_ms: 1.0,
+            release_ms: 10.0,
+        };
+
+        gate.process(&mut buffer);
+
+        // Noise region should be heavily attenuated
+        assert!(buffer.samples[500] < 0.0001);
+        // Strong signal region should remain loud
+        assert!(buffer.samples[1500] > 0.4);
     }
 }

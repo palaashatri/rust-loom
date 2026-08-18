@@ -861,6 +861,49 @@ impl KenBurnsEffect {
     }
 }
 
+/// Multitrack audio mixing parameters for video timeline audio tracks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackAudioConfig {
+    /// Fader volume in decibels (0.0 dB = unity gain).
+    pub volume_db: f32,
+    /// Stereo panning position in `[-1.0, 1.0]` (-1.0 = full left, 1.0 = full right).
+    pub pan: f32,
+    /// Track mute status.
+    pub is_muted: bool,
+    /// Track solo status.
+    pub is_solo: bool,
+}
+
+impl Default for TrackAudioConfig {
+    fn default() -> Self {
+        Self {
+            volume_db: 0.0,
+            pan: 0.0,
+            is_muted: false,
+            is_solo: false,
+        }
+    }
+}
+
+impl TrackAudioConfig {
+    /// Computes effective (left, right) linear amplitude gains accounting for mute and pan law.
+    pub fn stereo_linear_gains(&self) -> (f32, f32) {
+        if self.is_muted {
+            return (0.0, 0.0);
+        }
+
+        let linear_vol = 10.0f32.powf(self.volume_db / 20.0);
+        let pan = self.pan.clamp(-1.0, 1.0);
+
+        // Constant-power sinusoidal pan law
+        let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+        let left_pan = angle.cos();
+        let right_pan = angle.sin();
+
+        (linear_vol * left_pan, linear_vol * right_pan)
+    }
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -2073,5 +2116,25 @@ mod tests {
         let mid = effect.interpolate_crop_rect(0.5);
         // At t=0.5, smoothstep(0.5) = 0.5
         assert_eq!(mid, (0.1, 0.1, 0.8, 0.8));
+    }
+
+    #[test]
+    fn track_audio_mixer_pan_and_volume() {
+        let mut track_audio = TrackAudioConfig::default();
+        let (left, right) = track_audio.stereo_linear_gains();
+        // At center pan, gains should be equal and nonzero (~0.707)
+        assert!((left - right).abs() < 1e-4);
+        assert!(left > 0.7);
+
+        // Muted track should produce silence
+        track_audio.is_muted = true;
+        assert_eq!(track_audio.stereo_linear_gains(), (0.0, 0.0));
+
+        // Panned hard left
+        track_audio.is_muted = false;
+        track_audio.pan = -1.0;
+        let (left_pan, right_pan) = track_audio.stereo_linear_gains();
+        assert!(left_pan > 0.99);
+        assert!(right_pan < 1e-4);
     }
 }

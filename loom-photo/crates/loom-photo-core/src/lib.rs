@@ -637,6 +637,56 @@ impl RgbaImage {
         }
     }
 
+    /// Corrects or simulates optical lens distortion (barrel / pincushion) using polynomial radial mapping.
+    pub fn apply_lens_distortion(&self, config: &LensDistortionConfig) -> Result<Self, String> {
+        let mut out = Self::transparent(self.width, self.height)?;
+        let cx = self.width as f32 / 2.0;
+        let cy = self.height as f32 / 2.0;
+        let norm_factor = (cx * cx + cy * cy).sqrt();
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let dx = (x as f32 - cx) / norm_factor;
+                let dy = (y as f32 - cy) / norm_factor;
+                let r2 = dx * dx + dy * dy;
+                let r4 = r2 * r2;
+
+                let distortion = 1.0 + config.k1 * r2 + config.k2 * r4;
+                let src_x = cx + (dx * distortion * config.scale) * norm_factor;
+                let src_y = cy + (dy * distortion * config.scale) * norm_factor;
+
+                if src_x >= 0.0
+                    && src_x < (self.width - 1) as f32
+                    && src_y >= 0.0
+                    && src_y < (self.height - 1) as f32
+                {
+                    let x0 = src_x.floor() as u32;
+                    let y0 = src_y.floor() as u32;
+                    let x1 = (x0 + 1).min(self.width - 1);
+                    let y1 = (y0 + 1).min(self.height - 1);
+
+                    let fx = src_x - x0 as f32;
+                    let fy = src_y - y0 as f32;
+
+                    let p00 = self.pixel(x0, y0).unwrap_or([0, 0, 0, 0]);
+                    let p10 = self.pixel(x1, y0).unwrap_or([0, 0, 0, 0]);
+                    let p01 = self.pixel(x0, y1).unwrap_or([0, 0, 0, 0]);
+                    let p11 = self.pixel(x1, y1).unwrap_or([0, 0, 0, 0]);
+
+                    let mut sampled = [0u8; 4];
+                    for c in 0..4 {
+                        let top = p00[c] as f32 * (1.0 - fx) + p10[c] as f32 * fx;
+                        let bottom = p01[c] as f32 * (1.0 - fx) + p11[c] as f32 * fx;
+                        let val = top * (1.0 - fy) + bottom * fy;
+                        sampled[c] = val.round().clamp(0.0, 255.0) as u8;
+                    }
+                    out.set_pixel(x, y, sampled);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -838,6 +888,27 @@ impl Default for VignetteConfig {
             midpoint: 0.5,
             feather: 0.5,
             roundness: 1.0,
+        }
+    }
+}
+
+/// Optical lens distortion correction and simulation parameters (Brown-Conrady radial model).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LensDistortionConfig {
+    /// Radial quadratic coefficient (negative: barrel, positive: pincushion).
+    pub k1: f32,
+    /// Radial quartic coefficient.
+    pub k2: f32,
+    /// Output scaling / framing factor.
+    pub scale: f32,
+}
+
+impl Default for LensDistortionConfig {
+    fn default() -> Self {
+        Self {
+            k1: -0.1,
+            k2: 0.0,
+            scale: 1.0,
         }
     }
 }
@@ -1935,5 +2006,28 @@ mod tests {
         let corner_px = img.pixel(0, 0).unwrap();
         assert!(corner_px[0] < 120);
         assert_eq!(corner_px[3], 255); // Alpha preserved
+    }
+
+    #[test]
+    fn lens_distortion_radial_correction() {
+        let mut img = RgbaImage::transparent(16, 16).unwrap();
+        // Fill center block with opaque white
+        for y in 4..12 {
+            for x in 4..12 {
+                img.set_pixel(x, y, [255, 255, 255, 255]);
+            }
+        }
+        let barrel_config = LensDistortionConfig {
+            k1: -0.2,
+            k2: 0.0,
+            scale: 1.0,
+        };
+        let distorted = img.apply_lens_distortion(&barrel_config).unwrap();
+        assert_eq!(distorted.width, 16);
+        assert_eq!(distorted.height, 16);
+
+        // Center pixel (8, 8) must retain white color
+        let center_px = distorted.pixel(8, 8).unwrap();
+        assert_eq!(center_px, [255, 255, 255, 255]);
     }
 }

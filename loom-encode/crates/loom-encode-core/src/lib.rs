@@ -621,6 +621,93 @@ impl WatermarkOverlayConfig {
     }
 }
 
+/// Standard color primaries presets for broadcast and HDR video transcode profiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorPrimaries {
+    #[default]
+    Bt709,
+    Bt2020,
+    Smpte170m,
+    Smpte240m,
+}
+
+impl ColorPrimaries {
+    pub fn as_ffmpeg_str(&self) -> &'static str {
+        match self {
+            Self::Bt709 => "bt709",
+            Self::Bt2020 => "bt2020",
+            Self::Smpte170m => "smpte170m",
+            Self::Smpte240m => "smpte240m",
+        }
+    }
+}
+
+/// Electro-optical transfer characteristic functions (gamma curves and HDR transfer functions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorTransfer {
+    #[default]
+    Bt709,
+    Smpte2084Hdr10,
+    AribStdB67Hlg,
+    Iec6196621Srgb,
+    Linear,
+}
+
+impl ColorTransfer {
+    pub fn as_ffmpeg_str(&self) -> &'static str {
+        match self {
+            Self::Bt709 => "bt709",
+            Self::Smpte2084Hdr10 => "smpte2084",
+            Self::AribStdB67Hlg => "arib-std-b67",
+            Self::Iec6196621Srgb => "iec61966-2-1",
+            Self::Linear => "linear",
+        }
+    }
+}
+
+/// Color matrix coefficients for YUV-to-RGB conversion equations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorMatrix {
+    #[default]
+    Bt709,
+    Bt2020Nc,
+    Smpte170m,
+    Smpte240m,
+}
+
+impl ColorMatrix {
+    pub fn as_ffmpeg_str(&self) -> &'static str {
+        match self {
+            Self::Bt709 => "bt709",
+            Self::Bt2020Nc => "bt2020nc",
+            Self::Smpte170m => "smpte170m",
+            Self::Smpte240m => "smpte240m",
+        }
+    }
+}
+
+/// Color space metadata tagging for SDR and HDR delivery profiles.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ColorMetadataConfig {
+    pub primaries: ColorPrimaries,
+    pub transfer: ColorTransfer,
+    pub matrix: ColorMatrix,
+}
+
+impl ColorMetadataConfig {
+    /// Generates FFmpeg color metadata CLI argument flags.
+    pub fn generate_color_metadata_args(&self) -> Vec<String> {
+        vec![
+            "-color_primaries".into(),
+            self.primaries.as_ffmpeg_str().into(),
+            "-color_trc".into(),
+            self.transfer.as_ffmpeg_str().into(),
+            "-colorspace".into(),
+            self.matrix.as_ffmpeg_str().into(),
+        ]
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1443,6 +1530,28 @@ mod tests {
         assert_eq!(
             overlay.generate_overlay_expr(),
             "overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+        );
+    }
+
+    #[test]
+    fn color_metadata_argument_generation() {
+        let color = ColorMetadataConfig {
+            primaries: ColorPrimaries::Bt2020,
+            transfer: ColorTransfer::Smpte2084Hdr10,
+            matrix: ColorMatrix::Bt2020Nc,
+        };
+
+        let args = color.generate_color_metadata_args();
+        assert_eq!(
+            args,
+            vec![
+                "-color_primaries",
+                "bt2020",
+                "-color_trc",
+                "smpte2084",
+                "-colorspace",
+                "bt2020nc"
+            ]
         );
     }
 }
