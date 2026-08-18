@@ -1600,6 +1600,82 @@ impl Default for PageStyle {
     }
 }
 
+/// Standard physical paper sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PaperSize {
+    #[default]
+    A4,
+    Letter,
+    Legal,
+    Executive,
+    A3,
+    A5,
+}
+
+impl PaperSize {
+    /// Returns the (width, height) dimensions in points for portrait orientation.
+    pub fn dimensions_pt(&self) -> (f32, f32) {
+        match self {
+            Self::A4 => (595.0, 842.0),
+            Self::Letter => (612.0, 792.0),
+            Self::Legal => (612.0, 1008.0),
+            Self::Executive => (522.0, 756.0),
+            Self::A3 => (842.0, 1191.0),
+            Self::A5 => (420.0, 595.0),
+        }
+    }
+}
+
+/// Page orientation for layout and printing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageOrientation {
+    #[default]
+    Portrait,
+    Landscape,
+}
+
+/// Standard page margin presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageMarginsPreset {
+    #[default]
+    Normal, // 1 inch (72pt)
+    Narrow,   // 0.5 inch (36pt)
+    Moderate, // 1 inch top/bottom, 0.75 inch left/right (54pt)
+    Wide,     // 1 inch top/bottom, 2 inch left/right (144pt)
+}
+
+impl PageMarginsPreset {
+    /// Returns (top, bottom, left, right) margins in points.
+    pub fn margins_pt(&self) -> (f32, f32, f32, f32) {
+        match self {
+            Self::Normal => (72.0, 72.0, 72.0, 72.0),
+            Self::Narrow => (36.0, 36.0, 36.0, 36.0),
+            Self::Moderate => (72.0, 72.0, 54.0, 54.0),
+            Self::Wide => (72.0, 72.0, 144.0, 144.0),
+        }
+    }
+}
+
+/// Calculates estimated silent reading time in minutes for a given word count.
+pub fn calculate_reading_time_minutes(word_count: usize, words_per_minute: u32) -> f32 {
+    let wpm = if words_per_minute == 0 {
+        200
+    } else {
+        words_per_minute
+    };
+    word_count as f32 / wpm as f32
+}
+
+/// Calculates estimated spoken presentation time in minutes for a given word count.
+pub fn calculate_speaking_time_minutes(word_count: usize, words_per_minute: u32) -> f32 {
+    let wpm = if words_per_minute == 0 {
+        130
+    } else {
+        words_per_minute
+    };
+    word_count as f32 / wpm as f32
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -2659,5 +2735,26 @@ mod tests {
         doc.set_block_spacing(1, 1.5, 12.0).unwrap();
         assert_eq!(doc.blocks[0].style.line_spacing, 1.5);
         assert_eq!(doc.blocks[0].style.space_after, 12.0);
+    }
+
+    #[test]
+    fn paper_sizes_and_reading_metrics() {
+        let a4 = PaperSize::A4.dimensions_pt();
+        assert_eq!(a4, (595.0, 842.0));
+
+        let letter = PaperSize::Letter.dimensions_pt();
+        assert_eq!(letter, (612.0, 792.0));
+
+        let normal_margins = PageMarginsPreset::Normal.margins_pt();
+        assert_eq!(normal_margins, (72.0, 72.0, 72.0, 72.0));
+
+        let narrow_margins = PageMarginsPreset::Narrow.margins_pt();
+        assert_eq!(narrow_margins, (36.0, 36.0, 36.0, 36.0));
+
+        let read_time = calculate_reading_time_minutes(500, 250);
+        assert_eq!(read_time, 2.0);
+
+        let speak_time = calculate_speaking_time_minutes(260, 130);
+        assert_eq!(speak_time, 2.0);
     }
 }

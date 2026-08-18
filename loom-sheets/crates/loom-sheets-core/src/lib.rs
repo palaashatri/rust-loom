@@ -380,6 +380,57 @@ pub fn format_cell_display(raw: &str, format: NumberFormat) -> String {
     }
 }
 
+/// Auto-fill series expansion modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FillSeriesType {
+    #[default]
+    Linear,
+    Growth,
+    DateDays,
+}
+
+/// Generates a numeric progression series for drag-to-fill operations.
+pub fn generate_fill_series(
+    start: f64,
+    step_or_factor: f64,
+    count: usize,
+    kind: FillSeriesType,
+) -> Vec<f64> {
+    let mut series = Vec::with_capacity(count);
+    let mut current = start;
+
+    for _ in 0..count {
+        series.push(current);
+        match kind {
+            FillSeriesType::Linear | FillSeriesType::DateDays => current += step_or_factor,
+            FillSeriesType::Growth => current *= step_or_factor,
+        }
+    }
+    series
+}
+
+/// Sorts a 2D matrix of row cells by the specified column index.
+pub fn sort_range_rows(rows: &[Vec<String>], col_idx: usize, ascending: bool) -> Vec<Vec<String>> {
+    let mut sorted = rows.to_vec();
+    sorted.sort_by(|a, b| {
+        let val_a = a.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+        let val_b = b.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+
+        // Attempt numeric comparison if both values parse as numbers
+        let cmp = match (val_a.parse::<f64>(), val_b.parse::<f64>()) {
+            (Ok(na), Ok(nb)) => na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal),
+            _ => val_a.cmp(val_b),
+        };
+
+        if ascending {
+            cmp
+        } else {
+            cmp.reverse()
+        }
+    });
+    sorted
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -2642,5 +2693,32 @@ mod tests {
         assert_eq!(format_cell_display("1000", NumberFormat::Scientific), "1e3");
         assert_eq!(format_cell_display("hello", NumberFormat::General), "hello");
         assert_eq!(format_cell_display("", NumberFormat::Currency), "");
+    }
+
+    #[test]
+    fn fill_series_and_range_sorting() {
+        let linear = generate_fill_series(10.0, 5.0, 4, FillSeriesType::Linear);
+        assert_eq!(linear, vec![10.0, 15.0, 20.0, 25.0]);
+
+        let growth = generate_fill_series(2.0, 3.0, 4, FillSeriesType::Growth);
+        assert_eq!(growth, vec![2.0, 6.0, 18.0, 54.0]);
+
+        let rows = vec![
+            vec!["Cherry".into(), "30".into()],
+            vec!["Apple".into(), "10".into()],
+            vec!["Banana".into(), "20".into()],
+        ];
+
+        // Sort ascending by column 0 (string)
+        let sorted_str = sort_range_rows(&rows, 0, true);
+        assert_eq!(sorted_str[0][0], "Apple");
+        assert_eq!(sorted_str[1][0], "Banana");
+        assert_eq!(sorted_str[2][0], "Cherry");
+
+        // Sort descending by column 1 (numeric)
+        let sorted_num = sort_range_rows(&rows, 1, false);
+        assert_eq!(sorted_num[0][1], "30");
+        assert_eq!(sorted_num[1][1], "20");
+        assert_eq!(sorted_num[2][1], "10");
     }
 }

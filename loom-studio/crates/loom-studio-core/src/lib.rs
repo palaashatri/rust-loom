@@ -421,6 +421,65 @@ impl DelayEffect {
     }
 }
 
+/// Converts a decibel value to a linear amplitude gain multiplier.
+pub fn db_to_linear(db: f32) -> f32 {
+    10.0_f32.powf(db / 20.0)
+}
+
+/// Converts a linear amplitude gain multiplier to decibels.
+pub fn linear_to_db(linear: f32) -> f32 {
+    if linear <= 1e-5 {
+        -100.0
+    } else {
+        20.0 * linear.log10()
+    }
+}
+
+/// Dynamic range compressor effect processor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompressorEffect {
+    /// Compression threshold in dB (e.g. -12.0 dB).
+    pub threshold_db: f32,
+    /// Compression ratio (e.g. 4.0 for 4:1).
+    pub ratio: f32,
+    /// Post-compression makeup gain in dB.
+    pub makeup_gain_db: f32,
+}
+
+impl CompressorEffect {
+    /// Creates a new compressor configuration.
+    pub fn new(threshold_db: f32, ratio: f32, makeup_gain_db: f32) -> Self {
+        Self {
+            threshold_db: threshold_db.min(0.0),
+            ratio: ratio.max(1.0),
+            makeup_gain_db: makeup_gain_db.max(0.0),
+        }
+    }
+
+    /// Processes an audio buffer in-place applying dynamic range compression.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() {
+            return;
+        }
+        let threshold_linear = db_to_linear(self.threshold_db);
+        let makeup_linear = db_to_linear(self.makeup_gain_db);
+
+        for sample in &mut buffer.samples {
+            let abs_val = sample.abs();
+            if abs_val > threshold_linear && abs_val > 0.0 {
+                let sample_db = linear_to_db(abs_val);
+                let over_db = sample_db - self.threshold_db;
+                let compressed_db = self.threshold_db + over_db / self.ratio;
+                let target_linear = db_to_linear(compressed_db);
+                let gain_reduction = target_linear / abs_val;
+                *sample = *sample * gain_reduction * makeup_linear;
+            } else {
+                *sample *= makeup_linear;
+            }
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1505,5 +1564,28 @@ mod studio_runtime_tests {
         assert_eq!(buffer.samples[3], 0.0);
         // Feedback echo at sample 4: 1.0 * 0.5 * 0.5 = 0.25
         assert_eq!(buffer.samples[4], 0.25);
+    }
+
+    #[test]
+    fn compressor_effect_and_db_conversions() {
+        assert_eq!(db_to_linear(0.0), 1.0);
+        assert!((db_to_linear(-6.0) - 0.501).abs() < 1e-2);
+        assert_eq!(linear_to_db(1.0), 0.0);
+        assert!(linear_to_db(0.0) <= -100.0);
+
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 1,
+            samples: vec![1.0, 0.5, 0.1],
+        };
+
+        // -6dB threshold (~0.5 linear), 2:1 ratio, 0dB makeup
+        let comp = CompressorEffect::new(-6.0, 2.0, 0.0);
+        comp.process(&mut buffer);
+
+        // 1.0 (0dB) is 6dB over -6dB threshold -> compressed to -3dB (~0.707)
+        assert!(buffer.samples[0] < 1.0 && buffer.samples[0] > 0.7);
+        // 0.5 is at/below threshold -> unchanged
+        assert_eq!(buffer.samples[1], 0.5);
     }
 }

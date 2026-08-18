@@ -642,6 +642,44 @@ pub fn snap_timeline_to_edit_points(
     best_snap
 }
 
+/// Performs a Roll Edit between two adjacent clips, shifting the cut point by `delta_secs`.
+/// The left clip's duration increases by `delta_secs` while the right clip's in_point and start_time
+/// shift by `delta_secs` and its duration decreases by `delta_secs`.
+pub fn roll_edit(
+    left_clip: &mut Clip,
+    right_clip: &mut Clip,
+    delta_secs: f64,
+) -> Result<(), String> {
+    if left_clip.duration + delta_secs <= 0.1 {
+        return Err("roll edit would make left clip too short".into());
+    }
+    if right_clip.duration - delta_secs <= 0.1 {
+        return Err("roll edit would make right clip too short".into());
+    }
+
+    left_clip.duration += delta_secs;
+    right_clip.in_point += delta_secs;
+    right_clip.start_time += delta_secs;
+    right_clip.duration -= delta_secs;
+
+    Ok(())
+}
+
+/// Performs a Slip Edit on a clip, shifting its internal media window by `delta_secs`
+/// while preserving its timeline start_time and timeline duration.
+pub fn slip_edit(clip: &mut Clip, delta_secs: f64, media_duration: f64) -> Result<(), String> {
+    let new_in = clip.in_point + delta_secs;
+    if new_in < 0.0 {
+        return Err("slip edit before start of media".into());
+    }
+    if new_in + clip.duration > media_duration {
+        return Err("slip edit past end of media".into());
+    }
+
+    clip.in_point = new_in;
+    Ok(())
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -1750,5 +1788,26 @@ mod tests {
             0.1,
         );
         assert_eq!(snapped_marker, 12.0);
+    }
+
+    #[test]
+    fn roll_and_slip_editing() {
+        let mut left = Clip::new("c1", "MediaA", 5.0);
+        left.start_time = 0.0;
+        let mut right = Clip::new("c2", "MediaB", 5.0);
+        right.start_time = 5.0;
+
+        // Roll cut by +1.0s
+        roll_edit(&mut left, &mut right, 1.0).unwrap();
+        assert_eq!(left.duration, 6.0);
+        assert_eq!(right.start_time, 6.0);
+        assert_eq!(right.in_point, 1.0);
+        assert_eq!(right.duration, 4.0);
+
+        // Slip edit right clip by +2.0s within 10.0s media
+        slip_edit(&mut right, 2.0, 10.0).unwrap();
+        assert_eq!(right.in_point, 3.0);
+        assert_eq!(right.duration, 4.0); // duration unchanged
+        assert_eq!(right.start_time, 6.0); // start_time unchanged
     }
 }

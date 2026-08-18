@@ -506,6 +506,22 @@ impl RgbaImage {
         Ok(output)
     }
 
+    /// Extracts a single color channel (0: Red, 1: Green, 2: Blue, 3: Alpha) as a byte slice.
+    pub fn extract_channel(&self, channel_idx: usize) -> Result<Vec<u8>, String> {
+        if channel_idx > 3 {
+            return Err("channel index must be 0..=3".into());
+        }
+        let count = (self.width * self.height) as usize;
+        let mut channel = Vec::with_capacity(count);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let p = self.pixel(x, y).unwrap_or([0, 0, 0, 0]);
+                channel.push(p[channel_idx]);
+            }
+        }
+        Ok(channel)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -592,6 +608,38 @@ pub fn generate_gaussian_kernel(radius: u32, sigma: f32) -> Vec<f32> {
         }
     }
     kernel
+}
+
+/// Generates a radial gradient image from center_x, center_y outward to radius.
+pub fn generate_radial_gradient(
+    width: u32,
+    height: u32,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    inner_color: [u8; 4],
+    outer_color: [u8; 4],
+) -> Result<RgbaImage, String> {
+    let mut img = RgbaImage::transparent(width, height)?;
+    let rad = radius.max(1.0);
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - center_x;
+            let dy = y as f32 - center_y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let t = (dist / rad).clamp(0.0, 1.0);
+
+            let r = (inner_color[0] as f32 * (1.0 - t) + outer_color[0] as f32 * t).round() as u8;
+            let g = (inner_color[1] as f32 * (1.0 - t) + outer_color[1] as f32 * t).round() as u8;
+            let b = (inner_color[2] as f32 * (1.0 - t) + outer_color[2] as f32 * t).round() as u8;
+            let a = (inner_color[3] as f32 * (1.0 - t) + outer_color[3] as f32 * t).round() as u8;
+
+            img.set_pixel(x, y, [r, g, b, a]);
+        }
+    }
+
+    Ok(img)
 }
 
 /// 256-bin color channel and luminance histograms.
@@ -1576,5 +1624,26 @@ mod tests {
 
         let neighbor = blurred.pixel(2, 1).unwrap();
         assert!(neighbor[0] > 0);
+    }
+
+    #[test]
+    fn radial_gradient_and_channel_extraction() {
+        let grad =
+            generate_radial_gradient(10, 10, 5.0, 5.0, 5.0, [255, 0, 0, 255], [0, 0, 255, 255])
+                .unwrap();
+
+        // Center should be red
+        let center = grad.pixel(5, 5).unwrap();
+        assert_eq!(center[0], 255);
+        assert_eq!(center[2], 0);
+
+        // Far edge should be blue
+        let edge = grad.pixel(0, 0).unwrap();
+        assert!(edge[2] > 200);
+
+        // Channel extraction
+        let red_ch = grad.extract_channel(0).unwrap();
+        assert_eq!(red_ch.len(), 100);
+        assert_eq!(red_ch[55], 255); // center pixel index in 10x10 is 5*10 + 5 = 55
     }
 }

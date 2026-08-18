@@ -637,6 +637,55 @@ pub fn apply_layer_opacity(color: [f32; 4], opacity: f32) -> [f32; 4] {
     [color[0], color[1], color[2], alpha]
 }
 
+/// Keyframe interpolation curve modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum InterpolationMode {
+    #[default]
+    Linear,
+    Bezier,
+    Hold,
+}
+
+/// Graph editor tangent handles for Bezier keyframe curve interpolation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TangentHandle {
+    pub in_weight: f32,
+    pub in_angle_deg: f32,
+    pub out_weight: f32,
+    pub out_angle_deg: f32,
+}
+
+impl Default for TangentHandle {
+    fn default() -> Self {
+        Self {
+            in_weight: 0.33,
+            in_angle_deg: 0.0,
+            out_weight: 0.33,
+            out_angle_deg: 0.0,
+        }
+    }
+}
+
+/// Evaluates a normalized time parameter `t` in `[0.0, 1.0]` between two values based on interpolation mode.
+pub fn evaluate_keyframe_segment(v1: f32, v2: f32, t: f32, mode: InterpolationMode) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    match mode {
+        InterpolationMode::Linear => v1 + (v2 - v1) * t,
+        InterpolationMode::Hold => {
+            if t >= 1.0 {
+                v2
+            } else {
+                v1
+            }
+        }
+        InterpolationMode::Bezier => {
+            // Smooth ease-in-out cubic bezier approximation: 3t^2 - 2t^3
+            let smooth_t = t * t * (3.0 - 2.0 * t);
+            v1 + (v2 - v1) * smooth_t
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -936,5 +985,25 @@ mod tests {
 
         let transparent_red = apply_layer_opacity(red, 0.4);
         assert_eq!(transparent_red, [1.0, 0.0, 0.0, 0.4]);
+    }
+
+    #[test]
+    fn keyframe_interpolation_evaluation() {
+        // Linear
+        let lin = evaluate_keyframe_segment(10.0, 20.0, 0.5, InterpolationMode::Linear);
+        assert_eq!(lin, 15.0);
+
+        // Hold
+        let hold_mid = evaluate_keyframe_segment(10.0, 20.0, 0.5, InterpolationMode::Hold);
+        assert_eq!(hold_mid, 10.0);
+        let hold_end = evaluate_keyframe_segment(10.0, 20.0, 1.0, InterpolationMode::Hold);
+        assert_eq!(hold_end, 20.0);
+
+        // Bezier ease
+        let bez = evaluate_keyframe_segment(0.0, 100.0, 0.5, InterpolationMode::Bezier);
+        assert_eq!(bez, 50.0);
+
+        let tangent = TangentHandle::default();
+        assert_eq!(tangent.in_weight, 0.33);
     }
 }

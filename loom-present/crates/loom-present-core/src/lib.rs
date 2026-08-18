@@ -376,6 +376,64 @@ impl Default for SlideTransitionConfig {
     }
 }
 
+/// Border stroke styles for slide shapes and text boxes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum StrokeStyle {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+    None,
+}
+
+/// Stroke / border configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrokeConfig {
+    pub color: String,
+    pub width: f32,
+    pub style: StrokeStyle,
+}
+
+impl Default for StrokeConfig {
+    fn default() -> Self {
+        Self {
+            color: "#000000".into(),
+            width: 1.0,
+            style: StrokeStyle::Solid,
+        }
+    }
+}
+
+/// Drop shadow effect configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DropShadowConfig {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub blur_radius: f32,
+    pub color: String,
+}
+
+impl Default for DropShadowConfig {
+    fn default() -> Self {
+        Self {
+            offset_x: 2.0,
+            offset_y: 2.0,
+            blur_radius: 4.0,
+            color: "rgba(0, 0, 0, 0.3)".into(),
+        }
+    }
+}
+
+/// Normalizes an angle in degrees into the standard `[0.0, 360.0)` range.
+pub fn normalize_angle_degrees(degrees: f32) -> f32 {
+    let rem = degrees % 360.0;
+    if rem < 0.0 {
+        rem + 360.0
+    } else {
+        rem
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1290,5 +1348,24 @@ mod tests {
         };
         assert_eq!(fade.kind, TransitionType::Fade);
         assert_eq!(fade.duration_seconds, 1.0);
+    }
+
+    #[test]
+    fn stroke_and_shadow_styling() {
+        let stroke = StrokeConfig {
+            color: "#ff0000".into(),
+            width: 2.5,
+            style: StrokeStyle::Dashed,
+        };
+        assert_eq!(stroke.width, 2.5);
+        assert_eq!(stroke.style, StrokeStyle::Dashed);
+
+        let shadow = DropShadowConfig::default();
+        assert_eq!(shadow.blur_radius, 4.0);
+
+        assert_eq!(normalize_angle_degrees(0.0), 0.0);
+        assert_eq!(normalize_angle_degrees(360.0), 0.0);
+        assert_eq!(normalize_angle_degrees(450.0), 90.0);
+        assert_eq!(normalize_angle_degrees(-90.0), 270.0);
     }
 }

@@ -393,6 +393,45 @@ pub fn generate_subtitle_args(mode: SubtitleMode, subtitle_path: Option<&str>) -
     }
 }
 
+/// Generates FFmpeg video filter arguments for scaling and padding to fit a target resolution.
+pub fn generate_scale_and_pad_args(
+    src_w: u32,
+    src_h: u32,
+    target_w: u32,
+    target_h: u32,
+) -> Vec<String> {
+    if src_w == target_w && src_h == target_h {
+        return Vec::new();
+    }
+    let filter = format!(
+        "scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2",
+        target_w, target_h, target_w, target_h
+    );
+    vec!["-vf".to_string(), filter]
+}
+
+/// Standard audio sample bit depths and encoding formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AudioSampleFormat {
+    #[default]
+    S16Le,
+    S24Le,
+    S32Le,
+    F32Le,
+}
+
+impl AudioSampleFormat {
+    /// Returns the FFmpeg `-sample_fmt` argument value.
+    pub fn sample_fmt_str(&self) -> &'static str {
+        match self {
+            Self::S16Le => "s16",
+            Self::S24Le => "s32", // ffmpeg PCM 24bit uses s32 container
+            Self::S32Le => "s32",
+            Self::F32Le => "flt",
+        }
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1122,5 +1161,22 @@ mod tests {
 
         let conv_args = generate_subtitle_args(SubtitleMode::ConvertSrt, None);
         assert_eq!(conv_args, vec!["-c:s", "mov_text"]);
+    }
+
+    #[test]
+    fn scale_and_pad_filter_generation() {
+        assert!(generate_scale_and_pad_args(1920, 1080, 1920, 1080).is_empty());
+
+        let pad_args = generate_scale_and_pad_args(1440, 1080, 1920, 1080);
+        assert_eq!(
+            pad_args,
+            vec![
+                "-vf",
+                "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
+            ]
+        );
+
+        assert_eq!(AudioSampleFormat::S16Le.sample_fmt_str(), "s16");
+        assert_eq!(AudioSampleFormat::F32Le.sample_fmt_str(), "flt");
     }
 }
