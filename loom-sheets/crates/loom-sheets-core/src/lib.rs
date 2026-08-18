@@ -336,6 +336,50 @@ pub fn format_number_percentage(value: f64, decimals: usize) -> String {
     format!("{:.1$}%", value * 100.0, decimals)
 }
 
+/// Standard spreadsheet cell numeric display formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NumberFormat {
+    #[default]
+    General,
+    Currency,
+    Percentage,
+    Scientific,
+    DateIso,
+    PlainText,
+}
+
+/// Applies a number format to a raw string or evaluated numerical result.
+pub fn format_cell_display(raw: &str, format: NumberFormat) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+    match format {
+        NumberFormat::General | NumberFormat::PlainText => raw.to_string(),
+        NumberFormat::Currency => {
+            if let Ok(num) = raw.parse::<f64>() {
+                format_number_currency(num, "$", 2)
+            } else {
+                raw.to_string()
+            }
+        }
+        NumberFormat::Percentage => {
+            if let Ok(num) = raw.parse::<f64>() {
+                format_number_percentage(num, 1)
+            } else {
+                raw.to_string()
+            }
+        }
+        NumberFormat::Scientific => {
+            if let Ok(num) = raw.parse::<f64>() {
+                format!("{:e}", num)
+            } else {
+                raw.to_string()
+            }
+        }
+        NumberFormat::DateIso => raw.to_string(),
+    }
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -2583,5 +2627,20 @@ mod tests {
         // Reset with 0.0
         sheet.set_col_width(0, 0.0);
         assert_eq!(sheet.col_width(0), 80.0);
+    }
+
+    #[test]
+    fn cell_number_format_display() {
+        assert_eq!(
+            format_cell_display("123.45", NumberFormat::Currency),
+            "$123.45"
+        );
+        assert_eq!(
+            format_cell_display("0.75", NumberFormat::Percentage),
+            "75.0%"
+        );
+        assert_eq!(format_cell_display("1000", NumberFormat::Scientific), "1e3");
+        assert_eq!(format_cell_display("hello", NumberFormat::General), "hello");
+        assert_eq!(format_cell_display("", NumberFormat::Currency), "");
     }
 }

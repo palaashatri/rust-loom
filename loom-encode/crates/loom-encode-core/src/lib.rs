@@ -363,6 +363,36 @@ pub fn generate_two_pass_args(
     (pass1, pass2)
 }
 
+/// Subtitle handling strategy for transcode pipelines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SubtitleMode {
+    #[default]
+    None,
+    BurnIn,
+    PassthroughCopy,
+    ConvertSrt,
+}
+
+/// Generates FFmpeg CLI arguments for subtitle mapping and processing.
+pub fn generate_subtitle_args(mode: SubtitleMode, subtitle_path: Option<&str>) -> Vec<String> {
+    match mode {
+        SubtitleMode::None => Vec::new(),
+        SubtitleMode::BurnIn => {
+            if let Some(path) = subtitle_path {
+                vec!["-vf".to_string(), format!("subtitles={}", path)]
+            } else {
+                Vec::new()
+            }
+        }
+        SubtitleMode::PassthroughCopy => {
+            vec!["-c:s".to_string(), "copy".to_string()]
+        }
+        SubtitleMode::ConvertSrt => {
+            vec!["-c:s".to_string(), "mov_text".to_string()]
+        }
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1078,5 +1108,19 @@ mod tests {
         assert!(pass2.contains(&"2".to_string()));
         assert!(pass2.contains(&"-c:a".to_string()));
         assert!(pass2.contains(&"output.mp4".to_string()));
+    }
+
+    #[test]
+    fn subtitle_arguments_generation() {
+        assert!(generate_subtitle_args(SubtitleMode::None, None).is_empty());
+
+        let burn_args = generate_subtitle_args(SubtitleMode::BurnIn, Some("/path/to/subs.srt"));
+        assert_eq!(burn_args, vec!["-vf", "subtitles=/path/to/subs.srt"]);
+
+        let copy_args = generate_subtitle_args(SubtitleMode::PassthroughCopy, None);
+        assert_eq!(copy_args, vec!["-c:s", "copy"]);
+
+        let conv_args = generate_subtitle_args(SubtitleMode::ConvertSrt, None);
+        assert_eq!(conv_args, vec!["-c:s", "mov_text"]);
     }
 }

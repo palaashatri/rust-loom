@@ -431,6 +431,81 @@ impl RgbaImage {
         Ok(output)
     }
 
+    /// Performs separable two-pass Gaussian blur on this image.
+    pub fn gaussian_blur(&self, radius: u32, sigma: f32) -> Result<Self, String> {
+        if radius == 0 {
+            return Ok(self.clone());
+        }
+        let kernel = generate_gaussian_kernel(radius, sigma);
+        let w = self.width as i32;
+        let h = self.height as i32;
+        let r = radius as i32;
+
+        let mut temp = Self::transparent(self.width, self.height)?;
+
+        for y in 0..h {
+            for x in 0..w {
+                let mut r_acc = 0.0_f32;
+                let mut g_acc = 0.0_f32;
+                let mut b_acc = 0.0_f32;
+                let mut a_acc = 0.0_f32;
+
+                for (idx, &weight) in kernel.iter().enumerate() {
+                    let kx = (x - r + idx as i32).clamp(0, w - 1);
+                    let p = self.pixel(kx as u32, y as u32).unwrap_or([0, 0, 0, 0]);
+                    r_acc += p[0] as f32 * weight;
+                    g_acc += p[1] as f32 * weight;
+                    b_acc += p[2] as f32 * weight;
+                    a_acc += p[3] as f32 * weight;
+                }
+
+                temp.set_pixel(
+                    x as u32,
+                    y as u32,
+                    [
+                        r_acc.round().clamp(0.0, 255.0) as u8,
+                        g_acc.round().clamp(0.0, 255.0) as u8,
+                        b_acc.round().clamp(0.0, 255.0) as u8,
+                        a_acc.round().clamp(0.0, 255.0) as u8,
+                    ],
+                );
+            }
+        }
+
+        let mut output = Self::transparent(self.width, self.height)?;
+
+        for y in 0..h {
+            for x in 0..w {
+                let mut r_acc = 0.0_f32;
+                let mut g_acc = 0.0_f32;
+                let mut b_acc = 0.0_f32;
+                let mut a_acc = 0.0_f32;
+
+                for (idx, &weight) in kernel.iter().enumerate() {
+                    let ky = (y - r + idx as i32).clamp(0, h - 1);
+                    let p = temp.pixel(x as u32, ky as u32).unwrap_or([0, 0, 0, 0]);
+                    r_acc += p[0] as f32 * weight;
+                    g_acc += p[1] as f32 * weight;
+                    b_acc += p[2] as f32 * weight;
+                    a_acc += p[3] as f32 * weight;
+                }
+
+                output.set_pixel(
+                    x as u32,
+                    y as u32,
+                    [
+                        r_acc.round().clamp(0.0, 255.0) as u8,
+                        g_acc.round().clamp(0.0, 255.0) as u8,
+                        b_acc.round().clamp(0.0, 255.0) as u8,
+                        a_acc.round().clamp(0.0, 255.0) as u8,
+                    ],
+                );
+            }
+        }
+
+        Ok(output)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -488,6 +563,35 @@ impl CropAspectRatio {
             CropAspectRatio::Photo3x2 => Some(3.0 / 2.0),
         }
     }
+}
+
+/// Generates a 1D normalized Gaussian kernel of length `2 * radius + 1`.
+pub fn generate_gaussian_kernel(radius: u32, sigma: f32) -> Vec<f32> {
+    if radius == 0 {
+        return vec![1.0];
+    }
+    let s = if sigma > 0.0 {
+        sigma
+    } else {
+        radius as f32 / 2.0
+    };
+    let size = (radius * 2 + 1) as usize;
+    let mut kernel = Vec::with_capacity(size);
+    let mut sum = 0.0_f32;
+
+    for i in -(radius as i32)..=(radius as i32) {
+        let x = i as f32;
+        let weight = (-x * x / (2.0 * s * s)).exp();
+        kernel.push(weight);
+        sum += weight;
+    }
+
+    if sum > 0.0 {
+        for w in &mut kernel {
+            *w /= sum;
+        }
+    }
+    kernel
 }
 
 /// 256-bin color channel and luminance histograms.
@@ -1454,5 +1558,23 @@ mod tests {
         let (rx, ry) = r.transform_point(1.0, 0.0);
         assert!(rx.abs() < 1e-4);
         assert!((ry - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn gaussian_blur_filtering() {
+        let kernel = generate_gaussian_kernel(2, 1.0);
+        assert_eq!(kernel.len(), 5);
+        let sum: f32 = kernel.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-4);
+
+        let mut img = RgbaImage::transparent(5, 5).unwrap();
+        img.set_pixel(2, 2, [200, 100, 50, 255]);
+
+        let blurred = img.gaussian_blur(1, 1.0).unwrap();
+        let center = blurred.pixel(2, 2).unwrap();
+        assert!(center[0] > 0 && center[0] < 200);
+
+        let neighbor = blurred.pixel(2, 1).unwrap();
+        assert!(neighbor[0] > 0);
     }
 }

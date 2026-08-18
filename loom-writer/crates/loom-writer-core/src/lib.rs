@@ -533,6 +533,27 @@ impl WriterDocument {
         block.kind = kind.into();
         Ok(())
     }
+
+    /// Sets paragraph line spacing multiplier and space after in points for a block.
+    pub fn set_block_spacing(
+        &mut self,
+        block_id: u64,
+        line_spacing: f32,
+        space_after: f32,
+    ) -> Result<(), WriterError> {
+        let block = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == block_id)
+            .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
+        if line_spacing > 0.0 {
+            block.style.line_spacing = line_spacing;
+        }
+        if space_after >= 0.0 {
+            block.style.space_after = space_after;
+        }
+        Ok(())
+    }
 }
 
 /// An entry in the document's table of contents outline.
@@ -2628,5 +2649,15 @@ mod tests {
         // Position on space between "quick" and "brown" (char index 9)
         let space_bounds = doc.find_word_boundaries(0, 9).unwrap();
         assert_eq!(space_bounds, (9, 10)); // single space
+    }
+
+    #[test]
+    fn block_spacing_formatting() {
+        let mut doc = WriterDocument::new("doc-space", "Spacing Document");
+        doc.push(RichBlock::new(1, "p", "First paragraph."));
+
+        doc.set_block_spacing(1, 1.5, 12.0).unwrap();
+        assert_eq!(doc.blocks[0].style.line_spacing, 1.5);
+        assert_eq!(doc.blocks[0].style.space_after, 12.0);
     }
 }

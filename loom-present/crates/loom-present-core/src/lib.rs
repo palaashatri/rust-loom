@@ -348,6 +348,34 @@ impl SlideAspectRatio {
     }
 }
 
+/// Slide visual transition styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TransitionType {
+    #[default]
+    None,
+    Fade,
+    SlideLeft,
+    SlideRight,
+    Zoom,
+    Flip,
+}
+
+/// Slide transition settings.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SlideTransitionConfig {
+    pub kind: TransitionType,
+    pub duration_seconds: f32,
+}
+
+impl Default for SlideTransitionConfig {
+    fn default() -> Self {
+        Self {
+            kind: TransitionType::None,
+            duration_seconds: 0.5,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1248,5 +1276,19 @@ mod tests {
 
         assert_eq!(SlideAspectRatio::Standard4x3.dimensions(), (720.0, 540.0));
         assert_eq!(SlideAspectRatio::Standard4x3.ratio(), (4, 3));
+    }
+
+    #[test]
+    fn slide_transition_config() {
+        let def = SlideTransitionConfig::default();
+        assert_eq!(def.kind, TransitionType::None);
+        assert_eq!(def.duration_seconds, 0.5);
+
+        let fade = SlideTransitionConfig {
+            kind: TransitionType::Fade,
+            duration_seconds: 1.0,
+        };
+        assert_eq!(fade.kind, TransitionType::Fade);
+        assert_eq!(fade.duration_seconds, 1.0);
     }
 }

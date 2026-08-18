@@ -604,6 +604,44 @@ pub fn compute_waveform_peaks(samples: &[f32], target_bins: usize) -> Vec<(f32, 
     peaks
 }
 
+/// Snaps a timeline playhead or edit coordinate to nearby clip start/end boundaries or markers.
+pub fn snap_timeline_to_edit_points(
+    time_secs: f64,
+    tracks: &[Track],
+    markers: &[TimelineMarker],
+    tolerance_secs: f64,
+) -> f64 {
+    let mut best_snap = time_secs;
+    let mut min_diff = tolerance_secs;
+
+    for track in tracks {
+        for clip in &track.clips {
+            let start_diff = (time_secs - clip.start_time).abs();
+            if start_diff <= min_diff {
+                min_diff = start_diff;
+                best_snap = clip.start_time;
+            }
+
+            let end_time = clip.start_time + clip.effective_timeline_duration();
+            let end_diff = (time_secs - end_time).abs();
+            if end_diff <= min_diff {
+                min_diff = end_diff;
+                best_snap = end_time;
+            }
+        }
+    }
+
+    for marker in markers {
+        let marker_diff = (time_secs - marker.time).abs();
+        if marker_diff <= min_diff {
+            min_diff = marker_diff;
+            best_snap = marker.time;
+        }
+    }
+
+    best_snap
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -1670,5 +1708,47 @@ mod tests {
         assert_eq!(track.clips[1].start_time, 4.0);
         assert_eq!(track.clips[1].duration, 6.0);
         assert_eq!(track.clips[1].in_point, 4.0);
+    }
+
+    #[test]
+    fn timeline_edit_point_snapping() {
+        let mut track = Track::new("t1", "Video 1", TrackType::Video);
+        let mut clip = Clip::new("c1", "Media", 5.0);
+        clip.start_time = 2.0; // spans 2.0 -> 7.0
+        track.add_clip(clip);
+
+        let marker = TimelineMarker {
+            id: "m1".into(),
+            time: 12.0,
+            label: "Intro".into(),
+            color: "blue".into(),
+        };
+
+        // Snapping near start boundary (2.0s)
+        let snapped_start = snap_timeline_to_edit_points(
+            2.05,
+            std::slice::from_ref(&track),
+            std::slice::from_ref(&marker),
+            0.1,
+        );
+        assert_eq!(snapped_start, 2.0);
+
+        // Snapping near end boundary (7.0s)
+        let snapped_end = snap_timeline_to_edit_points(
+            6.98,
+            std::slice::from_ref(&track),
+            std::slice::from_ref(&marker),
+            0.1,
+        );
+        assert_eq!(snapped_end, 7.0);
+
+        // Snapping near marker (12.0s)
+        let snapped_marker = snap_timeline_to_edit_points(
+            12.04,
+            std::slice::from_ref(&track),
+            std::slice::from_ref(&marker),
+            0.1,
+        );
+        assert_eq!(snapped_marker, 12.0);
     }
 }

@@ -620,6 +620,23 @@ pub fn snap_timeline_time(
     best_snap
 }
 
+/// Interpolates linearly between two RGBA colors `[r, g, b, a]` normalized in `[0.0, 1.0]`.
+pub fn interpolate_color_rgba(c1: [f32; 4], c2: [f32; 4], t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    [
+        c1[0] + (c2[0] - c1[0]) * t,
+        c1[1] + (c2[1] - c1[1]) * t,
+        c1[2] + (c2[2] - c1[2]) * t,
+        c1[3] + (c2[3] - c1[3]) * t,
+    ]
+}
+
+/// Applies layer opacity multiplier to an RGBA color.
+pub fn apply_layer_opacity(color: [f32; 4], opacity: f32) -> [f32; 4] {
+    let alpha = (color[3] * opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    [color[0], color[1], color[2], alpha]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -907,5 +924,17 @@ mod tests {
         let empty_targets: Vec<f32> = Vec::new();
         let frame_snapped = snap_timeline_time(1.035, 30.0, &empty_targets, 0.05);
         assert!((frame_snapped - 1.033333).abs() < 1e-4);
+    }
+
+    #[test]
+    fn color_interpolation_and_opacity() {
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let blue = [0.0, 0.0, 1.0, 1.0];
+
+        let mid = interpolate_color_rgba(red, blue, 0.5);
+        assert_eq!(mid, [0.5, 0.0, 0.5, 1.0]);
+
+        let transparent_red = apply_layer_opacity(red, 0.4);
+        assert_eq!(transparent_red, [1.0, 0.0, 0.0, 0.4]);
     }
 }

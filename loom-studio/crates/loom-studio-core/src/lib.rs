@@ -364,6 +364,63 @@ pub fn calculate_crossfade_gains(curve: CrossfadeCurve, progress: f32) -> (f32, 
     }
 }
 
+/// Digital delay / echo audio effect processor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DelayEffect {
+    /// Delay time in milliseconds.
+    pub delay_time_ms: f32,
+    /// Feedback ratio [0.0..1.0).
+    pub feedback: f32,
+    /// Wet / dry mix ratio [0.0..1.0].
+    pub wet_mix: f32,
+}
+
+impl DelayEffect {
+    /// Creates a new delay effect configuration.
+    pub fn new(delay_time_ms: f32, feedback: f32, wet_mix: f32) -> Self {
+        Self {
+            delay_time_ms: delay_time_ms.max(1.0),
+            feedback: feedback.clamp(0.0, 0.95),
+            wet_mix: wet_mix.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Processes an audio buffer in-place applying delay and feedback.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() || self.wet_mix <= 0.0 {
+            return;
+        }
+        let channels = buffer.channels.max(1) as usize;
+        let delay_samples = ((self.delay_time_ms / 1000.0) * buffer.sample_rate as f32) as usize;
+        let delay_offset = delay_samples * channels;
+
+        if delay_offset == 0 || delay_offset >= buffer.samples.len() {
+            return;
+        }
+
+        let mut output = vec![0.0_f32; buffer.samples.len()];
+        for i in 0..buffer.samples.len() {
+            let dry = buffer.samples[i];
+            let wet = if i >= delay_offset {
+                output[i - delay_offset]
+            } else {
+                0.0
+            };
+            output[i] = dry + wet * self.feedback;
+        }
+
+        for i in 0..buffer.samples.len() {
+            let dry = buffer.samples[i];
+            let wet = if i >= delay_offset {
+                output[i - delay_offset]
+            } else {
+                0.0
+            };
+            buffer.samples[i] = dry * (1.0 - self.wet_mix) + wet * self.wet_mix;
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1427,5 +1484,26 @@ mod studio_runtime_tests {
         assert!((in_ep - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
         // Power sum (out^2 + in^2) equals 1.0 (constant loudness)
         assert!((out_ep * out_ep + in_ep * in_ep - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn delay_effect_processing() {
+        let mut buffer = AudioBuffer {
+            sample_rate: 1000, // 1 ms per sample
+            channels: 1,
+            samples: vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        };
+
+        let delay = DelayEffect::new(2.0, 0.5, 0.5); // 2 ms delay (2 samples), 50% feedback, 50% mix
+        delay.process(&mut buffer);
+
+        // Dry sample at 0 is scaled: 1.0 * (1 - 0.5) = 0.5
+        assert_eq!(buffer.samples[0], 0.5);
+        assert_eq!(buffer.samples[1], 0.0);
+        // Delayed echo at sample 2: 1.0 * 0.5 = 0.5
+        assert_eq!(buffer.samples[2], 0.5);
+        assert_eq!(buffer.samples[3], 0.0);
+        // Feedback echo at sample 4: 1.0 * 0.5 * 0.5 = 0.25
+        assert_eq!(buffer.samples[4], 0.25);
     }
 }
