@@ -928,6 +928,38 @@ pub fn generate_audio_driven_keyframes(
     keyframes
 }
 
+/// Calculates layer auto-orientation rotation angle in degrees from spatial velocity vector (dx, dy).
+pub fn auto_orient_along_path(tangent_x: f32, tangent_y: f32) -> f32 {
+    let rad = tangent_y.atan2(tangent_x);
+    let deg = rad.to_degrees();
+    if deg < 0.0 {
+        deg + 360.0
+    } else {
+        deg
+    }
+}
+
+/// Generates rotation heading angles in degrees for each point along a discrete spatial motion path.
+pub fn calculate_path_headings(path: &[[f32; 2]]) -> Vec<f32> {
+    if path.is_empty() {
+        return Vec::new();
+    }
+    if path.len() == 1 {
+        return vec![0.0];
+    }
+
+    let mut headings = Vec::with_capacity(path.len());
+    for i in 0..path.len() {
+        let (dx, dy) = if i + 1 < path.len() {
+            (path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1])
+        } else {
+            (path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1])
+        };
+        headings.push(auto_orient_along_path(dx, dy));
+    }
+    headings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1333,5 +1365,26 @@ mod tests {
 
         // Later frames during sine burst should have substantial amplitude
         assert!(keyframes[25].amplitude > 0.4);
+    }
+
+    #[test]
+    fn auto_orient_motion_path_headings() {
+        // Moving right (+X) -> 0 degrees
+        assert_eq!(auto_orient_along_path(10.0, 0.0), 0.0);
+
+        // Moving down (+Y) -> 90 degrees
+        assert_eq!(auto_orient_along_path(0.0, 10.0), 90.0);
+
+        // Moving left (-X) -> 180 degrees
+        assert_eq!(auto_orient_along_path(-10.0, 0.0), 180.0);
+
+        // Moving up (-Y) -> 270 degrees
+        assert_eq!(auto_orient_along_path(0.0, -10.0), 270.0);
+
+        let path = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]];
+        let headings = calculate_path_headings(&path);
+        assert_eq!(headings.len(), 3);
+        assert_eq!(headings[0], 0.0); // moving right
+        assert_eq!(headings[1], 90.0); // moving down
     }
 }

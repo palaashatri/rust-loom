@@ -708,6 +708,80 @@ impl ColorMetadataConfig {
     }
 }
 
+/// SMPTE ST 2086 HDR10 mastering display color volume metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MasteringDisplayColorVolume {
+    pub red: (f64, f64),
+    pub green: (f64, f64),
+    pub blue: (f64, f64),
+    pub white_point: (f64, f64),
+    pub max_luminance_nits: u32,
+    pub min_luminance_nits: f64,
+}
+
+impl Default for MasteringDisplayColorVolume {
+    fn default() -> Self {
+        Self {
+            red: (0.708, 0.292),
+            green: (0.170, 0.797),
+            blue: (0.131, 0.046),
+            white_point: (0.3127, 0.3290), // D65
+            max_luminance_nits: 1000,
+            min_luminance_nits: 0.0001,
+        }
+    }
+}
+
+impl MasteringDisplayColorVolume {
+    /// Formats the x265 `master-display` parameter string.
+    pub fn to_x265_display_str(&self) -> String {
+        format!(
+            "G({},{})B({},{})R({},{})WP({},{})L({},{})",
+            (self.green.0 * 50000.0).round() as u32,
+            (self.green.1 * 50000.0).round() as u32,
+            (self.blue.0 * 50000.0).round() as u32,
+            (self.blue.1 * 50000.0).round() as u32,
+            (self.red.0 * 50000.0).round() as u32,
+            (self.red.1 * 50000.0).round() as u32,
+            (self.white_point.0 * 50000.0).round() as u32,
+            (self.white_point.1 * 50000.0).round() as u32,
+            self.max_luminance_nits * 10000,
+            (self.min_luminance_nits * 10000.0).round() as u32
+        )
+    }
+}
+
+/// CTA-861.3 HDR10 content light level metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ContentLightLevel {
+    /// Maximum content light level in nits (MaxCLL).
+    pub max_cll: u32,
+    /// Maximum frame-average light level in nits (MaxFALL).
+    pub max_fall: u32,
+}
+
+impl ContentLightLevel {
+    /// Formats the x265 `max-cll` parameter string `MaxCLL,MaxFALL`.
+    pub fn to_x265_cll_str(&self) -> String {
+        format!("{},{}", self.max_cll, self.max_fall)
+    }
+}
+
+/// Generates FFmpeg x265-params arguments for HDR10 static metadata.
+pub fn generate_hdr10_x265_args(
+    display: &MasteringDisplayColorVolume,
+    cll: &ContentLightLevel,
+) -> Vec<String> {
+    vec![
+        "-x265-params".into(),
+        format!(
+            "hdr10=1:hdr10-opt=1:master-display={}:max-cll={}",
+            display.to_x265_display_str(),
+            cll.to_x265_cll_str()
+        ),
+    ]
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1553,5 +1627,21 @@ mod tests {
                 "bt2020nc"
             ]
         );
+    }
+
+    #[test]
+    fn hdr10_metadata_argument_generation() {
+        let display = MasteringDisplayColorVolume::default();
+        let cll = ContentLightLevel {
+            max_cll: 1000,
+            max_fall: 400,
+        };
+
+        let args = generate_hdr10_x265_args(&display, &cll);
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "-x265-params");
+        assert!(args[1].contains("hdr10=1"));
+        assert!(args[1].contains("max-cll=1000,400"));
+        assert!(args[1].contains("master-display="));
     }
 }

@@ -687,6 +687,48 @@ impl RgbaImage {
         Ok(out)
     }
 
+    /// Corrects or simulates lateral chromatic aberration (color fringing) by shifting color channels.
+    pub fn apply_chromatic_aberration(
+        &self,
+        config: &ChromaticAberrationConfig,
+    ) -> Result<Self, String> {
+        let mut out = self.clone();
+        let cx = self.width as f32 / 2.0;
+        let cy = self.height as f32 / 2.0;
+        let norm_factor = (cx * cx + cy * cy).sqrt().max(1.0);
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let dx = (x as f32 - cx) / norm_factor;
+                let dy = (y as f32 - cy) / norm_factor;
+
+                // Red channel sampling location
+                let rx = ((x as f32 + config.red_shift.0 + dx * config.radial_fringe * norm_factor)
+                    .round() as i32)
+                    .clamp(0, self.width as i32 - 1) as u32;
+                let ry = ((y as f32 + config.red_shift.1 + dy * config.radial_fringe * norm_factor)
+                    .round() as i32)
+                    .clamp(0, self.height as i32 - 1) as u32;
+
+                // Blue channel sampling location
+                let bx = ((x as f32 + config.blue_shift.0 - dx * config.radial_fringe * norm_factor)
+                    .round() as i32)
+                    .clamp(0, self.width as i32 - 1) as u32;
+                let by = ((y as f32 + config.blue_shift.1 - dy * config.radial_fringe * norm_factor)
+                    .round() as i32)
+                    .clamp(0, self.height as i32 - 1) as u32;
+
+                let r_val = self.pixel(rx, ry).unwrap_or([0, 0, 0, 0])[0];
+                let g_val = self.pixel(x, y).unwrap_or([0, 0, 0, 0])[1];
+                let b_val = self.pixel(bx, by).unwrap_or([0, 0, 0, 0])[2];
+                let a_val = self.pixel(x, y).unwrap_or([0, 0, 0, 0])[3];
+
+                out.set_pixel(x, y, [r_val, g_val, b_val, a_val]);
+            }
+        }
+        Ok(out)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -909,6 +951,27 @@ impl Default for LensDistortionConfig {
             k1: -0.1,
             k2: 0.0,
             scale: 1.0,
+        }
+    }
+}
+
+/// Lateral and transverse chromatic aberration correction/simulation parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChromaticAberrationConfig {
+    /// Cartesian pixel shift applied to the red channel (dx, dy).
+    pub red_shift: (f32, f32),
+    /// Cartesian pixel shift applied to the blue channel (dx, dy).
+    pub blue_shift: (f32, f32),
+    /// Radial lateral color fringing factor scaled with distance from image center.
+    pub radial_fringe: f32,
+}
+
+impl Default for ChromaticAberrationConfig {
+    fn default() -> Self {
+        Self {
+            red_shift: (1.0, 0.0),
+            blue_shift: (-1.0, 0.0),
+            radial_fringe: 0.0,
         }
     }
 }
@@ -2029,5 +2092,27 @@ mod tests {
         // Center pixel (8, 8) must retain white color
         let center_px = distorted.pixel(8, 8).unwrap();
         assert_eq!(center_px, [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn chromatic_aberration_channel_shifting() {
+        let mut img = RgbaImage::transparent(10, 10).unwrap();
+        // Set single pixel at center (5, 5) to white
+        img.set_pixel(5, 5, [255, 255, 255, 255]);
+
+        let config = ChromaticAberrationConfig {
+            red_shift: (1.0, 0.0),
+            blue_shift: (-1.0, 0.0),
+            radial_fringe: 0.0,
+        };
+        let shifted = img.apply_chromatic_aberration(&config).unwrap();
+
+        // Pixel (4, 5) should sample the shifted red channel from (5, 5)
+        let px4 = shifted.pixel(4, 5).unwrap();
+        assert_eq!(px4[0], 255); // Red shifted left to (4, 5)
+
+        // Pixel (6, 5) should sample the shifted blue channel from (5, 5)
+        let px6 = shifted.pixel(6, 5).unwrap();
+        assert_eq!(px6[2], 255); // Blue shifted right to (6, 5)
     }
 }

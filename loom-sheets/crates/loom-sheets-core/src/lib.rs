@@ -845,6 +845,53 @@ pub fn text_proper(s: &str) -> String {
     result
 }
 
+/// Multiplies corresponding components in given arrays and returns the sum of those products (SUMPRODUCT).
+pub fn sumproduct(arrays: &[&[f64]]) -> Result<f64, String> {
+    if arrays.is_empty() {
+        return Ok(0.0);
+    }
+    let len = arrays[0].len();
+    for arr in &arrays[1..] {
+        if arr.len() != len {
+            return Err("#VALUE!: arrays must have equal dimensions".into());
+        }
+    }
+
+    let mut total = 0.0;
+    for i in 0..len {
+        let mut prod = 1.0;
+        for arr in arrays {
+            prod *= arr[i];
+        }
+        total += prod;
+    }
+    Ok(total)
+}
+
+/// Sums elements in a slice that satisfy a condition (SUMIF).
+pub fn sumif(range: &[f64], criteria_fn: impl Fn(f64) -> bool) -> f64 {
+    range.iter().filter(|&&val| criteria_fn(val)).sum()
+}
+
+/// Counts elements in a slice that satisfy a condition (COUNTIF).
+pub fn countif(range: &[f64], criteria_fn: impl Fn(f64) -> bool) -> usize {
+    range.iter().filter(|&&val| criteria_fn(val)).count()
+}
+
+/// Calculates the average of elements in a slice that satisfy a condition (AVERAGEIF).
+pub fn averageif(range: &[f64], criteria_fn: impl Fn(f64) -> bool) -> Option<f64> {
+    let matching: Vec<f64> = range
+        .iter()
+        .copied()
+        .filter(|&val| criteria_fn(val))
+        .collect();
+    if matching.is_empty() {
+        None
+    } else {
+        Some(matching.iter().sum::<f64>() / matching.len() as f64)
+    }
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -3232,5 +3279,26 @@ mod tests {
         assert_eq!(text_upper("loom sheets"), "LOOM SHEETS");
         assert_eq!(text_lower("LOOM SHEETS"), "loom sheets");
         assert_eq!(text_proper("the quick brown fox"), "The Quick Brown Fox");
+    }
+
+    #[test]
+    fn sumproduct_and_conditional_aggregations() {
+        let quantities = vec![2.0, 5.0, 10.0];
+        let unit_prices = vec![10.0, 20.0, 5.0];
+
+        // SUMPRODUCT: (2*10) + (5*20) + (10*5) = 20 + 100 + 50 = 170.0
+        let total = sumproduct(&[&quantities, &unit_prices]).unwrap();
+        assert_eq!(total, 170.0);
+
+        let sales = vec![100.0, 250.0, 50.0, 400.0, 150.0];
+
+        // SUMIF sales > 100 -> 250 + 400 + 150 = 800.0
+        assert_eq!(sumif(&sales, |v| v > 100.0), 800.0);
+
+        // COUNTIF sales >= 200 -> 2
+        assert_eq!(countif(&sales, |v| v >= 200.0), 2);
+
+        // AVERAGEIF sales < 200 -> (100 + 50 + 150) / 3 = 100.0
+        assert_eq!(averageif(&sales, |v| v < 200.0), Some(100.0));
     }
 }

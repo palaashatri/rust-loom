@@ -813,6 +813,72 @@ impl NoiseGateEffect {
     }
 }
 
+/// Time-varying modulated delay-line flanger/chorus audio DSP effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FlangerEffect {
+    /// LFO modulation rate in hertz (e.g. 0.5 Hz).
+    pub rate_hz: f32,
+    /// Delay modulation depth in milliseconds (e.g. 2.5 ms).
+    pub depth_ms: f32,
+    /// Comb feedback amount in `[-0.95, 0.95]`.
+    pub feedback: f32,
+    /// Wet signal level multiplier.
+    pub wet_mix: f32,
+    /// Dry direct signal level multiplier.
+    pub dry_mix: f32,
+}
+
+impl Default for FlangerEffect {
+    fn default() -> Self {
+        Self {
+            rate_hz: 0.5,
+            depth_ms: 2.0,
+            feedback: 0.5,
+            wet_mix: 0.7,
+            dry_mix: 0.7,
+        }
+    }
+}
+
+impl FlangerEffect {
+    /// In-place flanger/chorus modulation processing.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() || buffer.sample_rate == 0 {
+            return;
+        }
+
+        let max_delay_samples =
+            ((self.depth_ms * 2.0 + 5.0) * 0.001 * buffer.sample_rate as f32).ceil() as usize;
+        let mut delay_line = vec![0.0f32; max_delay_samples.max(64)];
+        let mut write_idx = 0usize;
+        let feedback = self.feedback.clamp(-0.95, 0.95);
+
+        for (i, sample) in buffer.samples.iter_mut().enumerate() {
+            let dry = *sample;
+            let lfo = ((2.0
+                * std::f32::consts::PI
+                * self.rate_hz
+                * (i as f32 / buffer.sample_rate as f32))
+                .sin()
+                + 1.0)
+                * 0.5;
+            let delay_samples = (self.depth_ms * 0.001 * buffer.sample_rate as f32) * lfo + 1.0;
+
+            let read_pos = (write_idx as f32 + delay_line.len() as f32 - delay_samples)
+                % delay_line.len() as f32;
+            let i0 = read_pos.floor() as usize % delay_line.len();
+            let i1 = (i0 + 1) % delay_line.len();
+            let frac = read_pos - read_pos.floor();
+            let delayed = delay_line[i0] * (1.0 - frac) + delay_line[i1] * frac;
+
+            delay_line[write_idx] = dry + delayed * feedback;
+            write_idx = (write_idx + 1) % delay_line.len();
+
+            *sample = dry * self.dry_mix + delayed * self.wet_mix;
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -2024,5 +2090,22 @@ mod studio_runtime_tests {
         assert!(buffer.samples[500] < 0.0001);
         // Strong signal region should remain loud
         assert!(buffer.samples[1500] > 0.4);
+    }
+
+    #[test]
+    fn flanger_modulation_processing() {
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 1,
+            samples: (0..4410).map(|i| (i as f32 * 0.1).sin()).collect(),
+        };
+
+        let flanger = FlangerEffect::default();
+        flanger.process(&mut buffer);
+
+        // Flanger output should remain bounded and processed
+        assert_eq!(buffer.samples.len(), 4410);
+        let energy: f32 = buffer.samples.iter().map(|s| s.abs()).sum();
+        assert!(energy > 100.0);
     }
 }

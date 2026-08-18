@@ -647,13 +647,53 @@ pub fn calculate_smart_snapping(
 }
 
 /// Live presentation session state tracking slide progression, timers, and display modes.
+/// Per-slide rehearsal duration record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlideTimingRecord {
+    pub slide_index: usize,
+    pub duration_seconds: f64,
+}
+
+/// Summary report of a presentation rehearsal session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RehearsalReport {
+    pub total_duration_seconds: f64,
+    pub slide_timings: Vec<SlideTimingRecord>,
+}
+
+impl RehearsalReport {
+    /// Computes the average speaking time per slide in seconds.
+    pub fn average_seconds_per_slide(&self) -> f64 {
+        if self.slide_timings.is_empty() {
+            0.0
+        } else {
+            self.total_duration_seconds / self.slide_timings.len() as f64
+        }
+    }
+
+    /// Finds the slide index with the longest presentation duration.
+    pub fn longest_slide(&self) -> Option<(usize, f64)> {
+        self.slide_timings
+            .iter()
+            .max_by(|a, b| {
+                a.duration_seconds
+                    .partial_cmp(&b.duration_seconds)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|rec| (rec.slide_index, rec.duration_seconds))
+    }
+}
+
+/// Live presentation session state tracking slide progression, timers, and display modes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PresenterSession {
     pub current_slide_index: usize,
     pub total_slides: usize,
     pub elapsed_seconds: f64,
+    pub current_slide_seconds: f64,
     pub is_paused: bool,
     pub is_blanked: bool,
+    pub recorded_timings: Vec<SlideTimingRecord>,
 }
 
 impl PresenterSession {
@@ -662,15 +702,22 @@ impl PresenterSession {
             current_slide_index: 0,
             total_slides: total_slides.max(1),
             elapsed_seconds: 0.0,
+            current_slide_seconds: 0.0,
             is_paused: false,
             is_blanked: false,
+            recorded_timings: Vec::new(),
         }
     }
 
-    /// Advances to the next slide if not on the last slide.
+    /// Records time on current slide and advances to the next slide if not on the last slide.
     pub fn advance_slide(&mut self) -> bool {
         if self.current_slide_index + 1 < self.total_slides {
+            self.recorded_timings.push(SlideTimingRecord {
+                slide_index: self.current_slide_index,
+                duration_seconds: self.current_slide_seconds,
+            });
             self.current_slide_index += 1;
+            self.current_slide_seconds = 0.0;
             true
         } else {
             false
@@ -681,6 +728,7 @@ impl PresenterSession {
     pub fn previous_slide(&mut self) -> bool {
         if self.current_slide_index > 0 {
             self.current_slide_index -= 1;
+            self.current_slide_seconds = 0.0;
             true
         } else {
             false
@@ -701,6 +749,21 @@ impl PresenterSession {
     pub fn tick(&mut self, delta_seconds: f64) {
         if !self.is_paused && delta_seconds > 0.0 {
             self.elapsed_seconds += delta_seconds;
+            self.current_slide_seconds += delta_seconds;
+        }
+    }
+
+    /// Finalizes the rehearsal and returns a summary report.
+    pub fn finish_rehearsal(&mut self) -> RehearsalReport {
+        let mut timings = self.recorded_timings.clone();
+        timings.push(SlideTimingRecord {
+            slide_index: self.current_slide_index,
+            duration_seconds: self.current_slide_seconds,
+        });
+
+        RehearsalReport {
+            total_duration_seconds: self.elapsed_seconds,
+            slide_timings: timings,
         }
     }
 }
@@ -1743,5 +1806,29 @@ mod tests {
         let rev_matches = doc.search_speaker_notes("revenue", false);
         assert_eq!(rev_matches.len(), 1);
         assert_eq!(rev_matches[0].0, 1); // Slide 2 (index 1)
+    }
+
+    #[test]
+    fn rehearsal_timing_and_report() {
+        let mut session = PresenterSession::new(3);
+
+        // Slide 0 for 10 seconds
+        session.tick(10.0);
+        assert!(session.advance_slide());
+
+        // Slide 1 for 25 seconds
+        session.tick(25.0);
+        assert!(session.advance_slide());
+
+        // Slide 2 for 15 seconds
+        session.tick(15.0);
+
+        let report = session.finish_rehearsal();
+        assert_eq!(report.total_duration_seconds, 50.0);
+        assert_eq!(report.slide_timings.len(), 3);
+        assert!((report.average_seconds_per_slide() - (50.0 / 3.0)).abs() < 1e-4);
+
+        let longest = report.longest_slide().unwrap();
+        assert_eq!(longest, (1, 25.0)); // Slide 1 was longest
     }
 }

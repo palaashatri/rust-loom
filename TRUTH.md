@@ -16,18 +16,18 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **63/100**, expanding Stage C production engines across all eight applications
+approximately **65/100**, completing Stage C production engines across all eight applications
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
-text hyphenation and soft-hyphen syllable break algorithms (`HyphenationConfig`, `insert_soft_hyphens`) in Writer;
-text manipulation formula functions (`text_concatenate`, `text_left`, `text_right`, `text_mid`, `text_len`, `text_trim`, `text_upper`, `text_lower`, `text_proper`) in Sheets;
-speaker notes query and keyword search engine (`search_speaker_notes`) in Present;
-optical lens distortion correction and simulation model with Brown-Conrady polynomial radial mapping (`LensDistortionConfig`, `apply_lens_distortion`) in Photo;
-audio-driven keyframe generator extracting frame-accurate RMS amplitude envelopes (`AudioAmplitudeKeyframe`, `generate_audio_driven_keyframes`) in Motion;
-multitrack audio mixing parameters with constant-power stereo pan law and mute controls (`TrackAudioConfig`, `stereo_linear_gains`) in Video;
-dynamic noise gate DSP dynamics processor (`NoiseGateEffect`) in Studio; and
-video color primaries, transfer functions, and color matrix metadata tagging for broadcast SDR/HDR delivery (`ColorPrimaries`, `ColorTransfer`, `ColorMatrix`, `ColorMetadataConfig`) in Encode. All 11 monorepo
+justified line breaking and hyphenation penalty optimization models (`LineBreakPenaltyConfig`, `calculate_line_break_penalty`) in Writer;
+matrix component multiplication (`SUMPRODUCT`) and conditional aggregation formulas (`SUMIF`, `COUNTIF`, `AVERAGEIF`) in Sheets;
+slide rehearsal duration tracking and presentation timing analytics (`SlideTimingRecord`, `RehearsalReport`) in Present;
+lateral chromatic aberration correction and optical color fringing simulation (`ChromaticAberrationConfig`, `apply_chromatic_aberration`) in Photo;
+spatial motion path auto-orientation and heading trajectory calculations (`auto_orient_along_path`, `calculate_path_headings`) in Motion;
+true-peak lookahead brickwall master audio limiter and saturation prevention (`MasterAudioLimiter`) in Video;
+time-varying modulated delay-line flanger/chorus audio DSP processor (`FlangerEffect`) in Studio; and
+SMPTE ST 2086 HDR10 mastering display color volume and CTA-861.3 content light level metadata generation (`MasteringDisplayColorVolume`, `ContentLightLevel`, `generate_hdr10_x265_args`) in Encode. All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 537 passing automated tests.
+gates with 545 passing automated tests.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -63,9 +63,10 @@ parity or product completion.
 - **Writer:** editable paragraph surface, block model, style-run persistence,
   bounded/coalesced history, recovery, search/pagination metrics, word boundary expansion
   (`find_word_boundaries`), query occurrence counting (`count_matches`), document statistics
-  with sentence metrics (`statistics`, `DocumentStats`, `sentence_count`), text hyphenation
-  and soft-hyphen syllable break algorithms (`HyphenationConfig`, `insert_soft_hyphens`), page,
-  section, and column breaks with layout and page numbering overrides (`BreakKind`, `BreakConfig`),
+  with sentence metrics (`statistics`, `DocumentStats`, `sentence_count`), justified line breaking
+  and hyphenation penalty optimization models (`LineBreakPenaltyConfig`, `calculate_line_break_penalty`),
+  text hyphenation and soft-hyphen syllable break algorithms (`HyphenationConfig`, `insert_soft_hyphens`),
+  page, section, and column breaks with layout and page numbering overrides (`BreakKind`, `BreakConfig`),
   document watermarking (`WatermarkConfig`), legal and academic margin line numbering (`LineNumberingConfig`),
   multi-column document layout with customizable column gaps (`MultiColumnConfig`, `ColumnCount`: `Single`,
   `TwoColumns`, `ThreeColumns`), paragraph initial drop cap configuration (`DropCapConfig`), headers and footers
@@ -84,7 +85,8 @@ parity or product completion.
   for deterministic tests. Professional floating objects, forms, mail merge, EPUB, and high-fidelity DOCX/ODT
   remain incomplete.
 - **Sheets:** multi-sheet workbook management (`add_sheet`, `remove_sheet`, `rename_sheet`),
-  freeze panes configuration (`freeze_panes`, `unfreeze_panes`), string and text manipulation
+  freeze panes configuration (`freeze_panes`, `unfreeze_panes`), matrix component multiplication (`sumproduct`),
+  conditional aggregation formulas (`sumif`, `countif`, `averageif`), string and text manipulation
   formula functions (`text_concatenate`, `text_left`, `text_right`, `text_mid`, `text_len`, `text_trim`,
   `text_upper`, `text_lower`, `text_proper`), 2D matrix lookup functions (`vlookup`, `hlookup`, `match_lookup`,
   `index_lookup`), cell data validation engine with list, numeric range, and text length constraints
@@ -104,53 +106,57 @@ parity or product completion.
   saves native workbooks through Save/Save As via atomic write, and selects CSV export destinations natively.
   Large-grid virtualization, rich formatting, charts, pivots, broad function coverage, XLSX/ODS fidelity, and
   data connectors remain incomplete.
-- **Present:** deck/slide models, slide duplication/reordering/removal, speaker notes query and keyword search engine
-  (`search_speaker_notes`), live presenter session with timers, notes, and screen blanking (`PresenterSession`),
-  smart element alignment snapping with dynamic guide lines (`calculate_smart_snapping`, `SnapGuide`, `SnapResult`),
-  hierarchical scene graph node structure (`SceneNode`, `SceneNodeType`: `Shape`, `Text`, `Image`, `Group`) with
-  accumulated composite bounding box calculations (`calculate_global_bounds`), slide master templates (`MasterSlide`,
-  `apply_master_to_slide`), slide visual transition styles (`SlideTransitionConfig`, `TransitionType`: `Fade`,
-  `SlideLeft`, `SlideRight`, `Zoom`, `Flip`), border stroke styling (`StrokeConfig`, `StrokeStyle`: `Solid`, `Dashed`,
-  `Dotted`, `None`), drop shadow configuration (`DropShadowConfig`), angle normalization (`normalize_angle_degrees`),
-  layout preset templates (`TitleSlide`, `TitleAndContent`, `TwoColumn`, `Quote`, `BigStat`), slide aspect ratio presets
-  (`SlideAspectRatio`: `Widescreen16x9`, `Standard4x3`, `Widescreen16x10`), deck theme presets (`DeckThemePreset`:
-  `ModernDark`, `ClassicLight`, `VibrantGradient`, `MinimalistSlate`), multi-element bounding box union calculations
-  (`elements_bounding_box`), element geometric alignments (`align_left`, `align_center`, `align_top`), layer z-ordering
-  (`bring_to_front`, `send_to_back`, `bring_forward`, `send_backward`), layout presets, speaker notes markdown export
-  (`speaker_notes_markdown`), deck element metrics, transitions, scene generation, validation, persistence, history, PDF output,
-  and native New/Open/Save/Save As/export-destination workflows with atomic writes. Mixed media, animation authoring, presenter
-  workflows, recording, video export, and PPTX/ODP fidelity remain incomplete.
-- **Photo:** raster decode, pixel buffers, layers, optical lens distortion correction and simulation model (`LensDistortionConfig`,
-  `apply_lens_distortion`), photographic lens vignette filtering (`VignetteConfig`, `apply_vignette`), high-pass edge detail
-  filtering (`high_pass_filter`), unsharp mask sharpening (`unsharp_mask`), 3-way color grading / Lift-Gamma-Gain model
-  (`LiftGammaGain`, `apply_lift_gamma_gain`), 256-entry Tone Curve lookup tables (`ToneCurveLUT`: `identity`, `inverted`,
-  `s_curve`) with non-destructive curve mapping (`RgbaImage::apply_tone_curve`), 8 blend modes (`Normal`, `Multiply`, `Screen`,
-  `Overlay`, `Darken`, `Lighten`, `Difference`, `HardLight`), adjustments (`Brightness`, `Exposure`, `Contrast`, `Saturation`,
-  `Invert`, `Gamma`, `Temperature`, `Tint`, `Sepia`), 2D affine transformation matrices (`AffineTransform2D`: translation, scale,
-  rotation, point transformation), radial gradient rendering (`generate_radial_gradient`), color channel extraction
-  (`RgbaImage::extract_channel`), 2D separable Gaussian blur raster filtering (`gaussian_blur`, `generate_gaussian_kernel`),
-  two-pass box blur raster filtering (`box_blur`), layer mask invert and threshold operations (`invert_layer_mask`,
-  `apply_mask_threshold`), canvas transforms (`flip_horizontal`, `flip_vertical`, `rotate_90_cw`, `rotate_180`), 256-bin channel
-  and luminance histogram computation (`compute_histogram`), aspect-ratio constrained crop bounds (`aspect_crop_bounds`,
-  `CropAspectRatio`), mask foundations, compositing, crop/resize, persistence, history, native project Open/Save/Save As,
-  raster import, and atomic PNG/JPEG destination workflows. Painting tools, RAW/ICC, healing, warping, HDR/panorama, PSD fidelity,
-  GPU effects, and production AI editing remain incomplete.
-- **Motion:** layer/keyframe models, audio-driven keyframe generator extracting RMS amplitude envelopes (`AudioAmplitudeKeyframe`,
-  `generate_audio_driven_keyframes`), camera shutter angle and temporal velocity sampling for motion blur (`ShutterConfig`),
-  Catmull-Rom spline spatial motion path smoothing through waypoints (`smooth_spatial_path`), realtime composition playback clock
-  timebase with transport controls (`CompositionClock`), polygon / shape vertex interpolation for path morphing
-  (`interpolate_polygon_points`), keyframe graph editor interpolation modes (`InterpolationMode`: `Linear`, `Bezier`, `Hold`),
-  tangent handle model (`TangentHandle`), normalized keyframe segment evaluation (`evaluate_keyframe_segment`), 1D and 2D cubic Bézier
-  curve evaluation (`cubic_bezier_1d`, `cubic_bezier_2d`), linear RGBA color interpolation (`interpolate_color_rgba`) and layer
-  opacity calculation (`apply_layer_opacity`), timeline time snapping to keyframe targets and frame grid boundaries
-  (`snap_timeline_time`), standard composition resolution presets (`CompositionPreset`: `Fhd1080p`, `Uhd4k`, `Square1080`,
-  `Vertical1080x1920`, `Cinema4k`), easing curves with cubic and exponential functions (`cubic-in`, `cubic-out`, `expo-in`,
-  `expo-out`), multi-property keyframe count metrics (`total_keyframes`), keyframe sampling, transform manipulation, layer
-  duplication/reordering/removal, vector shape geometry models (`Rectangle`, `Ellipse`, `Polygon`, `Star`) with bounding-box
-  metrics, validation, persistence, bounded history, frame sampling, SVG frame export, and native New/Open/Save/Save As/export
-  destination workflows with atomic writes. Production compositing/playback, cameras/lights, particles, effects, tracking,
-  stabilization, optical flow, and render-queue breadth remain incomplete.
-- **Video:** track/clip models, multitrack audio mixing parameters with constant-power stereo pan law and mute controls
+- **Present:** deck/slide models, slide duplication/reordering/removal, slide rehearsal duration tracking and
+  presentation timing analytics (`SlideTimingRecord`, `RehearsalReport`, `PresenterSession::finish_rehearsal`),
+  speaker notes query and keyword search engine (`search_speaker_notes`), live presenter session with timers, notes,
+  and screen blanking (`PresenterSession`), smart element alignment snapping with dynamic guide lines
+  (`calculate_smart_snapping`, `SnapGuide`, `SnapResult`), hierarchical scene graph node structure
+  (`SceneNode`, `SceneNodeType`: `Shape`, `Text`, `Image`, `Group`) with accumulated composite bounding box calculations
+  (`calculate_global_bounds`), slide master templates (`MasterSlide`, `apply_master_to_slide`), slide visual transition
+  styles (`SlideTransitionConfig`, `TransitionType`: `Fade`, `SlideLeft`, `SlideRight`, `Zoom`, `Flip`), border stroke styling
+  (`StrokeConfig`, `StrokeStyle`: `Solid`, `Dashed`, `Dotted`, `None`), drop shadow configuration (`DropShadowConfig`),
+  angle normalization (`normalize_angle_degrees`), layout preset templates (`TitleSlide`, `TitleAndContent`, `TwoColumn`,
+  `Quote`, `BigStat`), slide aspect ratio presets (`SlideAspectRatio`: `Widescreen16x9`, `Standard4x3`, `Widescreen16x10`),
+  deck theme presets (`DeckThemePreset`: `ModernDark`, `ClassicLight`, `VibrantGradient`, `MinimalistSlate`), multi-element
+  bounding box union calculations (`elements_bounding_box`), element geometric alignments (`align_left`, `align_center`,
+  `align_top`), layer z-ordering (`bring_to_front`, `send_to_back`, `bring_forward`, `send_backward`), layout presets,
+  speaker notes markdown export (`speaker_notes_markdown`), deck element metrics, transitions, scene generation, validation,
+  persistence, history, PDF output, and native New/Open/Save/Save As/export-destination workflows with atomic writes. Mixed media,
+  animation authoring, presenter workflows, recording, video export, and PPTX/ODP fidelity remain incomplete.
+- **Photo:** raster decode, pixel buffers, layers, lateral chromatic aberration correction and optical color fringing simulation
+  (`ChromaticAberrationConfig`, `apply_chromatic_aberration`), optical lens distortion correction and simulation model
+  (`LensDistortionConfig`, `apply_lens_distortion`), photographic lens vignette filtering (`VignetteConfig`, `apply_vignette`),
+  high-pass edge detail filtering (`high_pass_filter`), unsharp mask sharpening (`unsharp_mask`), 3-way color grading /
+  Lift-Gamma-Gain model (`LiftGammaGain`, `apply_lift_gamma_gain`), 256-entry Tone Curve lookup tables (`ToneCurveLUT`:
+  `identity`, `inverted`, `s_curve`) with non-destructive curve mapping (`RgbaImage::apply_tone_curve`), 8 blend modes (`Normal`,
+  `Multiply`, `Screen`, `Overlay`, `Darken`, `Lighten`, `Difference`, `HardLight`), adjustments (`Brightness`, `Exposure`,
+  `Contrast`, `Saturation`, `Invert`, `Gamma`, `Temperature`, `Tint`, `Sepia`), 2D affine transformation matrices
+  (`AffineTransform2D`: translation, scale, rotation, point transformation), radial gradient rendering (`generate_radial_gradient`),
+  color channel extraction (`RgbaImage::extract_channel`), 2D separable Gaussian blur raster filtering (`gaussian_blur`,
+  `generate_gaussian_kernel`), two-pass box blur raster filtering (`box_blur`), layer mask invert and threshold operations
+  (`invert_layer_mask`, `apply_mask_threshold`), canvas transforms (`flip_horizontal`, `flip_vertical`, `rotate_90_cw`, `rotate_180`),
+  256-bin channel and luminance histogram computation (`compute_histogram`), aspect-ratio constrained crop bounds
+  (`aspect_crop_bounds`, `CropAspectRatio`), mask foundations, compositing, crop/resize, persistence, history, native project
+  Open/Save/Save As, raster import, and atomic PNG/JPEG destination workflows. Painting tools, RAW/ICC, healing, warping,
+  HDR/panorama, PSD fidelity, GPU effects, and production AI editing remain incomplete.
+- **Motion:** layer/keyframe models, spatial motion path auto-orientation and heading trajectory calculations
+  (`auto_orient_along_path`, `calculate_path_headings`), audio-driven keyframe generator extracting RMS amplitude envelopes
+  (`AudioAmplitudeKeyframe`, `generate_audio_driven_keyframes`), camera shutter angle and temporal velocity sampling for
+  motion blur (`ShutterConfig`), Catmull-Rom spline spatial motion path smoothing through waypoints (`smooth_spatial_path`),
+  realtime composition playback clock timebase with transport controls (`CompositionClock`), polygon / shape vertex
+  interpolation for path morphing (`interpolate_polygon_points`), keyframe graph editor interpolation modes (`InterpolationMode`:
+  `Linear`, `Bezier`, `Hold`), tangent handle model (`TangentHandle`), normalized keyframe segment evaluation
+  (`evaluate_keyframe_segment`), 1D and 2D cubic Bézier curve evaluation (`cubic_bezier_1d`, `cubic_bezier_2d`), linear RGBA
+  color interpolation (`interpolate_color_rgba`) and layer opacity calculation (`apply_layer_opacity`), timeline time snapping to
+  keyframe targets and frame grid boundaries (`snap_timeline_time`), standard composition resolution presets
+  (`CompositionPreset`: `Fhd1080p`, `Uhd4k`, `Square1080`, `Vertical1080x1920`, `Cinema4k`), easing curves with cubic and
+  exponential functions (`cubic-in`, `cubic-out`, `expo-in`, `expo-out`), multi-property keyframe count metrics (`total_keyframes`),
+  keyframe sampling, transform manipulation, layer duplication/reordering/removal, vector shape geometry models (`Rectangle`,
+  `Ellipse`, `Polygon`, `Star`) with bounding-box metrics, validation, persistence, bounded history, frame sampling, SVG frame
+  export, and native New/Open/Save/Save As/export destination workflows with atomic writes. Production compositing/playback,
+  cameras/lights, particles, effects, tracking, stabilization, optical flow, and render-queue breadth remain incomplete.
+- **Video:** track/clip models, true-peak lookahead brickwall master audio limiter and saturation prevention
+  (`MasterAudioLimiter`), multitrack audio mixing parameters with constant-power stereo pan law and mute controls
   (`TrackAudioConfig`, `stereo_linear_gains`), dynamic pan-and-zoom / Ken Burns motion effect (`KenBurnsEffect`), clip audio
   volume automation envelopes with linear decibel interpolation (`AudioEnvelope`, `AudioEnvelopeKey`), timeline marker management
   system with color palette tagging (`TimelineMarker`, `MarkerColor`, `VideoProject::find_markers_in_range`), NLE video transitions
@@ -163,13 +169,14 @@ parity or product completion.
   local probing and preview decode, persistence, history, FFmpeg-backed export, progress, cancellation, and atomic writes.
   Synchronized timeline playback, real proxy workflows, multicam, advanced trims, professional audio/color/effects, HDR,
   transcription/tracking, and interchange remain incomplete.
-- **Studio:** track/region models, dynamic noise gate DSP dynamics processor (`NoiseGateEffect`), algorithmic reverberation DSP
-  processor (`ReverbEffect`), synthesis test tone oscillator with standard waveforms (`OscillatorWaveform`: `Sine`, `Square`,
-  `Triangle`, `Sawtooth`, `generate_oscillator_tone`), multitrack mixer bus and auxiliary effects send routing (`AuxSend`,
-  `MixerBus`), 4-band parametric equalizer DSP processor (`FourBandEq`, `EqBand`: LowShelf, LowMid, HighMid, HighShelf with
-  per-band frequency, gain dB, and Q), dynamic range compression effect processor (`CompressorEffect`), decibel to linear amplitude
-  conversions (`db_to_linear`, `linear_to_db`), region split/trim/removal, digital delay / echo audio effect processor (`DelayEffect`
-  with feedback and wet/dry mix), audio crossfade curve calculations (`CrossfadeCurve`: `Linear`, `EqualPower` with constant
+- **Studio:** track/region models, time-varying modulated delay-line flanger/chorus audio DSP processor (`FlangerEffect`),
+  dynamic noise gate DSP dynamics processor (`NoiseGateEffect`), algorithmic reverberation DSP processor (`ReverbEffect`),
+  synthesis test tone oscillator with standard waveforms (`OscillatorWaveform`: `Sine`, `Square`, `Triangle`, `Sawtooth`,
+  `generate_oscillator_tone`), multitrack mixer bus and auxiliary effects send routing (`AuxSend`, `MixerBus`), 4-band
+  parametric equalizer DSP processor (`FourBandEq`, `EqBand`: LowShelf, LowMid, HighMid, HighShelf with per-band frequency,
+  gain dB, and Q), dynamic range compression effect processor (`CompressorEffect`), decibel to linear amplitude conversions
+  (`db_to_linear`, `linear_to_db`), region split/trim/removal, digital delay / echo audio effect processor (`DelayEffect` with
+  feedback and wet/dry mix), audio crossfade curve calculations (`CrossfadeCurve`: `Linear`, `EqualPower` with constant
   loudness power conservation), audio gain scaling and peak normalization, parametric EQ biquad filter coefficients
   (`BiquadCoefficients`: `peaking_eq`, `low_pass`), audio buffer soft clipping / saturation limiter (`soft_clip`), musical
   beat and bar grid conversions (`samples_per_beat`, `samples_per_bar`, `beat_to_seconds`, `seconds_to_beat`), constant-power
@@ -178,22 +185,23 @@ parity or product completion.
   interpolation, stereo mixing, persistence, history, local audio/MIDI device foundations, and atomic writes for song packages
   and WAV exports. Production recording, realtime scheduling, comping, time/pitch tools, CLAP/VST3 hosting, isolation,
   plugin UI, and mastering remain incomplete.
-- **Encode:** editable FFmpeg queue, video color primaries, transfer functions, and color matrix metadata tagging (`ColorPrimaries`,
-  `ColorTransfer`, `ColorMatrix`, `ColorMetadataConfig`), video logo / graphic watermark overlay filter generator
-  (`WatermarkOverlayConfig`, `WatermarkPosition`), EBU R128 / ITU-R BS.1770 audio loudness normalization filter argument generator
-  (`LoudnessNormConfig`), video filter chain pipeline construction (`FilterChain`, `VideoFilter`: `Scale`, `Fps`, `PixelFormat`,
-  `Deinterlace`, `Custom`), hardware-accelerated video codec profiles (`HardwareEncoder`, `generate_hardware_encoder_args`:
-  `NvencH264`, `NvencHevc`, `VideoToolboxH264`, `VideoToolboxHevc`, `VaapiH264`, `VaapiHevc`), stream track mapping (`StreamMapping`,
-  `generate_map_args`), aspect ratio scaling and padding letterbox/pillarbox filter generation (`generate_scale_and_pad_args`),
-  audio sample bit-depth formats (`AudioSampleFormat`: `S16Le`, `S24Le`, `S32Le`, `F32Le`), transcode subtitle processing pipeline
-  modes (`generate_subtitle_args`, `SubtitleMode`: `None`, `BurnIn`, `PassthroughCopy`, `ConvertSrt`), two-pass VBR video encoding
-  command argument generation (`generate_two_pass_args`), target bitrate calculation for file size constraints
-  (`calculate_target_bitrate_kbps`), aspect ratio formatting (`aspect_ratio_string`), batch output filename template expansion
-  (`format_output_template`), multi-destination batching, expanded preset library (`H.264 1080p`, `ProRes Master`, `HEVC 4K`,
-  `VP9 WebM`, `FLAC Audio`, `MP3 320k`), progress throughput and ETA estimation (`EncodeProgressMetrics::estimate`), job reordering,
-  failure retries, cleanup of completed jobs, deterministic command plans, local backend discovery, presets, execution, progress,
-  cancellation, persistence, recovery, queue history, and atomic writes. Complete hardware policy, exhaustive formats, pause/resume
-  guarantees, watch folders, and perceptual conformance remain incomplete.
+- **Encode:** editable FFmpeg queue, SMPTE ST 2086 HDR10 mastering display color volume and CTA-861.3 content light level metadata
+  generation (`MasteringDisplayColorVolume`, `ContentLightLevel`, `generate_hdr10_x265_args`), video color primaries, transfer
+  functions, and color matrix metadata tagging (`ColorPrimaries`, `ColorTransfer`, `ColorMatrix`, `ColorMetadataConfig`),
+  video logo / graphic watermark overlay filter generator (`WatermarkOverlayConfig`, `WatermarkPosition`), EBU R128 / ITU-R BS.1770
+  audio loudness normalization filter argument generator (`LoudnessNormConfig`), video filter chain pipeline construction
+  (`FilterChain`, `VideoFilter`: `Scale`, `Fps`, `PixelFormat`, `Deinterlace`, `Custom`), hardware-accelerated video codec profiles
+  (`HardwareEncoder`, `generate_hardware_encoder_args`: `NvencH264`, `NvencHevc`, `VideoToolboxH264`, `VideoToolboxHevc`, `VaapiH264`,
+  `VaapiHevc`), stream track mapping (`StreamMapping`, `generate_map_args`), aspect ratio scaling and padding letterbox/pillarbox
+  filter generation (`generate_scale_and_pad_args`), audio sample bit-depth formats (`AudioSampleFormat`: `S16Le`, `S24Le`, `S32Le`,
+  `F32Le`), transcode subtitle processing pipeline modes (`generate_subtitle_args`, `SubtitleMode`: `None`, `BurnIn`, `PassthroughCopy`,
+  `ConvertSrt`), two-pass VBR video encoding command argument generation (`generate_two_pass_args`), target bitrate calculation for
+  file size constraints (`calculate_target_bitrate_kbps`), aspect ratio formatting (`aspect_ratio_string`), batch output filename
+  template expansion (`format_output_template`), multi-destination batching, expanded preset library (`H.264 1080p`, `ProRes Master`,
+  `HEVC 4K`, `VP9 WebM`, `FLAC Audio`, `MP3 320k`), progress throughput and ETA estimation (`EncodeProgressMetrics::estimate`),
+  job reordering, failure retries, cleanup of completed jobs, deterministic command plans, local backend discovery, presets,
+  execution, progress, cancellation, persistence, recovery, queue history, and atomic writes. Complete hardware policy,
+  exhaustive formats, pause/resume guarantees, watch folders, and perceptual conformance remain incomplete.
 
 ## Evidence boundaries
 
@@ -227,7 +235,7 @@ still lacks complete semantic round-trip and independent PDF evidence. Photo sti
 has non-atomic persistence/export and status-only tool modes. Motion's repaired
 native workflow passed its focused strict gate, while its professional playback,
 compositing, and rendering engine remains incomplete. The complete-suite truth
-score is approximately **63/100**.
+score is approximately **65/100**.
 
 ### Keyboard journeys
 

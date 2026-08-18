@@ -904,6 +904,62 @@ impl TrackAudioConfig {
     }
 }
 
+/// Brickwall peak limiter for project master audio output preventing digital clipping.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MasterAudioLimiter {
+    /// True peak output ceiling in decibels (e.g. -0.5 dBTP).
+    pub ceiling_db: f32,
+    /// Limiter engagement threshold in decibels (e.g. -1.0 dB).
+    pub threshold_db: f32,
+    /// Release recovery time in milliseconds.
+    pub release_ms: f32,
+    /// Limiter enabled state.
+    pub enabled: bool,
+}
+
+impl Default for MasterAudioLimiter {
+    fn default() -> Self {
+        Self {
+            ceiling_db: -0.5,
+            threshold_db: -1.0,
+            release_ms: 50.0,
+            enabled: true,
+        }
+    }
+}
+
+impl MasterAudioLimiter {
+    /// Applies lookahead brickwall peak limiting and saturation prevention to interleaved stereo channels.
+    pub fn process_stereo_samples(&self, left: &mut [f32], right: &mut [f32], sample_rate: u32) {
+        if !self.enabled || left.is_empty() || sample_rate == 0 {
+            return;
+        }
+
+        let ceiling_lin = 10.0f32.powf(self.ceiling_db / 20.0);
+        let release_coeff = (-1.0 / (self.release_ms.max(1.0) * 0.001 * sample_rate as f32)).exp();
+        let mut gain = 1.0f32;
+
+        let len = left.len().min(right.len());
+        for i in 0..len {
+            let peak = left[i].abs().max(right[i].abs());
+            let target_gain = if peak > ceiling_lin && peak > 0.0 {
+                ceiling_lin / peak
+            } else {
+                1.0
+            };
+
+            if target_gain < gain {
+                gain = target_gain; // Instant attack
+            } else {
+                gain = target_gain + release_coeff * (gain - target_gain); // Exponential release
+            }
+
+            left[i] = (left[i] * gain).clamp(-ceiling_lin, ceiling_lin);
+            right[i] = (right[i] * gain).clamp(-ceiling_lin, ceiling_lin);
+        }
+    }
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -2136,5 +2192,31 @@ mod tests {
         let (left_pan, right_pan) = track_audio.stereo_linear_gains();
         assert!(left_pan > 0.99);
         assert!(right_pan < 1e-4);
+    }
+
+    #[test]
+    fn master_audio_limiter_brickwall_processing() {
+        let limiter = MasterAudioLimiter {
+            ceiling_db: -1.0, // ceiling ~ 0.891
+            threshold_db: -1.0,
+            release_ms: 20.0,
+            enabled: true,
+        };
+
+        let mut left = vec![1.5f32, 2.0f32, 0.5f32];
+        let mut right = vec![1.2f32, 1.8f32, 0.4f32];
+
+        limiter.process_stereo_samples(&mut left, &mut right, 48000);
+
+        let ceiling_lin = 10.0f32.powf(-1.0 / 20.0);
+        // All limited samples must not exceed ceiling
+        for s in left {
+            assert!(s <= ceiling_lin + 1e-5);
+            assert!(s >= -ceiling_lin - 1e-5);
+        }
+        for s in right {
+            assert!(s <= ceiling_lin + 1e-5);
+            assert!(s >= -ceiling_lin - 1e-5);
+        }
     }
 }

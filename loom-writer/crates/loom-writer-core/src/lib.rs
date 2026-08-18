@@ -2003,6 +2003,47 @@ pub fn insert_soft_hyphens(text: &str, config: &HyphenationConfig) -> String {
     result
 }
 
+/// Knuth-Plass-style line-breaking penalty configuration for justified paragraph typesetting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineBreakPenaltyConfig {
+    /// Penalty for breaking a line on a hyphen.
+    pub hyphen_penalty: u32,
+    /// Penalty for breaking two consecutive lines on a hyphen.
+    pub consecutive_hyphen_penalty: u32,
+    /// Penalty for creating a single-line paragraph widow or orphan.
+    pub widow_orphan_penalty: u32,
+}
+
+impl Default for LineBreakPenaltyConfig {
+    fn default() -> Self {
+        Self {
+            hyphen_penalty: 50,
+            consecutive_hyphen_penalty: 120,
+            widow_orphan_penalty: 150,
+        }
+    }
+}
+
+/// Calculates line break aesthetic penalty for paragraph justification optimization.
+pub fn calculate_line_break_penalty(
+    is_hyphenated: bool,
+    previous_was_hyphenated: bool,
+    is_widow_or_orphan: bool,
+    config: &LineBreakPenaltyConfig,
+) -> u32 {
+    let mut penalty = 0;
+    if is_hyphenated {
+        penalty += config.hyphen_penalty;
+        if previous_was_hyphenated {
+            penalty += config.consecutive_hyphen_penalty;
+        }
+    }
+    if is_widow_or_orphan {
+        penalty += config.widow_orphan_penalty;
+    }
+    penalty
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -3177,5 +3218,26 @@ mod tests {
         let text = "The international conference was outstanding.";
         let hyphenated = insert_soft_hyphens(text, &config);
         assert!(hyphenated.contains('\u{00AD}'));
+    }
+
+    #[test]
+    fn line_break_penalty_optimization() {
+        let config = LineBreakPenaltyConfig::default();
+
+        // Clean break with no hyphen or widow
+        let clean = calculate_line_break_penalty(false, false, false, &config);
+        assert_eq!(clean, 0);
+
+        // Single hyphen break
+        let single_hyphen = calculate_line_break_penalty(true, false, false, &config);
+        assert_eq!(single_hyphen, 50);
+
+        // Two consecutive hyphens
+        let consecutive_hyphen = calculate_line_break_penalty(true, true, false, &config);
+        assert_eq!(consecutive_hyphen, 170); // 50 + 120
+
+        // Widow/orphan line
+        let widow = calculate_line_break_penalty(false, false, true, &config);
+        assert_eq!(widow, 150);
     }
 }
