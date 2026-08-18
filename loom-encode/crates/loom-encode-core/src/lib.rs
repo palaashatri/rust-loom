@@ -538,6 +538,40 @@ impl FilterChain {
     }
 }
 
+/// EBU R128 / ITU-R BS.1770 audio loudness normalization configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoudnessNormConfig {
+    pub integrated_lufs: f32,
+    pub true_peak_db: f32,
+    pub loudness_range_lu: f32,
+    pub enabled: bool,
+}
+
+impl Default for LoudnessNormConfig {
+    fn default() -> Self {
+        Self {
+            integrated_lufs: -23.0,
+            true_peak_db: -1.5,
+            loudness_range_lu: 11.0,
+            enabled: true,
+        }
+    }
+}
+
+impl LoudnessNormConfig {
+    /// Generates FFmpeg `-af loudnorm=...` filter arguments if enabled.
+    pub fn generate_loudnorm_args(&self) -> Vec<String> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        let filter_str = format!(
+            "loudnorm=I={:.1}:TP={:.1}:LRA={:.1}",
+            self.integrated_lufs, self.true_peak_db, self.loudness_range_lu
+        );
+        vec!["-af".into(), filter_str]
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1326,5 +1360,18 @@ mod tests {
 
         let args = chain.generate_args();
         assert_eq!(args, vec!["-vf", "scale=1280:720,fps=30,format=yuv420p"]);
+    }
+
+    #[test]
+    fn loudness_norm_argument_generation() {
+        let lnorm = LoudnessNormConfig::default();
+        let args = lnorm.generate_loudnorm_args();
+        assert_eq!(args, vec!["-af", "loudnorm=I=-23.0:TP=-1.5:LRA=11.0"]);
+
+        let disabled = LoudnessNormConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(disabled.generate_loudnorm_args().is_empty());
     }
 }

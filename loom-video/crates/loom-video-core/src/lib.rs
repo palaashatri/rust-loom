@@ -756,6 +756,75 @@ pub fn calculate_transition_overlap(cut_point: f64, duration: f64, alignment: &s
     }
 }
 
+/// Volume keyframe on a clip audio envelope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioEnvelopeKey {
+    pub time_offset: f64,
+    pub volume_db: f32,
+}
+
+/// Dynamic audio volume automation curve across a clip.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AudioEnvelope {
+    pub keys: Vec<AudioEnvelopeKey>,
+}
+
+impl AudioEnvelope {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds or updates an automation key at a relative clip offset.
+    pub fn add_key(&mut self, time_offset: f64, volume_db: f32) {
+        if let Some(pos) = self
+            .keys
+            .iter()
+            .position(|k| (k.time_offset - time_offset).abs() < 1e-4)
+        {
+            self.keys[pos].volume_db = volume_db;
+        } else {
+            self.keys.push(AudioEnvelopeKey {
+                time_offset,
+                volume_db,
+            });
+            self.keys.sort_by(|a, b| {
+                a.time_offset
+                    .partial_cmp(&b.time_offset)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+    }
+
+    /// Evaluates interpolated decibel volume gain at a relative clip time offset.
+    pub fn evaluate_volume_db_at(&self, time_offset: f64) -> f32 {
+        if self.keys.is_empty() {
+            return 0.0; // 0 dB unity gain default
+        }
+        if time_offset <= self.keys[0].time_offset {
+            return self.keys[0].volume_db;
+        }
+        if time_offset >= self.keys.last().unwrap().time_offset {
+            return self.keys.last().unwrap().volume_db;
+        }
+
+        // Find surrounding keys for linear interpolation
+        for i in 0..self.keys.len() - 1 {
+            let k1 = &self.keys[i];
+            let k2 = &self.keys[i + 1];
+            if time_offset >= k1.time_offset && time_offset <= k2.time_offset {
+                let span = k2.time_offset - k1.time_offset;
+                if span.abs() < 1e-5 {
+                    return k1.volume_db;
+                }
+                let t = ((time_offset - k1.time_offset) / span) as f32;
+                return k1.volume_db + (k2.volume_db - k1.volume_db) * t;
+            }
+        }
+
+        0.0
+    }
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -1934,5 +2003,21 @@ mod tests {
 
         assert!(proj.remove_marker("m1"));
         assert_eq!(proj.markers.len(), 1);
+    }
+
+    #[test]
+    fn audio_envelope_volume_automation() {
+        let mut env = AudioEnvelope::new();
+        assert_eq!(env.evaluate_volume_db_at(2.5), 0.0);
+
+        // Fade in from -24dB at 0.0s to 0dB at 2.0s
+        env.add_key(0.0, -24.0);
+        env.add_key(2.0, 0.0);
+
+        assert_eq!(env.evaluate_volume_db_at(-1.0), -24.0);
+        assert_eq!(env.evaluate_volume_db_at(0.0), -24.0);
+        assert_eq!(env.evaluate_volume_db_at(1.0), -12.0); // halfway
+        assert_eq!(env.evaluate_volume_db_at(2.0), 0.0);
+        assert_eq!(env.evaluate_volume_db_at(5.0), 0.0);
     }
 }

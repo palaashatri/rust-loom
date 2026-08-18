@@ -613,6 +613,66 @@ impl MixerBus {
     }
 }
 
+/// Waveform shape presets for synthesis and test tone calibration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OscillatorWaveform {
+    #[default]
+    Sine,
+    Square,
+    Triangle,
+    Sawtooth,
+}
+
+/// Generates a synthetic audio tone with specified waveform, frequency, duration, and amplitude.
+pub fn generate_oscillator_tone(
+    waveform: OscillatorWaveform,
+    freq_hz: f32,
+    duration_seconds: f32,
+    sample_rate: u32,
+    amplitude: f32,
+) -> Result<AudioBuffer, String> {
+    if sample_rate == 0 || duration_seconds <= 0.0 || freq_hz <= 0.0 {
+        return Err("invalid tone generation parameters".into());
+    }
+
+    let num_samples = (duration_seconds * sample_rate as f32).round() as usize;
+    let mut samples = Vec::with_capacity(num_samples);
+    let amp = amplitude.clamp(0.0, 1.0);
+    let two_pi = std::f32::consts::PI * 2.0;
+
+    for i in 0..num_samples {
+        let t = i as f32 / sample_rate as f32;
+        let phase = (t * freq_hz).fract(); // [0.0, 1.0)
+
+        let s = match waveform {
+            OscillatorWaveform::Sine => (phase * two_pi).sin(),
+            OscillatorWaveform::Square => {
+                if phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            OscillatorWaveform::Triangle => {
+                if phase < 0.5 {
+                    4.0 * phase - 1.0
+                } else {
+                    3.0 - 4.0 * phase
+                }
+            }
+            OscillatorWaveform::Sawtooth => 2.0 * phase - 1.0,
+        };
+
+        samples.push(s * amp);
+    }
+
+    Ok(AudioBuffer {
+        sample_rate,
+        channels: 1,
+        samples,
+    })
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1762,5 +1822,18 @@ mod studio_runtime_tests {
             enabled: false,
         };
         assert_eq!(send_muted.linear_gain(), 0.0);
+    }
+
+    #[test]
+    fn oscillator_tone_generation() {
+        let sine_tone =
+            generate_oscillator_tone(OscillatorWaveform::Sine, 440.0, 0.1, 44100, 0.8).unwrap();
+        assert_eq!(sine_tone.samples.len(), 4410);
+        assert_eq!(sine_tone.channels, 1);
+        assert!(sine_tone.samples.iter().all(|s| s.abs() <= 0.8001));
+
+        let square_tone =
+            generate_oscillator_tone(OscillatorWaveform::Square, 100.0, 0.05, 44100, 0.5).unwrap();
+        assert!(square_tone.samples[0] > 0.49);
     }
 }

@@ -590,6 +590,85 @@ impl DependencyGraph {
     }
 }
 
+/// Data validation criteria types for constraining cell input values.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationCriteria {
+    List(Vec<String>),
+    WholeNumberBetween(i64, i64),
+    DecimalBetween(f64, f64),
+    TextLengthBetween(usize, usize),
+}
+
+/// Data validation rule attached to a cell or range.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DataValidationRule {
+    pub criteria: ValidationCriteria,
+    pub allow_blank: bool,
+    pub error_message: String,
+}
+
+impl DataValidationRule {
+    pub fn new(criteria: ValidationCriteria, error_message: impl Into<String>) -> Self {
+        Self {
+            criteria,
+            allow_blank: true,
+            error_message: error_message.into(),
+        }
+    }
+
+    /// Validates a candidate input string against this rule.
+    pub fn validate(&self, input: &str) -> Result<(), String> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            if self.allow_blank {
+                return Ok(());
+            } else {
+                return Err(self.error_message.clone());
+            }
+        }
+
+        match &self.criteria {
+            ValidationCriteria::List(items) => {
+                if items.iter().any(|item| item.eq_ignore_ascii_case(trimmed)) {
+                    Ok(())
+                } else {
+                    Err(self.error_message.clone())
+                }
+            }
+            ValidationCriteria::WholeNumberBetween(min, max) => {
+                if let Ok(n) = trimmed.parse::<i64>() {
+                    if n >= *min && n <= *max {
+                        Ok(())
+                    } else {
+                        Err(self.error_message.clone())
+                    }
+                } else {
+                    Err(self.error_message.clone())
+                }
+            }
+            ValidationCriteria::DecimalBetween(min, max) => {
+                if let Ok(n) = trimmed.parse::<f64>() {
+                    if n >= *min && n <= *max {
+                        Ok(())
+                    } else {
+                        Err(self.error_message.clone())
+                    }
+                } else {
+                    Err(self.error_message.clone())
+                }
+            }
+            ValidationCriteria::TextLengthBetween(min, max) => {
+                let len = trimmed.chars().count();
+                if len >= *min && len <= *max {
+                    Ok(())
+                } else {
+                    Err(self.error_message.clone())
+                }
+            }
+        }
+    }
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -2918,5 +2997,25 @@ mod tests {
         // Recalculation order starting from dirty cell A1
         let order = graph.get_recalculation_order(&[a1]);
         assert_eq!(order, vec![a1, b1, c1]);
+    }
+
+    #[test]
+    fn cell_data_validation_rules() {
+        let list_rule = DataValidationRule::new(
+            ValidationCriteria::List(vec!["Red".into(), "Green".into(), "Blue".into()]),
+            "Must be a valid color",
+        );
+        assert!(list_rule.validate("Red").is_ok());
+        assert!(list_rule.validate("green").is_ok());
+        assert!(list_rule.validate("Yellow").is_err());
+        assert!(list_rule.validate("").is_ok()); // allow_blank = true
+
+        let num_rule = DataValidationRule::new(
+            ValidationCriteria::WholeNumberBetween(1, 100),
+            "Must be 1..=100",
+        );
+        assert!(num_rule.validate("50").is_ok());
+        assert!(num_rule.validate("101").is_err());
+        assert!(num_rule.validate("abc").is_err());
     }
 }

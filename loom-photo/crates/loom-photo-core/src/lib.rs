@@ -550,6 +550,51 @@ impl RgbaImage {
         }
     }
 
+    /// High-pass raster filter extracting high-frequency edge details with a 128-gray baseline.
+    pub fn high_pass_filter(&self, radius: u32, sigma: f32) -> Result<RgbaImage, String> {
+        let blurred = self.gaussian_blur(radius, sigma)?;
+        let mut out = self.clone();
+
+        for (src, blur) in out
+            .pixels
+            .chunks_exact_mut(4)
+            .zip(blurred.pixels.chunks_exact(4))
+        {
+            for i in 0..3 {
+                let diff = src[i] as f32 - blur[i] as f32 + 128.0;
+                src[i] = diff.clamp(0.0, 255.0).round() as u8;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Unsharp mask sharpening filter emphasizing local edge contrast.
+    pub fn unsharp_mask(
+        &self,
+        radius: u32,
+        sigma: f32,
+        amount: f32,
+        threshold: u8,
+    ) -> Result<RgbaImage, String> {
+        let blurred = self.gaussian_blur(radius, sigma)?;
+        let mut out = self.clone();
+
+        for (src, blur) in out
+            .pixels
+            .chunks_exact_mut(4)
+            .zip(blurred.pixels.chunks_exact(4))
+        {
+            for i in 0..3 {
+                let diff = src[i] as f32 - blur[i] as f32;
+                if diff.abs() >= threshold as f32 {
+                    let sharpened = src[i] as f32 + diff * amount;
+                    src[i] = sharpened.clamp(0.0, 255.0).round() as u8;
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -1779,5 +1824,23 @@ mod tests {
         assert_eq!(px[1], 128); // Green default
         assert!(px[2] > 140); // Blue lifted
         assert_eq!(px[3], 255); // Alpha preserved
+    }
+
+    #[test]
+    fn high_pass_and_unsharp_mask_filtering() {
+        let mut img = RgbaImage::transparent(4, 4).unwrap();
+        // Flat gray image -> high pass should produce exact neutral 128 gray
+        for y in 0..4 {
+            for x in 0..4 {
+                img.set_pixel(x, y, [100, 100, 100, 255]);
+            }
+        }
+        let hp = img.high_pass_filter(1, 1.0).unwrap();
+        let hp_px = hp.pixel(1, 1).unwrap();
+        assert_eq!(hp_px, [128, 128, 128, 255]);
+
+        let usm = img.unsharp_mask(1, 1.0, 1.5, 5).unwrap();
+        let usm_px = usm.pixel(1, 1).unwrap();
+        assert_eq!(usm_px, [100, 100, 100, 255]); // Unchanged on flat area
     }
 }

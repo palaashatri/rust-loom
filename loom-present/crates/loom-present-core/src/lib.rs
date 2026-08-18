@@ -540,6 +540,112 @@ impl SceneNode {
     }
 }
 
+/// Alignment guide line generated when objects snap to common edges or centers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapGuide {
+    pub position: f32,
+    pub is_vertical: bool,
+}
+
+/// Result of smart snapping computation containing adjusted coordinates and active guide lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapResult {
+    pub snapped_x: f32,
+    pub snapped_y: f32,
+    pub guides: Vec<SnapGuide>,
+}
+
+/// Computes intelligent object alignment snapping against neighboring elements.
+pub fn calculate_smart_snapping(
+    moving_bounds: (f32, f32, f32, f32),
+    reference_bounds: &[(f32, f32, f32, f32)],
+    threshold_px: f32,
+) -> SnapResult {
+    let (mx, my, mw, mh) = moving_bounds;
+    let mut snapped_x = mx;
+    let mut snapped_y = my;
+    let mut guides = Vec::new();
+
+    let m_left = mx;
+    let m_center_x = mx + mw / 2.0;
+    let m_right = mx + mw;
+
+    let m_top = my;
+    let m_center_y = my + mh / 2.0;
+    let m_bottom = my + mh;
+
+    let mut x_snapped = false;
+    let mut y_snapped = false;
+
+    for &(rx, ry, rw, rh) in reference_bounds {
+        let r_left = rx;
+        let r_center_x = rx + rw / 2.0;
+        let r_right = rx + rw;
+
+        let r_top = ry;
+        let r_center_y = ry + rh / 2.0;
+        let r_bottom = ry + rh;
+
+        // X snapping (left-to-left, center-to-center, right-to-right)
+        if !x_snapped {
+            if (m_left - r_left).abs() <= threshold_px {
+                snapped_x = r_left;
+                guides.push(SnapGuide {
+                    position: r_left,
+                    is_vertical: true,
+                });
+                x_snapped = true;
+            } else if (m_center_x - r_center_x).abs() <= threshold_px {
+                snapped_x = r_center_x - mw / 2.0;
+                guides.push(SnapGuide {
+                    position: r_center_x,
+                    is_vertical: true,
+                });
+                x_snapped = true;
+            } else if (m_right - r_right).abs() <= threshold_px {
+                snapped_x = r_right - mw;
+                guides.push(SnapGuide {
+                    position: r_right,
+                    is_vertical: true,
+                });
+                x_snapped = true;
+            }
+        }
+
+        // Y snapping (top-to-top, center-to-center, bottom-to-bottom)
+        if !y_snapped {
+            if (m_top - r_top).abs() <= threshold_px {
+                snapped_y = r_top;
+                guides.push(SnapGuide {
+                    position: r_top,
+                    is_vertical: false,
+                });
+                y_snapped = true;
+            } else if (m_center_y - r_center_y).abs() <= threshold_px {
+                snapped_y = r_center_y - mh / 2.0;
+                guides.push(SnapGuide {
+                    position: r_center_y,
+                    is_vertical: false,
+                });
+                y_snapped = true;
+            } else if (m_bottom - r_bottom).abs() <= threshold_px {
+                snapped_y = r_bottom - mh;
+                guides.push(SnapGuide {
+                    position: r_bottom,
+                    is_vertical: false,
+                });
+                y_snapped = true;
+            }
+        }
+    }
+
+    SnapResult {
+        snapped_x,
+        snapped_y,
+        guides,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1505,5 +1611,17 @@ mod tests {
         assert_eq!(gy, 10.0);
         assert_eq!(gw, 120.0);
         assert_eq!(gh, 70.0);
+    }
+
+    #[test]
+    fn smart_snapping_to_reference_bounds() {
+        let reference = vec![(100.0, 100.0, 200.0, 200.0)];
+        // Moving element at (98.0, 100.0) -> left edge 98 is within 5px of reference left edge 100
+        let moving = (98.0, 100.0, 50.0, 50.0);
+        let res = calculate_smart_snapping(moving, &reference, 5.0);
+
+        assert_eq!(res.snapped_x, 100.0);
+        assert_eq!(res.snapped_y, 100.0);
+        assert_eq!(res.guides.len(), 2);
     }
 }

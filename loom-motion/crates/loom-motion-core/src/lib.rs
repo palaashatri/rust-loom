@@ -775,6 +775,61 @@ impl CompositionClock {
     }
 }
 
+/// Generates a smooth, curved spatial motion path through control waypoints using Catmull-Rom splines.
+pub fn smooth_spatial_path(
+    waypoints: &[[f64; 2]],
+    subdivisions: usize,
+) -> Result<Vec<[f64; 2]>, String> {
+    if waypoints.len() < 2 {
+        return Err("at least 2 waypoints are required for spatial path".into());
+    }
+    if subdivisions == 0 {
+        return Ok(waypoints.to_vec());
+    }
+
+    let mut result = Vec::new();
+    let n = waypoints.len();
+
+    for i in 0..n - 1 {
+        let p0 = if i == 0 {
+            waypoints[0]
+        } else {
+            waypoints[i - 1]
+        };
+        let p1 = waypoints[i];
+        let p2 = waypoints[i + 1];
+        let p3 = if i + 2 < n {
+            waypoints[i + 2]
+        } else {
+            waypoints[i + 1]
+        };
+
+        for step in 0..subdivisions {
+            let t = step as f64 / subdivisions as f64;
+            let t2 = t * t;
+            let t3 = t2 * t;
+
+            let x = 0.5
+                * ((2.0 * p1[0])
+                    + (-p0[0] + p2[0]) * t
+                    + (2.0 * p0[0] - 5.0 * p1[0] + 4.0 * p2[0] - p3[0]) * t2
+                    + (-p0[0] + 3.0 * p1[0] - 3.0 * p2[0] + p3[0]) * t3);
+
+            let y = 0.5
+                * ((2.0 * p1[1])
+                    + (-p0[1] + p2[1]) * t
+                    + (2.0 * p0[1] - 5.0 * p1[1] + 4.0 * p2[1] - p3[1]) * t2
+                    + (-p0[1] + 3.0 * p1[1] - 3.0 * p2[1] + p3[1]) * t3);
+
+            result.push([x, y]);
+        }
+    }
+
+    // Add final waypoint
+    result.push(*waypoints.last().unwrap());
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1127,5 +1182,19 @@ mod tests {
 
         // Step forward from out_frame with loop_playback = true should wrap to in_frame (0)
         assert_eq!(clock.step_forward(), 0);
+    }
+
+    #[test]
+    fn smooth_spatial_motion_path() {
+        let waypoints = vec![[0.0, 0.0], [50.0, 100.0], [100.0, 0.0]];
+        let smoothed = smooth_spatial_path(&waypoints, 4).unwrap();
+
+        // 2 segments * 4 steps + 1 endpoint = 9 points
+        assert_eq!(smoothed.len(), 9);
+        assert_eq!(smoothed[0], [0.0, 0.0]);
+        assert_eq!(smoothed[8], [100.0, 0.0]);
+
+        // Error with fewer than 2 points
+        assert!(smooth_spatial_path(&[[0.0, 0.0]], 4).is_err());
     }
 }

@@ -1855,6 +1855,50 @@ impl Default for DropCapConfig {
     }
 }
 
+/// Diagonal or horizontal document watermark configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatermarkConfig {
+    pub text: String,
+    pub font_size_pt: f32,
+    pub color_rgba: [u8; 4],
+    pub rotation_deg: f32,
+    pub opacity: f32,
+    pub enabled: bool,
+}
+
+impl Default for WatermarkConfig {
+    fn default() -> Self {
+        Self {
+            text: "DRAFT".into(),
+            font_size_pt: 72.0,
+            color_rgba: [128, 128, 128, 128],
+            rotation_deg: -45.0,
+            opacity: 0.25,
+            enabled: false,
+        }
+    }
+}
+
+/// Margin line numbering configuration for legal and academic manuscripts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineNumberingConfig {
+    pub start_number: u32,
+    pub count_by: u32,
+    pub restart_each_page: bool,
+    pub enabled: bool,
+}
+
+impl Default for LineNumberingConfig {
+    fn default() -> Self {
+        Self {
+            start_number: 1,
+            count_by: 1,
+            restart_each_page: false,
+            enabled: false,
+        }
+    }
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -2989,5 +3033,18 @@ mod tests {
         assert_eq!(drop_cap.lines, 3);
         assert_eq!(drop_cap.characters, 1);
         assert!(!drop_cap.enabled);
+    }
+
+    #[test]
+    fn watermark_and_line_numbering() {
+        let watermark = WatermarkConfig::default();
+        assert_eq!(watermark.text, "DRAFT");
+        assert_eq!(watermark.rotation_deg, -45.0);
+        assert!(!watermark.enabled);
+
+        let line_num = LineNumberingConfig::default();
+        assert_eq!(line_num.start_number, 1);
+        assert_eq!(line_num.count_by, 1);
+        assert!(!line_num.restart_each_page);
     }
 }
