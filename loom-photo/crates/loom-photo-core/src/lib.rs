@@ -531,6 +531,25 @@ impl RgbaImage {
         }
     }
 
+    /// Applies 3-way color grading (Lift, Gamma, Gain) to RGB channels, preserving alpha.
+    pub fn apply_lift_gamma_gain(&mut self, lgg: &LiftGammaGain) {
+        for pixel in self.pixels.chunks_exact_mut(4) {
+            for (idx, (lift, gamma, gain)) in [
+                (lgg.lift.0, lgg.gamma.0, lgg.gain.0),
+                (lgg.lift.1, lgg.gamma.1, lgg.gain.1),
+                (lgg.lift.2, lgg.gamma.2, lgg.gain.2),
+            ]
+            .iter()
+            .enumerate()
+            {
+                let v = pixel[idx] as f32 / 255.0;
+                let inv_gamma = if *gamma > 0.001 { 1.0 / gamma } else { 1.0 };
+                let graded = lift * (1.0 - v) + gain * v.powf(inv_gamma);
+                pixel[idx] = (graded.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -688,6 +707,27 @@ impl ToneCurveLUT {
             *val = (out * 255.0).round() as u8;
         }
         Self { map }
+    }
+}
+
+/// 3-way color grading controls (Lift, Gamma, Gain) for shadows, midtones, and highlights.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LiftGammaGain {
+    /// Lift (shadows RGB offset, default: (0.0, 0.0, 0.0)).
+    pub lift: (f32, f32, f32),
+    /// Gamma (midtones RGB exponent, default: (1.0, 1.0, 1.0)).
+    pub gamma: (f32, f32, f32),
+    /// Gain (highlights RGB multiplier, default: (1.0, 1.0, 1.0)).
+    pub gain: (f32, f32, f32),
+}
+
+impl Default for LiftGammaGain {
+    fn default() -> Self {
+        Self {
+            lift: (0.0, 0.0, 0.0),
+            gamma: (1.0, 1.0, 1.0),
+            gain: (1.0, 1.0, 1.0),
+        }
     }
 }
 
@@ -1720,5 +1760,24 @@ mod tests {
 
         let px = img.pixel(0, 0).unwrap();
         assert_eq!(px, [155, 105, 55, 255]); // 255 - input
+    }
+
+    #[test]
+    fn lift_gamma_gain_color_grading() {
+        let mut img = RgbaImage::transparent(2, 2).unwrap();
+        img.set_pixel(0, 0, [128, 128, 128, 255]);
+
+        let mut lgg = LiftGammaGain::default();
+        // Boost gain (highlights multiplier) on Red
+        lgg.gain.0 = 1.5;
+        // Lift shadows on Blue
+        lgg.lift.2 = 0.2;
+
+        img.apply_lift_gamma_gain(&lgg);
+        let px = img.pixel(0, 0).unwrap();
+        assert!(px[0] > 180); // Red boosted by gain
+        assert_eq!(px[1], 128); // Green default
+        assert!(px[2] > 140); // Blue lifted
+        assert_eq!(px[3], 255); // Alpha preserved
     }
 }

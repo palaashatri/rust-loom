@@ -1787,6 +1787,74 @@ pub struct FootnoteEntry {
     pub is_endnote: bool,
 }
 
+/// Multi-column page layout configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColumnCount {
+    #[default]
+    Single,
+    TwoColumns,
+    ThreeColumns,
+}
+
+impl ColumnCount {
+    pub fn count(&self) -> usize {
+        match self {
+            Self::Single => 1,
+            Self::TwoColumns => 2,
+            Self::ThreeColumns => 3,
+        }
+    }
+}
+
+/// Multi-column layout settings with column gaps and separator line options.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiColumnConfig {
+    pub columns: ColumnCount,
+    pub column_gap_pt: f32,
+    pub show_separator_line: bool,
+}
+
+impl Default for MultiColumnConfig {
+    fn default() -> Self {
+        Self {
+            columns: ColumnCount::Single,
+            column_gap_pt: 18.0, // 0.25 inch default gap
+            show_separator_line: false,
+        }
+    }
+}
+
+impl MultiColumnConfig {
+    /// Calculates width of each column given total printable width in points.
+    pub fn calculate_column_width(&self, printable_width_pt: f32) -> f32 {
+        let count = self.columns.count();
+        if count <= 1 {
+            return printable_width_pt;
+        }
+        let total_gap = self.column_gap_pt * (count - 1) as f32;
+        let available = (printable_width_pt - total_gap).max(10.0);
+        available / count as f32
+    }
+}
+
+/// Initial drop cap configuration for styled paragraph opening letters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropCapConfig {
+    pub lines: u32,
+    pub characters: u32,
+    pub enabled: bool,
+}
+
+impl Default for DropCapConfig {
+    fn default() -> Self {
+        Self {
+            lines: 3,
+            characters: 1,
+            enabled: false,
+        }
+    }
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -2894,5 +2962,32 @@ mod tests {
             Some("Document Title - Page 2 of 10".into())
         );
         assert_eq!(config.format_footer(2, 10), Some("Confidential - 2".into()));
+    }
+
+    #[test]
+    fn multi_column_layout_and_drop_caps() {
+        let single = MultiColumnConfig::default();
+        assert_eq!(single.calculate_column_width(500.0), 500.0);
+
+        let two_col = MultiColumnConfig {
+            columns: ColumnCount::TwoColumns,
+            column_gap_pt: 20.0,
+            show_separator_line: true,
+        };
+        // (500 - 20) / 2 = 240.0
+        assert_eq!(two_col.calculate_column_width(500.0), 240.0);
+
+        let three_col = MultiColumnConfig {
+            columns: ColumnCount::ThreeColumns,
+            column_gap_pt: 10.0,
+            show_separator_line: false,
+        };
+        // (500 - 20) / 3 = 160.0
+        assert_eq!(three_col.calculate_column_width(500.0), 160.0);
+
+        let drop_cap = DropCapConfig::default();
+        assert_eq!(drop_cap.lines, 3);
+        assert_eq!(drop_cap.characters, 1);
+        assert!(!drop_cap.enabled);
     }
 }

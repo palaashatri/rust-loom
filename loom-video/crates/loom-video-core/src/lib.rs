@@ -131,6 +131,31 @@ impl Track {
     }
 }
 
+/// Palette color presets for timeline markers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MarkerColor {
+    #[default]
+    Blue,
+    Red,
+    Green,
+    Yellow,
+    Purple,
+    Cyan,
+}
+
+impl MarkerColor {
+    pub fn as_hex(&self) -> &'static str {
+        match self {
+            Self::Blue => "#3b82f6",
+            Self::Red => "#ef4444",
+            Self::Green => "#10b981",
+            Self::Yellow => "#f59e0b",
+            Self::Purple => "#8b5cf6",
+            Self::Cyan => "#06b6d4",
+        }
+    }
+}
+
 /// Timeline marker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimelineMarker {
@@ -210,6 +235,14 @@ impl VideoProject {
 
     pub fn total_clips(&self) -> usize {
         self.tracks.iter().map(|t| t.clips.len()).sum()
+    }
+
+    /// Finds all timeline markers falling within an inclusive time range `[start, end]`.
+    pub fn find_markers_in_range(&self, start: f64, end: f64) -> Vec<&TimelineMarker> {
+        self.markers
+            .iter()
+            .filter(|m| m.time >= start && m.time <= end)
+            .collect()
     }
 }
 
@@ -1867,5 +1900,39 @@ mod tests {
         let (end_on_cut, end_end) = calculate_transition_overlap(10.0, 2.0, "EndOnCut");
         assert_eq!(end_on_cut, 8.0);
         assert_eq!(end_end, 10.0);
+    }
+
+    #[test]
+    fn timeline_markers_and_color_presets() {
+        let mut proj = VideoProject::new("vp1", "Test Video");
+        assert_eq!(MarkerColor::Blue.as_hex(), "#3b82f6");
+        assert_eq!(MarkerColor::Red.as_hex(), "#ef4444");
+
+        let m1 = TimelineMarker {
+            id: "m1".into(),
+            time: 5.0,
+            label: "Cut 1".into(),
+            color: MarkerColor::Red.as_hex().into(),
+        };
+        let m2 = TimelineMarker {
+            id: "m2".into(),
+            time: 15.0,
+            label: "Cut 2".into(),
+            color: MarkerColor::Green.as_hex().into(),
+        };
+
+        proj.add_marker(m1).unwrap();
+        proj.add_marker(m2).unwrap();
+
+        // Sorted by time
+        assert_eq!(proj.markers[0].id, "m1");
+        assert_eq!(proj.markers[1].id, "m2");
+
+        let in_range = proj.find_markers_in_range(0.0, 10.0);
+        assert_eq!(in_range.len(), 1);
+        assert_eq!(in_range[0].id, "m1");
+
+        assert!(proj.remove_marker("m1"));
+        assert_eq!(proj.markers.len(), 1);
     }
 }

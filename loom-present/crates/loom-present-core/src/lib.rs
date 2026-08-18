@@ -463,6 +463,83 @@ pub fn apply_master_to_slide(slide: &mut Slide, master: &MasterSlide) {
     slide.bg_color = master.bg_color.clone();
 }
 
+/// Type of scene node within a slide hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SceneNodeType {
+    Shape,
+    Text,
+    Image,
+    Group,
+}
+
+/// Hierarchical scene graph node with local transforms and composite bounding boxes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneNode {
+    pub id: String,
+    pub node_type: SceneNodeType,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub rotation_deg: f32,
+    pub children: Vec<SceneNode>,
+}
+
+impl SceneNode {
+    pub fn new(
+        id: impl Into<String>,
+        node_type: SceneNodeType,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            node_type,
+            x,
+            y,
+            width: w,
+            height: h,
+            rotation_deg: 0.0,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn add_child(&mut self, child: SceneNode) {
+        self.children.push(child);
+    }
+
+    /// Computes the accumulated global bounding box (x, y, w, h) in canvas coordinates.
+    pub fn calculate_global_bounds(
+        &self,
+        parent_offset_x: f32,
+        parent_offset_y: f32,
+    ) -> (f32, f32, f32, f32) {
+        let global_x = parent_offset_x + self.x;
+        let global_y = parent_offset_y + self.y;
+
+        if self.children.is_empty() {
+            return (global_x, global_y, self.width, self.height);
+        }
+
+        let mut min_x = global_x;
+        let mut min_y = global_y;
+        let mut max_x = global_x + self.width;
+        let mut max_y = global_y + self.height;
+
+        for child in &self.children {
+            let (cx, cy, cw, ch) = child.calculate_global_bounds(global_x, global_y);
+            min_x = min_x.min(cx);
+            min_y = min_y.min(cy);
+            max_x = max_x.max(cx + cw);
+            max_y = max_y.max(cy + ch);
+        }
+
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1408,5 +1485,25 @@ mod tests {
 
         apply_master_to_slide(&mut slide, &master);
         assert_eq!(slide.bg_color, "#1e1e2e");
+    }
+
+    #[test]
+    fn scene_node_hierarchical_bounds() {
+        let mut root_group = SceneNode::new("g1", SceneNodeType::Group, 10.0, 10.0, 0.0, 0.0);
+        let child1 = SceneNode::new("c1", SceneNodeType::Shape, 5.0, 5.0, 50.0, 50.0);
+        let child2 = SceneNode::new("c2", SceneNodeType::Text, 20.0, 30.0, 100.0, 40.0);
+
+        root_group.add_child(child1);
+        root_group.add_child(child2);
+
+        // Global bounds:
+        // child1: x = 10+5=15, y = 10+5=15, right = 15+50=65, bottom = 15+50=65
+        // child2: x = 10+20=30, y = 10+30=40, right = 30+100=130, bottom = 40+40=80
+        // Combined min_x = 10 (root), max_x = 130 -> width = 120, min_y = 10, max_y = 80 -> height = 70
+        let (gx, gy, gw, gh) = root_group.calculate_global_bounds(0.0, 0.0);
+        assert_eq!(gx, 10.0);
+        assert_eq!(gy, 10.0);
+        assert_eq!(gw, 120.0);
+        assert_eq!(gh, 70.0);
     }
 }

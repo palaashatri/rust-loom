@@ -710,6 +710,71 @@ pub fn interpolate_polygon_points(
     Ok(points)
 }
 
+/// Realtime playback clock and transport timebase for motion compositions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositionClock {
+    pub fps: f64,
+    pub current_frame: u64,
+    pub in_frame: u64,
+    pub out_frame: u64,
+    pub is_playing: bool,
+    pub loop_playback: bool,
+}
+
+impl CompositionClock {
+    pub fn new(fps: f64, out_frame: u64) -> Self {
+        Self {
+            fps: if fps > 0.0 { fps } else { 60.0 },
+            current_frame: 0,
+            in_frame: 0,
+            out_frame: out_frame.max(1),
+            is_playing: false,
+            loop_playback: true,
+        }
+    }
+
+    /// Converts frame number to timestamp in seconds.
+    pub fn frame_to_seconds(&self, frame: u64) -> f64 {
+        frame as f64 / self.fps
+    }
+
+    /// Converts seconds to closest frame number.
+    pub fn seconds_to_frame(&self, seconds: f64) -> u64 {
+        (seconds.max(0.0) * self.fps).round() as u64
+    }
+
+    /// Steps forward by 1 frame, respecting in/out points and loop mode.
+    pub fn step_forward(&mut self) -> u64 {
+        if self.current_frame >= self.out_frame {
+            if self.loop_playback {
+                self.current_frame = self.in_frame;
+            }
+        } else {
+            self.current_frame += 1;
+        }
+        self.current_frame
+    }
+
+    /// Steps backward by 1 frame, bounded by in point.
+    pub fn step_backward(&mut self) -> u64 {
+        if self.current_frame > self.in_frame {
+            self.current_frame -= 1;
+        }
+        self.current_frame
+    }
+
+    /// Seeks to a specific frame number clamped within composition bounds.
+    pub fn seek_frame(&mut self, frame: u64) {
+        self.current_frame = frame.clamp(self.in_frame, self.out_frame);
+    }
+
+    /// Seeks to a timestamp in seconds.
+    pub fn seek_seconds(&mut self, seconds: f64) {
+        let frame = self.seconds_to_frame(seconds);
+        self.seek_frame(frame);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1045,5 +1110,22 @@ mod tests {
         // Mismatched lengths should error
         let triangle = vec![[0.0, 0.0], [5.0, 10.0], [10.0, 0.0]];
         assert!(interpolate_polygon_points(&square, &triangle, 0.5).is_err());
+    }
+
+    #[test]
+    fn composition_clock_transport() {
+        let mut clock = CompositionClock::new(60.0, 120);
+        assert_eq!(clock.frame_to_seconds(60), 1.0);
+        assert_eq!(clock.seconds_to_frame(2.0), 120);
+
+        assert_eq!(clock.step_forward(), 1);
+        assert_eq!(clock.step_forward(), 2);
+        assert_eq!(clock.step_backward(), 1);
+
+        clock.seek_frame(120);
+        assert_eq!(clock.current_frame, 120);
+
+        // Step forward from out_frame with loop_playback = true should wrap to in_frame (0)
+        assert_eq!(clock.step_forward(), 0);
     }
 }

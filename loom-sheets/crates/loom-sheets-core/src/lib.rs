@@ -530,6 +530,66 @@ pub fn shift_formula_references(formula: &str, delta_cols: i32, delta_rows: i32)
     result
 }
 
+/// Dependency graph tracking precedent and dependent relationships between cells.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DependencyGraph {
+    /// Maps precedent cells to the set of dependent cells that rely on them.
+    precedent_to_dependents: std::collections::HashMap<CellRef, Vec<CellRef>>,
+}
+
+impl DependencyGraph {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a dependency: `dependent` cell relies on `precedent` cell.
+    pub fn add_dependency(&mut self, dependent: CellRef, precedent: CellRef) {
+        let dependents = self.precedent_to_dependents.entry(precedent).or_default();
+        if !dependents.contains(&dependent) {
+            dependents.push(dependent);
+        }
+    }
+
+    /// Clears all dependencies where `dependent` was relying on precedents.
+    pub fn remove_dependent(&mut self, dependent: &CellRef) {
+        for dependents in self.precedent_to_dependents.values_mut() {
+            dependents.retain(|d| d != dependent);
+        }
+    }
+
+    /// Gets immediate dependents of a modified precedent cell.
+    pub fn get_direct_dependents(&self, precedent: &CellRef) -> &[CellRef] {
+        self.precedent_to_dependents
+            .get(precedent)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Computes a topological recalculation order for dirty cells and all their transitive dependents.
+    pub fn get_recalculation_order(&self, dirty_roots: &[CellRef]) -> Vec<CellRef> {
+        let mut order = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        for root in dirty_roots {
+            queue.push_back(*root);
+        }
+
+        while let Some(current) = queue.pop_front() {
+            if visited.insert(current) {
+                order.push(current);
+                if let Some(dependents) = self.precedent_to_dependents.get(&current) {
+                    for dep in dependents {
+                        queue.push_back(*dep);
+                    }
+                }
+            }
+        }
+
+        order
+    }
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -2838,5 +2898,25 @@ mod tests {
 
         // Non-formula string unchanged
         assert_eq!(shift_formula_references("Hello World", 1, 1), "Hello World");
+    }
+
+    #[test]
+    fn dependency_graph_and_recalculation_order() {
+        let mut graph = DependencyGraph::new();
+        let a1 = CellRef::parse("A1").unwrap();
+        let b1 = CellRef::parse("B1").unwrap();
+        let c1 = CellRef::parse("C1").unwrap();
+
+        // B1 depends on A1 (=A1 * 2)
+        graph.add_dependency(b1, a1);
+        // C1 depends on B1 (=B1 + 10)
+        graph.add_dependency(c1, b1);
+
+        assert_eq!(graph.get_direct_dependents(&a1), &[b1]);
+        assert_eq!(graph.get_direct_dependents(&b1), &[c1]);
+
+        // Recalculation order starting from dirty cell A1
+        let order = graph.get_recalculation_order(&[a1]);
+        assert_eq!(order, vec![a1, b1, c1]);
     }
 }

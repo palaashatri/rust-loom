@@ -486,6 +486,58 @@ impl StreamMapping {
     }
 }
 
+/// Structured video filter nodes for constructing FFmpeg `-vf` filter chains.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VideoFilter {
+    Scale { width: u32, height: u32 },
+    Fps { fps: u32 },
+    PixelFormat { format: String },
+    Deinterlace,
+    Custom { filter_expr: String },
+}
+
+impl VideoFilter {
+    pub fn to_filter_string(&self) -> String {
+        match self {
+            Self::Scale { width, height } => format!("scale={}:{}", width, height),
+            Self::Fps { fps } => format!("fps={}", fps),
+            Self::PixelFormat { format } => format!("format={}", format),
+            Self::Deinterlace => "yadif=0:-1:0".to_string(),
+            Self::Custom { filter_expr } => filter_expr.clone(),
+        }
+    }
+}
+
+/// Sequence of video filters concatenated into a single filter graph.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FilterChain {
+    pub filters: Vec<VideoFilter>,
+}
+
+impl FilterChain {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, filter: VideoFilter) {
+        self.filters.push(filter);
+    }
+
+    /// Generates the `-vf <filtergraph>` arguments if filters are present.
+    pub fn generate_args(&self) -> Vec<String> {
+        if self.filters.is_empty() {
+            return Vec::new();
+        }
+        let graph = self
+            .filters
+            .iter()
+            .map(|f| f.to_filter_string())
+            .collect::<Vec<String>>()
+            .join(",");
+        vec!["-vf".into(), graph]
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1256,5 +1308,23 @@ mod tests {
             args,
             vec!["-map", "0:v:0", "-map", "0:a:1", "-map", "0:s:0"]
         );
+    }
+
+    #[test]
+    fn filter_chain_argument_generation() {
+        let mut chain = FilterChain::new();
+        assert!(chain.generate_args().is_empty());
+
+        chain.add(VideoFilter::Scale {
+            width: 1280,
+            height: 720,
+        });
+        chain.add(VideoFilter::Fps { fps: 30 });
+        chain.add(VideoFilter::PixelFormat {
+            format: "yuv420p".into(),
+        });
+
+        let args = chain.generate_args();
+        assert_eq!(args, vec!["-vf", "scale=1280:720,fps=30,format=yuv420p"]);
     }
 }

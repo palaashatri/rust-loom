@@ -544,6 +544,75 @@ impl FourBandEq {
     }
 }
 
+/// Aux send routing descriptor for sending a portion of track signal to an effects bus.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuxSend {
+    pub target_bus_id: String,
+    pub send_gain_db: f32,
+    pub pre_fader: bool,
+    pub enabled: bool,
+}
+
+impl AuxSend {
+    pub fn new(target_bus_id: impl Into<String>, send_gain_db: f32) -> Self {
+        Self {
+            target_bus_id: target_bus_id.into(),
+            send_gain_db: send_gain_db.clamp(-96.0, 12.0),
+            pre_fader: false,
+            enabled: true,
+        }
+    }
+
+    /// Calculates linear send multiplier.
+    pub fn linear_gain(&self) -> f32 {
+        if self.enabled {
+            db_to_linear(self.send_gain_db)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Multitrack mixer bus with volume, pan, and auxiliary send routing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MixerBus {
+    pub id: String,
+    pub name: String,
+    pub volume_db: f32,
+    pub pan: f32,
+    pub muted: bool,
+    pub solo: bool,
+    pub sends: Vec<AuxSend>,
+}
+
+impl MixerBus {
+    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            volume_db: 0.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            sends: Vec::new(),
+        }
+    }
+
+    /// Returns linear volume gain accounting for mute state.
+    pub fn effective_gain(&self) -> f32 {
+        if self.muted {
+            0.0
+        } else {
+            db_to_linear(self.volume_db)
+        }
+    }
+
+    /// Appends an auxiliary send to this bus.
+    pub fn add_send(&mut self, send: AuxSend) {
+        self.sends.push(send);
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1670,5 +1739,28 @@ mod studio_runtime_tests {
 
         eq.process(&mut buffer);
         assert!(buffer.samples[0] > 0.35); // 0.2 * ~2.0 = ~0.4
+    }
+
+    #[test]
+    fn mixer_bus_and_aux_sends() {
+        let mut bus = MixerBus::new("b1", "Reverb Bus");
+        assert_eq!(bus.effective_gain(), 1.0);
+
+        bus.volume_db = -6.0;
+        assert!((bus.effective_gain() - 0.501).abs() < 0.01);
+
+        bus.muted = true;
+        assert_eq!(bus.effective_gain(), 0.0);
+
+        let send = AuxSend::new("b1", 0.0);
+        assert_eq!(send.linear_gain(), 1.0);
+
+        let send_muted = AuxSend {
+            target_bus_id: "b1".into(),
+            send_gain_db: 0.0,
+            pre_fader: false,
+            enabled: false,
+        };
+        assert_eq!(send_muted.linear_gain(), 0.0);
     }
 }
