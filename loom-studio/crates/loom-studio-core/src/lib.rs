@@ -286,6 +286,65 @@ pub fn load_studio_project(bytes: &[u8]) -> Result<StudioProject, String> {
     serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
 }
 
+/// Biquad IIR filter coefficients for parametric equalizer bands.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BiquadCoefficients {
+    pub b0: f32,
+    pub b1: f32,
+    pub b2: f32,
+    pub a1: f32,
+    pub a2: f32,
+}
+
+impl BiquadCoefficients {
+    /// Peaking EQ filter band (Audio EQ Cookbook).
+    pub fn peaking_eq(sample_rate: u32, freq_hz: f32, gain_db: f32, q: f32) -> Self {
+        let sr = sample_rate.max(1) as f32;
+        let w0 = 2.0 * std::f32::consts::PI * freq_hz.clamp(20.0, sr * 0.49) / sr;
+        let a = 10.0_f32.powf(gain_db / 40.0);
+        let alpha = w0.sin() / (2.0 * q.max(0.1));
+        let cos_w0 = w0.cos();
+
+        let b0 = 1.0 + alpha * a;
+        let b1 = -2.0 * cos_w0;
+        let b2 = 1.0 - alpha * a;
+        let a0 = 1.0 + alpha / a;
+        let a1 = -2.0 * cos_w0;
+        let a2 = 1.0 - alpha / a;
+
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+        }
+    }
+
+    /// Low-pass 2nd order Butterworth filter band.
+    pub fn low_pass(sample_rate: u32, cutoff_hz: f32, q: f32) -> Self {
+        let sr = sample_rate.max(1) as f32;
+        let w0 = 2.0 * std::f32::consts::PI * cutoff_hz.clamp(20.0, sr * 0.49) / sr;
+        let alpha = w0.sin() / (2.0 * q.max(0.1));
+        let cos_w0 = w0.cos();
+
+        let b0 = (1.0 - cos_w0) / 2.0;
+        let b1 = 1.0 - cos_w0;
+        let b2 = (1.0 - cos_w0) / 2.0;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cos_w0;
+        let a2 = 1.0 - alpha;
+
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1320,5 +1379,19 @@ mod studio_runtime_tests {
         assert!(buffer.samples[1] < 0.5); // tanh(0.5) ~ 0.462
         assert!(buffer.samples[2] < 1.0); // tanh(1.5) < 1.0
         assert!(buffer.samples[3] < 1.0); // tanh(3.0) < 1.0
+    }
+
+    #[test]
+    fn biquad_filter_coefficients() {
+        let eq = BiquadCoefficients::peaking_eq(48000, 1000.0, 6.0, 1.0);
+        assert!(eq.b0.is_finite());
+        assert!(eq.b1.is_finite());
+        assert!(eq.b2.is_finite());
+        assert!(eq.a1.is_finite());
+        assert!(eq.a2.is_finite());
+
+        let lp = BiquadCoefficients::low_pass(48000, 5000.0, 0.707);
+        assert!(lp.b0 > 0.0);
+        assert!(lp.b1 > 0.0);
     }
 }

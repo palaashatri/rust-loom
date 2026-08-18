@@ -347,6 +347,90 @@ impl RgbaImage {
         Ok(output)
     }
 
+    /// Performs a two-pass (horizontal + vertical) box blur with a specified pixel radius.
+    pub fn box_blur(&self, radius: u32) -> Result<Self, String> {
+        if radius == 0 {
+            return Ok(self.clone());
+        }
+        let w = self.width as usize;
+        let h = self.height as usize;
+        let rad = radius as usize;
+
+        // Pass 1: Horizontal Blur
+        let mut temp = Self::transparent(self.width, self.height)?;
+        for y in 0..h {
+            for x in 0..w {
+                let x_start = x.saturating_sub(rad);
+                let x_end = (x + rad).min(w - 1);
+                let count = (x_end - x_start + 1) as u32;
+
+                let mut r_sum = 0u32;
+                let mut g_sum = 0u32;
+                let mut b_sum = 0u32;
+                let mut a_sum = 0u32;
+
+                for kx in x_start..=x_end {
+                    let p = self
+                        .pixel(kx as u32, y as u32)
+                        .expect("pixel within bounds");
+                    r_sum += p[0] as u32;
+                    g_sum += p[1] as u32;
+                    b_sum += p[2] as u32;
+                    a_sum += p[3] as u32;
+                }
+
+                temp.set_pixel(
+                    x as u32,
+                    y as u32,
+                    [
+                        (r_sum / count) as u8,
+                        (g_sum / count) as u8,
+                        (b_sum / count) as u8,
+                        (a_sum / count) as u8,
+                    ],
+                );
+            }
+        }
+
+        // Pass 2: Vertical Blur
+        let mut output = Self::transparent(self.width, self.height)?;
+        for y in 0..h {
+            let y_start = y.saturating_sub(rad);
+            let y_end = (y + rad).min(h - 1);
+            let count = (y_end - y_start + 1) as u32;
+
+            for x in 0..w {
+                let mut r_sum = 0u32;
+                let mut g_sum = 0u32;
+                let mut b_sum = 0u32;
+                let mut a_sum = 0u32;
+
+                for ky in y_start..=y_end {
+                    let p = temp
+                        .pixel(x as u32, ky as u32)
+                        .expect("pixel within bounds");
+                    r_sum += p[0] as u32;
+                    g_sum += p[1] as u32;
+                    b_sum += p[2] as u32;
+                    a_sum += p[3] as u32;
+                }
+
+                output.set_pixel(
+                    x as u32,
+                    y as u32,
+                    [
+                        (r_sum / count) as u8,
+                        (g_sum / count) as u8,
+                        (b_sum / count) as u8,
+                        (a_sum / count) as u8,
+                    ],
+                );
+            }
+        }
+
+        Ok(output)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -1260,5 +1344,22 @@ mod tests {
         // Threshold at 100 -> [255, 255, 0, 0]
         canvas.apply_mask_threshold(&layer_id, 100).unwrap();
         assert_eq!(canvas.layer_mask(&layer_id).unwrap(), &[255, 255, 0, 0]);
+    }
+
+    #[test]
+    fn box_blur_smoothing() {
+        let mut img = RgbaImage::transparent(3, 3).unwrap();
+        // Set center pixel to white
+        img.set_pixel(1, 1, [255, 255, 255, 255]);
+
+        let blurred = img.box_blur(1).unwrap();
+        // Corner pixels now receive spread intensity > 0
+        let corner = blurred.pixel(0, 0).unwrap();
+        assert!(corner[0] > 0);
+        assert!(corner[3] > 0);
+
+        // Radius 0 returns exact clone
+        let clone_blur = img.box_blur(0).unwrap();
+        assert_eq!(clone_blur.pixel(1, 1).unwrap(), [255, 255, 255, 255]);
     }
 }

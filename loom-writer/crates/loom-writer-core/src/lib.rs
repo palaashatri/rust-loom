@@ -340,6 +340,35 @@ impl WriterDocument {
         }
     }
 
+    /// Locates word boundaries `(start_char, end_char)` for a character position in a block.
+    pub fn find_word_boundaries(
+        &self,
+        block_index: usize,
+        char_offset: usize,
+    ) -> Option<(usize, usize)> {
+        let block = self.blocks.get(block_index)?;
+        let chars: Vec<char> = block.text.as_str().chars().collect();
+        if chars.is_empty() {
+            return Some((0, 0));
+        }
+        let pos = char_offset.min(chars.len().saturating_sub(1));
+
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+        let target_is_word = is_word_char(chars[pos]);
+
+        let mut start = pos;
+        while start > 0 && is_word_char(chars[start - 1]) == target_is_word {
+            start -= 1;
+        }
+
+        let mut end = pos;
+        while end < chars.len() && is_word_char(chars[end]) == target_is_word {
+            end += 1;
+        }
+
+        Some((start, end))
+    }
+
     /// Estimate long-form document metrics including page count, word count, character count, and reading time.
     pub fn estimate_pagination(&self) -> PaginationMetrics {
         let plain = self.plain_text();
@@ -2576,5 +2605,19 @@ mod tests {
         assert!(stats.char_count > 40);
         assert!(stats.char_count_no_spaces < stats.char_count);
         assert!(stats.reading_time_minutes > 0.0);
+    }
+
+    #[test]
+    fn find_word_boundaries_expansion() {
+        let mut doc = WriterDocument::new("doc-wb", "Word Boundaries");
+        doc.push(RichBlock::new(1, "p", "The quick brown fox."));
+
+        // Position on 'u' in "quick" (char index 5)
+        let bounds = doc.find_word_boundaries(0, 5).unwrap();
+        assert_eq!(bounds, (4, 9)); // "quick" spans [4..9]
+
+        // Position on space between "quick" and "brown" (char index 9)
+        let space_bounds = doc.find_word_boundaries(0, 9).unwrap();
+        assert_eq!(space_bounds, (9, 10)); // single space
     }
 }

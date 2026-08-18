@@ -13,6 +13,39 @@ pub struct Keyframe {
     pub easing: String,
 }
 
+/// Standard composition resolution preset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompositionPreset {
+    Fhd1080p,
+    Uhd4k,
+    Square1080,
+    Vertical1080x1920,
+    Cinema4k,
+}
+
+impl CompositionPreset {
+    /// Returns `(width, height)` in pixels.
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            CompositionPreset::Fhd1080p => (1920, 1080),
+            CompositionPreset::Uhd4k => (3840, 2160),
+            CompositionPreset::Square1080 => (1080, 1080),
+            CompositionPreset::Vertical1080x1920 => (1080, 1920),
+            CompositionPreset::Cinema4k => (4096, 2160),
+        }
+    }
+
+    /// Aspect ratio as `(num, den)`.
+    pub fn aspect_ratio(&self) -> (u32, u32) {
+        match self {
+            CompositionPreset::Fhd1080p | CompositionPreset::Uhd4k => (16, 9),
+            CompositionPreset::Square1080 => (1, 1),
+            CompositionPreset::Vertical1080x1920 => (9, 16),
+            CompositionPreset::Cinema4k => (256, 135),
+        }
+    }
+}
+
 /// Vector shape geometry for motion graphic shapes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -813,5 +846,20 @@ mod tests {
         let (x, y) = cubic_bezier_2d(p_start, (30.0, 50.0), (70.0, 150.0), p_end, 0.5);
         assert_eq!(x, 50.0);
         assert_eq!(y, 100.0);
+    }
+
+    #[test]
+    fn composition_preset_dimensions_and_aspect_ratios() {
+        assert_eq!(CompositionPreset::Fhd1080p.dimensions(), (1920, 1080));
+        assert_eq!(CompositionPreset::Fhd1080p.aspect_ratio(), (16, 9));
+
+        assert_eq!(CompositionPreset::Square1080.dimensions(), (1080, 1080));
+        assert_eq!(CompositionPreset::Square1080.aspect_ratio(), (1, 1));
+
+        assert_eq!(
+            CompositionPreset::Vertical1080x1920.dimensions(),
+            (1080, 1920)
+        );
+        assert_eq!(CompositionPreset::Vertical1080x1920.aspect_ratio(), (9, 16));
     }
 }

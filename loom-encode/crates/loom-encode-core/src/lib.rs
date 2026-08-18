@@ -280,6 +280,41 @@ pub fn format_output_template(
     result
 }
 
+/// Calculates required video bitrate (in kbps) to fit within a target file size in megabytes.
+pub fn calculate_target_bitrate_kbps(
+    target_file_size_mb: f64,
+    duration_secs: f64,
+    audio_bitrate_kbps: u32,
+) -> Result<u32, String> {
+    if target_file_size_mb <= 0.0 || duration_secs <= 0.0 {
+        return Err("target file size and duration must be positive".into());
+    }
+    let total_kilobits = target_file_size_mb * 8192.0;
+    let total_bitrate_kbps = total_kilobits / duration_secs;
+    let video_bitrate = total_bitrate_kbps - audio_bitrate_kbps as f64;
+    if video_bitrate < 50.0 {
+        return Err("target size too small for specified duration and audio bitrate".into());
+    }
+    Ok(video_bitrate.round() as u32)
+}
+
+/// Computes a simplified aspect ratio string (e.g. "16:9", "4:3", "1:1").
+pub fn aspect_ratio_string(width: u32, height: u32) -> String {
+    if width == 0 || height == 0 {
+        return "0:0".into();
+    }
+    fn gcd(mut a: u32, mut b: u32) -> u32 {
+        while b != 0 {
+            let temp = b;
+            b = a % b;
+            a = temp;
+        }
+        a
+    }
+    let d = gcd(width, height);
+    format!("{}:{}", width / d, height / d)
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -966,5 +1001,18 @@ mod tests {
         // Without extension placeholder
         let out2 = format_output_template("{name}_converted", "Clip1.mkv", "ProRes", "mov");
         assert_eq!(out2, "Clip1_converted.mov");
+    }
+
+    #[test]
+    fn bitrate_calculation_and_aspect_ratios() {
+        // Target: 100 MB, 60 seconds duration, 192 kbps audio -> video bitrate ~ 13,461 kbps
+        let v_br = calculate_target_bitrate_kbps(100.0, 60.0, 192).unwrap();
+        assert!(v_br > 13000 && v_br < 14000);
+
+        // Aspect ratios
+        assert_eq!(aspect_ratio_string(1920, 1080), "16:9");
+        assert_eq!(aspect_ratio_string(1080, 1080), "1:1");
+        assert_eq!(aspect_ratio_string(1440, 1080), "4:3");
+        assert_eq!(aspect_ratio_string(0, 1080), "0:0");
     }
 }

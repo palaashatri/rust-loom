@@ -267,7 +267,42 @@ impl Sheet {
         self.freeze_rows = 0;
         self.freeze_cols = 0;
     }
+}
 
+/// Formats a numeric value as currency (e.g. "$1,234.50").
+pub fn format_number_currency(value: f64, symbol: &str, decimals: usize) -> String {
+    let sign = if value < 0.0 { "-" } else { "" };
+    let abs_val = value.abs();
+    let int_part = abs_val.trunc() as u64;
+    let frac_part = abs_val.fract();
+
+    // Group integer part by thousands
+    let int_str = int_part.to_string();
+    let mut grouped = String::new();
+    let chars: Vec<char> = int_str.chars().collect();
+    let len = chars.len();
+    for (i, c) in chars.into_iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+
+    if decimals == 0 {
+        format!("{sign}{symbol}{grouped}")
+    } else {
+        let frac_str = format!("{:.1$}", frac_part, decimals);
+        let frac_formatted = frac_str.trim_start_matches("0.");
+        format!("{sign}{symbol}{grouped}.{frac_formatted}")
+    }
+}
+
+/// Formats a fractional numeric value as percentage (e.g. "25.0%").
+pub fn format_number_percentage(value: f64, decimals: usize) -> String {
+    format!("{:.1$}%", value * 100.0, decimals)
+}
+
+impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
         if let Some(r) = CellRef::parse(a1) {
@@ -2488,5 +2523,15 @@ mod tests {
             sheet.cell_alignment(CellRef::parse("C3").unwrap()),
             CellAlignment::Right
         );
+    }
+
+    #[test]
+    fn currency_and_percentage_formatting() {
+        assert_eq!(format_number_currency(1234.56, "$", 2), "$1,234.56");
+        assert_eq!(format_number_currency(-999999.0, "£", 0), "-£999,999");
+        assert_eq!(format_number_currency(0.0, "$", 2), "$0.00");
+
+        assert_eq!(format_number_percentage(0.255, 1), "25.5%");
+        assert_eq!(format_number_percentage(1.0, 0), "100%");
     }
 }

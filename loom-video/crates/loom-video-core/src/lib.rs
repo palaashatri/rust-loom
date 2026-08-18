@@ -528,6 +528,37 @@ impl Track {
     }
 }
 
+/// Computes min and max peak pairs `(min_sample, max_sample)` decimated into `target_bins` for fast timeline waveform rendering.
+pub fn compute_waveform_peaks(samples: &[f32], target_bins: usize) -> Vec<(f32, f32)> {
+    if samples.is_empty() || target_bins == 0 {
+        return Vec::new();
+    }
+    let total_samples = samples.len();
+    let bin_size = (total_samples as f64 / target_bins as f64).max(1.0);
+    let mut peaks = Vec::with_capacity(target_bins);
+
+    for bin in 0..target_bins {
+        let start = (bin as f64 * bin_size) as usize;
+        let end = (((bin + 1) as f64 * bin_size) as usize).min(total_samples);
+        if start >= total_samples {
+            break;
+        }
+        let slice = &samples[start..end.max(start + 1)];
+        let mut min_val = 0.0f32;
+        let mut max_val = 0.0f32;
+        for &s in slice {
+            if s < min_val {
+                min_val = s;
+            }
+            if s > max_val {
+                max_val = s;
+            }
+        }
+        peaks.push((min_val, max_val));
+    }
+    peaks
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -1556,5 +1587,20 @@ mod tests {
         assert_eq!(moved, 2);
         assert_eq!(track.clips[0].start_time, 0.0);
         assert_eq!(track.clips[1].start_time, 3.0);
+    }
+
+    #[test]
+    fn waveform_peak_decimation() {
+        let samples = vec![0.1, -0.8, 0.9, -0.2, 0.5, -0.5, 0.3, -0.1];
+        let peaks = compute_waveform_peaks(&samples, 2);
+        assert_eq!(peaks.len(), 2);
+
+        // First half: min is -0.8, max is 0.9
+        assert_eq!(peaks[0].0, -0.8);
+        assert_eq!(peaks[0].1, 0.9);
+
+        // Second half: min is -0.5, max is 0.5
+        assert_eq!(peaks[1].0, -0.5);
+        assert_eq!(peaks[1].1, 0.5);
     }
 }

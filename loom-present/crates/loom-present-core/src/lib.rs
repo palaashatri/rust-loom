@@ -299,6 +299,27 @@ pub enum SlideLayoutPreset {
     BigStat,
 }
 
+/// Predefined color themes for presentation decks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeckThemePreset {
+    ModernDark,
+    ClassicLight,
+    VibrantGradient,
+    MinimalistSlate,
+}
+
+impl DeckThemePreset {
+    /// Returns (background_hex, primary_text_hex, accent_hex).
+    pub fn palette(&self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            DeckThemePreset::ModernDark => ("#0F172A", "#F8FAFC", "#38BDF8"),
+            DeckThemePreset::ClassicLight => ("#FFFFFF", "#0F172A", "#2563EB"),
+            DeckThemePreset::VibrantGradient => ("#1E1B4B", "#FDF4FF", "#C084FC"),
+            DeckThemePreset::MinimalistSlate => ("#F1F5F9", "#1E293B", "#64748B"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1175,5 +1196,17 @@ mod tests {
 
         // Missing elements return None
         assert!(slide.elements_bounding_box(&["e99"]).is_none());
+    }
+
+    #[test]
+    fn deck_theme_presets() {
+        let (dark_bg, dark_fg, dark_accent) = DeckThemePreset::ModernDark.palette();
+        assert!(dark_bg.starts_with('#'));
+        assert!(dark_fg.starts_with('#'));
+        assert!(dark_accent.starts_with('#'));
+
+        let (light_bg, light_fg, _) = DeckThemePreset::ClassicLight.palette();
+        assert_eq!(light_bg, "#FFFFFF");
+        assert_eq!(light_fg, "#0F172A");
     }
 }
