@@ -345,6 +345,25 @@ impl BiquadCoefficients {
     }
 }
 
+/// Crossfade interpolation curve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CrossfadeCurve {
+    Linear,
+    EqualPower,
+}
+
+/// Calculates gain multipliers `(fade_out_gain, fade_in_gain)` for progress `t` in `[0, 1]`.
+pub fn calculate_crossfade_gains(curve: CrossfadeCurve, progress: f32) -> (f32, f32) {
+    let t = progress.clamp(0.0, 1.0);
+    match curve {
+        CrossfadeCurve::Linear => (1.0 - t, t),
+        CrossfadeCurve::EqualPower => {
+            let angle = t * std::f32::consts::FRAC_PI_2;
+            (angle.cos(), angle.sin())
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1393,5 +1412,20 @@ mod studio_runtime_tests {
         let lp = BiquadCoefficients::low_pass(48000, 5000.0, 0.707);
         assert!(lp.b0 > 0.0);
         assert!(lp.b1 > 0.0);
+    }
+
+    #[test]
+    fn audio_crossfade_curves() {
+        // Linear crossfade
+        let (out_lin, in_lin) = calculate_crossfade_gains(CrossfadeCurve::Linear, 0.5);
+        assert_eq!(out_lin, 0.5);
+        assert_eq!(in_lin, 0.5);
+
+        // Equal-power crossfade at midpoint: cos(pi/4) = sin(pi/4) = 1/sqrt(2) ~ 0.707 (-3 dB)
+        let (out_ep, in_ep) = calculate_crossfade_gains(CrossfadeCurve::EqualPower, 0.5);
+        assert!((out_ep - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert!((in_ep - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        // Power sum (out^2 + in^2) equals 1.0 (constant loudness)
+        assert!((out_ep * out_ep + in_ep * in_ep - 1.0).abs() < 1e-4);
     }
 }

@@ -588,6 +588,38 @@ pub fn cubic_bezier_2d(
     )
 }
 
+/// Snaps a timeline time to nearby keyframe targets or frame boundaries within a tolerance threshold.
+pub fn snap_timeline_time(
+    time_secs: f32,
+    fps: f32,
+    snap_targets: &[f32],
+    tolerance_secs: f32,
+) -> f32 {
+    let mut best_snap = time_secs;
+    let mut min_diff = tolerance_secs;
+    let mut found_target = false;
+
+    for &target in snap_targets {
+        let diff = (time_secs - target).abs();
+        if diff <= min_diff {
+            min_diff = diff;
+            best_snap = target;
+            found_target = true;
+        }
+    }
+
+    if !found_target && fps > 0.0 {
+        let frame_duration = 1.0 / fps;
+        let nearest_frame_time = (time_secs * fps).round() * frame_duration;
+        let frame_diff = (time_secs - nearest_frame_time).abs();
+        if frame_diff < tolerance_secs {
+            best_snap = nearest_frame_time;
+        }
+    }
+
+    best_snap
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -861,5 +893,19 @@ mod tests {
             (1080, 1920)
         );
         assert_eq!(CompositionPreset::Vertical1080x1920.aspect_ratio(), (9, 16));
+    }
+
+    #[test]
+    fn timeline_time_snapping() {
+        // Snap to target at 2.0s with tolerance 0.1s
+        let targets = vec![1.0, 2.0, 3.5];
+        let snapped = snap_timeline_time(2.04, 30.0, &targets, 0.1);
+        assert_eq!(snapped, 2.0);
+
+        // Snap to nearest frame at 30fps (frame duration ~ 0.0333s)
+        // 1.035s is closer to frame 31 (1.0333s) than to no target
+        let empty_targets: Vec<f32> = Vec::new();
+        let frame_snapped = snap_timeline_time(1.035, 30.0, &empty_targets, 0.05);
+        assert!((frame_snapped - 1.033333).abs() < 1e-4);
     }
 }

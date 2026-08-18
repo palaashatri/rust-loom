@@ -215,6 +215,10 @@ pub struct Sheet {
     pub freeze_rows: u32,
     /// Frozen left columns count.
     pub freeze_cols: u32,
+    /// Custom column widths in pixels keyed by column index.
+    pub col_widths: BTreeMap<u32, f32>,
+    /// Custom row heights in pixels keyed by row index.
+    pub row_heights: BTreeMap<u32, f32>,
 }
 
 impl Sheet {
@@ -226,7 +230,37 @@ impl Sheet {
             alignments: BTreeMap::new(),
             freeze_rows: 0,
             freeze_cols: 0,
+            col_widths: BTreeMap::new(),
+            row_heights: BTreeMap::new(),
         }
+    }
+
+    /// Sets custom column width for column index.
+    pub fn set_col_width(&mut self, col: u32, width: f32) {
+        if width > 0.0 {
+            self.col_widths.insert(col, width);
+        } else {
+            self.col_widths.remove(&col);
+        }
+    }
+
+    /// Gets column width for column index (defaulting to 80.0 px).
+    pub fn col_width(&self, col: u32) -> f32 {
+        self.col_widths.get(&col).copied().unwrap_or(80.0)
+    }
+
+    /// Sets custom row height for row index.
+    pub fn set_row_height(&mut self, row: u32, height: f32) {
+        if height > 0.0 {
+            self.row_heights.insert(row, height);
+        } else {
+            self.row_heights.remove(&row);
+        }
+    }
+
+    /// Gets row height for row index (defaulting to 24.0 px).
+    pub fn row_height(&self, row: u32) -> f32 {
+        self.row_heights.get(&row).copied().unwrap_or(24.0)
     }
 
     /// Sets text alignment for a single cell.
@@ -2533,5 +2567,21 @@ mod tests {
 
         assert_eq!(format_number_percentage(0.255, 1), "25.5%");
         assert_eq!(format_number_percentage(1.0, 0), "100%");
+    }
+
+    #[test]
+    fn custom_column_and_row_sizing() {
+        let mut sheet = Sheet::new("Dimensions");
+        assert_eq!(sheet.col_width(0), 80.0);
+        assert_eq!(sheet.row_height(0), 24.0);
+
+        sheet.set_col_width(0, 150.0);
+        sheet.set_row_height(5, 36.0);
+        assert_eq!(sheet.col_width(0), 150.0);
+        assert_eq!(sheet.row_height(5), 36.0);
+
+        // Reset with 0.0
+        sheet.set_col_width(0, 0.0);
+        assert_eq!(sheet.col_width(0), 80.0);
     }
 }

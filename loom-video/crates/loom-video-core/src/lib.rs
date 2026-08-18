@@ -526,6 +526,51 @@ impl Track {
         }
         Ok(moved_count)
     }
+
+    /// Splits a clip at timeline time `split_time`, creating a second clip for the remaining duration.
+    /// Returns the new clip ID.
+    pub fn split_clip(&mut self, clip_id: &str, split_time: f64) -> Result<String, TimelineError> {
+        if self.locked {
+            return Err(TimelineError::TrackLocked);
+        }
+        let clip_idx = self
+            .clips
+            .iter()
+            .position(|c| c.id == clip_id)
+            .ok_or(TimelineError::ClipNotFound)?;
+
+        let clip = &self.clips[clip_idx];
+        let clip_start = clip.start_time;
+        let clip_duration = clip.effective_timeline_duration();
+        let clip_end = clip_start + clip_duration;
+
+        if split_time <= clip_start + 0.001 || split_time >= clip_end - 0.001 {
+            return Err(TimelineError::InvalidTiming(
+                "split time must be strictly within clip bounds".into(),
+            ));
+        }
+
+        let rate = clip.playback_rate.max(0.001);
+        let left_duration = split_time - clip_start;
+        let source_delta = left_duration * rate;
+
+        let new_id = format!("{}-split", clip.id);
+        let mut second_clip = clip.clone();
+        second_clip.id = new_id.clone();
+        second_clip.start_time = split_time;
+        second_clip.in_point += source_delta;
+        second_clip.duration = (clip_end - split_time) * rate;
+        second_clip.out_point = second_clip.in_point + second_clip.duration;
+
+        // Resize left clip
+        let first_clip = &mut self.clips[clip_idx];
+        first_clip.duration = left_duration * rate;
+        first_clip.out_point = first_clip.in_point + first_clip.duration;
+
+        self.clips.push(second_clip);
+        self.sort_clips();
+        Ok(new_id)
+    }
 }
 
 /// Computes min and max peak pairs `(min_sample, max_sample)` decimated into `target_bins` for fast timeline waveform rendering.
@@ -1602,5 +1647,28 @@ mod tests {
         // Second half: min is -0.5, max is 0.5
         assert_eq!(peaks[1].0, -0.5);
         assert_eq!(peaks[1].1, 0.5);
+    }
+
+    #[test]
+    fn timeline_split_clip_operation() {
+        let mut track = Track::new("t1", "Video 1", TrackType::Video);
+        let mut clip = Clip::new("c1", "Media", 10.0);
+        clip.start_time = 0.0;
+        track.add_clip(clip);
+
+        // Split clip at 4.0s
+        let new_id = track.split_clip("c1", 4.0).unwrap();
+        assert_eq!(track.clips.len(), 2);
+
+        // First clip: 0.0 -> 4.0, duration 4.0
+        assert_eq!(track.clips[0].id, "c1");
+        assert_eq!(track.clips[0].start_time, 0.0);
+        assert_eq!(track.clips[0].duration, 4.0);
+
+        // Second clip: 4.0 -> 10.0, duration 6.0
+        assert_eq!(track.clips[1].id, new_id);
+        assert_eq!(track.clips[1].start_time, 4.0);
+        assert_eq!(track.clips[1].duration, 6.0);
+        assert_eq!(track.clips[1].in_point, 4.0);
     }
 }

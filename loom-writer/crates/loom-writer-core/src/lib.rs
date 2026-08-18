@@ -320,11 +320,16 @@ impl WriterDocument {
         let mut words = 0;
         let mut chars = 0;
         let mut chars_no_spaces = 0;
+        let mut sentences = 0;
         for b in &self.blocks {
             let text = b.text.as_str();
             chars += text.chars().count();
             chars_no_spaces += text.chars().filter(|c| !c.is_whitespace()).count();
             words += text.split_whitespace().count();
+            sentences += text
+                .chars()
+                .filter(|&c| c == '.' || c == '!' || c == '?')
+                .count();
         }
         let reading_time = if words > 0 {
             (words as f32 / 200.0).max(0.1)
@@ -336,6 +341,7 @@ impl WriterDocument {
             char_count: chars,
             char_count_no_spaces: chars_no_spaces,
             block_count: self.blocks.len(),
+            sentence_count: sentences.max(if words > 0 { 1 } else { 0 }),
             reading_time_minutes: reading_time,
         }
     }
@@ -564,6 +570,8 @@ pub struct DocumentStats {
     pub char_count_no_spaces: usize,
     /// Total paragraphs / blocks.
     pub block_count: usize,
+    /// Total sentences across all blocks.
+    pub sentence_count: usize,
     /// Estimated reading time in minutes (assuming 200 WPM).
     pub reading_time_minutes: f32,
 }
@@ -2602,6 +2610,7 @@ mod tests {
         let stats = doc.statistics();
         assert_eq!(stats.block_count, 2);
         assert_eq!(stats.word_count, 11);
+        assert_eq!(stats.sentence_count, 2);
         assert!(stats.char_count > 40);
         assert!(stats.char_count_no_spaces < stats.char_count);
         assert!(stats.reading_time_minutes > 0.0);

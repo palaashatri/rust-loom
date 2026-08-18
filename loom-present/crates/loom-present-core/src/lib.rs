@@ -320,6 +320,34 @@ impl DeckThemePreset {
     }
 }
 
+/// Standard slide aspect ratios.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlideAspectRatio {
+    Widescreen16x9,
+    Standard4x3,
+    Widescreen16x10,
+}
+
+impl SlideAspectRatio {
+    /// Returns default slide canvas `(width, height)` in points.
+    pub fn dimensions(&self) -> (f32, f32) {
+        match self {
+            SlideAspectRatio::Widescreen16x9 => (960.0, 540.0),
+            SlideAspectRatio::Standard4x3 => (720.0, 540.0),
+            SlideAspectRatio::Widescreen16x10 => (864.0, 540.0),
+        }
+    }
+
+    /// Aspect ratio as `(width_ratio, height_ratio)`.
+    pub fn ratio(&self) -> (u32, u32) {
+        match self {
+            SlideAspectRatio::Widescreen16x9 => (16, 9),
+            SlideAspectRatio::Standard4x3 => (4, 3),
+            SlideAspectRatio::Widescreen16x10 => (16, 10),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1208,5 +1236,17 @@ mod tests {
         let (light_bg, light_fg, _) = DeckThemePreset::ClassicLight.palette();
         assert_eq!(light_bg, "#FFFFFF");
         assert_eq!(light_fg, "#0F172A");
+    }
+
+    #[test]
+    fn slide_aspect_ratio_presets() {
+        assert_eq!(
+            SlideAspectRatio::Widescreen16x9.dimensions(),
+            (960.0, 540.0)
+        );
+        assert_eq!(SlideAspectRatio::Widescreen16x9.ratio(), (16, 9));
+
+        assert_eq!(SlideAspectRatio::Standard4x3.dimensions(), (720.0, 540.0));
+        assert_eq!(SlideAspectRatio::Standard4x3.ratio(), (4, 3));
     }
 }

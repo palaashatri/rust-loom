@@ -503,6 +503,83 @@ pub struct ImageHistogram {
     pub luma: [u32; 256],
 }
 
+/// 2D affine transformation matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AffineTransform2D {
+    pub a: f32,
+    pub b: f32,
+    pub c: f32,
+    pub d: f32,
+    pub tx: f32,
+    pub ty: f32,
+}
+
+impl AffineTransform2D {
+    /// Identity matrix.
+    pub fn identity() -> Self {
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    /// Translation matrix.
+    pub fn translation(tx: f32, ty: f32) -> Self {
+        Self {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            tx,
+            ty,
+        }
+    }
+
+    /// Scale matrix.
+    pub fn scale(sx: f32, sy: f32) -> Self {
+        Self {
+            a: sx,
+            b: 0.0,
+            c: 0.0,
+            d: sy,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    /// Rotation matrix by angle in radians.
+    pub fn rotation(radians: f32) -> Self {
+        let cos = radians.cos();
+        let sin = radians.sin();
+        Self {
+            a: cos,
+            b: sin,
+            c: -sin,
+            d: cos,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    /// Transforms a point `(x, y)`.
+    pub fn transform_point(&self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.a * x + self.c * y + self.tx,
+            self.b * x + self.d * y + self.ty,
+        )
+    }
+}
+
+impl Default for AffineTransform2D {
+    fn default() -> Self {
+        Self::identity()
+    }
+}
+
 fn image_byte_len(width: u32, height: u32) -> Result<usize, String> {
     if width == 0 || height == 0 {
         return Err("image dimensions must be non-zero".into());
@@ -1361,5 +1438,21 @@ mod tests {
         // Radius 0 returns exact clone
         let clone_blur = img.box_blur(0).unwrap();
         assert_eq!(clone_blur.pixel(1, 1).unwrap(), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn affine_transform_2d_operations() {
+        let t = AffineTransform2D::translation(10.0, 20.0);
+        let p1 = t.transform_point(5.0, 5.0);
+        assert_eq!(p1, (15.0, 25.0));
+
+        let s = AffineTransform2D::scale(2.0, 3.0);
+        let p2 = s.transform_point(4.0, 5.0);
+        assert_eq!(p2, (8.0, 15.0));
+
+        let r = AffineTransform2D::rotation(std::f32::consts::FRAC_PI_2);
+        let (rx, ry) = r.transform_point(1.0, 0.0);
+        assert!(rx.abs() < 1e-4);
+        assert!((ry - 1.0).abs() < 1e-4);
     }
 }

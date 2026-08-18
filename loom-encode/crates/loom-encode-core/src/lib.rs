@@ -315,6 +315,54 @@ pub fn aspect_ratio_string(width: u32, height: u32) -> String {
     format!("{}:{}", width / d, height / d)
 }
 
+/// Generates FFmpeg arguments `(pass1_args, pass2_args)` for two-pass VBR video encoding.
+pub fn generate_two_pass_args(
+    source: &str,
+    output: &str,
+    pass_logfile: &str,
+    target_bitrate_kbps: u32,
+) -> (Vec<String>, Vec<String>) {
+    let b_arg = format!("{}k", target_bitrate_kbps);
+    let pass1 = vec![
+        "-y".to_string(),
+        "-i".to_string(),
+        source.to_string(),
+        "-c:v".to_string(),
+        "libx264".to_string(),
+        "-b:v".to_string(),
+        b_arg.clone(),
+        "-pass".to_string(),
+        "1".to_string(),
+        "-passlogfile".to_string(),
+        pass_logfile.to_string(),
+        "-an".to_string(),
+        "-f".to_string(),
+        "null".to_string(),
+        "/dev/null".to_string(),
+    ];
+
+    let pass2 = vec![
+        "-y".to_string(),
+        "-i".to_string(),
+        source.to_string(),
+        "-c:v".to_string(),
+        "libx264".to_string(),
+        "-b:v".to_string(),
+        b_arg,
+        "-pass".to_string(),
+        "2".to_string(),
+        "-passlogfile".to_string(),
+        pass_logfile.to_string(),
+        "-c:a".to_string(),
+        "aac".to_string(),
+        "-b:a".to_string(),
+        "192k".to_string(),
+        output.to_string(),
+    ];
+
+    (pass1, pass2)
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1014,5 +1062,21 @@ mod tests {
         assert_eq!(aspect_ratio_string(1080, 1080), "1:1");
         assert_eq!(aspect_ratio_string(1440, 1080), "4:3");
         assert_eq!(aspect_ratio_string(0, 1080), "0:0");
+    }
+
+    #[test]
+    fn two_pass_encoding_args() {
+        let (pass1, pass2) =
+            generate_two_pass_args("input.mov", "output.mp4", "/tmp/ffmpeg2pass", 5000);
+
+        assert!(pass1.contains(&"-pass".to_string()));
+        assert!(pass1.contains(&"1".to_string()));
+        assert!(pass1.contains(&"-an".to_string()));
+        assert!(pass1.contains(&"5000k".to_string()));
+
+        assert!(pass2.contains(&"-pass".to_string()));
+        assert!(pass2.contains(&"2".to_string()));
+        assert!(pass2.contains(&"-c:a".to_string()));
+        assert!(pass2.contains(&"output.mp4".to_string()));
     }
 }
