@@ -315,6 +315,31 @@ impl WriterDocument {
         entries
     }
 
+    /// Computes full document text statistics.
+    pub fn statistics(&self) -> DocumentStats {
+        let mut words = 0;
+        let mut chars = 0;
+        let mut chars_no_spaces = 0;
+        for b in &self.blocks {
+            let text = b.text.as_str();
+            chars += text.chars().count();
+            chars_no_spaces += text.chars().filter(|c| !c.is_whitespace()).count();
+            words += text.split_whitespace().count();
+        }
+        let reading_time = if words > 0 {
+            (words as f32 / 200.0).max(0.1)
+        } else {
+            0.0
+        };
+        DocumentStats {
+            word_count: words,
+            char_count: chars,
+            char_count_no_spaces: chars_no_spaces,
+            block_count: self.blocks.len(),
+            reading_time_minutes: reading_time,
+        }
+    }
+
     /// Estimate long-form document metrics including page count, word count, character count, and reading time.
     pub fn estimate_pagination(&self) -> PaginationMetrics {
         let plain = self.plain_text();
@@ -496,6 +521,21 @@ pub struct PaginationMetrics {
     /// Total character count.
     pub characters: usize,
     /// Estimated reading time in minutes.
+    pub reading_time_minutes: f32,
+}
+
+/// Comprehensive statistics for a written document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentStats {
+    /// Total words across all blocks.
+    pub word_count: usize,
+    /// Total characters (including whitespace).
+    pub char_count: usize,
+    /// Total characters (excluding whitespace).
+    pub char_count_no_spaces: usize,
+    /// Total paragraphs / blocks.
+    pub block_count: usize,
+    /// Estimated reading time in minutes (assuming 200 WPM).
     pub reading_time_minutes: f32,
 }
 
@@ -2522,5 +2562,19 @@ mod tests {
         assert_eq!(doc.count_matches("the", true), 1);
         assert_eq!(doc.count_matches("the", false), 3);
         assert_eq!(doc.count_matches("cat", false), 0);
+    }
+
+    #[test]
+    fn document_statistics_calculation() {
+        let mut doc = WriterDocument::new("doc-stats", "Stats Document");
+        doc.push(RichBlock::new(1, "p", "Hello world this is Loom Writer."));
+        doc.push(RichBlock::new(2, "p", "Second paragraph with more words."));
+
+        let stats = doc.statistics();
+        assert_eq!(stats.block_count, 2);
+        assert_eq!(stats.word_count, 11);
+        assert!(stats.char_count > 40);
+        assert!(stats.char_count_no_spaces < stats.char_count);
+        assert!(stats.reading_time_minutes > 0.0);
     }
 }

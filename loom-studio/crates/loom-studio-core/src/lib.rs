@@ -402,6 +402,14 @@ impl AudioBuffer {
         })
     }
 
+    /// Soft-clips samples using hyperbolic tangent saturation to limit output without hard digital clipping.
+    pub fn soft_clip(&mut self, drive: f32) {
+        let d = drive.max(1.0);
+        for s in &mut self.samples {
+            *s = (*s * d).tanh() / d;
+        }
+    }
+
     /// Encodes signed 16-bit PCM WAV bytes.
     pub fn to_wav_pcm16(&self) -> Result<Vec<u8>, String> {
         self.validate()?;
@@ -1300,5 +1308,17 @@ mod studio_runtime_tests {
 
         assert_eq!(proj.beat_to_seconds(4.0), 2.0);
         assert_eq!(proj.seconds_to_beat(2.0), 4.0);
+    }
+
+    #[test]
+    fn audio_buffer_soft_clip() {
+        let mut buffer = AudioBuffer::silence(48000, 1, 4).unwrap();
+        buffer.samples = vec![0.0, 0.5, 1.5, 3.0];
+
+        buffer.soft_clip(1.0);
+        assert_eq!(buffer.samples[0], 0.0);
+        assert!(buffer.samples[1] < 0.5); // tanh(0.5) ~ 0.462
+        assert!(buffer.samples[2] < 1.0); // tanh(1.5) < 1.0
+        assert!(buffer.samples[3] < 1.0); // tanh(3.0) < 1.0
     }
 }

@@ -258,6 +258,28 @@ impl EncodeProgressMetrics {
     }
 }
 
+/// Expands output filename template patterns for batch encoding.
+pub fn format_output_template(
+    template: &str,
+    source_name: &str,
+    preset_name: &str,
+    container_ext: &str,
+) -> String {
+    let clean_stem = std::path::Path::new(source_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(source_name);
+    let mut result = template
+        .replace("{name}", clean_stem)
+        .replace("{preset}", preset_name)
+        .replace("{ext}", container_ext.trim_start_matches('.'));
+    if !result.contains('.') && !container_ext.is_empty() {
+        result.push('.');
+        result.push_str(container_ext.trim_start_matches('.'));
+    }
+    result
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -929,5 +951,20 @@ mod tests {
         let m_done = EncodeProgressMetrics::estimate(1000, 1000, 20.0);
         assert!((m_done.progress - 1.0).abs() < 1e-4);
         assert_eq!(m_done.eta_seconds, 0.0);
+    }
+
+    #[test]
+    fn output_template_interpolation() {
+        let out = format_output_template(
+            "{name}_{preset}.{ext}",
+            "/Users/projects/Promo_Final.mov",
+            "1080p_h264",
+            "mp4",
+        );
+        assert_eq!(out, "Promo_Final_1080p_h264.mp4");
+
+        // Without extension placeholder
+        let out2 = format_output_template("{name}_converted", "Clip1.mkv", "ProRes", "mov");
+        assert_eq!(out2, "Clip1_converted.mov");
     }
 }

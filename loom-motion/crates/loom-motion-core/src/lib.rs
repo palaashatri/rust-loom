@@ -530,6 +530,31 @@ fn easing_progress(name: &str, progress: f32) -> f32 {
     }
 }
 
+/// Evaluates a 1D cubic Bézier curve: B(t) = (1-t)^3*p0 + 3(1-t)^2*t*p1 + 3(1-t)*t^2*p2 + t^3*p3.
+pub fn cubic_bezier_1d(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    let one_minus_t = 1.0 - t;
+    let b0 = one_minus_t.powi(3) * p0;
+    let b1 = 3.0 * one_minus_t.powi(2) * t * p1;
+    let b2 = 3.0 * one_minus_t * t.powi(2) * p2;
+    let b3 = t.powi(3) * p3;
+    b0 + b1 + b2 + b3
+}
+
+/// Evaluates a 2D cubic Bézier spatial path position: (x(t), y(t)).
+pub fn cubic_bezier_2d(
+    p0: (f32, f32),
+    p1: (f32, f32),
+    p2: (f32, f32),
+    p3: (f32, f32),
+    t: f32,
+) -> (f32, f32) {
+    (
+        cubic_bezier_1d(p0.0, p1.0, p2.0, p3.0, t),
+        cubic_bezier_1d(p0.1, p1.1, p2.1, p3.1, t),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,5 +796,22 @@ mod tests {
         doc.add_layer(l1);
 
         assert_eq!(doc.total_keyframes(), 3);
+    }
+
+    #[test]
+    fn cubic_bezier_curves_and_paths() {
+        // Start: t=0 -> p0
+        assert_eq!(cubic_bezier_1d(0.0, 10.0, 20.0, 30.0, 0.0), 0.0);
+        // End: t=1 -> p3
+        assert_eq!(cubic_bezier_1d(0.0, 10.0, 20.0, 30.0, 1.0), 30.0);
+        // Midpoint: t=0.5 of symmetric curve [0, 100, 100, 0] -> 75.0
+        assert_eq!(cubic_bezier_1d(0.0, 100.0, 100.0, 0.0, 0.5), 75.0);
+
+        // 2D Path
+        let p_start = (0.0, 0.0);
+        let p_end = (100.0, 200.0);
+        let (x, y) = cubic_bezier_2d(p_start, (30.0, 50.0), (70.0, 150.0), p_end, 0.5);
+        assert_eq!(x, 50.0);
+        assert_eq!(y, 100.0);
     }
 }

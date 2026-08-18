@@ -192,11 +192,23 @@ impl RawCellEdit {
     }
 }
 
+/// Text alignment within a spreadsheet cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CellAlignment {
+    #[default]
+    General,
+    Left,
+    Center,
+    Right,
+}
+
 /// A single worksheet.
 #[derive(Debug, Clone, Default)]
 pub struct Sheet {
     /// Cells keyed by coordinate.
     pub cells: BTreeMap<CellRef, Cell>,
+    /// Alignment styles keyed by cell coordinate.
+    pub alignments: BTreeMap<CellRef, CellAlignment>,
     /// Sheet name.
     pub name: String,
     /// Frozen top rows count.
@@ -211,9 +223,37 @@ impl Sheet {
         Self {
             name: name.to_string(),
             cells: BTreeMap::new(),
+            alignments: BTreeMap::new(),
             freeze_rows: 0,
             freeze_cols: 0,
         }
+    }
+
+    /// Sets text alignment for a single cell.
+    pub fn set_cell_alignment(&mut self, r: CellRef, alignment: CellAlignment) {
+        if alignment == CellAlignment::General {
+            self.alignments.remove(&r);
+        } else {
+            self.alignments.insert(r, alignment);
+        }
+    }
+
+    /// Sets text alignment across a rectangular range of cells.
+    pub fn set_range_alignment(&mut self, start: CellRef, end: CellRef, alignment: CellAlignment) {
+        let min_col = start.col.min(end.col);
+        let max_col = start.col.max(end.col);
+        let min_row = start.row.min(end.row);
+        let max_row = start.row.max(end.row);
+        for col in min_col..=max_col {
+            for row in min_row..=max_row {
+                self.set_cell_alignment(CellRef { col, row }, alignment);
+            }
+        }
+    }
+
+    /// Gets text alignment for a cell (defaulting to General).
+    pub fn cell_alignment(&self, r: CellRef) -> CellAlignment {
+        self.alignments.get(&r).copied().unwrap_or_default()
     }
 
     /// Freeze a number of top rows and left columns.
@@ -2427,5 +2467,26 @@ mod tests {
         sheet.unfreeze_panes();
         assert_eq!(sheet.freeze_rows, 0);
         assert_eq!(sheet.freeze_cols, 0);
+    }
+
+    #[test]
+    fn cell_and_range_alignment() {
+        let mut sheet = Sheet::new("Sales");
+        let a1 = CellRef::parse("A1").unwrap();
+        let b2 = CellRef::parse("B2").unwrap();
+        assert_eq!(sheet.cell_alignment(a1), CellAlignment::General);
+
+        sheet.set_cell_alignment(a1, CellAlignment::Center);
+        assert_eq!(sheet.cell_alignment(a1), CellAlignment::Center);
+
+        // Range alignment
+        let start = CellRef::parse("B1").unwrap();
+        let end = CellRef::parse("C3").unwrap();
+        sheet.set_range_alignment(start, end, CellAlignment::Right);
+        assert_eq!(sheet.cell_alignment(b2), CellAlignment::Right);
+        assert_eq!(
+            sheet.cell_alignment(CellRef::parse("C3").unwrap()),
+            CellAlignment::Right
+        );
     }
 }

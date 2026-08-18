@@ -508,6 +508,24 @@ impl Track {
         self.sort_clips();
         Ok(())
     }
+
+    /// Closes all gaps between clips on this track, aligning them contiguously starting at time 0.0.
+    pub fn close_gaps(&mut self) -> Result<usize, TimelineError> {
+        if self.locked {
+            return Err(TimelineError::TrackLocked);
+        }
+        self.sort_clips();
+        let mut current_time = 0.0;
+        let mut moved_count = 0;
+        for clip in &mut self.clips {
+            if (clip.start_time - current_time).abs() > 1e-4 {
+                clip.start_time = current_time;
+                moved_count += 1;
+            }
+            current_time += clip.effective_timeline_duration();
+        }
+        Ok(moved_count)
+    }
 }
 
 /// SMPTE timecode representation (HH:MM:SS:FF).
@@ -1521,5 +1539,22 @@ mod tests {
         // 100 pixels per second
         assert_eq!(VideoProject::seconds_to_pixels(5.5, 100.0), 550.0);
         assert_eq!(VideoProject::pixels_to_seconds(550.0, 100.0), 5.5);
+    }
+
+    #[test]
+    fn timeline_track_close_gaps() {
+        let mut track = Track::new("v1", "Video 1", TrackType::Video);
+        let mut c1 = Clip::new("c1", "Intro", 3.0);
+        c1.start_time = 2.0; // gap of 2s before c1
+        let mut c2 = Clip::new("c2", "Main", 5.0);
+        c2.start_time = 8.0; // gap of 3s between c1 and c2
+
+        track.add_clip(c1);
+        track.add_clip(c2);
+
+        let moved = track.close_gaps().unwrap();
+        assert_eq!(moved, 2);
+        assert_eq!(track.clips[0].start_time, 0.0);
+        assert_eq!(track.clips[1].start_time, 3.0);
     }
 }

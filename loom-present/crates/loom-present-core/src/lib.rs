@@ -259,6 +259,34 @@ impl Slide {
             }
         }
     }
+
+    /// Calculates the tight bounding box (min_x, min_y, width, height) enclosing multiple elements.
+    pub fn elements_bounding_box(&self, element_ids: &[&str]) -> Option<(f32, f32, f32, f32)> {
+        let matching: Vec<&SlideElement> = self
+            .elements
+            .iter()
+            .filter(|e| element_ids.contains(&e.id.as_str()))
+            .collect();
+        if matching.is_empty() {
+            return None;
+        }
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        for el in matching {
+            min_x = min_x.min(el.x);
+            min_y = min_y.min(el.y);
+            max_x = max_x.max(el.x + el.width);
+            max_y = max_y.max(el.y + el.height);
+        }
+        Some((
+            min_x,
+            min_y,
+            (max_x - min_x).max(0.0),
+            (max_y - min_y).max(0.0),
+        ))
+    }
 }
 
 /// Predefined layout templates for presentation slides.
@@ -1117,5 +1145,35 @@ mod tests {
         assert!(md.contains("Welcome the audience."));
         assert!(md.contains("## Slide 2 — Product Demo"));
         assert!(md.contains("Show live preview."));
+    }
+
+    #[test]
+    fn elements_bounding_box_union() {
+        let mut slide = Slide::new("s1", "Slide 1", "custom");
+        slide.add_element(SlideElement {
+            id: "e1".into(),
+            element_type: ElementType::BodyText,
+            content: "Box 1".into(),
+            x: 100.0,
+            y: 100.0,
+            width: 200.0,
+            height: 100.0,
+        });
+        slide.add_element(SlideElement {
+            id: "e2".into(),
+            element_type: ElementType::ShapeRectangle,
+            content: "Box 2".into(),
+            x: 250.0,
+            y: 150.0,
+            width: 150.0,
+            height: 100.0,
+        });
+
+        let bbox = slide.elements_bounding_box(&["e1", "e2"]).unwrap();
+        // min_x = 100, min_y = 100, max_x = 400 (width = 300), max_y = 250 (height = 150)
+        assert_eq!(bbox, (100.0, 100.0, 300.0, 150.0));
+
+        // Missing elements return None
+        assert!(slide.elements_bounding_box(&["e99"]).is_none());
     }
 }

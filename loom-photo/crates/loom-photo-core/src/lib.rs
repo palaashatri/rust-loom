@@ -496,6 +496,30 @@ impl PhotoCanvas {
         Ok(())
     }
 
+    /// Inverts all values in a layer mask (255 - value).
+    pub fn invert_layer_mask(&mut self, layer_id: &str) -> Result<(), String> {
+        let mask = self
+            .layer_masks
+            .get_mut(layer_id)
+            .ok_or_else(|| format!("layer {layer_id} has no attached mask"))?;
+        for byte in mask.iter_mut() {
+            *byte = 255 - *byte;
+        }
+        Ok(())
+    }
+
+    /// Applies a hard threshold to a layer mask (values >= threshold become 255, else 0).
+    pub fn apply_mask_threshold(&mut self, layer_id: &str, threshold: u8) -> Result<(), String> {
+        let mask = self
+            .layer_masks
+            .get_mut(layer_id)
+            .ok_or_else(|| format!("layer {layer_id} has no attached mask"))?;
+        for byte in mask.iter_mut() {
+            *byte = if *byte >= threshold { 255 } else { 0 };
+        }
+        Ok(())
+    }
+
     /// Returns attached pixels for a layer.
     pub fn layer_image(&self, layer_id: &str) -> Option<&RgbaImage> {
         self.layer_images.get(layer_id)
@@ -1216,5 +1240,25 @@ mod tests {
         let sepia_pix = sepia_img.pixel(0, 0).unwrap();
         assert!(sepia_pix[0] > 130); // Red is enhanced in sepia
         assert!(sepia_pix[2] < 100); // Blue is reduced in sepia
+    }
+
+    #[test]
+    fn layer_mask_inversion_and_threshold() {
+        let doc = PhotoDocument::new("p1", "Mask Test", 2, 2);
+        let mut canvas = PhotoCanvas::new(doc).unwrap();
+        let layer_id = canvas.document.layers[0].id.clone();
+
+        // Attach mask with values [0, 100, 200, 255]
+        canvas
+            .set_layer_mask(&layer_id, vec![0, 100, 200, 255])
+            .unwrap();
+
+        // Invert mask -> [255, 155, 55, 0]
+        canvas.invert_layer_mask(&layer_id).unwrap();
+        assert_eq!(canvas.layer_mask(&layer_id).unwrap(), &[255, 155, 55, 0]);
+
+        // Threshold at 100 -> [255, 255, 0, 0]
+        canvas.apply_mask_threshold(&layer_id, 100).unwrap();
+        assert_eq!(canvas.layer_mask(&layer_id).unwrap(), &[255, 255, 0, 0]);
     }
 }
