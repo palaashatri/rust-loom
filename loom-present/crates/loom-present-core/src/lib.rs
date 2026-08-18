@@ -434,6 +434,35 @@ pub fn normalize_angle_degrees(degrees: f32) -> f32 {
     }
 }
 
+/// Slide master template for uniform slide deck styling and layouts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MasterSlide {
+    pub id: String,
+    pub name: String,
+    pub bg_color: String,
+    pub default_title_color: String,
+    pub default_body_color: String,
+    pub footer_text: String,
+}
+
+impl Default for MasterSlide {
+    fn default() -> Self {
+        Self {
+            id: "master-default".into(),
+            name: "Standard Master".into(),
+            bg_color: "#1e1e2e".into(),
+            default_title_color: "#cdd6f4".into(),
+            default_body_color: "#a6adc8".into(),
+            footer_text: "Loom Presentation".into(),
+        }
+    }
+}
+
+/// Applies a master slide template's styling to a target slide.
+pub fn apply_master_to_slide(slide: &mut Slide, master: &MasterSlide) {
+    slide.bg_color = master.bg_color.clone();
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationDocument {
     pub id: String,
@@ -1367,5 +1396,17 @@ mod tests {
         assert_eq!(normalize_angle_degrees(360.0), 0.0);
         assert_eq!(normalize_angle_degrees(450.0), 90.0);
         assert_eq!(normalize_angle_degrees(-90.0), 270.0);
+    }
+
+    #[test]
+    fn master_slide_application() {
+        let master = MasterSlide::default();
+        assert_eq!(master.bg_color, "#1e1e2e");
+
+        let mut slide = Slide::new("s1", "My Slide", "TitleAndContent");
+        assert_eq!(slide.bg_color, "#ffffff");
+
+        apply_master_to_slide(&mut slide, &master);
+        assert_eq!(slide.bg_color, "#1e1e2e");
     }
 }

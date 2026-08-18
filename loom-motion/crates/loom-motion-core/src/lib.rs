@@ -686,6 +686,30 @@ pub fn evaluate_keyframe_segment(v1: f32, v2: f32, t: f32, mode: InterpolationMo
     }
 }
 
+/// Interpolates between two sets of polygon vertices for shape morphing animations.
+pub fn interpolate_polygon_points(
+    p1: &[[f32; 2]],
+    p2: &[[f32; 2]],
+    t: f32,
+) -> Result<Vec<[f32; 2]>, String> {
+    if p1.len() != p2.len() {
+        return Err("polygon point sets must have matching vertex counts".into());
+    }
+    if p1.is_empty() {
+        return Ok(Vec::new());
+    }
+    let t = t.clamp(0.0, 1.0);
+    let mut points = Vec::with_capacity(p1.len());
+
+    for (v1, v2) in p1.iter().zip(p2.iter()) {
+        let x = v1[0] + (v2[0] - v1[0]) * t;
+        let y = v1[1] + (v2[1] - v1[1]) * t;
+        points.push([x, y]);
+    }
+
+    Ok(points)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1005,5 +1029,21 @@ mod tests {
 
         let tangent = TangentHandle::default();
         assert_eq!(tangent.in_weight, 0.33);
+    }
+
+    #[test]
+    fn polygon_points_interpolation() {
+        let square = vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+        let shifted = vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]];
+
+        let mid = interpolate_polygon_points(&square, &shifted, 0.5).unwrap();
+        assert_eq!(mid[0], [5.0, 5.0]);
+        assert_eq!(mid[1], [15.0, 5.0]);
+        assert_eq!(mid[2], [15.0, 15.0]);
+        assert_eq!(mid[3], [5.0, 15.0]);
+
+        // Mismatched lengths should error
+        let triangle = vec![[0.0, 0.0], [5.0, 10.0], [10.0, 0.0]];
+        assert!(interpolate_polygon_points(&square, &triangle, 0.5).is_err());
     }
 }

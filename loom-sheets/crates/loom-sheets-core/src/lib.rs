@@ -431,6 +431,105 @@ pub fn sort_range_rows(rows: &[Vec<String>], col_idx: usize, ascending: bool) ->
     sorted
 }
 
+/// Shifts cell references within a formula string by `delta_cols` and `delta_rows`,
+/// respecting absolute `$` anchors (e.g. `$A$1`, `A$1`, `$A1`, `A1`).
+pub fn shift_formula_references(formula: &str, delta_cols: i32, delta_rows: i32) -> String {
+    if !formula.starts_with('=') {
+        return formula.to_string();
+    }
+
+    let mut result = String::with_capacity(formula.len());
+    let chars: Vec<char> = formula.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        // Check for start of cell reference (optional '$' followed by letters then optional '$' then digits)
+        let is_ref_start = if chars[i] == '$' {
+            i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic()
+        } else if chars[i].is_ascii_alphabetic() {
+            // Must not be preceded by alphanumeric or underscore (which would make it a function name like SUM)
+            !(i > 0 && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_'))
+        } else {
+            false
+        };
+
+        if is_ref_start {
+            let start = i;
+            let mut col_abs = false;
+            if chars[i] == '$' {
+                col_abs = true;
+                i += 1;
+            }
+
+            let col_start = i;
+            while i < chars.len() && chars[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+            let col_str: String = chars[col_start..i].iter().collect();
+
+            let mut row_abs = false;
+            if i < chars.len() && chars[i] == '$' {
+                row_abs = true;
+                i += 1;
+            }
+
+            let row_start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            let row_str: String = chars[row_start..i].iter().collect();
+
+            // Check if this formed a valid cell reference (e.g., has digits for row)
+            if !col_str.is_empty() && !row_str.is_empty() {
+                // Parse column index (0-based)
+                let mut col_idx: u32 = 0;
+                for c in col_str.to_ascii_uppercase().chars() {
+                    col_idx = col_idx * 26 + (c as u32 - 'A' as u32 + 1);
+                }
+                let mut col_num = (col_idx - 1) as i32;
+
+                // Parse row index (0-based)
+                let mut row_num = row_str.parse::<i32>().unwrap_or(1) - 1;
+
+                if !col_abs {
+                    col_num = (col_num + delta_cols).max(0);
+                }
+                if !row_abs {
+                    row_num = (row_num + delta_rows).max(0);
+                }
+
+                // Re-encode column string
+                let mut new_col = String::new();
+                let mut cn = col_num + 1;
+                while cn > 0 {
+                    let rem = ((cn - 1) % 26) as u8;
+                    new_col.insert(0, (b'A' + rem) as char);
+                    cn = (cn - 1) / 26;
+                }
+
+                if col_abs {
+                    result.push('$');
+                }
+                result.push_str(&new_col);
+                if row_abs {
+                    result.push('$');
+                }
+                result.push_str(&(row_num + 1).to_string());
+            } else {
+                // Not a valid cell reference, push original matched substring
+                for ch in &chars[start..i] {
+                    result.push(*ch);
+                }
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -2720,5 +2819,24 @@ mod tests {
         assert_eq!(sorted_num[0][1], "30");
         assert_eq!(sorted_num[1][1], "20");
         assert_eq!(sorted_num[2][1], "10");
+    }
+
+    #[test]
+    fn formula_reference_shifting() {
+        // Relative reference: =A1 shifted right 1 col and down 2 rows -> =B3
+        assert_eq!(shift_formula_references("=A1", 1, 2), "=B3");
+
+        // Mixed references: =$A1 + B$2 + $C$3 + D4 shifted right 1 col, down 1 row:
+        // $A1 -> $A2 (col absolute, row relative)
+        // B$2 -> C$2 (col relative, row absolute)
+        // $C$3 -> $C$3 (both absolute)
+        // D4 -> E5 (both relative)
+        assert_eq!(
+            shift_formula_references("=$A1+B$2+$C$3+D4", 1, 1),
+            "=$A2+C$2+$C$3+E5"
+        );
+
+        // Non-formula string unchanged
+        assert_eq!(shift_formula_references("Hello World", 1, 1), "Hello World");
     }
 }

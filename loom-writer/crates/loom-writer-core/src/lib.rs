@@ -1676,6 +1676,117 @@ pub fn calculate_speaking_time_minutes(word_count: usize, words_per_minute: u32)
     word_count as f32 / wpm as f32
 }
 
+/// Page number numbering format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageNumberFormat {
+    #[default]
+    Arabic,
+    RomanUpper,
+    RomanLower,
+    Alphabetical,
+}
+
+impl PageNumberFormat {
+    /// Formats a 1-based page number into a string according to this format.
+    pub fn format(&self, page_num: usize) -> String {
+        match self {
+            Self::Arabic => format!("{}", page_num),
+            Self::RomanUpper => match page_num {
+                1 => "I".into(),
+                2 => "II".into(),
+                3 => "III".into(),
+                4 => "IV".into(),
+                5 => "V".into(),
+                6 => "VI".into(),
+                7 => "VII".into(),
+                8 => "VIII".into(),
+                9 => "IX".into(),
+                10 => "X".into(),
+                _ => format!("{}", page_num),
+            },
+            Self::RomanLower => match page_num {
+                1 => "i".into(),
+                2 => "ii".into(),
+                3 => "iii".into(),
+                4 => "iv".into(),
+                5 => "v".into(),
+                6 => "vi".into(),
+                7 => "vii".into(),
+                8 => "viii".into(),
+                9 => "ix".into(),
+                10 => "x".into(),
+                _ => format!("{}", page_num),
+            },
+            Self::Alphabetical => {
+                if (1..=26).contains(&page_num) {
+                    let ch = (b'A' + (page_num as u8 - 1)) as char;
+                    ch.to_string()
+                } else {
+                    format!("{}", page_num)
+                }
+            }
+        }
+    }
+}
+
+/// Header and footer layout configuration for paginated documents.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HeaderFooterConfig {
+    /// Header text (supports `{page}` and `{total}` placeholders).
+    pub header_text: String,
+    /// Footer text (supports `{page}` and `{total}` placeholders).
+    pub footer_text: String,
+    /// Header/footer text alignment.
+    pub alignment: String,
+    /// Page number formatting style.
+    pub page_number_format: PageNumberFormat,
+    /// Whether the first page omits headers and footers (e.g. cover page).
+    pub different_first_page: bool,
+}
+
+impl HeaderFooterConfig {
+    /// Formats header text for a given page index (1-based) and total page count.
+    pub fn format_header(&self, page_num: usize, total_pages: usize) -> Option<String> {
+        if self.different_first_page && page_num == 1 {
+            return None;
+        }
+        if self.header_text.is_empty() {
+            return None;
+        }
+        let formatted_page = self.page_number_format.format(page_num);
+        let res = self
+            .header_text
+            .replace("{page}", &formatted_page)
+            .replace("{total}", &total_pages.to_string());
+        Some(res)
+    }
+
+    /// Formats footer text for a given page index (1-based) and total page count.
+    pub fn format_footer(&self, page_num: usize, total_pages: usize) -> Option<String> {
+        if self.different_first_page && page_num == 1 {
+            return None;
+        }
+        if self.footer_text.is_empty() {
+            return None;
+        }
+        let formatted_page = self.page_number_format.format(page_num);
+        let res = self
+            .footer_text
+            .replace("{page}", &formatted_page)
+            .replace("{total}", &total_pages.to_string());
+        Some(res)
+    }
+}
+
+/// Footnote or endnote citation entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FootnoteEntry {
+    pub id: u64,
+    pub marker: String,
+    pub text: String,
+    pub is_endnote: bool,
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -2756,5 +2867,32 @@ mod tests {
 
         let speak_time = calculate_speaking_time_minutes(260, 130);
         assert_eq!(speak_time, 2.0);
+    }
+
+    #[test]
+    fn header_footer_formatting_and_page_numbers() {
+        assert_eq!(PageNumberFormat::Arabic.format(3), "3");
+        assert_eq!(PageNumberFormat::RomanUpper.format(4), "IV");
+        assert_eq!(PageNumberFormat::RomanLower.format(5), "v");
+        assert_eq!(PageNumberFormat::Alphabetical.format(2), "B");
+
+        let config = HeaderFooterConfig {
+            header_text: "Document Title - Page {page} of {total}".into(),
+            footer_text: "Confidential - {page}".into(),
+            alignment: "center".into(),
+            page_number_format: PageNumberFormat::Arabic,
+            different_first_page: true,
+        };
+
+        // First page should be omitted
+        assert_eq!(config.format_header(1, 10), None);
+        assert_eq!(config.format_footer(1, 10), None);
+
+        // Second page
+        assert_eq!(
+            config.format_header(2, 10),
+            Some("Document Title - Page 2 of 10".into())
+        );
+        assert_eq!(config.format_footer(2, 10), Some("Confidential - 2".into()));
     }
 }

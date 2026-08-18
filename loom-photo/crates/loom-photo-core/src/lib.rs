@@ -522,6 +522,15 @@ impl RgbaImage {
         Ok(channel)
     }
 
+    /// Applies a tone curve LUT to all RGB color channels, preserving alpha.
+    pub fn apply_tone_curve(&mut self, lut: &ToneCurveLUT) {
+        for pixel in self.pixels.chunks_exact_mut(4) {
+            pixel[0] = lut.map[pixel[0] as usize];
+            pixel[1] = lut.map[pixel[1] as usize];
+            pixel[2] = lut.map[pixel[2] as usize];
+        }
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -640,6 +649,46 @@ pub fn generate_radial_gradient(
     }
 
     Ok(img)
+}
+
+/// 256-entry lookup table for tone curve mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToneCurveLUT {
+    pub map: [u8; 256],
+}
+
+impl ToneCurveLUT {
+    /// Identity tone curve (output == input).
+    pub fn identity() -> Self {
+        let mut map = [0u8; 256];
+        for (i, val) in map.iter_mut().enumerate() {
+            *val = i as u8;
+        }
+        Self { map }
+    }
+
+    /// Inverted tone curve (output == 255 - input).
+    pub fn inverted() -> Self {
+        let mut map = [0u8; 256];
+        for (i, val) in map.iter_mut().enumerate() {
+            *val = (255 - i) as u8;
+        }
+        Self { map }
+    }
+
+    /// Generates an S-curve contrast lookup table with strength in `[0.0, 2.0]`.
+    pub fn s_curve(strength: f32) -> Self {
+        let mut map = [0u8; 256];
+        let s = strength.clamp(0.0, 2.0);
+        for (i, val) in map.iter_mut().enumerate() {
+            let x = i as f32 / 255.0;
+            // Sigmoidal / Hermite S-curve blending: (3x^2 - 2x^3) * s + x * (1 - s)
+            let s_val = x * x * (3.0 - 2.0 * x);
+            let out = (s_val * s + x * (1.0 - s)).clamp(0.0, 1.0);
+            *val = (out * 255.0).round() as u8;
+        }
+        Self { map }
+    }
 }
 
 /// 256-bin color channel and luminance histograms.
@@ -1645,5 +1694,31 @@ mod tests {
         let red_ch = grad.extract_channel(0).unwrap();
         assert_eq!(red_ch.len(), 100);
         assert_eq!(red_ch[55], 255); // center pixel index in 10x10 is 5*10 + 5 = 55
+    }
+
+    #[test]
+    fn tone_curve_lut_mapping() {
+        let id_lut = ToneCurveLUT::identity();
+        assert_eq!(id_lut.map[0], 0);
+        assert_eq!(id_lut.map[128], 128);
+        assert_eq!(id_lut.map[255], 255);
+
+        let inv_lut = ToneCurveLUT::inverted();
+        assert_eq!(inv_lut.map[0], 255);
+        assert_eq!(inv_lut.map[255], 0);
+
+        let s_lut = ToneCurveLUT::s_curve(1.0);
+        // Midpoint 128 is ~0.5 -> mapped to ~128
+        assert!((s_lut.map[128] as i32 - 128).abs() <= 1);
+        // Shadows are pulled down, highlights pushed up
+        assert!(s_lut.map[64] < 64);
+        assert!(s_lut.map[192] > 192);
+
+        let mut img = RgbaImage::transparent(2, 2).unwrap();
+        img.set_pixel(0, 0, [100, 150, 200, 255]);
+        img.apply_tone_curve(&inv_lut);
+
+        let px = img.pixel(0, 0).unwrap();
+        assert_eq!(px, [155, 105, 55, 255]); // 255 - input
     }
 }

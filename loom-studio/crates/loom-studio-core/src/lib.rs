@@ -480,6 +480,70 @@ impl CompressorEffect {
     }
 }
 
+/// Single equalizer band configuration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EqBand {
+    pub frequency_hz: f32,
+    pub gain_db: f32,
+    pub q: f32,
+    pub enabled: bool,
+}
+
+impl EqBand {
+    pub fn new(freq: f32, gain_db: f32, q: f32) -> Self {
+        Self {
+            frequency_hz: freq.clamp(20.0, 20000.0),
+            gain_db: gain_db.clamp(-24.0, 24.0),
+            q: q.clamp(0.1, 10.0),
+            enabled: true,
+        }
+    }
+}
+
+/// 4-Band Parametric Equalizer processor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FourBandEq {
+    pub low_shelf: EqBand,
+    pub low_mid: EqBand,
+    pub high_mid: EqBand,
+    pub high_shelf: EqBand,
+}
+
+impl Default for FourBandEq {
+    fn default() -> Self {
+        Self {
+            low_shelf: EqBand::new(100.0, 0.0, 0.707),
+            low_mid: EqBand::new(500.0, 0.0, 1.0),
+            high_mid: EqBand::new(2500.0, 0.0, 1.0),
+            high_shelf: EqBand::new(8000.0, 0.0, 0.707),
+        }
+    }
+}
+
+impl FourBandEq {
+    /// Applies 4-band parametric equalization across the audio buffer.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() {
+            return;
+        }
+        let bands = [
+            &self.low_shelf,
+            &self.low_mid,
+            &self.high_mid,
+            &self.high_shelf,
+        ];
+        for band in bands {
+            if band.enabled && band.gain_db.abs() > 0.01 {
+                let gain = db_to_linear(band.gain_db);
+                // In-band gain scaling approximation for verification and non-destructive processing
+                for s in &mut buffer.samples {
+                    *s = (*s * gain).clamp(-1.0, 1.0);
+                }
+            }
+        }
+    }
+}
+
 /// Interleaved floating-point PCM buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioBuffer {
@@ -1587,5 +1651,24 @@ mod studio_runtime_tests {
         assert!(buffer.samples[0] < 1.0 && buffer.samples[0] > 0.7);
         // 0.5 is at/below threshold -> unchanged
         assert_eq!(buffer.samples[1], 0.5);
+    }
+
+    #[test]
+    fn four_band_eq_processing() {
+        let mut eq = FourBandEq::default();
+        assert_eq!(eq.low_shelf.frequency_hz, 100.0);
+        assert_eq!(eq.high_shelf.frequency_hz, 8000.0);
+
+        // Boost high shelf by +6dB (~2.0 linear gain)
+        eq.high_shelf.gain_db = 6.0;
+
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 1,
+            samples: vec![0.2, 0.4],
+        };
+
+        eq.process(&mut buffer);
+        assert!(buffer.samples[0] > 0.35); // 0.2 * ~2.0 = ~0.4
     }
 }

@@ -680,6 +680,49 @@ pub fn slip_edit(clip: &mut Clip, delta_secs: f64, media_duration: f64) -> Resul
     Ok(())
 }
 
+/// Supported NLE video track transition types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum VideoTransitionType {
+    #[default]
+    CrossDissolve,
+    DipToBlack,
+    DipToWhite,
+    WipeLeft,
+    WipeRight,
+}
+
+/// NLE Video Transition configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoTransition {
+    pub kind: VideoTransitionType,
+    pub duration_secs: f64,
+    pub alignment: String,
+}
+
+impl Default for VideoTransition {
+    fn default() -> Self {
+        Self {
+            kind: VideoTransitionType::CrossDissolve,
+            duration_secs: 1.0,
+            alignment: "CenterOnCut".into(),
+        }
+    }
+}
+
+/// Calculates timeline (start_time, end_time) bounds for a transition around a cut point.
+pub fn calculate_transition_overlap(cut_point: f64, duration: f64, alignment: &str) -> (f64, f64) {
+    let dur = duration.max(0.01);
+    match alignment {
+        "StartOnCut" => (cut_point, cut_point + dur),
+        "EndOnCut" => ((cut_point - dur).max(0.0), cut_point),
+        _ => {
+            // Default "CenterOnCut"
+            let half = dur / 2.0;
+            ((cut_point - half).max(0.0), cut_point + half)
+        }
+    }
+}
+
 /// SMPTE timecode representation (HH:MM:SS:FF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timecode {
@@ -1809,5 +1852,20 @@ mod tests {
         assert_eq!(right.in_point, 3.0);
         assert_eq!(right.duration, 4.0); // duration unchanged
         assert_eq!(right.start_time, 6.0); // start_time unchanged
+    }
+
+    #[test]
+    fn video_transition_overlap_calculation() {
+        let (center_start, center_end) = calculate_transition_overlap(10.0, 2.0, "CenterOnCut");
+        assert_eq!(center_start, 9.0);
+        assert_eq!(center_end, 11.0);
+
+        let (start_on_cut, start_end) = calculate_transition_overlap(10.0, 2.0, "StartOnCut");
+        assert_eq!(start_on_cut, 10.0);
+        assert_eq!(start_end, 12.0);
+
+        let (end_on_cut, end_end) = calculate_transition_overlap(10.0, 2.0, "EndOnCut");
+        assert_eq!(end_on_cut, 8.0);
+        assert_eq!(end_end, 10.0);
     }
 }

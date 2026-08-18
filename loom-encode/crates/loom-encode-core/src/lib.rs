@@ -432,6 +432,60 @@ impl AudioSampleFormat {
     }
 }
 
+/// Hardware-accelerated video codec profiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum HardwareEncoder {
+    #[default]
+    None,
+    NvencH264,
+    NvencHevc,
+    VideoToolboxH264,
+    VideoToolboxHevc,
+    VaapiH264,
+    VaapiHevc,
+}
+
+/// Generates video codec FFmpeg arguments for hardware-accelerated encoders.
+pub fn generate_hardware_encoder_args(hw: HardwareEncoder) -> Vec<String> {
+    match hw {
+        HardwareEncoder::None => Vec::new(),
+        HardwareEncoder::NvencH264 => vec!["-c:v".into(), "h264_nvenc".into()],
+        HardwareEncoder::NvencHevc => vec!["-c:v".into(), "hevc_nvenc".into()],
+        HardwareEncoder::VideoToolboxH264 => vec!["-c:v".into(), "h264_videotoolbox".into()],
+        HardwareEncoder::VideoToolboxHevc => vec!["-c:v".into(), "hevc_videotoolbox".into()],
+        HardwareEncoder::VaapiH264 => vec!["-c:v".into(), "h264_vaapi".into()],
+        HardwareEncoder::VaapiHevc => vec!["-c:v".into(), "hevc_vaapi".into()],
+    }
+}
+
+/// Stream mapping configuration for selecting specific media tracks from an input file.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StreamMapping {
+    pub video_track: Option<u32>,
+    pub audio_track: Option<u32>,
+    pub subtitle_track: Option<u32>,
+}
+
+impl StreamMapping {
+    /// Generates FFmpeg `-map` arguments for explicit track mapping.
+    pub fn generate_map_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(v) = self.video_track {
+            args.push("-map".into());
+            args.push(format!("0:v:{}", v));
+        }
+        if let Some(a) = self.audio_track {
+            args.push("-map".into());
+            args.push(format!("0:a:{}", a));
+        }
+        if let Some(s) = self.subtitle_track {
+            args.push("-map".into());
+            args.push(format!("0:s:{}", s));
+        }
+        args
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1178,5 +1232,29 @@ mod tests {
 
         assert_eq!(AudioSampleFormat::S16Le.sample_fmt_str(), "s16");
         assert_eq!(AudioSampleFormat::F32Le.sample_fmt_str(), "flt");
+    }
+
+    #[test]
+    fn hardware_encoder_and_stream_mapping_args() {
+        assert!(generate_hardware_encoder_args(HardwareEncoder::None).is_empty());
+        assert_eq!(
+            generate_hardware_encoder_args(HardwareEncoder::NvencH264),
+            vec!["-c:v", "h264_nvenc"]
+        );
+        assert_eq!(
+            generate_hardware_encoder_args(HardwareEncoder::VideoToolboxHevc),
+            vec!["-c:v", "hevc_videotoolbox"]
+        );
+
+        let map = StreamMapping {
+            video_track: Some(0),
+            audio_track: Some(1),
+            subtitle_track: Some(0),
+        };
+        let args = map.generate_map_args();
+        assert_eq!(
+            args,
+            vec!["-map", "0:v:0", "-map", "0:a:1", "-map", "0:s:0"]
+        );
     }
 }
