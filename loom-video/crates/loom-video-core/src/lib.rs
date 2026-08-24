@@ -1952,6 +1952,80 @@ impl ProxyRegistry {
     }
 }
 
+/// The playback transport direction of a shuttle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShuttleDirection {
+    #[default]
+    Forward,
+    Reverse,
+}
+
+/// J/K/L-style shuttle transport state: each press of the shuttle key steps through the
+/// speed ladder, `Stop` resets to paused. Speeds are playback-rate multipliers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShuttleState {
+    pub direction: ShuttleDirection,
+    /// Zero-based index into the speed ladder; paused when stopped.
+    pub step: usize,
+}
+
+/// The standard shuttle speed ladder in playback-rate multiples.
+pub const SHUTTLE_SPEED_LADDER: &[f64] = &[0.5, 1.0, 2.0, 4.0, 8.0];
+
+impl Default for ShuttleState {
+    fn default() -> Self {
+        Self::stopped()
+    }
+}
+
+impl ShuttleState {
+    /// Paused shuttle at the base of the forward ladder.
+    pub fn stopped() -> Self {
+        Self {
+            direction: ShuttleDirection::Forward,
+            step: 0,
+        }
+    }
+
+    /// True when the shuttle is fully stopped (step 0 regardless of direction).
+    pub fn is_stopped(&self) -> bool {
+        self.step == 0
+    }
+
+    /// Signed playback rate: positive forward, negative reverse; zero when stopped.
+    pub fn rate(&self) -> f64 {
+        if self.is_stopped() {
+            0.0
+        } else {
+            let magnitude = SHUTTLE_SPEED_LADDER
+                .get(self.step - 1)
+                .copied()
+                .unwrap_or(*SHUTTLE_SPEED_LADDER.last().unwrap());
+            match self.direction {
+                ShuttleDirection::Forward => magnitude,
+                ShuttleDirection::Reverse => -magnitude,
+            }
+        }
+    }
+
+    /// Advances one rung up the ladder in the current direction.
+    pub fn press_shuttle_forward(&mut self) {
+        self.direction = ShuttleDirection::Forward;
+        self.step = (self.step + 1).min(SHUTTLE_SPEED_LADDER.len());
+    }
+
+    /// Advances one rung up the reverse ladder.
+    pub fn press_shuttle_reverse(&mut self) {
+        self.direction = ShuttleDirection::Reverse;
+        self.step = (self.step + 1).min(SHUTTLE_SPEED_LADDER.len());
+    }
+
+    /// Stops playback and returns to the neutral paused state.
+    pub fn press_stop(&mut self) {
+        *self = Self::stopped();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2669,5 +2743,60 @@ mod tests {
             })
             .is_err());
         assert_eq!(registry.links.len(), 1);
+    }
+
+    #[test]
+    fn shuttle_transport_ladder() {
+        // Stopped state has zero rate
+        let mut s = ShuttleState::stopped();
+        assert!(s.is_stopped());
+        assert_eq!(s.rate(), 0.0);
+
+        // Forward ladder: 0.5x, 1x, 2x, 4x, 8x then saturates
+        s.press_shuttle_forward();
+        assert_eq!(s.rate(), 0.5);
+        s.press_shuttle_forward();
+        assert_eq!(s.rate(), 1.0);
+        s.press_shuttle_forward();
+        assert_eq!(s.rate(), 2.0);
+        s.press_shuttle_forward();
+        assert_eq!(s.rate(), 4.0);
+        s.press_shuttle_forward();
+        assert_eq!(s.rate(), 8.0);
+        let top = s.clone();
+        s.press_shuttle_forward();
+        assert_eq!(s.rate(), 8.0, "ladder saturates at maximum speed");
+        assert_eq!(s.step, SHUTTLE_SPEED_LADDER.len());
+
+        // Stop resets to neutral paused state
+        s.press_stop();
+        assert!(s.is_stopped());
+        assert_eq!(s.rate(), 0.0);
+
+        // Reverse ladder mirrors with negative rates
+        let mut r = ShuttleState::default();
+        assert!(r.is_stopped());
+        r.press_shuttle_reverse();
+        assert_eq!(r.rate(), -0.5);
+        r.press_shuttle_reverse();
+        assert_eq!(r.rate(), -1.0);
+        r.press_shuttle_reverse();
+        assert_eq!(r.direction, ShuttleDirection::Reverse);
+        assert!((r.rate() - (-2.0)).abs() < 1e-9);
+
+        // Direction switch from reverse keeps the step magnitude
+        r.press_shuttle_forward();
+        assert_eq!(r.direction, ShuttleDirection::Forward);
+        assert!((r.rate() - 4.0).abs() < 1e-9);
+
+        // Determinism: identical sequences produce identical states
+        let mut a = ShuttleState::stopped();
+        let mut b = ShuttleState::stopped();
+        for _ in 0..3 {
+            a.press_shuttle_forward();
+            b.press_shuttle_forward();
+        }
+        assert_eq!(a, b);
+        assert_eq!(top.direction, ShuttleDirection::Forward);
     }
 }

@@ -1665,6 +1665,34 @@ fn truncate_on_char_boundary(value: &str, limit: usize) -> &str {
     &value[..end]
 }
 
+/// Estimates the encoded output size in bytes from component bitrates and duration.
+/// Total kilobits = (video + audio kbps) * seconds; bytes = kilobits * 1000 / 8.
+pub fn estimate_output_size_bytes(
+    video_bitrate_kbps: u32,
+    audio_bitrate_kbps: u32,
+    duration_secs: f64,
+) -> Result<u64, String> {
+    if duration_secs <= 0.0 || !duration_secs.is_finite() {
+        return Err("duration must be positive and finite".into());
+    }
+    let total_kilobits = (video_bitrate_kbps as f64 + audio_bitrate_kbps as f64) * duration_secs;
+    Ok((total_kilobits * 1000.0 / 8.0).round() as u64)
+}
+
+/// Estimates free-space feasibility: true when `available_bytes` exceeds the estimate plus
+/// the given safety margin fraction of it (e.g. 0.1 reserves 10% headroom).
+pub fn has_room_for_output(
+    estimated_bytes: u64,
+    available_bytes: u64,
+    margin_fraction: f64,
+) -> Result<bool, String> {
+    if !(0.0..=1.0).contains(&margin_fraction) {
+        return Err("margin fraction must be within [0, 1]".into());
+    }
+    let required = (estimated_bytes as f64 * (1.0 + margin_fraction)).ceil() as u64;
+    Ok(available_bytes >= required)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2267,5 +2295,36 @@ mod tests {
         let mut broken = rule.clone();
         broken.stability_seconds = 4000;
         assert!(broken.validate().is_err());
+    }
+
+    #[test]
+    fn output_size_estimation_and_disk_feasibility() {
+        // 8 Mbps video + 192 kbps audio over 60 s = 8192 kbit/s * 60 = 491,520 kbits
+        // = 61,440,000 bytes exactly
+        let size = estimate_output_size_bytes(8000, 192, 60.0).unwrap();
+        assert_eq!(size, 61_440_000);
+
+        // Video-only second: 5128 kbps * 1 s = 5,128,000 bits = 641,000 bytes
+        assert_eq!(estimate_output_size_bytes(5128, 0, 1.0).unwrap(), 641_000);
+        // Tiny slice: 5128 kbps * 0.0001 s rounds down to 64 bytes
+        assert_eq!(estimate_output_size_bytes(5128, 0, 0.0001).unwrap(), 64);
+        // Rounding to whole bytes: 1 kbps * 1 s = 1000 bits = 125 bytes
+        assert_eq!(estimate_output_size_bytes(1, 0, 1.0).unwrap(), 125);
+
+        assert!(estimate_output_size_bytes(5000, 128, 0.0).is_err());
+        assert!(estimate_output_size_bytes(5000, 128, -1.0).is_err());
+        assert!(estimate_output_size_bytes(5000, 128, f64::NAN).is_err());
+
+        // Feasibility with a 10% margin
+        assert!(has_room_for_output(10_000, 11_000, 0.1).unwrap());
+        assert!(!has_room_for_output(10_000, 10_999, 0.1).unwrap());
+
+        // Zero margin requires the exact estimate
+        assert!(has_room_for_output(10_000, 10_000, 0.0).unwrap());
+        assert!(!has_room_for_output(10_000, 9_999, 0.0).unwrap());
+
+        // Invalid margins are rejected rather than silently applied
+        assert!(has_room_for_output(1, 1, -0.5).is_err());
+        assert!(has_room_for_output(1, 1, 1.5).is_err());
     }
 }

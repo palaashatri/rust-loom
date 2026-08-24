@@ -2888,6 +2888,102 @@ impl CitationEntry {
     }
 }
 
+/// Approximate English syllable count for a word using standard heuristic rules.
+///
+/// Exact deterministic procedure (input is defensively lowercased with
+/// `to_ascii_lowercase`, so lowercase input is expected but other case also
+/// behaves sanely):
+///
+/// 1. Vowels are `a`, `e`, `i`, `o`, `u`, `y`. Every non-alphabetic character
+///    acts as a separator that breaks vowel runs.
+/// 2. Each maximal run of vowels counts as one syllable.
+/// 3. Silent trailing `e`: when the word has more than two characters, ends in
+///    `e`, and the second-to-last character is not a vowel, one syllable is
+///    subtracted (saturating at zero).
+/// 4. Consonant + `le` ending: when the word has at least three characters,
+///    ends in `le`, and the character before `le` is not a vowel, one syllable
+///    is added back (that `e` is pronounced, as in "table").
+/// 5. An empty word yields `0`; any non-empty word yields at least `1`.
+pub fn estimate_syllables(word: &str) -> usize {
+    let lowered = word.to_ascii_lowercase();
+    let is_vowel = |c: char| matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'y');
+
+    let mut groups = 0usize;
+    let mut prev_vowel = false;
+    for c in lowered.chars() {
+        if is_vowel(c) && !prev_vowel {
+            groups += 1;
+        }
+        prev_vowel = is_vowel(c);
+    }
+
+    let chars: Vec<char> = lowered.chars().collect();
+    let mut syllables = groups;
+
+    if chars.len() > 2 && chars[chars.len() - 1] == 'e' && !is_vowel(chars[chars.len() - 2]) {
+        syllables = syllables.saturating_sub(1);
+    }
+
+    if chars.len() >= 3
+        && chars[chars.len() - 1] == 'e'
+        && chars[chars.len() - 2] == 'l'
+        && !is_vowel(chars[chars.len() - 3])
+    {
+        syllables += 1;
+    }
+
+    if chars.is_empty() {
+        0
+    } else {
+        syllables.max(1)
+    }
+}
+
+/// Computes readability scores over plain text using the Flesch formulas.
+///
+/// Returns `(flesch_reading_ease, fkgl_grade_level)` where:
+///
+/// - `words` are whitespace-separated tokens containing at least one
+///   alphanumeric character;
+/// - `sentences` are the segments produced by splitting on the sentence
+///   terminators `.`, `!`, `?` that contain at least one such word
+///   (unterminated trailing text forms a final segment);
+/// - `syllables` is `estimate_syllables` summed over all words.
+///
+/// `flesch_reading_ease = 206.835 - 1.015*(words/sentences) -
+/// 84.6*(syllables/words)` and `fkgl_grade_level = 0.39*(words/sentences) +
+/// 11.8*(syllables/words)`.
+///
+/// Higher reading-ease means easier text; higher grade level means harder
+/// text. Abbreviations like "e.g." are tokenized naively by this heuristic
+/// and inflate the counts. Empty or degenerate input (no sentence segment
+/// containing a word) returns `Err("no sentences")`.
+pub fn readability_scores(text: &str) -> Result<(f64, f64), String> {
+    let is_word = |w: &str| w.chars().any(|c| c.is_alphanumeric());
+    let words: Vec<&str> = text.split_whitespace().filter(|w| is_word(w)).collect();
+    let sentences = text
+        .split(['.', '!', '?'])
+        .filter(|segment| segment.split_whitespace().any(is_word))
+        .count();
+
+    if sentences == 0 {
+        return Err("no sentences".to_string());
+    }
+
+    let syllables: usize = words.iter().map(|w| estimate_syllables(w)).sum();
+    let words_f = words.len() as f64;
+    let sentences_f = sentences as f64;
+    let syllables_f = syllables as f64;
+
+    let words_per_sentence = words_f / sentences_f;
+    let syllables_per_word = syllables_f / words_f;
+
+    let flesch = 206.835 - 1.015 * words_per_sentence - 84.6 * syllables_per_word;
+    let fkgl = 0.39 * words_per_sentence + 11.8 * syllables_per_word;
+
+    Ok((flesch, fkgl))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3411,6 +3507,57 @@ mod tests {
         assert!(stats.char_count > 40);
         assert!(stats.char_count_no_spaces < stats.char_count);
         assert!(stats.reading_time_minutes > 0.0);
+    }
+
+    #[test]
+    fn readability_scoring_and_syllables() {
+        // Syllable heuristic spot checks (rules documented on estimate_syllables).
+        assert_eq!(estimate_syllables("cat"), 1); // one vowel group "a"
+        assert_eq!(estimate_syllables("reading"), 2); // groups "ea", "i"
+                                                      // "table": groups a,e = 2; silent-e -> 1; consonant+"le" adds 1 back -> 2.
+        assert_eq!(estimate_syllables("table"), 2);
+        assert_eq!(estimate_syllables(""), 0);
+
+        // Fixture A: six monosyllables, one sentence.
+        // words=6, syllables=6, sentences=1
+        // Flesch = 206.835 - 1.015*(6/1) - 84.6*(6/6) = 206.835 - 6.09 - 84.6 = 116.145
+        // FKGL   = 0.39*(6/1) + 11.8*(6/6) = 2.34 + 11.8 = 14.14
+        let (easy_flesch, easy_fkgl) = readability_scores("The cat sat on the mat.").unwrap();
+        assert!((easy_flesch - 116.145).abs() < 1e-9);
+        assert!((easy_fkgl - 14.14).abs() < 1e-9);
+
+        // Fixture B: seven polysyllables, one long sentence.
+        // incredible=4 (groups i,e,i,e=4; silent-e -1; consonant+"le" +1)
+        // organizations=5 (o,a,i,a,io)  systematically=6 (y,e,a,i,a,y)
+        // documented=4 (o,u,e,e)  extraordinary=5 (e,ao,i,a,y)
+        // educational=5 (e,u,a,io,a)  examinations=5 (e,a,i,a,io)
+        // words=7, syllables=34, sentences=1
+        // Flesch = 206.835 - 1.015*7 - 84.6*(34/7) = 199.73 - 410.91428571... = -211.18428571428564
+        // FKGL   = 0.39*7 + 11.8*(34/7) = 2.73 + 57.31428571... = 60.044285714285714
+        let (hard_flesch, hard_fkgl) = readability_scores(
+            "Incredible organizations systematically documented extraordinary educational examinations.",
+        )
+        .unwrap();
+        assert!((hard_flesch - -211.18428571428564).abs() < 1e-9);
+        assert!((hard_fkgl - 60.044285714285714).abs() < 1e-9);
+
+        assert!(easy_flesch > hard_flesch);
+        assert!(easy_fkgl < hard_fkgl);
+
+        // Mixed terminators '.', '!', '?' split into three sentences.
+        // words=9 monosyllables, syllables=9, sentences=3
+        // Flesch = 206.835 - 1.015*(9/3) - 84.6*(9/9) = 206.835 - 3.045 - 84.6 = 119.19
+        // FKGL   = 0.39*(9/3) + 11.8*(9/9) = 1.17 + 11.8 = 12.97
+        let (mixed_flesch, mixed_fkgl) =
+            readability_scores("The cat ran! The dog hid? The bird sang.").unwrap();
+        assert!((mixed_flesch - 119.19).abs() < 1e-9);
+        assert!((mixed_fkgl - 12.97).abs() < 1e-9);
+
+        assert_eq!(readability_scores("").unwrap_err(), "no sentences");
+        assert_eq!(readability_scores("?!.").unwrap_err(), "no sentences");
+
+        // Unterminated trailing text still forms one sentence.
+        assert!(readability_scores("hello world").is_ok());
     }
 
     #[test]

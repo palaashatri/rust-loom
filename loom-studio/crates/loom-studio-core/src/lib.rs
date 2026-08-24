@@ -2136,6 +2136,103 @@ impl TempoMap {
     }
 }
 
+/// Recognized chord qualities for pitch-class analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChordQuality {
+    #[default]
+    Major,
+    Minor,
+    Diminished,
+    Augmented,
+    Dominant7,
+    Major7,
+    Minor7,
+}
+
+/// Semitone intervals from the chord root defining each quality.
+const CHORD_TEMPLATES: &[(ChordQuality, &[u32])] = &[
+    (ChordQuality::Major, &[4, 7]),
+    (ChordQuality::Minor, &[3, 7]),
+    (ChordQuality::Diminished, &[3, 6]),
+    (ChordQuality::Augmented, &[4, 8]),
+    (ChordQuality::Dominant7, &[4, 7, 10]),
+    (ChordQuality::Major7, &[4, 7, 11]),
+    (ChordQuality::Minor7, &[3, 7, 10]),
+];
+
+/// A detected chord result with a heuristic confidence in [0,1].
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetectedChord {
+    /// Root pitch class 0..=11 where 0 = C.
+    pub root_pitch_class: u8,
+    pub quality: ChordQuality,
+    pub confidence: f32,
+}
+
+/// Detects the most likely chord from sounding pitches (MIDI numbers; values above 127 are
+/// ignored). Every distinct pitch class is tried as root; each quality template scores by its
+/// fraction of matched intervals with a small deterministic bass-root bonus. Candidates compare
+/// by coverage, then matched-interval count, then template size, then root pitch class. Fewer
+/// than three distinct pitch classes yield `None`.
+pub fn detect_chord(pitches: &[u8]) -> Option<DetectedChord> {
+    let classes: Vec<u8> = {
+        let mut set: Vec<u8> = pitches
+            .iter()
+            .copied()
+            .filter(|p| *p <= 127)
+            .map(|p| p % 12)
+            .collect();
+        set.sort_unstable();
+        set.dedup();
+        set
+    };
+    if classes.len() < 3 {
+        return None;
+    }
+
+    let bass_class = pitches.iter().copied().filter(|p| *p <= 127).min()? % 12;
+
+    // (coverage, matched, template_len, root, quality)
+    let mut best: Option<(f32, usize, usize, u8, ChordQuality)> = None;
+    for root in &classes {
+        for (quality, intervals) in CHORD_TEMPLATES {
+            let matched = intervals
+                .iter()
+                .filter(|i| classes.contains(&((root + **i as u8) % 12)))
+                .count();
+            if matched == 0 {
+                continue;
+            }
+            let mut coverage = matched as f32 / intervals.len() as f32;
+            if *root == bass_class {
+                coverage += 0.01;
+            }
+
+            let candidate = (coverage, matched, intervals.len(), *root, *quality);
+            let replace = match &best {
+                None => true,
+                Some(b) => {
+                    candidate.0 > b.0
+                        || (candidate.0 == b.0
+                            && (candidate.1 > b.1
+                                || (candidate.1 == b.1
+                                    && (candidate.2 < b.2
+                                        || candidate.2 == b.2 && candidate.3 < b.3))))
+                }
+            };
+            if replace {
+                best = Some(candidate);
+            }
+        }
+    }
+
+    best.map(|(coverage, _, _, root, quality)| DetectedChord {
+        root_pitch_class: root,
+        quality,
+        confidence: coverage.min(1.0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2905,5 +3002,41 @@ mod studio_runtime_tests {
         for &s in &buffer.samples {
             assert!(s >= -1.0 - 1e-5 && s <= 1.0 + 1e-5);
         }
+    }
+
+    #[test]
+    fn chord_detection_qualities() {
+        // C major triad: C4 E4 G4 -> root pitch class 0 (C), Major
+        let c_major = detect_chord(&[60, 64, 67]).unwrap();
+        assert_eq!(c_major.root_pitch_class, 0);
+        assert_eq!(c_major.quality, ChordQuality::Major);
+        assert!(c_major.confidence > 0.99);
+
+        // A minor: A3 C4 E4 -> root pitch class 9 (A), Minor. The bass bonus must not
+        // override the exact template match.
+        let a_minor = detect_chord(&[57, 60, 64]).unwrap();
+        assert_eq!(a_minor.root_pitch_class, 9);
+        assert_eq!(a_minor.quality, ChordQuality::Minor);
+        assert!(a_minor.confidence > 0.99);
+
+        // G dominant seventh: G3 B3 D4 F4 -> root 7 (G), Dominant7 with full coverage
+        let g7 = detect_chord(&[55, 59, 62, 65]).unwrap();
+        assert_eq!(g7.root_pitch_class, 7);
+        assert_eq!(g7.quality, ChordQuality::Dominant7);
+        assert!(g7.confidence > 0.99);
+
+        // Fewer than three distinct pitch classes cannot form a chord
+        assert!(detect_chord(&[60, 64]).is_none());
+        assert!(detect_chord(&[60, 60, 72]).is_none());
+        assert!(detect_chord(&[]).is_none());
+
+        // A chromatic cluster still resolves deterministically without a perfect fit
+        let cluster = detect_chord(&[60, 61, 62, 63]);
+        assert!(cluster.is_some());
+        let c = cluster.unwrap();
+        assert!(c.confidence < 1.0);
+
+        // Deterministic across repeated calls
+        assert_eq!(detect_chord(&[60, 64, 67]), detect_chord(&[60, 64, 67]));
     }
 }

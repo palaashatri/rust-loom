@@ -1281,6 +1281,66 @@ pub fn handheld_offset_track(
     track
 }
 
+/// Time remapping modes for looping source content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimeRemapMode {
+    /// Play once then hold last frame past duration.
+    #[default]
+    Hold,
+    /// Wrap modulo duration.
+    Loop,
+    /// Bounce back and forth across [0, duration].
+    PingPong,
+}
+
+/// Maps composition time to source time under a remap mode with speed multiplier.
+///
+/// Source time is `comp_time_seconds * speed`, then resolved by `mode` into
+/// `[0, source_duration_seconds]`. Returns an error unless `comp_time_seconds` is finite and
+/// non-negative and both `source_duration_seconds` and `speed` are finite and positive.
+pub fn remap_source_time(
+    comp_time_seconds: f64,
+    source_duration_seconds: f64,
+    speed: f64,
+    mode: TimeRemapMode,
+) -> Result<f64, String> {
+    if !source_duration_seconds.is_finite() || source_duration_seconds <= 0.0 {
+        return Err("source duration must be finite and greater than zero".into());
+    }
+    if !speed.is_finite() || speed <= 0.0 {
+        return Err("speed must be finite and greater than zero".into());
+    }
+    if !comp_time_seconds.is_finite() || comp_time_seconds < 0.0 {
+        return Err("composition time must be finite and non-negative".into());
+    }
+
+    let t_src = comp_time_seconds * speed;
+    Ok(match mode {
+        TimeRemapMode::Hold => t_src.clamp(0.0, source_duration_seconds),
+        TimeRemapMode::Loop => t_src % source_duration_seconds,
+        TimeRemapMode::PingPong => {
+            // Triangle wave over period 2*duration mapping into [0, duration].
+            let period = 2.0 * source_duration_seconds;
+            let phase = t_src % period;
+            if phase <= source_duration_seconds {
+                phase
+            } else {
+                period - phase
+            }
+        }
+    })
+}
+
+/// Composition-frame count needed to play `source_frames` exactly once at playback `speed`
+/// (1.0 = realtime): `ceil(source_frames / speed)`. Returns an error unless `speed` is finite
+/// and greater than zero.
+pub fn frames_required(source_frames: u32, speed: f64) -> Result<u32, String> {
+    if !speed.is_finite() || speed <= 0.0 {
+        return Err("speed must be finite and greater than zero".into());
+    }
+    Ok((source_frames as f64 / speed).ceil() as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1880,5 +1940,63 @@ mod tests {
 
         // Inverted ranges yield no samples.
         assert!(handheld_offset_track(1.0, 0.0, 0.125, 1, &config).is_empty());
+    }
+
+    #[test]
+    fn time_remap_modes_and_edges() {
+        // Hold clamps to the last frame beyond duration.
+        assert_eq!(
+            remap_source_time(1.0, 2.0, 1.0, TimeRemapMode::Hold),
+            Ok(1.0)
+        );
+        assert_eq!(
+            remap_source_time(10.0, 2.0, 1.0, TimeRemapMode::Hold),
+            Ok(2.0)
+        );
+
+        // Loop wraps modulo duration (duration 2s, speed 1: t=5 -> 1).
+        assert_eq!(
+            remap_source_time(5.0, 2.0, 1.0, TimeRemapMode::Loop),
+            Ok(1.0)
+        );
+        assert_eq!(
+            remap_source_time(4.0, 2.0, 1.0, TimeRemapMode::Loop),
+            Ok(0.0)
+        );
+
+        // PingPong mirrors across [0, duration] (t=3, d=2 -> 1).
+        assert_eq!(
+            remap_source_time(3.0, 2.0, 1.0, TimeRemapMode::PingPong),
+            Ok(1.0)
+        );
+        assert_eq!(
+            remap_source_time(5.0, 2.0, 1.0, TimeRemapMode::PingPong),
+            Ok(1.0)
+        );
+
+        // Speed 2 halves arrival times into the source.
+        assert_eq!(
+            remap_source_time(0.5, 2.0, 2.0, TimeRemapMode::Hold),
+            Ok(1.0)
+        );
+        assert_eq!(
+            remap_source_time(1.0, 2.0, 2.0, TimeRemapMode::Loop),
+            Ok(0.0)
+        );
+
+        // Invalid durations, speeds, and negative times are rejected.
+        assert!(remap_source_time(0.0, 0.0, 1.0, TimeRemapMode::Hold).is_err());
+        assert!(remap_source_time(0.0, -1.0, 1.0, TimeRemapMode::Hold).is_err());
+        assert!(remap_source_time(0.0, f64::NAN, 1.0, TimeRemapMode::Hold).is_err());
+        assert!(remap_source_time(0.0, 2.0, 0.0, TimeRemapMode::Hold).is_err());
+        assert!(remap_source_time(0.0, 2.0, f64::INFINITY, TimeRemapMode::Hold).is_err());
+        assert!(remap_source_time(-0.1, 2.0, 1.0, TimeRemapMode::Hold).is_err());
+
+        // frames_required rounds up fractional composition frames and rejects bad speeds.
+        assert_eq!(frames_required(25, 1.0), Ok(25));
+        assert_eq!(frames_required(25, 2.0), Ok(13));
+        assert_eq!(frames_required(24, 2.0), Ok(12));
+        assert!(frames_required(25, 0.0).is_err());
+        assert!(frames_required(25, -1.0).is_err());
     }
 }

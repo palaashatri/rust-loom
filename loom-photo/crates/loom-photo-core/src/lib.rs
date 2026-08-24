@@ -2116,6 +2116,71 @@ pub fn rotate_image_arbitrary(image: &RgbaImage, degrees: f64) -> Result<RgbaIma
     Ok(output)
 }
 
+/// Analyzes the luma histogram to find robust black/white points: the lowest bin whose
+/// cumulative population reaches `clip_fraction` of total pixels gives `in_black`; symmetrically
+/// from the top for `in_white`; output range stays full [0,255]; gamma 1.
+///
+/// Luminance bins come from [`RgbaImage::compute_histogram`] (Rec.709 weights rounded to
+/// integer levels). `clip_fraction` must lie in `0.0..=0.45`. A flat image (every pixel the
+/// same value `v`) yields `in_black = v` and `in_white = min(v + 1, 255)` so the input window
+/// never collapses to a divide-by-zero inside [`apply_levels`]; when `v == 255` the window is
+/// lowered to `[254, 255]` instead so the result still passes [`LevelsConfig::validate`].
+pub fn auto_contrast_levels(image: &RgbaImage, clip_fraction: f64) -> Result<LevelsConfig, String> {
+    if !(0.0..=0.45).contains(&clip_fraction) {
+        return Err(format!(
+            "clip_fraction {clip_fraction} outside range 0.0..=0.45"
+        ));
+    }
+    let histogram = image.compute_histogram();
+    let total: u64 = histogram.luma.iter().map(|&count| u64::from(count)).sum();
+    let clip_target = clip_fraction * total as f64;
+
+    let mut cumulative = 0u64;
+    let mut black_bin = 0usize;
+    for (bin, &count) in histogram.luma.iter().enumerate() {
+        black_bin = bin;
+        cumulative += u64::from(count);
+        if cumulative as f64 >= clip_target {
+            break;
+        }
+    }
+    let mut cumulative_from_top = 0u64;
+    let mut white_bin = 255usize;
+    for offset in 0..256usize {
+        let bin = 255 - offset;
+        white_bin = bin;
+        cumulative_from_top += u64::from(histogram.luma[bin]);
+        if cumulative_from_top as f64 >= clip_target {
+            break;
+        }
+    }
+
+    let mut in_black = black_bin as f32;
+    let mut in_white = white_bin as f32;
+    if in_white <= in_black {
+        // Degenerate window (flat or single-bin images): widen by one level, clamped to
+        // 0..=255, so the config validates and apply_levels never divides by zero.
+        in_white = (in_black + 1.0).min(255.0);
+        if in_white <= in_black {
+            in_black = in_white - 1.0;
+        }
+    }
+    Ok(LevelsConfig {
+        in_black,
+        in_white,
+        gamma: 1.0,
+        out_black: 0.0,
+        out_white: 255.0,
+    })
+}
+
+impl RgbaImage {
+    /// One-shot auto contrast using [`auto_contrast_levels`] then [`apply_levels`].
+    pub fn auto_contrast(&self, clip_fraction: f64) -> Result<RgbaImage, String> {
+        apply_levels(self, &auto_contrast_levels(self, clip_fraction)?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2846,5 +2911,81 @@ mod tests {
         };
         assert!(bad_gamma.validate().is_err());
         assert!(apply_levels(&img, &bad_gamma).is_err());
+    }
+
+    #[test]
+    fn auto_contrast_derives_levels() {
+        let spread = |image: &RgbaImage| {
+            let mut lo = u8::MAX;
+            let mut hi = u8::MIN;
+            for pixel in image.pixels.chunks_exact(4) {
+                for channel in &pixel[..3] {
+                    lo = lo.min(*channel);
+                    hi = hi.max(*channel);
+                }
+            }
+            i32::from(hi) - i32::from(lo)
+        };
+
+        // Low-contrast gray ramp spanning only levels 60..=70 expands toward full range.
+        let mut img = RgbaImage::transparent(11, 4).unwrap();
+        for x in 0..11u32 {
+            let value = 60u8 + x as u8;
+            for y in 0..4u32 {
+                img.set_pixel(x, y, [value, value, value, 255]);
+            }
+        }
+        let levels = auto_contrast_levels(&img, 0.05).unwrap();
+        levels.validate().expect("derived levels must validate");
+        assert_eq!(levels.in_black, 60.0);
+        assert_eq!(levels.in_white, 70.0);
+        let expanded = img.auto_contrast(0.05).unwrap();
+        assert!(
+            spread(&expanded) > spread(&img),
+            "spread should grow: {} -> {}",
+            spread(&img),
+            spread(&expanded)
+        );
+        assert!(spread(&expanded) >= 200);
+
+        // A flat image yields a valid one-level-wide window instead of divide-by-zero.
+        let flat = RgbaImage::solid(3, 3, [128, 128, 128, 255]).unwrap();
+        let flat_levels = auto_contrast_levels(&flat, 0.01).unwrap();
+        flat_levels.validate().expect("flat levels must validate");
+        assert_eq!(flat_levels.in_black, 128.0);
+        assert_eq!(flat_levels.in_white, 129.0);
+
+        // clip_fraction outside 0.0..=0.45 is rejected.
+        assert!(auto_contrast_levels(&img, -0.01).is_err());
+        assert!(auto_contrast_levels(&img, 0.46).is_err());
+
+        // An equal-population full-range gradient changes little: every level 0..=255
+        // appears twice across this 16x32 canvas, so clipping barely trims the ends.
+        let mut full = RgbaImage::transparent(16, 32).unwrap();
+        for index in 0..512usize {
+            let value = (index % 256) as u8;
+            full.set_pixel(
+                (index % 16) as u32,
+                (index / 16) as u32,
+                [value, value, value, 255],
+            );
+        }
+        let untouched = full.auto_contrast(0.01).unwrap();
+        let mut max_delta = 0i32;
+        for (original, adjusted) in full
+            .pixels
+            .chunks_exact(4)
+            .zip(untouched.pixels.chunks_exact(4))
+        {
+            for (original_channel, adjusted_channel) in original.iter().take(3).zip(&adjusted[..3])
+            {
+                let delta = (i32::from(*original_channel) - i32::from(*adjusted_channel)).abs();
+                max_delta = max_delta.max(delta);
+            }
+        }
+        assert!(
+            max_delta <= 3,
+            "full-range image should be nearly unchanged, max delta {max_delta}"
+        );
     }
 }

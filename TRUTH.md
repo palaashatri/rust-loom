@@ -16,18 +16,18 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **76/100**, advancing Stage D professional feature breadth across all eight applications
+approximately **78/100**, advancing Stage D professional feature breadth across all eight applications
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
-bibliography citation formatting across APA, MLA, Chicago, and IEEE styles with surname/initial derivation (`CitationStyle`, `CitationEntry`) in Writer;
-goal-seek numeric solving over bracketed functions via deterministic bisection (`goal_seek_bisection`) in Sheets;
-even element distribution spacing along horizontal and vertical axes (`Slide::distribute_horizontally`, `Slide::distribute_vertically`) in Present;
-arbitrary-angle image rotation with exact 90-degree fast paths and bilinear general sampling (`rotate_image_arbitrary`) in Photo;
-procedural handheld camera shake simulation with layered sway/jitter synthesis (`HandheldConfig`, `calculate_handheld_offset`) in Motion;
-proxy media linkage registry with staleness detection for relink workflows (`ProxyLink`, `ProxyRegistry`) in Video;
-piecewise tempo maps with linear ramp interpolation and closed-form beat/second inversion (`TempoMap`, `TempoNode`) in Studio; and
-batch output collision resolution plus cross-platform filename sanitization (`resolve_output_collisions`, `sanitize_output_filename`) in Encode. All 11 monorepo
+Flesch reading-ease and grade-level readability scoring with syllable heuristics (`estimate_syllables`, `readability_scores`) in Writer;
+TEXTJOIN-style joining, delimiter splitting, repetition, and nth-instance substitution (`text_join`, `split_text_to_columns`, `text_repeat`, `text_substitute`) in Sheets;
+aspect-ratio-preserving fit of elements into target boxes with centered letterboxing (`fit_rect_into_box`, `fit_element_to_box`) in Present;
+histogram-driven auto-contrast Levels derivation with one-shot application (`auto_contrast_levels`, `RgbaImage::auto_contrast`) in Photo;
+loop/pingpong time remapping for retimed source playback (`TimeRemapMode`, `remap_source_time`, `frames_required`) in Motion;
+J/K/L shuttle transport state with a signed speed ladder (`ShuttleState`, `SHUTTLE_SPEED_LADDER`) in Video;
+pitch-class chord detection across seven qualities with confidence scoring (`ChordQuality`, `DetectedChord`, `detect_chord`) in Studio; and
+output size estimation with disk-space feasibility margins (`estimate_output_size_bytes`, `has_room_for_output`) in Encode. All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 585 passing automated tests.
+gates with 593 passing automated tests.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -63,7 +63,8 @@ parity or product completion.
 - **Writer:** editable paragraph surface, block model, style-run persistence, a mail merge template engine with
   `{{field}}` placeholder extraction and per-record document rendering (`MergeTemplate`, `extract_fields`,
   `render_record`), bibliography citation formatting across APA, MLA, Chicago, and IEEE styles with surname/initial
-  derivation (`CitationStyle`, `CitationEntry`), document outline extraction with indented heading navigation entries
+  derivation (`CitationStyle`, `CitationEntry`), Flesch reading-ease and grade-level readability scoring with syllable
+  heuristics (`estimate_syllables`, `readability_scores`), document outline extraction with indented heading navigation entries
   (`OutlineEntry`, `extract_outline`), bounded/coalesced history, recovery, search/pagination metrics, word boundary expansion
   (`find_word_boundaries`), query occurrence counting (`count_matches`), options-aware search and
   replace with case sensitivity and whole-word matching (`SearchOptions`, `find_matches_with_options`,
@@ -93,7 +94,9 @@ parity or product completion.
 - **Sheets:** multi-sheet workbook management (`add_sheet`, `remove_sheet`, `rename_sheet`),
   freeze panes configuration (`freeze_panes`, `unfreeze_panes`), pivot-table grouping and aggregation across Sum,
   Count, Average, Min, and Max (`PivotAggregation`, `compute_pivot`), goal-seek numeric solving over bracketed
-  functions via deterministic bisection (`goal_seek_bisection`), chart data-series specifications with validation,
+  functions via deterministic bisection (`goal_seek_bisection`), TEXTJOIN-style joining, delimiter splitting,
+  repetition, and nth-instance substitution (`text_join`, `split_text_to_columns`, `text_repeat`, `text_substitute`),
+  chart data-series specifications with validation,
   value ranges, and normalized plotting points (`ChartKind`, `ChartSeries`, `ChartSpec`), statistical analysis formulas for mode,
   population/sample variance, and standard deviation (`mode_single`, `var_p`, `var_s`, `stdev_p`, `stdev_s`),
   financial formula calculation engine
@@ -121,7 +124,8 @@ parity or product completion.
 - **Present:** deck/slide models, slide duplication/reordering/removal, object entrance animation entries with
   click-build ordering and smoothstep progress timing (`AnimationEffect`, `AnimationEntry`,
   `sort_animation_builds`, `animation_progress`), even element distribution spacing along horizontal and vertical axes
-  (`Slide::distribute_horizontally`, `Slide::distribute_vertically`), accessibility reading-order assignment with element resequencing and
+  (`Slide::distribute_horizontally`, `Slide::distribute_vertically`), aspect-ratio-preserving fit of elements into target
+  boxes with centered letterboxing (`fit_rect_into_box`, `fit_element_to_box`), accessibility reading-order assignment with element resequencing and
   validity checks (`ReadingOrder`), live presenter annotation
   overlays with pen/highlighter drawing tools and per-slide stroke storage (`SlideAnnotationOverlay`,
   `AnnotationStroke`, `AnnotationDrawingTool`), interactive click action triggers and slide
@@ -144,7 +148,8 @@ parity or product completion.
   animation authoring, presenter workflows, recording, video export, and PPTX/ODP fidelity remain incomplete.
 - **Photo:** raster decode, pixel buffers, layers, arbitrary-angle image rotation with exact 90-degree fast paths and
   bilinear general sampling (`rotate_image_arbitrary`), photographic Levels adjustment with black/white points and gamma
-  remapping (`LevelsConfig`, `apply_levels`), a round paint-brush engine with hardness falloff and spaced dab
+  remapping (`LevelsConfig`, `apply_levels`), histogram-driven auto-contrast Levels derivation with one-shot application
+  (`auto_contrast_levels`, `RgbaImage::auto_contrast`), a round paint-brush engine with hardness falloff and spaced dab
   stroke rendering (`BrushConfig`, `brush_dab_alpha`, `paint_stroke`), analog photographic film grain simulation with
   luminance-dependent density and monochrome/color modes (`FilmGrainConfig`, `RgbaImage::apply_film_grain`),
   split toning and color balance dual-tone adjustment model for shadows
@@ -166,7 +171,8 @@ parity or product completion.
   HDR/panorama, PSD fidelity, GPU effects, and production AI editing remain incomplete.
 - **Motion:** layer/keyframe models, damped harmonic spring overshoot keyframe arrival physics
   (`InertialBounceConfig`, `calculate_inertial_bounce`), procedural handheld camera shake simulation with layered sway/jitter
-  synthesis (`HandheldConfig`, `calculate_handheld_offset`), motion-blur shutter sample offsets and multi-sample position
+  synthesis (`HandheldConfig`, `calculate_handheld_offset`), loop/pingpong time remapping for retimed source playback
+  (`TimeRemapMode`, `remap_source_time`, `frames_required`), motion-blur shutter sample offsets and multi-sample position
   accumulation (`shutter_sample_offsets`, `accumulate_motion_samples`), deterministic particle emitter simulation with cone emission
   and gravity integration (`Particle`, `ParticleEmitterConfig`, `step_particles`), procedural motion turbulence and organic multi-octave harmonic wiggle noise generators
   (`WiggleConfig`, `wiggle_1d`, `wiggle_2d`), spatial motion path auto-orientation and heading trajectory calculations
@@ -185,7 +191,8 @@ parity or product completion.
   `Ellipse`, `Polygon`, `Star`) with bounding-box metrics, validation, persistence, bounded history, frame sampling, SVG frame
   export, and native New/Open/Save/Save As/export destination workflows with atomic writes. Production compositing/playback,
   cameras/lights, particles, effects, tracking, stabilization, optical flow, and render-queue breadth remain incomplete.
-- **Video:** track/clip models, proxy media linkage registry with staleness detection for relink workflows
+- **Video:** track/clip models, J/K/L shuttle transport state with a signed speed ladder
+  (`ShuttleState`, `SHUTTLE_SPEED_LADDER`), proxy media linkage registry with staleness detection for relink workflows
   (`ProxyLink`, `ProxyRegistry`), dialogue ducking automation envelope generation with attack/release ramps
   (`DuckingConfig`, `generate_ducking_envelope`), multicam camera-angle switching with cut points and active-angle resolution
   (`MulticamAngle`, `MulticamCut`, `active_angle_at`), musical beat-grid clip alignment with snap targets
@@ -204,7 +211,8 @@ parity or product completion.
   persistence, history, FFmpeg-backed export, progress, cancellation, and atomic writes. Synchronized timeline playback,
   real proxy workflows, multicam, advanced trims, professional audio/color/effects, HDR, transcription/tracking, and
   interchange remain incomplete.
-- **Studio:** track/region models, piecewise tempo maps with linear ramp interpolation and closed-form beat/second
+- **Studio:** track/region models, pitch-class chord detection across seven qualities with confidence scoring
+  (`ChordQuality`, `DetectedChord`, `detect_chord`), piecewise tempo maps with linear ramp interpolation and closed-form beat/second
   inversion (`TempoMap`, `TempoNode`), take-folder comping with best-take selection and overlap-safe composite sections
   (`TakeFolder`, `Take`, `CompSection`), MIDI note quantization to beat grids with adjustable snap strength
   (`BeatNote`, `quantize_notes`), ring modulator audio DSP effect with carrier-frequency sideband synthesis
@@ -226,7 +234,9 @@ parity or product completion.
   and WAV exports. Production recording, realtime scheduling, comping, time/pitch tools, CLAP/VST3 hosting, isolation,
   plugin UI, and mastering remain incomplete.
 - **Encode:** editable FFmpeg queue, batch output collision resolution plus cross-platform filename sanitization
-  (`resolve_output_collisions`, `sanitize_output_filename`), watch-folder ingestion rules with extension matching and file-stability
+  (`resolve_output_collisions`, `sanitize_output_filename`), output size estimation with disk-space feasibility margins
+  (`estimate_output_size_bytes`, `has_room_for_output`),
+  watch-folder ingestion rules with extension matching and file-stability
   thresholds (`WatchFolderRule`), post-encode conformance verification probe generation for decode integrity,
   duration tolerance, stream count, and loudness ceilings (`ConformanceCheck`, `generate_conformance_probe_args`),
   standardized audio channel downmix matrix profiles with ITU-R BS.775
@@ -283,7 +293,7 @@ still lacks complete semantic round-trip and independent PDF evidence. Photo sti
 has non-atomic persistence/export and status-only tool modes. Motion's repaired
 native workflow passed its focused strict gate, while its professional playback,
 compositing, and rendering engine remains incomplete. The complete-suite truth
-score is approximately **76/100**.
+score is approximately **78/100**.
 
 ### Keyboard journeys
 

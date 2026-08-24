@@ -847,6 +847,81 @@ pub fn text_proper(s: &str) -> String {
     result
 }
 
+/// Joins values with a delimiter, skipping empty strings when `skip_empty` is true (TEXTJOIN).
+pub fn text_join(delimiter: &str, skip_empty: bool, values: &[String]) -> String {
+    let mut parts: Vec<&str> = Vec::with_capacity(values.len());
+    for v in values {
+        if skip_empty && v.is_empty() {
+            continue;
+        }
+        parts.push(v);
+    }
+    parts.join(delimiter)
+}
+
+/// Splits text on a delimiter into fields; consecutive delimiters produce empty fields.
+/// An empty delimiter is an error.
+pub fn split_text_to_columns(text: &str, delimiter: &str) -> Result<Vec<String>, String> {
+    if delimiter.is_empty() {
+        return Err("#VALUE!: delimiter must not be empty".into());
+    }
+    Ok(text.split(delimiter).map(|s| s.to_string()).collect())
+}
+
+/// Repeats a text value `n` times; zero repetitions yield an empty string.
+pub fn text_repeat(value: &str, n: usize) -> String {
+    value.repeat(n)
+}
+
+/// Substitutes occurrences of `old_text` with `new_text`. With `instance_num` of 0 every
+/// occurrence is replaced; a value greater than zero replaces only that nth occurrence.
+pub fn text_substitute(
+    text: &str,
+    old_text: &str,
+    new_text: &str,
+    case_sensitive: bool,
+    instance_num: usize,
+) -> Result<String, String> {
+    if old_text.is_empty() {
+        return Err("#VALUE!: old_text must not be empty".into());
+    }
+
+    let matches: Vec<usize> = {
+        let mut found = Vec::new();
+        let (haystack, needle) = if case_sensitive {
+            (text.to_string(), old_text.to_string())
+        } else {
+            (text.to_lowercase(), old_text.to_lowercase())
+        };
+        let mut offset = 0;
+        while let Some(pos) = haystack[offset..].find(&needle) {
+            found.push(offset + pos);
+            offset += pos + needle.len();
+        }
+        found
+    };
+
+    if matches.is_empty() || instance_num > matches.len() {
+        return Ok(text.to_string());
+    }
+
+    let selected: Vec<usize> = if instance_num == 0 {
+        matches
+    } else {
+        vec![matches[instance_num - 1]]
+    };
+
+    let mut result = String::with_capacity(text.len());
+    let mut last_end = 0;
+    for start in selected {
+        result.push_str(&text[last_end..start]);
+        result.push_str(new_text);
+        last_end = start + old_text.len();
+    }
+    result.push_str(&text[last_end..]);
+    Ok(result)
+}
+
 /// Multiplies corresponding components in given arrays and returns the sum of those products (SUMPRODUCT).
 pub fn sumproduct(arrays: &[&[f64]]) -> Result<f64, String> {
     if arrays.is_empty() {
@@ -3833,5 +3908,56 @@ mod tests {
 
         let constant = goal_seek_bisection(|_| 7.0, 0.0, 5.0, 3.0, 1e-6, 64).unwrap_err();
         assert!(constant.contains("no sign change"), "{constant}");
+    }
+
+    #[test]
+    fn text_join_split_substitute_repeat() {
+        // TEXTJOIN with and without skipping empties
+        let values = vec!["a".to_string(), String::new(), "b".to_string()];
+        assert_eq!(text_join("-", false, &values), "a--b");
+        assert_eq!(text_join("-", true, &values), "a-b");
+        assert_eq!(text_join(",", true, &[]), "");
+
+        // SPLIT keeps empty fields from consecutive delimiters
+        let fields = split_text_to_columns("a,,b", ",").unwrap();
+        assert_eq!(
+            fields,
+            vec!["a".to_string(), String::new(), "b".to_string()]
+        );
+        assert_eq!(
+            split_text_to_columns("x|y", "|").unwrap(),
+            vec!["x".to_string(), "y".to_string()]
+        );
+        assert!(split_text_to_columns("abc", "").is_err());
+
+        // REPT
+        assert_eq!(text_repeat("ab", 3), "ababab");
+        assert_eq!(text_repeat("ab", 0), "");
+
+        // SUBSTITUTE
+        // "Banana" contains "na" at bytes 2 and 4; replacing all yields Ba|ny|ny
+        assert_eq!(
+            text_substitute("Banana", "na", "ny", true, 0).unwrap(),
+            "Banyny"
+        );
+        assert_eq!(
+            text_substitute("Banana", "NA", "ny", false, 0).unwrap(),
+            "Banyny"
+        );
+        assert_eq!(
+            text_substitute("Banana", "NA", "ny", true, 0).unwrap(),
+            "Banana"
+        );
+        // Only the second instance replaced
+        assert_eq!(
+            text_substitute("Banana", "na", "X", true, 2).unwrap(),
+            "BanaX"
+        );
+        // Out-of-range instance leaves the text unchanged
+        assert_eq!(
+            text_substitute("Banana", "na", "X", true, 9).unwrap(),
+            "Banana"
+        );
+        assert!(text_substitute("abc", "", "x", true, 0).is_err());
     }
 }

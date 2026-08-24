@@ -1704,6 +1704,60 @@ impl ReadingOrder {
     }
 }
 
+/// Computes the largest x/y/w/h rectangle fitting entirely inside the target box while
+/// preserving the source aspect ratio, centered within it. Returns (x, y, width, height) f64s.
+/// Degenerate source (zero/negative w or h) or target => Err naming the problem.
+pub fn fit_rect_into_box(
+    src_w: f64,
+    src_h: f64,
+    box_x: f64,
+    box_y: f64,
+    box_w: f64,
+    box_h: f64,
+) -> Result<(f64, f64, f64, f64), String> {
+    if src_w <= 0.0 {
+        return Err("source width must be positive".into());
+    }
+    if src_h <= 0.0 {
+        return Err("source height must be positive".into());
+    }
+    if box_w <= 0.0 {
+        return Err("box width must be positive".into());
+    }
+    if box_h <= 0.0 {
+        return Err("box height must be positive".into());
+    }
+    let scale = (box_w / src_w).min(box_h / src_h);
+    let width = src_w * scale;
+    let height = src_h * scale;
+    let x = box_x + (box_w - width) / 2.0;
+    let y = box_y + (box_h - height) / 2.0;
+    Ok((x, y, width, height))
+}
+
+/// Applies fit_rect_into_box to a slide element's geometry, mutating its x/y/width/height.
+pub fn fit_element_to_box(
+    element: &mut SlideElement,
+    box_x: f64,
+    box_y: f64,
+    box_w: f64,
+    box_h: f64,
+) -> Result<(), String> {
+    let (x, y, width, height) = fit_rect_into_box(
+        f64::from(element.width),
+        f64::from(element.height),
+        box_x,
+        box_y,
+        box_w,
+        box_h,
+    )?;
+    element.x = x as f32;
+    element.y = y as f32;
+    element.width = width as f32;
+    element.height = height as f32;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2399,5 +2453,49 @@ mod tests {
             .unwrap();
         broken.ordered_element_ids[empty_pos] = "b".to_string();
         assert!(broken.is_valid());
+    }
+
+    #[test]
+    fn fit_preserves_aspect_ratio_centered() {
+        // 2:1 source into a square box letterboxes top and bottom, filling width.
+        assert_eq!(
+            fit_rect_into_box(200.0, 100.0, 100.0, 100.0, 400.0, 400.0),
+            Ok((100.0, 200.0, 400.0, 200.0))
+        );
+
+        // 1:4 source into a wide box pillarboxes left and right, filling height.
+        assert_eq!(
+            fit_rect_into_box(50.0, 200.0, 0.0, 0.0, 800.0, 200.0),
+            Ok((375.0, 0.0, 50.0, 200.0))
+        );
+
+        // Matching aspect ratio fills the box exactly at the box origin.
+        assert_eq!(
+            fit_rect_into_box(160.0, 90.0, 10.0, 20.0, 320.0, 180.0),
+            Ok((10.0, 20.0, 320.0, 180.0))
+        );
+
+        // Zero-height source names the problem.
+        assert_eq!(
+            fit_rect_into_box(100.0, 0.0, 0.0, 0.0, 400.0, 400.0),
+            Err("source height must be positive".to_string())
+        );
+
+        // Element geometry is mutated in place with the same fit semantics.
+        let mut elem = SlideElement {
+            id: "img-1".into(),
+            element_type: ElementType::BodyText,
+            content: "photo".into(),
+            x: 500.0,
+            y: 500.0,
+            width: 300.0,
+            height: 150.0,
+            action: None,
+        };
+        fit_element_to_box(&mut elem, 0.0, 0.0, 600.0, 600.0).expect("fit failed");
+        assert_eq!(elem.x, 0.0);
+        assert_eq!(elem.y, 150.0);
+        assert_eq!(elem.width, 600.0);
+        assert_eq!(elem.height, 300.0);
     }
 }
