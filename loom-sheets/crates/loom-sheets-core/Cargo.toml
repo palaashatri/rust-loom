@@ -9,5 +9,6 @@ description = "Loom Sheets formula engine and workbook model (headless, testable
 [dependencies]
 loom-package = { workspace = true }
 loom-command = { workspace = true }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

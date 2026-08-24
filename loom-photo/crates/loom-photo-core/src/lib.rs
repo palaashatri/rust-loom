@@ -1921,6 +1921,83 @@ pub fn paint_stroke(
     }
 }
 
+/// Photographic Levels adjustment: remap input black/white points to output range with gamma.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LevelsConfig {
+    /// Input black point 0..=255 (below this maps to out_black).
+    pub in_black: f32,
+    /// Input white point 0..=255 (above this maps to out_white); must be > in_black.
+    pub in_white: f32,
+    /// Midtone gamma in (0, ~3]; 1.0 neutral.
+    pub gamma: f32,
+    /// Output black 0..=255.
+    pub out_black: f32,
+    /// Output white 0..=255.
+    pub out_white: f32,
+}
+
+impl LevelsConfig {
+    /// Neutral levels (identity when applied).
+    pub fn identity() -> Self {
+        Self {
+            in_black: 0.0,
+            in_white: 255.0,
+            gamma: 1.0,
+            out_black: 0.0,
+            out_white: 255.0,
+        }
+    }
+
+    /// Validates ranges; Err message names the violated constraint.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(0.0..=255.0).contains(&self.in_black) {
+            return Err(format!("in_black {} outside range 0..=255", self.in_black));
+        }
+        if !(0.0..=255.0).contains(&self.in_white) {
+            return Err(format!("in_white {} outside range 0..=255", self.in_white));
+        }
+        if self.in_white <= self.in_black {
+            return Err(format!(
+                "in_white {} must be greater than in_black {}",
+                self.in_white, self.in_black
+            ));
+        }
+        if self.gamma <= 0.0 {
+            return Err(format!("gamma {} must be greater than 0", self.gamma));
+        }
+        if !(0.0..=255.0).contains(&self.out_black) {
+            return Err(format!(
+                "out_black {} outside range 0..=255",
+                self.out_black
+            ));
+        }
+        if !(0.0..=255.0).contains(&self.out_white) {
+            return Err(format!(
+                "out_white {} outside range 0..=255",
+                self.out_white
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Applies Levels to every pixel's RGB channels (alpha preserved), clamping results.
+pub fn apply_levels(image: &RgbaImage, config: &LevelsConfig) -> Result<RgbaImage, String> {
+    config.validate()?;
+    let mut out = image.clone();
+    let inv_gamma = 1.0 / config.gamma;
+    let in_span = config.in_white - config.in_black;
+    let out_span = config.out_white - config.out_black;
+    for pixel in out.pixels.chunks_exact_mut(4) {
+        for channel in pixel.iter_mut().take(3) {
+            let normalized = ((f32::from(*channel) - config.in_black) / in_span).clamp(0.0, 1.0);
+            let mapped = config.out_black + normalized.powf(inv_gamma) * out_span;
+            *channel = mapped.round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2484,5 +2561,127 @@ mod tests {
         // Far corners are untouched by the stroke.
         assert_eq!(canvas.pixel(0, 0), Some([255, 255, 255, 255]));
         assert_eq!(canvas.pixel(99, 99), Some([255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn levels_adjustment_remap() {
+        let mut img = RgbaImage::transparent(4, 1).unwrap();
+        img.set_pixel(0, 0, [30, 30, 30, 200]);
+        img.set_pixel(1, 0, [250, 250, 250, 180]);
+        img.set_pixel(2, 0, [128, 128, 128, 64]);
+        img.set_pixel(3, 0, [10, 10, 10, 255]);
+
+        // Identity config round-trips within +/-1 per channel.
+        let identity = apply_levels(&img, &LevelsConfig::identity()).unwrap();
+        for x in 0..4 {
+            let orig = img.pixel(x, 0).unwrap();
+            let got = identity.pixel(x, 0).unwrap();
+            for c in 0..4 {
+                assert!(
+                    (orig[c] as i32 - got[c] as i32).abs() <= 1,
+                    "identity drifted at ({x}, channel {c}): {orig:?} -> {got:?}"
+                );
+            }
+        }
+
+        // Narrowing the input window around the shadow pixel (in_black raised to
+        // 10, in_white pulled down to 50) remaps value 30 upward.
+        let lifted = apply_levels(
+            &img,
+            &LevelsConfig {
+                in_black: 10.0,
+                in_white: 50.0,
+                gamma: 1.0,
+                out_black: 0.0,
+                out_white: 255.0,
+            },
+        )
+        .unwrap();
+        let shadow = lifted.pixel(0, 0).unwrap();
+        assert!(
+            shadow[0] > 30,
+            "shadow pixel inside the narrowed window should brighten, got {}",
+            shadow[0]
+        );
+        assert_eq!(shadow[0], 128); // (30 - 10) / (50 - 10) = 0.5 -> 127.5 -> 128
+
+        // Raising in_black past a pixel clips it down to out_black (black-point clamp).
+        let clipped = apply_levels(
+            &img,
+            &LevelsConfig {
+                in_black: 40.0,
+                in_white: 255.0,
+                gamma: 1.0,
+                out_black: 0.0,
+                out_white: 255.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(clipped.pixel(0, 0).unwrap()[0], 0);
+
+        // Gamma > 1 lifts shadows/midtones via powf(1/gamma).
+        let gamma_lift = apply_levels(
+            &img,
+            &LevelsConfig {
+                in_black: 0.0,
+                in_white: 255.0,
+                gamma: 1.6,
+                out_black: 0.0,
+                out_white: 255.0,
+            },
+        )
+        .unwrap();
+        assert!(gamma_lift.pixel(2, 0).unwrap()[0] > 128);
+
+        // Lowering out_white dims highlights.
+        let dimmed = apply_levels(
+            &img,
+            &LevelsConfig {
+                in_black: 0.0,
+                in_white: 255.0,
+                gamma: 1.0,
+                out_black: 0.0,
+                out_white: 180.0,
+            },
+        )
+        .unwrap();
+        let highlight = dimmed.pixel(1, 0).unwrap();
+        assert!(
+            highlight[0] < 250,
+            "lowered out_white should dim the highlight, got {}",
+            highlight[0]
+        );
+
+        // Alpha is preserved by every variant above.
+        for result in [&identity, &lifted, &clipped, &gamma_lift, &dimmed] {
+            for x in 0..4 {
+                assert_eq!(
+                    result.pixel(x, 0).unwrap()[3],
+                    img.pixel(x, 0).unwrap()[3],
+                    "alpha changed at x={x}"
+                );
+            }
+        }
+
+        // validate() rejects inverted input points and non-positive gamma.
+        let bad_white = LevelsConfig {
+            in_black: 100.0,
+            in_white: 100.0,
+            gamma: 1.0,
+            out_black: 0.0,
+            out_white: 255.0,
+        };
+        assert!(bad_white.validate().is_err());
+        assert!(apply_levels(&img, &bad_white).is_err());
+
+        let bad_gamma = LevelsConfig {
+            in_black: 0.0,
+            in_white: 255.0,
+            gamma: 0.0,
+            out_black: 0.0,
+            out_white: 255.0,
+        };
+        assert!(bad_gamma.validate().is_err());
+        assert!(apply_levels(&img, &bad_gamma).is_err());
     }
 }

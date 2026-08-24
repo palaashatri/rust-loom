@@ -1814,6 +1814,70 @@ pub fn active_angle_at(angles: &[MulticamAngle], cuts: &[MulticamCut], time: f64
         .or(Some(0))
 }
 
+/// Parameters for generating a ducking automation envelope over a music clip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckingConfig {
+    /// Amount of gain reduction applied while dialogue is active, in decibels (positive number, e.g. 12).
+    pub reduction_db: f64,
+    /// Attack time in seconds (ramp into full reduction).
+    pub attack_seconds: f64,
+    /// Release time in seconds (ramp back to unity).
+    pub release_seconds: f64,
+    /// Extra padding added before/after each dialogue region, seconds >= 0.
+    pub padding_seconds: f64,
+}
+
+/// Generates envelope keys `(time_seconds, gain_db)` implementing a dialogue-ducking curve over
+/// `dialogue_regions` given as `(start, end)` pairs. Regions may be unsorted but must satisfy
+/// `start < end`, otherwise an error is returned. Regions are processed sorted by start without
+/// merging overlaps; when two regions' keys land on identical times, the later region's key
+/// overwrites the earlier one. Each padded region contributes four keys: attack ramp start at
+/// 0 dB, padded region start at full reduction, padded region end holding full reduction, and
+/// the release ramp end back at 0 dB. Output is sorted by time ascending.
+pub fn generate_ducking_envelope(
+    config: &DuckingConfig,
+    dialogue_regions: &[(f64, f64)],
+) -> Result<Vec<(f64, f64)>, String> {
+    if config.reduction_db.is_nan() || config.reduction_db <= 0.0 {
+        return Err("reduction_db must be greater than 0".to_string());
+    }
+    if config.attack_seconds.is_nan() || config.attack_seconds < 0.0 {
+        return Err("attack_seconds must be >= 0".to_string());
+    }
+    if config.release_seconds.is_nan() || config.release_seconds < 0.0 {
+        return Err("release_seconds must be >= 0".to_string());
+    }
+    if config.padding_seconds.is_nan() || config.padding_seconds < 0.0 {
+        return Err("padding_seconds must be >= 0".to_string());
+    }
+
+    let mut regions: Vec<(f64, f64)> = dialogue_regions.to_vec();
+    regions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Keys are pushed region by region (sorted by start), then stably sorted by time.
+    // dedup_by keeps the last of each identical-time run, so a later region's key
+    // overwrites an earlier one at the same time, matching AudioEnvelope::add_key's
+    // replace-at-same-offset behaviour.
+    let mut keys: Vec<(f64, f64)> = Vec::new();
+    for (start, end) in regions {
+        if start.is_nan() || end.is_nan() || start >= end {
+            return Err(format!(
+                "dialogue region must satisfy start < end, got ({start}, {end})"
+            ));
+        }
+        let padded_start = start - config.padding_seconds;
+        let padded_end = end + config.padding_seconds;
+        keys.push((padded_start - config.attack_seconds, 0.0));
+        keys.push((padded_start, -config.reduction_db));
+        keys.push((padded_end, -config.reduction_db));
+        keys.push((padded_end + config.release_seconds, 0.0));
+    }
+
+    keys.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    keys.dedup_by(|a, b| a.0 == b.0);
+    Ok(keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2399,5 +2463,69 @@ mod tests {
             angle_index: 7,
         }];
         assert_eq!(active_angle_at(&angles, &out_of_range, 3.0), Some(0));
+    }
+
+    #[test]
+    fn ducking_envelope_generation() {
+        let config = DuckingConfig {
+            reduction_db: 12.0,
+            attack_seconds: 0.5,
+            release_seconds: 0.8,
+            padding_seconds: 1.0,
+        };
+
+        // Single dialogue region [10, 15]: padded to [9, 16], attack ramp from 8.5,
+        // full reduction across the padded region, release ramp ending at 16.8.
+        let keys = generate_ducking_envelope(&config, &[(10.0, 15.0)]).unwrap();
+        let expected = [(8.5, 0.0), (9.0, -12.0), (16.0, -12.0), (16.8, 0.0)];
+        assert_eq!(keys.len(), expected.len());
+        for ((time, gain), (want_time, want_gain)) in keys.iter().zip(expected.iter()) {
+            assert!(
+                (time - want_time).abs() < 1e-9,
+                "time {time} != {want_time}"
+            );
+            assert!(
+                (gain - want_gain).abs() < 1e-9,
+                "gain {gain} != {want_gain}"
+            );
+        }
+
+        // Invalid parameters are rejected.
+        for bad in [
+            DuckingConfig {
+                reduction_db: 0.0,
+                ..config.clone()
+            },
+            DuckingConfig {
+                reduction_db: -3.0,
+                ..config.clone()
+            },
+            DuckingConfig {
+                attack_seconds: -0.5,
+                ..config.clone()
+            },
+            DuckingConfig {
+                release_seconds: -1.0,
+                ..config.clone()
+            },
+            DuckingConfig {
+                padding_seconds: -0.25,
+                ..config.clone()
+            },
+        ] {
+            assert!(generate_ducking_envelope(&bad, &[(10.0, 15.0)]).is_err());
+        }
+
+        // Inverted region is rejected.
+        assert!(generate_ducking_envelope(&config, &[(15.0, 10.0)]).is_err());
+
+        // Two unsorted regions produce sorted ascending output with no merging.
+        let keys = generate_ducking_envelope(&config, &[(20.0, 25.0), (5.0, 8.0)]).unwrap();
+        assert_eq!(keys.len(), 8);
+        for pair in keys.windows(2) {
+            assert!(pair[0].0 < pair[1].0, "keys not sorted: {keys:?}");
+        }
+        assert!((keys[0].0 - 3.5).abs() < 1e-9);
+        assert!((keys[7].0 - 26.8).abs() < 1e-9);
     }
 }

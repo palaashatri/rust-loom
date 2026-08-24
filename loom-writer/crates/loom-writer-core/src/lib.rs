@@ -2748,6 +2748,49 @@ impl MergeTemplate {
     }
 }
 
+/// One heading entry in the extracted document outline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineEntry {
+    /// Heading level 1..=6.
+    pub level: u8,
+    /// Heading text content.
+    pub title: String,
+    /// Index of the block in the document's block list.
+    pub block_index: usize,
+}
+
+impl OutlineEntry {
+    /// Renders the outline entry indented two spaces per level below 1.
+    pub fn render_indented(&self) -> String {
+        let indent = "  ".repeat(self.level.saturating_sub(1) as usize);
+        format!("{indent}{}", self.title)
+    }
+}
+
+/// Extracts a navigable outline from document blocks, keeping only heading
+/// blocks (level derived from the block kind). Skips empty titles.
+pub fn extract_outline(blocks: &[RichBlock]) -> Vec<OutlineEntry> {
+    blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(block_index, block)| {
+            let level = block.kind.strip_prefix("heading")?.parse::<u8>().ok()?;
+            if !(1..=6).contains(&level) {
+                return None;
+            }
+            let trimmed = block.text.as_str().trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(OutlineEntry {
+                level,
+                title: trimmed.to_string(),
+                block_index,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3543,5 +3586,44 @@ mod tests {
         let plain = MergeTemplate::new("No placeholders in this body.");
         let empty: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
         assert_eq!(plain.render_record(&empty), "No placeholders in this body.");
+    }
+
+    #[test]
+    fn document_outline_extraction() {
+        let blocks = vec![
+            RichBlock::new(1, "paragraph", "Preamble text."),
+            RichBlock::new(2, "heading1", "Introduction"),
+            RichBlock::new(3, "paragraph", "Intro body."),
+            RichBlock::new(4, "heading2", "Background"),
+            RichBlock::new(5, "heading3", "Prior Work"),
+            RichBlock::new(6, "heading2", "   "),
+            RichBlock::new(7, "quote", "A quoted passage."),
+            RichBlock::new(8, "heading1", "Conclusion"),
+        ];
+
+        let outline = extract_outline(&blocks);
+        assert_eq!(outline.len(), 4);
+        assert_eq!(outline[0].level, 1);
+        assert_eq!(outline[0].title, "Introduction");
+        assert_eq!(outline[0].block_index, 1);
+        assert_eq!(outline[1].level, 2);
+        assert_eq!(outline[1].title, "Background");
+        assert_eq!(outline[1].block_index, 3);
+        assert_eq!(outline[2].level, 3);
+        assert_eq!(outline[2].title, "Prior Work");
+        assert_eq!(outline[2].block_index, 4);
+        assert_eq!(outline[3].level, 1);
+        assert_eq!(outline[3].title, "Conclusion");
+        assert_eq!(outline[3].block_index, 7);
+
+        // Whitespace-only headings and non-heading kinds never appear.
+        assert!(outline.iter().all(|entry| !entry.title.trim().is_empty()));
+
+        // Indentation is two spaces per level below one.
+        assert_eq!(outline[0].render_indented(), "Introduction");
+        assert_eq!(outline[1].render_indented(), "  Background");
+        assert_eq!(outline[2].render_indented(), "    Prior Work");
+
+        assert!(extract_outline(&[]).is_empty());
     }
 }

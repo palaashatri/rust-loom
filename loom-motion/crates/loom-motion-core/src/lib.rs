@@ -1154,6 +1154,36 @@ pub fn step_particles(
     particles.len()
 }
 
+/// Produces the sub-frame sample times (seconds relative to the current frame time, all < 0,
+/// i.e. trailing the frame) used to accumulate one motion-blurred frame, given shutter angle
+/// in degrees (360 = full frame exposure), fps, and samples-per-frame count (>=1).
+/// Sample i = -(i / samples) * (angle/360)/fps seconds for i in 0..samples.
+///
+/// Returns an empty vector when `fps <= 0` or non-finite, when `angle_degrees` is outside
+/// `(0, 360]` (including non-finite), or when `samples == 0`.
+pub fn shutter_sample_offsets(angle_degrees: f64, fps: f64, samples: usize) -> Vec<f64> {
+    let angle_ok = angle_degrees > 0.0 && angle_degrees <= 360.0;
+    let fps_ok = fps.is_finite() && fps > 0.0;
+    if !angle_ok || !fps_ok || samples == 0 {
+        return Vec::new();
+    }
+    (0..samples)
+        .map(|i| -(i as f64 / samples as f64) * (angle_degrees / 360.0) / fps)
+        .collect()
+}
+
+/// Averages N sampled transform positions into one accumulated blur position (simple mean).
+/// An empty input yields `(0.0, 0.0)`.
+pub fn accumulate_motion_samples(positions: &[(f32, f32)]) -> (f32, f32) {
+    if positions.is_empty() {
+        return (0.0, 0.0);
+    }
+    let count = positions.len() as f32;
+    let sum_x: f32 = positions.iter().map(|position| position.0).sum();
+    let sum_y: f32 = positions.iter().map(|position| position.1).sum();
+    (sum_x / count, sum_y / count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1678,5 +1708,27 @@ mod tests {
         assert!(run_a.is_empty());
         assert_eq!(step_particles(&mut run_a, &quiet, 0.1, 99), 0);
         assert!(run_a.is_empty());
+    }
+
+    #[test]
+    fn motion_blur_sampling_and_accumulation() {
+        // 180° shutter at 24 fps over 2 samples:
+        // offset_i = -(i / samples) * (angle / 360) / fps
+        let offsets = shutter_sample_offsets(180.0, 24.0, 2);
+        assert_eq!(offsets.len(), 2);
+        assert!((offsets[0] - 0.0).abs() < 1e-9);
+        assert!((offsets[1] - (-(1.0 / 2.0) * (180.0 / 360.0) / 24.0)).abs() < 1e-9);
+
+        // Invalid inputs yield no samples: fps must be positive, samples >= 1.
+        assert!(shutter_sample_offsets(180.0, 0.0, 2).is_empty());
+        assert!(shutter_sample_offsets(180.0, 24.0, 0).is_empty());
+
+        // Accumulation is the simple mean of sampled positions.
+        let blurred = accumulate_motion_samples(&[(0.0, 0.0), (10.0, 20.0), (30.0, 40.0)]);
+        assert!((blurred.0 - (40.0f32 / 3.0)).abs() < 1e-4);
+        assert!((blurred.1 - 20.0).abs() < 1e-9);
+
+        // A single sample accumulates to itself.
+        assert_eq!(accumulate_motion_samples(&[(-5.5, 12.25)]), (-5.5, 12.25));
     }
 }

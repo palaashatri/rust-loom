@@ -7,6 +7,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 /// A cell coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CellRef {
@@ -2790,6 +2792,109 @@ fn dependency_graph(
     (dependencies, dependents)
 }
 
+/// Chart type presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ChartKind {
+    #[default]
+    Line,
+    Bar,
+    Pie,
+    Scatter,
+}
+
+/// One data series: category/value pairs plus display metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ChartSeries {
+    pub name: String,
+    /// Category labels parallel to `values`; mismatched lengths must be rejected by validate.
+    pub categories: Vec<String>,
+    pub values: Vec<f64>,
+}
+
+/// A chart specification bound to sheet ranges conceptually; pure-data model with validation
+/// and derived axis metrics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ChartSpec {
+    pub kind: ChartKind,
+    pub title: String,
+    pub series: Vec<ChartSeries>,
+}
+
+impl ChartSpec {
+    /// Validates: non-empty title, at least one series, every series has equal-length
+    /// categories/values and no NaN values. Err names the violated rule.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.title.trim().is_empty() {
+            return Err("chart title must not be empty".to_string());
+        }
+        if self.series.is_empty() {
+            return Err("chart must contain at least one series".to_string());
+        }
+        for series in &self.series {
+            if series.categories.len() != series.values.len() {
+                return Err(format!(
+                    "series '{}' has {} categories but {} values; lengths must match",
+                    series.name,
+                    series.categories.len(),
+                    series.values.len()
+                ));
+            }
+            for (index, value) in series.values.iter().enumerate() {
+                if value.is_nan() {
+                    return Err(format!(
+                        "series '{}' contains a NaN value at index {}",
+                        series.name, index
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// (min, max) across all series values; Err when validation fails or no finite values.
+    pub fn value_range(&self) -> Result<(f64, f64), String> {
+        self.validate()?;
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for series in &self.series {
+            for &value in &series.values {
+                if value < min {
+                    min = value;
+                }
+                if value > max {
+                    max = value;
+                }
+            }
+        }
+        if !min.is_finite() || !max.is_finite() {
+            return Err("chart contains no finite values".to_string());
+        }
+        Ok((min, max))
+    }
+
+    /// Normalizes each value to 0..=1 against the computed range; Err conditions as above.
+    pub fn normalized_points(&self) -> Result<Vec<Vec<f64>>, String> {
+        let (min, max) = self.value_range()?;
+        Ok(self
+            .series
+            .iter()
+            .map(|series| {
+                series
+                    .values
+                    .iter()
+                    .map(|&value| {
+                        if min == max {
+                            1.0
+                        } else {
+                            (value - min) / (max - min)
+                        }
+                    })
+                    .collect::<Vec<f64>>()
+            })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3520,5 +3625,99 @@ mod tests {
         assert!(compute_pivot(&empty, &[], PivotAggregation::Sum)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn chart_spec_validation_and_normalization() {
+        let series_a = ChartSeries {
+            name: "Revenue".to_string(),
+            categories: vec!["Q1".to_string(), "Q2".to_string(), "Q3".to_string()],
+            values: vec![0.0, 5.0, 10.0],
+        };
+        let series_b = ChartSeries {
+            name: "Costs".to_string(),
+            categories: vec!["Q1".to_string(), "Q2".to_string(), "Q3".to_string()],
+            values: vec![10.0, 5.0, 0.0],
+        };
+        let spec = ChartSpec {
+            kind: ChartKind::Bar,
+            title: "Quarterly".to_string(),
+            series: vec![series_a.clone(), series_b.clone()],
+        };
+
+        assert!(spec.validate().is_ok());
+        assert_eq!(spec.value_range().unwrap(), (0.0, 10.0));
+
+        let points = spec.normalized_points().unwrap();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0], vec![0.0, 0.5, 1.0]);
+        assert_eq!(points[1], vec![1.0, 0.5, 0.0]);
+        for series_points in &points {
+            for &point in series_points {
+                assert!((0.0..=1.0).contains(&point));
+            }
+        }
+
+        // A constant-value series maps to 1.0 everywhere (min == max).
+        let constant = ChartSpec {
+            kind: ChartKind::Line,
+            title: "Flat".to_string(),
+            series: vec![ChartSeries {
+                name: "Constant".to_string(),
+                categories: vec!["a".to_string(), "b".to_string()],
+                values: vec![7.0, 7.0],
+            }],
+        };
+        assert_eq!(constant.value_range().unwrap(), (7.0, 7.0));
+        assert_eq!(constant.normalized_points().unwrap(), vec![vec![1.0, 1.0]]);
+
+        // Validation errors name the violated rule.
+        let empty_title = ChartSpec {
+            kind: ChartKind::Pie,
+            title: String::new(),
+            series: vec![series_a.clone()],
+        };
+        assert_eq!(
+            empty_title.validate().unwrap_err(),
+            "chart title must not be empty"
+        );
+
+        let no_series = ChartSpec {
+            kind: ChartKind::Line,
+            title: "Empty".to_string(),
+            series: Vec::new(),
+        };
+        assert_eq!(
+            no_series.validate().unwrap_err(),
+            "chart must contain at least one series"
+        );
+
+        let mismatch = ChartSpec {
+            kind: ChartKind::Scatter,
+            title: "Mismatched".to_string(),
+            series: vec![ChartSeries {
+                name: series_b.name.clone(),
+                categories: vec!["Q1".to_string()],
+                values: vec![10.0, 5.0],
+            }],
+        };
+        assert_eq!(
+            mismatch.validate().unwrap_err(),
+            "series 'Costs' has 1 categories but 2 values; lengths must match"
+        );
+
+        let nan = ChartSpec {
+            kind: ChartKind::Line,
+            title: "NaN".to_string(),
+            series: vec![ChartSeries {
+                name: series_a.name.clone(),
+                categories: vec!["Q1".to_string(), "Q2".to_string()],
+                values: vec![1.0, f64::NAN],
+            }],
+        };
+        assert_eq!(
+            nan.validate().unwrap_err(),
+            "series 'Revenue' contains a NaN value at index 1"
+        );
     }
 }

@@ -1489,6 +1489,69 @@ pub fn generate_conformance_probe_args(output: &str, checks: &[ConformanceCheck]
     probes
 }
 
+/// A watched-folder ingestion rule: files appearing in `watch_path` whose extension matches
+/// are queued for transcoding with the named destination preset after a stability delay.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WatchFolderRule {
+    /// Absolute or relative directory path to watch.
+    pub watch_path: String,
+    /// Lowercased file extensions to ingest WITHOUT the dot, e.g. ["mov", "mp4"].
+    pub extensions: Vec<String>,
+    /// Preset id applied to ingested files.
+    pub preset_id: String,
+    /// Output directory for completed transcodes; empty means alongside source.
+    pub output_directory: Option<String>,
+    /// Seconds a file must be unmodified before ingestion (size-stability check).
+    pub stability_seconds: u32,
+}
+
+impl WatchFolderRule {
+    /// Validates: non-empty path, at least one extension, every extension lowercase,
+    /// dot-free, alphanumeric; stability_seconds <= 3600. Err names the violated rule.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.watch_path.trim().is_empty() {
+            return Err("watch folder path must not be empty".to_string());
+        }
+        if self.extensions.is_empty() {
+            return Err("watch folder rule must list at least one extension".to_string());
+        }
+        for extension in &self.extensions {
+            if extension.is_empty()
+                || !extension
+                    .chars()
+                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+            {
+                return Err(format!(
+                    "invalid watch folder extension '{extension}': entries must be lowercase, alphanumeric, and free of dots"
+                ));
+            }
+        }
+        if self.stability_seconds > 3600 {
+            return Err(format!(
+                "stability_seconds {} exceeds the maximum allowed 3600",
+                self.stability_seconds
+            ));
+        }
+        Ok(())
+    }
+
+    /// True when a filename would be picked up by this rule (case-insensitive extension match).
+    pub fn matches_file(&self, file_name: &str) -> bool {
+        if file_name.ends_with('/') || file_name.ends_with('\\') {
+            return false;
+        }
+        let Some(extension) = std::path::Path::new(file_name)
+            .extension()
+            .and_then(|value| value.to_str())
+        else {
+            return false;
+        };
+        self.extensions
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1984,5 +2047,47 @@ mod tests {
         );
 
         assert!(generate_conformance_probe_args("unused.mp4", &[]).is_empty());
+    }
+
+    #[test]
+    fn watch_folder_rule_matching_and_validation() {
+        let rule = WatchFolderRule {
+            watch_path: "/imports/camera".into(),
+            extensions: vec!["mov".into(), "mp4".into()],
+            preset_id: "h264_1080p".into(),
+            output_directory: Some("/exports/web".into()),
+            stability_seconds: 30,
+        };
+        assert!(rule.validate().is_ok());
+
+        // Case-insensitive extension matching, including multi-dot names.
+        assert!(rule.matches_file("A.MOV"));
+        assert!(rule.matches_file("b.mp4"));
+        assert!(rule.matches_file("clip.v2.mov"));
+
+        // Non-matching extensions, extension-less names, and directory-like paths.
+        assert!(!rule.matches_file("c.avi"));
+        assert!(!rule.matches_file("no_extension"));
+        assert!(!rule.matches_file("drop.mov/"));
+
+        let mut broken = rule.clone();
+        broken.watch_path = String::new();
+        assert!(broken.validate().is_err());
+
+        let mut broken = rule.clone();
+        broken.extensions = Vec::new();
+        assert!(broken.validate().is_err());
+
+        let mut broken = rule.clone();
+        broken.extensions = vec!["MP4".into()];
+        assert!(broken.validate().is_err());
+
+        let mut broken = rule.clone();
+        broken.extensions = vec![".mov".into()];
+        assert!(broken.validate().is_err());
+
+        let mut broken = rule.clone();
+        broken.stability_seconds = 4000;
+        assert!(broken.validate().is_err());
     }
 }

@@ -1589,6 +1589,57 @@ pub fn animation_progress(entry: &AnimationEntry, elapsed_ms: u32) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Accessibility reading-order assignment for one slide's elements.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReadingOrder {
+    pub slide_index: usize,
+    /// Element ids in intended reading sequence (screen readers announce in this order).
+    pub ordered_element_ids: Vec<String>,
+}
+
+impl ReadingOrder {
+    pub fn new(slide_index: usize) -> Self {
+        Self {
+            slide_index,
+            ordered_element_ids: Vec::new(),
+        }
+    }
+
+    /// Moves an element id to position `to`; no-op if absent. Returns true when order changed.
+    pub fn move_element(&mut self, element_id: &str, to: usize) -> bool {
+        let Some(from) = self
+            .ordered_element_ids
+            .iter()
+            .position(|id| id == element_id)
+        else {
+            return false;
+        };
+        if from == to || to >= self.ordered_element_ids.len() {
+            return false;
+        }
+        let id = self.ordered_element_ids.remove(from);
+        self.ordered_element_ids.insert(to, id);
+        true
+    }
+
+    /// Appends ids from `element_ids` that are not already present (dedup).
+    pub fn append_missing(&mut self, element_ids: &[String]) {
+        for element_id in element_ids {
+            if !self.ordered_element_ids.contains(element_id) {
+                self.ordered_element_ids.push(element_id.clone());
+            }
+        }
+    }
+
+    /// True when every id occurs exactly once and none is empty.
+    pub fn is_valid(&self) -> bool {
+        let mut seen = std::collections::HashSet::with_capacity(self.ordered_element_ids.len());
+        self.ordered_element_ids
+            .iter()
+            .all(|id| !id.is_empty() && seen.insert(id.as_str()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2164,5 +2215,65 @@ mod tests {
         assert_eq!(animation_progress(&instant, 49), 0.0);
         assert_eq!(animation_progress(&instant, 50), 1.0);
         assert_eq!(animation_progress(&instant, 51), 1.0);
+    }
+
+    #[test]
+    fn reading_order_manipulation_and_validation() {
+        let mut order = ReadingOrder::new(2);
+        assert_eq!(order.slide_index, 2);
+        assert!(order.is_valid());
+
+        order.append_missing(&[
+            "title-1".to_string(),
+            "body-1".to_string(),
+            "chart-1".to_string(),
+        ]);
+        assert_eq!(
+            order.ordered_element_ids,
+            vec!["title-1", "body-1", "chart-1"]
+        );
+
+        // append_missing skips ids already present and appends only new ones.
+        order.append_missing(&["body-1".to_string(), "stat-1".to_string()]);
+        assert_eq!(
+            order.ordered_element_ids,
+            vec!["title-1", "body-1", "chart-1", "stat-1"]
+        );
+
+        // Move chart to the front of the reading sequence.
+        assert!(order.move_element("chart-1", 0));
+        assert_eq!(
+            order.ordered_element_ids,
+            vec!["chart-1", "title-1", "body-1", "stat-1"]
+        );
+        // Absent id is a no-op; moving to the current position is a no-op.
+        assert!(!order.move_element("missing-1", 0));
+        assert!(!order.move_element("chart-1", 0));
+        assert_eq!(
+            order.ordered_element_ids,
+            vec!["chart-1", "title-1", "body-1", "stat-1"]
+        );
+
+        assert!(order.is_valid());
+
+        // A duplicate id invalidates the order.
+        order.ordered_element_ids.push("body-1".into());
+        assert!(!order.is_valid());
+        // Removing the duplicate fixes it again.
+        order.ordered_element_ids.pop();
+        assert!(order.is_valid());
+
+        // An empty id invalidates the order even without duplicates.
+        let mut broken = ReadingOrder::new(3);
+        broken.append_missing(&["a".to_string(), String::new()]);
+        assert!(!broken.is_valid());
+        // Replacing the empty entry restores validity.
+        let empty_pos = broken
+            .ordered_element_ids
+            .iter()
+            .position(|id| id.is_empty())
+            .unwrap();
+        broken.ordered_element_ids[empty_pos] = "b".to_string();
+        assert!(broken.is_valid());
     }
 }

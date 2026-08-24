@@ -1808,6 +1808,119 @@ pub fn quantize_notes(
         .collect())
 }
 
+/// One recorded alternative take inside a take folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Take {
+    pub name: String,
+    /// Take start on the timeline, seconds.
+    pub start_seconds: f64,
+    pub duration_seconds: f64,
+    /// 0..=1 rating used to suggest the best take.
+    pub rating: f32,
+}
+
+/// A comp section selecting a time range from one take.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompSection {
+    pub take_index: usize,
+    pub start_seconds: f64,
+    pub duration_seconds: f64,
+}
+
+/// A folder of alternative takes plus the current composite selection.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TakeFolder {
+    pub takes: Vec<Take>,
+    pub comp: Vec<CompSection>,
+}
+
+impl TakeFolder {
+    /// Index of the highest-rated take (ties resolved by earliest index); None when empty.
+    pub fn best_take(&self) -> Option<usize> {
+        let mut best: Option<(f32, usize)> = None;
+        for (index, take) in self.takes.iter().enumerate() {
+            match best {
+                Some((rating, _)) if rating >= take.rating => {}
+                _ => best = Some((take.rating, index)),
+            }
+        }
+        best.map(|(_, index)| index)
+    }
+
+    /// Replaces the comp with one section spanning the entire given take.
+    /// Out-of-range index => Err.
+    pub fn use_whole_take(&mut self, take_index: usize) -> Result<(), String> {
+        let take = self
+            .takes
+            .get(take_index)
+            .ok_or_else(|| format!("take index {take_index} out of range"))?;
+        self.comp = vec![CompSection {
+            take_index,
+            start_seconds: take.start_seconds,
+            duration_seconds: take.duration_seconds,
+        }];
+        Ok(())
+    }
+
+    /// Appends a comp section clipped to the chosen take's bounds; sections must not overlap
+    /// existing ones (they may be adjacent); Err names the violated rule.
+    pub fn add_comp_section(
+        &mut self,
+        take_index: usize,
+        start_seconds: f64,
+        duration_seconds: f64,
+    ) -> Result<(), String> {
+        if !duration_seconds.is_finite() || duration_seconds <= 0.0 {
+            return Err(format!(
+                "comp section duration {duration_seconds} must be greater than zero"
+            ));
+        }
+        let take = self
+            .takes
+            .get(take_index)
+            .ok_or_else(|| format!("take index {take_index} out of range"))?;
+        let take_end = take.start_seconds + take.duration_seconds;
+        if !(take.start_seconds..=take_end).contains(&start_seconds) {
+            return Err(format!(
+                "comp section start {start_seconds} lies outside take '{}' bounds \
+                 [{}, {}]",
+                take.name, take.start_seconds, take_end
+            ));
+        }
+        let end_seconds = start_seconds + duration_seconds;
+        let clipped_end = end_seconds.min(take_end);
+        let clipped_duration = clipped_end - start_seconds;
+        if clipped_duration <= 0.0 {
+            return Err(format!(
+                "comp section starting at {start_seconds} leaves no room inside take '{}' \
+                 bounds",
+                take.name
+            ));
+        }
+        let overlaps_existing = self.comp.iter().any(|section| {
+            let section_end = section.start_seconds + section.duration_seconds;
+            start_seconds < section_end && section.start_seconds < clipped_end
+        });
+        if overlaps_existing {
+            return Err("comp section overlaps an existing comp section".into());
+        }
+        self.comp.push(CompSection {
+            take_index,
+            start_seconds,
+            duration_seconds: clipped_duration,
+        });
+        Ok(())
+    }
+
+    /// Total compounded duration in seconds.
+    pub fn comp_duration(&self) -> f64 {
+        self.comp
+            .iter()
+            .map(|section| section.duration_seconds)
+            .sum()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1978,6 +2091,93 @@ mod tests {
         assert_eq!(project.tracks[1].regions[0].start_sample, 123);
         assert!(project.remove_region(1, "r1"));
         assert!(project.validate().is_empty());
+    }
+
+    #[test]
+    fn take_folder_comping() {
+        // An empty folder suggests no take.
+        let mut folder = TakeFolder::default();
+        assert_eq!(folder.best_take(), None);
+
+        folder.takes = vec![
+            Take {
+                name: "take_1".into(),
+                start_seconds: 10.0,
+                duration_seconds: 8.0,
+                rating: 0.4,
+            },
+            Take {
+                name: "take_2".into(),
+                start_seconds: 20.0,
+                duration_seconds: 6.0,
+                rating: 0.9,
+            },
+            Take {
+                name: "take_3".into(),
+                start_seconds: 30.0,
+                duration_seconds: 10.0,
+                rating: 0.7,
+            },
+        ];
+        assert_eq!(folder.best_take(), Some(1));
+
+        // Whole-take comping replaces any previous selection with the full span.
+        folder.use_whole_take(2).unwrap();
+        assert_eq!(folder.comp.len(), 1);
+        assert_eq!(
+            folder.comp[0],
+            CompSection {
+                take_index: 2,
+                start_seconds: 30.0,
+                duration_seconds: 10.0
+            }
+        );
+        assert_eq!(folder.comp_duration(), 10.0);
+
+        // A section reaching past the take end is clipped to the take bound.
+        folder.add_comp_section(0, 14.0, 100.0).unwrap();
+        assert_eq!(folder.comp.len(), 2);
+        assert_eq!(
+            folder.comp[1],
+            CompSection {
+                take_index: 0,
+                start_seconds: 14.0,
+                duration_seconds: 4.0
+            }
+        );
+        assert_eq!(folder.comp_duration(), 14.0);
+
+        // Adjacent-but-not-overlapping sections are accepted; this one ends
+        // flush with the take's own end bound.
+        folder.add_comp_section(1, 23.0, 3.0).unwrap();
+        assert_eq!(
+            folder.comp[2],
+            CompSection {
+                take_index: 1,
+                start_seconds: 23.0,
+                duration_seconds: 3.0
+            }
+        );
+        assert_eq!(folder.comp_duration(), 17.0);
+
+        // Out-of-bounds starts are rejected.
+        assert!(folder.add_comp_section(0, 9.999, 1.0).is_err());
+        assert!(folder.add_comp_section(0, 19.0, 1.0).is_err());
+        // A section starting exactly at the take end leaves no usable range.
+        assert!(folder.add_comp_section(0, 18.0, 1.0).is_err());
+        // Overlapping an existing section is rejected; adjacency is not overlap.
+        assert!(folder.add_comp_section(2, 35.0, 2.0).is_err());
+        assert!(folder.add_comp_section(0, 16.0, 1.0).is_err());
+        assert!(folder.add_comp_section(0, 14.5, 1.0).is_err());
+        // Zero and negative durations are rejected, as are unknown takes.
+        assert!(folder.add_comp_section(0, 12.0, 0.0).is_err());
+        assert!(folder.add_comp_section(0, 12.0, -1.0).is_err());
+        assert!(folder.add_comp_section(7, 12.0, 1.0).is_err());
+        assert!(folder.use_whole_take(3).is_err());
+
+        // The valid sections above are untouched by every rejected call.
+        assert_eq!(folder.comp.len(), 3);
+        assert_eq!(folder.comp_duration(), 17.0);
     }
 }
 
