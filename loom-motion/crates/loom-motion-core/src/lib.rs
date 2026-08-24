@@ -1051,6 +1051,109 @@ pub fn calculate_inertial_bounce(
     delta_value * config.amplitude * oscillation * decay_factor
 }
 
+/// A single simulated particle.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Particle {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    /// Remaining lifetime in seconds.
+    pub life: f32,
+    /// Initial lifetime in seconds.
+    pub max_life: f32,
+}
+
+/// Emission and force configuration for a particle emitter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParticleEmitterConfig {
+    /// Particles emitted per second.
+    pub emission_rate: f32,
+    /// Emission direction in degrees (0 = +x axis, 90 = up/-y screen space).
+    pub direction_degrees: f32,
+    /// Half-angle cone spread in degrees.
+    pub spread_degrees: f32,
+    /// Initial speed in px/s.
+    pub speed: f32,
+    /// Downward acceleration px/s^2 (screen space, where +y points down).
+    pub gravity: f32,
+    /// Particle lifetime seconds.
+    pub life: f32,
+}
+
+impl Default for ParticleEmitterConfig {
+    fn default() -> Self {
+        Self {
+            emission_rate: 50.0,
+            direction_degrees: 90.0,
+            spread_degrees: 25.0,
+            speed: 120.0,
+            gravity: 200.0,
+            life: 1.5,
+        }
+    }
+}
+
+/// Advances the particle simulation by `dt` seconds and returns the new population count.
+///
+/// Emission is quantized per step: `round(emission_rate * dt)` particles are spawned at the
+/// origin `(0, 0)` each call with no carried accumulator between steps, so callers stepping at
+/// uneven rates should expect quantized emission totals; callers translate spawned particles.
+/// Per-particle cone spread randomness is derived deterministically by integer-hashing
+/// `(frame_index, spawn index)`, so identical inputs always produce identical states without an
+/// RNG crate. Each step integrates velocities and downward gravity, decrements lifetimes, and
+/// removes dead particles.
+pub fn step_particles(
+    particles: &mut Vec<Particle>,
+    config: &ParticleEmitterConfig,
+    dt: f32,
+    frame_index: u64,
+) -> usize {
+    let dt = dt.max(0.0);
+    let emit_count = if config.emission_rate.is_finite() && config.emission_rate > 0.0 && dt > 0.0 {
+        (config.emission_rate * dt).round().max(0.0) as usize
+    } else {
+        0
+    };
+
+    let base_angle = config.direction_degrees.to_radians();
+    let spread = config.spread_degrees.to_radians();
+    let life = config.life.max(0.0);
+
+    for spawn_index in 0..emit_count {
+        // SplitMix64-style finalizer keeps emission deterministic without an RNG crate.
+        let mut hash = frame_index.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (spawn_index as u64).wrapping_mul(0xD1B5_4A32_D192_ED03);
+        hash ^= hash >> 30;
+        hash = hash.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        hash ^= hash >> 27;
+        hash = hash.wrapping_mul(0x94D0_49BB_1331_11EB);
+        hash ^= hash >> 31;
+        let unit = (hash >> 40) as f32 / (1u64 << 24) as f32;
+        let angle = base_angle + (unit - 0.5) * 2.0 * spread;
+
+        particles.push(Particle {
+            x: 0.0,
+            y: 0.0,
+            vx: config.speed * angle.cos(),
+            // Negate sin so positive degrees launch upward against screen-space +y.
+            vy: -config.speed * angle.sin(),
+            life,
+            max_life: life,
+        });
+    }
+
+    for particle in particles.iter_mut() {
+        particle.vy += config.gravity * dt;
+        particle.x += particle.vx * dt;
+        particle.y += particle.vy * dt;
+        particle.life -= dt;
+    }
+
+    particles.retain(|particle| particle.life > 0.0);
+    particles.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1526,5 +1629,54 @@ mod tests {
         // At t = 2.0s (after decay), bounce has decayed to near 0
         let late = calculate_inertial_bounce(2.0, 500.0, &config);
         assert!(late.abs() < 0.1);
+    }
+
+    #[test]
+    fn particle_simulation_is_deterministic() {
+        let config = ParticleEmitterConfig::default();
+        let mut run_a = Vec::new();
+        let mut run_b = Vec::new();
+
+        let mut populations = Vec::new();
+        for frame in 0..10u64 {
+            step_particles(&mut run_a, &config, 1.0 / 60.0, frame);
+            step_particles(&mut run_b, &config, 1.0 / 60.0, frame);
+            populations.push(run_a.len());
+        }
+
+        // Identical inputs must produce bit-identical simulation states.
+        assert_eq!(run_a, run_b);
+
+        // 50 Hz at 1/60 s rounds to one spawn per step; nothing expires within
+        // 1/6 s of a 1.5 s lifetime, so the population grows monotonically.
+        assert_eq!(populations[0], 1);
+        assert!(populations.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(run_a.len(), 10);
+
+        // Direction 90 launches upward: every initial vy is negative (+y is down).
+        assert!(run_a.iter().all(|particle| particle.vy < 0.0));
+
+        // Gravity accelerates particles downward: vy rises toward +y every step
+        // even while the emitter is silent (rate 0).
+        let vys_before_quiet: Vec<f32> = run_a.iter().map(|particle| particle.vy).collect();
+        let quiet = ParticleEmitterConfig {
+            emission_rate: 0.0,
+            ..config.clone()
+        };
+        step_particles(&mut run_a, &quiet, 1.0 / 60.0, 10);
+        step_particles(&mut run_a, &quiet, 1.0 / 60.0, 11);
+        assert_eq!(run_a.len(), vys_before_quiet.len());
+        for (before, particle) in vys_before_quiet.iter().zip(run_a.iter()) {
+            assert!(particle.vy > *before);
+            assert!(particle.life > 0.0);
+        }
+
+        // Simulating past max life removes every particle and the emitter stays silent.
+        for frame in 12..32u64 {
+            step_particles(&mut run_a, &quiet, 0.1, frame);
+        }
+        assert!(run_a.is_empty());
+        assert_eq!(step_particles(&mut run_a, &quiet, 0.1, 99), 0);
+        assert!(run_a.is_empty());
     }
 }

@@ -2691,6 +2691,63 @@ fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// A mail merge template containing `{{field}}` merge placeholders.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MergeTemplate {
+    /// Template body text with embedded `{{field}}` placeholders.
+    pub body_template: String,
+}
+
+impl MergeTemplate {
+    /// Create a new merge template from body text.
+    pub fn new(body_template: &str) -> Self {
+        Self {
+            body_template: body_template.to_string(),
+        }
+    }
+
+    /// Extracts unique placeholder field names in order of first appearance.
+    pub fn extract_fields(&self) -> Vec<String> {
+        let mut fields = Vec::new();
+        let mut rest = self.body_template.as_str();
+        while let Some(open) = rest.find("{{") {
+            let inner = &rest[open + "{{".len()..];
+            let Some(close) = inner.find("}}") else {
+                break;
+            };
+            let name = &inner[..close];
+            if !name.is_empty() && !fields.iter().any(|existing| existing == name) {
+                fields.push(name.to_string());
+            }
+            rest = &inner[close + "}}".len()..];
+        }
+        fields
+    }
+
+    /// Renders one merged document by substituting `{{field}}` placeholders with
+    /// record values. Unknown placeholders are left intact.
+    pub fn render_record(&self, fields: &std::collections::BTreeMap<String, String>) -> String {
+        let mut out = String::with_capacity(self.body_template.len());
+        let mut rest = self.body_template.as_str();
+        while let Some(open) = rest.find("{{") {
+            out.push_str(&rest[..open]);
+            let inner = &rest[open + "{{".len()..];
+            let Some(close) = inner.find("}}") else {
+                out.push_str(rest[open..].as_ref());
+                return out;
+            };
+            let name = &inner[..close];
+            match fields.get(name) {
+                Some(value) => out.push_str(value),
+                None => out.push_str(&rest[open..open + "{{".len() + close + "}}".len()]),
+            }
+            rest = &inner[close + "}}".len()..];
+        }
+        out.push_str(rest);
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3455,5 +3512,36 @@ mod tests {
         // Replace all "fox" with "dog"
         let replaced = replace_matches(sample, "fox", "dog", &case_insens);
         assert_eq!(replaced, "The quick brown dog jumps over the lazy dog.");
+    }
+
+    #[test]
+    fn mail_merge_template_rendering() {
+        // Field extraction preserves first-appearance order and deduplicates.
+        let template = MergeTemplate::new(
+            "Dear {{name}}, your {{plan}} plan renews soon. Thank you, {{name}}.",
+        );
+        assert_eq!(template.extract_fields(), vec!["name", "plan"]);
+
+        // Rendering substitutes every occurrence of known fields.
+        let mut record = std::collections::BTreeMap::new();
+        record.insert("name".to_string(), "Ada".to_string());
+        record.insert("plan".to_string(), "Studio".to_string());
+        assert_eq!(
+            template.render_record(&record),
+            "Dear Ada, your Studio plan renews soon. Thank you, Ada."
+        );
+
+        // Unknown placeholders are left intact.
+        let mut partial = std::collections::BTreeMap::new();
+        partial.insert("plan".to_string(), "Pro".to_string());
+        assert_eq!(
+            template.render_record(&partial),
+            "Dear {{name}}, your Pro plan renews soon. Thank you, {{name}}."
+        );
+
+        // A template without placeholders renders unchanged even with an empty map.
+        let plain = MergeTemplate::new("No placeholders in this body.");
+        let empty: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+        assert_eq!(plain.render_record(&empty), "No placeholders in this body.");
     }
 }

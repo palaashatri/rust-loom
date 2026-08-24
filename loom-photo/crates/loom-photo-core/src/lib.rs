@@ -1810,6 +1810,117 @@ fn apply_adjustment(
     }
 }
 
+/// Round brush configuration with hardness-controlled falloff.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrushConfig {
+    /// Brush radius in pixels (> 0).
+    pub radius: f32,
+    /// 0.0 = fully soft feathered edge, 1.0 = hard edge. Clamped to [0, 1].
+    pub hardness: f32,
+    /// Per-dab opacity multiplier in [0, 1].
+    pub opacity: f32,
+    /// Brush RGBA color.
+    pub color: [u8; 4],
+}
+
+impl Default for BrushConfig {
+    fn default() -> Self {
+        Self {
+            radius: 12.0,
+            hardness: 0.8,
+            opacity: 1.0,
+            color: [0, 0, 0, 255],
+        }
+    }
+}
+
+/// Returns the normalized dab alpha in [0, 1] at a pixel whose distance from the dab
+/// center is `distance`. `distance >= radius` yields 0; within the hard core
+/// (`distance <= hardness * radius`) it yields 1; otherwise it falls off linearly.
+pub fn brush_dab_alpha(distance: f32, config: &BrushConfig) -> f64 {
+    let radius = config.radius.max(f32::EPSILON);
+    if distance >= radius {
+        return 0.0;
+    }
+    let hard_edge = config.hardness.clamp(0.0, 1.0) * radius;
+    if distance <= hard_edge {
+        return 1.0;
+    }
+    ((radius - distance) / (radius - hard_edge)) as f64
+}
+
+/// Stamps one circular dab centered at (`cx`, `cy`) using source-over compositing.
+/// The canvas is treated as an opaque backdrop: RGB channels blend toward the dab
+/// color by the dab alpha and the destination alpha moves toward 255 accordingly.
+fn stamp_dab(canvas: &mut RgbaImage, cx: f32, cy: f32, config: &BrushConfig) {
+    if config.radius <= 0.0 {
+        return;
+    }
+    let opacity = config.opacity.clamp(0.0, 1.0) as f64;
+    if opacity <= 0.0 {
+        return;
+    }
+    let radius = config.radius;
+    let min_x = ((cx - radius).floor() as i64).max(0);
+    let min_y = ((cy - radius).floor() as i64).max(0);
+    let max_x = ((cx + radius).ceil() as i64).min(canvas.width as i64 - 1);
+    let max_y = ((cy + radius).ceil() as i64).min(canvas.height as i64 - 1);
+    if min_x > max_x || min_y > max_y {
+        return;
+    }
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            let alpha = brush_dab_alpha((dx * dx + dy * dy).sqrt(), config) * opacity;
+            if alpha <= 0.0 {
+                continue;
+            }
+            let x = x as u32;
+            let y = y as u32;
+            let Some(destination) = canvas.pixel(x, y) else {
+                continue;
+            };
+            let inverse = 1.0 - alpha;
+            let blended = [
+                (config.color[0] as f64 * alpha + destination[0] as f64 * inverse)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
+                (config.color[1] as f64 * alpha + destination[1] as f64 * inverse)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
+                (config.color[2] as f64 * alpha + destination[2] as f64 * inverse)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
+                (alpha * 255.0 + destination[3] as f64 * inverse)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
+            ];
+            canvas.set_pixel(x, y, blended);
+        }
+    }
+}
+
+/// Paints one straight brush stroke from `from` to `to`, stamping circular dabs spaced
+/// `spacing` pixels apart along the line (including both endpoints), alpha-compositing
+/// each dab over the canvas with `dab alpha * opacity`.
+pub fn paint_stroke(
+    canvas: &mut RgbaImage,
+    from: (f32, f32),
+    to: (f32, f32),
+    spacing: f32,
+    config: &BrushConfig,
+) {
+    let delta = (to.0 - from.0, to.1 - from.1);
+    let length = (delta.0 * delta.0 + delta.1 * delta.1).sqrt();
+    let spacing = spacing.abs().max(1e-3);
+    let steps = (length / spacing).ceil().max(1.0);
+    for step in 0..=steps as u32 {
+        let t = step as f32 / steps;
+        stamp_dab(canvas, from.0 + delta.0 * t, from.1 + delta.1 * t, config);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2332,5 +2443,46 @@ mod tests {
         // Monochromatic grain keeps R == G == B
         assert_eq!(p0[0], p0[1]);
         assert_eq!(p0[1], p0[2]);
+    }
+
+    #[test]
+    fn brush_dab_and_stroke_painting() {
+        let config = BrushConfig {
+            radius: 10.0,
+            hardness: 0.5,
+            opacity: 1.0,
+            color: [255, 0, 0, 255],
+        };
+
+        // Center of the dab is fully opaque, beyond the radius is empty.
+        assert_eq!(brush_dab_alpha(0.0, &config), 1.0);
+        assert_eq!(brush_dab_alpha(11.0, &config), 0.0);
+
+        // Mid-feather (between hard core at 5.0 and radius at 10.0) is partial coverage.
+        let mid_feather = brush_dab_alpha(7.5, &config);
+        assert!(
+            mid_feather > 0.0 && mid_feather < 1.0,
+            "expected partial alpha in the feather, got {mid_feather}"
+        );
+
+        // Horizontal stroke with an opaque hard red brush on a white canvas.
+        let mut canvas = RgbaImage::solid(100, 100, [255, 255, 255, 255]).unwrap();
+        let hard_brush = BrushConfig {
+            radius: 6.0,
+            hardness: 1.0,
+            opacity: 1.0,
+            color: [220, 30, 30, 255],
+        };
+        paint_stroke(&mut canvas, (20.0, 50.0), (80.0, 50.0), 2.0, &hard_brush);
+
+        let center = canvas.pixel(50, 50).unwrap();
+        assert!(
+            center[0] > 200 && center[1] < 60 && center[2] < 60,
+            "stroke center line should be red-ish, got {center:?}"
+        );
+
+        // Far corners are untouched by the stroke.
+        assert_eq!(canvas.pixel(0, 0), Some([255, 255, 255, 255]));
+        assert_eq!(canvas.pixel(99, 99), Some([255, 255, 255, 255]));
     }
 }

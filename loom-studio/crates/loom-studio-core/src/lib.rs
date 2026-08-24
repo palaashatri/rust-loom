@@ -1764,6 +1764,50 @@ pub fn synthesize_notes(
     Ok(output)
 }
 
+/// A single MIDI note event expressed in beat units relative to the song start.
+///
+/// Unlike [`MidiNote`], which feeds the synthesizer in seconds, this type keeps
+/// musical (beat) positions so grid operations such as [`quantize_notes`] work
+/// without a tempo context.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeatNote {
+    /// Note start position in beats from the song start.
+    pub start_beat: f64,
+    /// Note length in beats.
+    pub duration_beats: f64,
+    /// MIDI pitch in `[0, 127]`.
+    pub pitch: u8,
+    /// Velocity in `[0, 127]`.
+    pub velocity: u8,
+}
+
+/// Quantizes note starts to the nearest multiple of `grid_beats`, blending the
+/// snap by `strength` in `[0, 1]` (0 leaves notes unchanged, 1 snaps them fully
+/// onto the grid). Durations are preserved but never place a note end before its
+/// moved start; the minimum duration is `1e-6` beats. Negative resulting starts
+/// are clamped to `0`. Returns a new `Vec`; the input slice is unmodified.
+pub fn quantize_notes(
+    notes: &[BeatNote],
+    grid_beats: f64,
+    strength: f64,
+) -> Result<Vec<BeatNote>, String> {
+    if !grid_beats.is_finite() || grid_beats <= 0.0 {
+        return Err("quantize grid must be greater than zero".into());
+    }
+    let blend = strength.clamp(0.0, 1.0);
+    Ok(notes
+        .iter()
+        .map(|note| {
+            let nearest_grid = (note.start_beat / grid_beats).round() * grid_beats;
+            BeatNote {
+                start_beat: (note.start_beat + (nearest_grid - note.start_beat) * blend).max(0.0),
+                duration_beats: note.duration_beats.max(1e-6),
+                ..*note
+            }
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1884,6 +1928,47 @@ mod tests {
             value: 0.0,
         });
         assert!((lane.sample(0.5, 0.0) - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn midi_quantize_snap_strength() {
+        let note_at = |start: f64| BeatNote {
+            start_beat: start,
+            duration_beats: 0.2,
+            pitch: 60,
+            velocity: 100,
+        };
+
+        // Full strength snaps 0.31 to the nearest sixteenth (0.25).
+        let full = quantize_notes(&[note_at(0.31)], 0.25, 1.0).unwrap();
+        assert!((full[0].start_beat - 0.25).abs() < 1e-9);
+
+        // Zero strength leaves the note unchanged.
+        let none = quantize_notes(&[note_at(0.31)], 0.25, 0.0).unwrap();
+        assert_eq!(none[0].start_beat, 0.31);
+
+        // Half strength lands halfway between the original start and the grid.
+        let half = quantize_notes(&[note_at(0.31)], 0.25, 0.5).unwrap();
+        assert!((half[0].start_beat - 0.28).abs() < 1e-9);
+
+        // Strength saturates outside [0, 1].
+        let saturated = quantize_notes(&[note_at(0.31)], 0.25, 3.0).unwrap();
+        assert!((saturated[0].start_beat - 0.25).abs() < 1e-9);
+
+        // Negative starts clamp to zero.
+        let clamped = quantize_notes(&[note_at(-0.4)], 0.25, 1.0).unwrap();
+        assert_eq!(clamped[0].start_beat, 0.0);
+
+        // Grid must be positive.
+        assert!(quantize_notes(&[note_at(0.31)], 0.0, 1.0).is_err());
+        assert!(quantize_notes(&[note_at(0.31)], -0.25, 1.0).is_err());
+
+        // Durations are preserved and the input slice is untouched.
+        let notes = vec![note_at(0.31), note_at(-0.4)];
+        let quantized = quantize_notes(&notes, 0.25, 1.0).unwrap();
+        assert_eq!(quantized[0].duration_beats, 0.2);
+        assert_eq!(quantized[1].duration_beats, 0.2);
+        assert_eq!(notes[0].start_beat, 0.31);
     }
 
     #[test]

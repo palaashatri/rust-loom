@@ -990,6 +990,47 @@ pub fn stdev_s(values: &[f64]) -> Result<f64, String> {
     var_s(values).map(|v| v.sqrt())
 }
 
+/// Aggregation operations available to pivot table value fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PivotAggregation {
+    #[default]
+    Sum,
+    Count,
+    Average,
+    Min,
+    Max,
+}
+
+/// Groups row values by key and aggregates the paired values.
+pub fn compute_pivot(
+    keys: &[String],
+    values: &[f64],
+    aggregation: PivotAggregation,
+) -> Result<Vec<(String, f64)>, String> {
+    if keys.len() != values.len() {
+        return Err("#VALUE!: keys and values must have equal lengths".into());
+    }
+
+    // BTreeMap keeps groups sorted by key so output ordering is deterministic.
+    let mut groups: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    for (key, value) in keys.iter().zip(values.iter()) {
+        groups.entry(key.as_str()).or_default().push(*value);
+    }
+
+    let mut result = Vec::with_capacity(groups.len());
+    for (key, group) in groups {
+        let aggregated: f64 = match aggregation {
+            PivotAggregation::Sum => group.iter().sum(),
+            PivotAggregation::Count => group.len() as f64,
+            PivotAggregation::Average => group.iter().sum::<f64>() / group.len() as f64,
+            PivotAggregation::Min => group.iter().copied().fold(f64::INFINITY, f64::min),
+            PivotAggregation::Max => group.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        };
+        result.push((key.to_string(), aggregated));
+    }
+    Ok(result)
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -3435,5 +3476,49 @@ mod tests {
         let v_s = var_s(&dataset).unwrap();
         assert!((v_s - (32.0 / 7.0)).abs() < 1e-5);
         assert!((stdev_s(&dataset).unwrap() - (32.0 / 7.0f64).sqrt()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pivot_grouping_and_aggregation() {
+        let keys = vec![
+            "East".to_string(),
+            "West".to_string(),
+            "East".to_string(),
+            "South".to_string(),
+            "West".to_string(),
+        ];
+        let values = vec![10.0, 20.0, 15.0, 30.0, 5.0];
+
+        // SUM: East = 10+15 = 25, South = 30, West = 20+5 = 25.
+        // Results are sorted by group key ascending: East < South < West.
+        assert_eq!(
+            compute_pivot(&keys, &values, PivotAggregation::Sum).unwrap(),
+            vec![
+                ("East".to_string(), 25.0),
+                ("South".to_string(), 30.0),
+                ("West".to_string(), 25.0),
+            ]
+        );
+
+        // AVERAGE: East = (10+15)/2 = 12.5
+        let averages = compute_pivot(&keys, &values, PivotAggregation::Average).unwrap();
+        assert_eq!(averages[0], ("East".to_string(), 12.5));
+
+        // MIN/MAX/COUNT for the East group: min = 10, max = 15, count = 2.
+        let mins = compute_pivot(&keys, &values, PivotAggregation::Min).unwrap();
+        let maxes = compute_pivot(&keys, &values, PivotAggregation::Max).unwrap();
+        let counts = compute_pivot(&keys, &values, PivotAggregation::Count).unwrap();
+        assert_eq!(mins[0], ("East".to_string(), 10.0));
+        assert_eq!(maxes[0], ("East".to_string(), 15.0));
+        assert_eq!(counts[0], ("East".to_string(), 2.0));
+
+        // Mismatched lengths must be rejected.
+        assert!(compute_pivot(&keys[..1], &values, PivotAggregation::Sum).is_err());
+
+        // Empty input yields an empty result.
+        let empty: Vec<String> = Vec::new();
+        assert!(compute_pivot(&empty, &[], PivotAggregation::Sum)
+            .unwrap()
+            .is_empty());
     }
 }

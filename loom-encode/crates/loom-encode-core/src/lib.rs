@@ -1409,6 +1409,86 @@ where
     }
 }
 
+/// Post-encode conformance checks evaluated against a finished output file.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ConformanceCheck {
+    /// Full-stream decode integrity pass (ffmpeg null muxer with error termination).
+    DecodeIntegrity,
+    /// Verify measured duration stays within +/- tolerance seconds of expected.
+    DurationTolerance {
+        expected_seconds: f64,
+        tolerance_seconds: f64,
+    },
+    /// Verify at least the given number of streams exist of any type.
+    MinimumStreamCount { count: usize },
+    /// Verify audio loudness integrated value does not exceed target LUFS by more than 1 LU.
+    LoudnessCeiling { target_lufs: f64 },
+}
+
+/// Builds the ffprobe/ffmpeg argument vector that GATHERS evidence for the given checks against
+/// `output`. DecodeIntegrity uses ffmpeg (`-v error -xerror -i <out> -f null -`); the rest are
+/// ffprobe/loudnorm measurement invocations flattened into one deterministic Vec<String> where each
+/// probe starts with its subcommand token ("ffprobe" or "ffmpeg").
+pub fn generate_conformance_probe_args(output: &str, checks: &[ConformanceCheck]) -> Vec<String> {
+    let mut probes = Vec::new();
+    for check in checks {
+        match *check {
+            ConformanceCheck::DecodeIntegrity => {
+                probes.push("ffmpeg".into());
+                probes.extend([
+                    "-v".into(),
+                    "error".into(),
+                    "-xerror".into(),
+                    "-i".into(),
+                    output.into(),
+                    "-f".into(),
+                    "null".into(),
+                    "-".into(),
+                ]);
+            }
+            ConformanceCheck::DurationTolerance { .. } => {
+                probes.push("ffprobe".into());
+                probes.extend([
+                    "-v".into(),
+                    "error".into(),
+                    "-show_entries".into(),
+                    "format=duration".into(),
+                    "-of".into(),
+                    "default=noprint_wrappers=1:nokey=1".into(),
+                    output.into(),
+                ]);
+            }
+            ConformanceCheck::MinimumStreamCount { .. } => {
+                probes.push("ffprobe".into());
+                probes.extend([
+                    "-v".into(),
+                    "error".into(),
+                    "-show_entries".into(),
+                    "stream=index".into(),
+                    "-of".into(),
+                    "csv=p=0".into(),
+                    output.into(),
+                ]);
+            }
+            ConformanceCheck::LoudnessCeiling { .. } => {
+                probes.push("ffmpeg".into());
+                probes.extend([
+                    "-nostdin".into(),
+                    "-i".into(),
+                    output.into(),
+                    "-vn".into(),
+                    "-af".into(),
+                    "loudnorm=print_format=json".into(),
+                    "-f".into(),
+                    "null".into(),
+                    "-".into(),
+                ]);
+            }
+        }
+    }
+    probes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1800,5 +1880,109 @@ mod tests {
         assert!(s51_args[1].contains("pan=stereo"));
         assert!(s51_args[1].contains("FL="));
         assert!(s51_args[1].contains("FR="));
+    }
+
+    #[test]
+    fn conformance_probe_args_generation() {
+        let checks = [
+            ConformanceCheck::DecodeIntegrity,
+            ConformanceCheck::DurationTolerance {
+                expected_seconds: 90.0,
+                tolerance_seconds: 0.5,
+            },
+            ConformanceCheck::MinimumStreamCount { count: 2 },
+            ConformanceCheck::LoudnessCeiling { target_lufs: -16.0 },
+        ];
+
+        let args = generate_conformance_probe_args("Master_Cut_01_Web.mp4", &checks);
+
+        // Each probe begins with its subcommand token; split the flat vector on those markers.
+        let starts: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter_map(|(index, token)| {
+                if token == "ffmpeg" || token == "ffprobe" {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(starts.len(), checks.len());
+
+        let mut probes: Vec<Vec<&str>> = Vec::new();
+        for (position, &start) in starts.iter().enumerate() {
+            let end = starts.get(position + 1).copied().unwrap_or(args.len());
+            probes.push(args[start..end].iter().map(String::as_str).collect());
+        }
+
+        // Ordering matches slice order.
+        let markers: Vec<&str> = probes.iter().map(|probe| probe[0]).collect();
+        assert_eq!(markers, vec!["ffmpeg", "ffprobe", "ffprobe", "ffmpeg"]);
+
+        // DecodeIntegrity: ffmpeg with error termination and null muxer.
+        assert_eq!(
+            probes[0],
+            vec![
+                "ffmpeg",
+                "-v",
+                "error",
+                "-xerror",
+                "-i",
+                "Master_Cut_01_Web.mp4",
+                "-f",
+                "null",
+                "-"
+            ]
+        );
+
+        // Duration evidence via ffprobe format duration.
+        assert_eq!(
+            probes[1],
+            vec![
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                "Master_Cut_01_Web.mp4"
+            ]
+        );
+
+        // Stream count evidence via ffprobe stream index listing.
+        assert_eq!(
+            probes[2],
+            vec![
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+                "Master_Cut_01_Web.mp4"
+            ]
+        );
+
+        // Loudness evidence via a loudnorm JSON measurement pass.
+        assert_eq!(
+            probes[3],
+            vec![
+                "ffmpeg",
+                "-nostdin",
+                "-i",
+                "Master_Cut_01_Web.mp4",
+                "-vn",
+                "-af",
+                "loudnorm=print_format=json",
+                "-f",
+                "null",
+                "-"
+            ]
+        );
+
+        assert!(generate_conformance_probe_args("unused.mp4", &[]).is_empty());
     }
 }

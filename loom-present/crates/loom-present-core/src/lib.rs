@@ -1548,6 +1548,47 @@ fn unique_slide_id(document: &PresentationDocument, prefix: &str) -> String {
     }
 }
 
+/// Entrance animation effect presets for slide elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AnimationEffect {
+    #[default]
+    Appear,
+    FadeIn,
+    FlyFromLeft,
+    FlyFromRight,
+    ZoomIn,
+}
+
+/// One object animation entry bound to a slide element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnimationEntry {
+    pub element_id: String,
+    pub effect: AnimationEffect,
+    /// Zero-based position in the click-build sequence.
+    pub build_order: usize,
+    pub duration_ms: u32,
+    pub delay_ms: u32,
+}
+
+/// Sorts animation entries into their build order (stable).
+pub fn sort_animation_builds(entries: &mut [AnimationEntry]) {
+    entries.sort_by_key(|entry| entry.build_order);
+}
+
+/// Computes normalized eased progress 0.0..=1.0 of an entry at elapsed ms (after delay), using
+/// smoothstep easing (3t^2 - 2t^3) clamped to [0,1]. Before delay elapses => 0.0; past end => 1.0.
+pub fn animation_progress(entry: &AnimationEntry, elapsed_ms: u32) -> f64 {
+    if elapsed_ms < entry.delay_ms {
+        return 0.0;
+    }
+    if entry.duration_ms == 0 || elapsed_ms - entry.delay_ms >= entry.duration_ms {
+        return 1.0;
+    }
+    let t = f64::from(elapsed_ms - entry.delay_ms) / f64::from(entry.duration_ms);
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2047,5 +2088,81 @@ mod tests {
         assert_eq!(session.annotations.get(&0).unwrap().strokes.len(), 0);
         // Slide 1 remains untouched
         assert_eq!(session.annotations.get(&1).unwrap().strokes.len(), 1);
+    }
+
+    #[test]
+    fn animation_build_order_and_progress() {
+        let mut entries = vec![
+            AnimationEntry {
+                element_id: "title".into(),
+                effect: AnimationEffect::FadeIn,
+                build_order: 2,
+                duration_ms: 400,
+                delay_ms: 100,
+            },
+            AnimationEntry {
+                element_id: "chart".into(),
+                effect: AnimationEffect::ZoomIn,
+                build_order: 1,
+                duration_ms: 200,
+                delay_ms: 0,
+            },
+            AnimationEntry {
+                element_id: "subtitle".into(),
+                effect: AnimationEffect::FlyFromLeft,
+                build_order: 1,
+                duration_ms: 300,
+                delay_ms: 50,
+            },
+            AnimationEntry {
+                element_id: "stat".into(),
+                effect: AnimationEffect::Appear,
+                build_order: 0,
+                duration_ms: 500,
+                delay_ms: 250,
+            },
+        ];
+        entries.reverse();
+        sort_animation_builds(&mut entries);
+        assert_eq!(
+            entries.iter().map(|e| e.build_order).collect::<Vec<_>>(),
+            vec![0, 1, 1, 2]
+        );
+        // Stable: equal build_order keeps original relative order.
+        assert_eq!(entries[1].element_id, "subtitle");
+        assert_eq!(entries[2].element_id, "chart");
+
+        // Progress == 0 during the delay window (inclusive of its end).
+        let fade = AnimationEntry {
+            element_id: "fade-item".into(),
+            effect: AnimationEffect::FadeIn,
+            build_order: 0,
+            duration_ms: 400,
+            delay_ms: 100,
+        };
+        assert_eq!(animation_progress(&fade, 0), 0.0);
+        assert_eq!(animation_progress(&fade, 99), 0.0);
+        assert_eq!(animation_progress(&fade, 100), 0.0);
+
+        // Mid-progress is monotonic between two sample points and strictly inside (0, 1).
+        let early = animation_progress(&fade, 200);
+        let late = animation_progress(&fade, 300);
+        assert!(early > 0.0 && early < late && late < 1.0);
+
+        // Past completion => exactly 1.0.
+        assert_eq!(animation_progress(&fade, 500), 1.0);
+        assert_eq!(animation_progress(&fade, 10_000), 1.0);
+
+        // Duration 0 means instantly complete once the delay passes.
+        let instant = AnimationEntry {
+            element_id: "instant".into(),
+            effect: AnimationEffect::Appear,
+            build_order: 0,
+            duration_ms: 0,
+            delay_ms: 50,
+        };
+        assert_eq!(animation_progress(&instant, 49), 0.0);
+        assert_eq!(animation_progress(&instant, 50), 1.0);
+        assert_eq!(animation_progress(&instant, 51), 1.0);
     }
 }

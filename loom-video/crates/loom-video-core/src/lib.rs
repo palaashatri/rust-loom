@@ -1781,6 +1781,39 @@ where
     }
 }
 
+/// One camera angle available to a multicam clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MulticamAngle {
+    /// Identifier of the source clip backing this angle.
+    pub clip_id: String,
+    pub label: String,
+}
+
+/// A cut switching the active multicam angle at a timeline time (seconds).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MulticamCut {
+    pub timeline_time: f64,
+    pub angle_index: usize,
+}
+
+/// Returns the index of the active camera angle at `time` given ordered or unordered cuts.
+/// Before the first cut, angle 0 is active. Returns None when `angles` is empty.
+pub fn active_angle_at(angles: &[MulticamAngle], cuts: &[MulticamCut], time: f64) -> Option<usize> {
+    if angles.is_empty() {
+        return None;
+    }
+    cuts.iter()
+        .filter(|cut| cut.timeline_time <= time)
+        .min_by(|a, b| {
+            b.timeline_time
+                .partial_cmp(&a.timeline_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|cut| cut.angle_index)
+        .filter(|index| *index < angles.len())
+        .or(Some(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2320,5 +2353,51 @@ mod tests {
         assert_eq!(clips[0].start_time, 0.5);
         assert_eq!(clips[1].start_time, 1.25);
         assert_eq!(clips[2].start_time, 2.0);
+    }
+
+    #[test]
+    fn multicam_active_angle_switching() {
+        let angles = vec![
+            MulticamAngle {
+                clip_id: "wide".into(),
+                label: "Wide".into(),
+            },
+            MulticamAngle {
+                clip_id: "closeup".into(),
+                label: "Close-Up".into(),
+            },
+            MulticamAngle {
+                clip_id: "overhead".into(),
+                label: "Overhead".into(),
+            },
+        ];
+        // Deliberately unsorted; the function must not mutate its input.
+        let cuts = [
+            MulticamCut {
+                timeline_time: 5.5,
+                angle_index: 2,
+            },
+            MulticamCut {
+                timeline_time: 2.0,
+                angle_index: 1,
+            },
+        ];
+
+        assert_eq!(active_angle_at(&angles, &cuts, 0.0), Some(0));
+        assert_eq!(active_angle_at(&angles, &cuts, 1.999), Some(0));
+        assert_eq!(active_angle_at(&angles, &cuts, 2.0), Some(1));
+        assert_eq!(active_angle_at(&angles, &cuts, 5.499), Some(1));
+        assert_eq!(active_angle_at(&angles, &cuts, 5.5), Some(2));
+        assert_eq!(active_angle_at(&angles, &cuts, 120.0), Some(2));
+        assert_eq!(cuts.len(), 2);
+        assert_eq!(cuts[0].timeline_time, 5.5);
+
+        assert_eq!(active_angle_at(&[], &cuts, 3.0), None);
+
+        let out_of_range = [MulticamCut {
+            timeline_time: 1.0,
+            angle_index: 7,
+        }];
+        assert_eq!(active_angle_at(&angles, &out_of_range, 3.0), Some(0));
     }
 }
