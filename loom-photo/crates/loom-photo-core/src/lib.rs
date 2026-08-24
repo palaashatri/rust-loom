@@ -1921,6 +1921,83 @@ pub fn paint_stroke(
     }
 }
 
+/// Copies pixels from `source_offset` relative to each destination dab of a brush stroke,
+/// retouching `canvas` in place with the soft round falloff of [`brush_dab_alpha`]. The sample
+/// for a destination pixel is read from the pre-stroke snapshot, so repeated dabs never
+/// feed back on themselves.
+pub fn clone_stamp(
+    canvas: &mut RgbaImage,
+    from: (f32, f32),
+    to: (f32, f32),
+    source_offset: (f32, f32),
+    spacing: f32,
+    config: &BrushConfig,
+) {
+    if config.radius <= 0.0 || config.opacity.clamp(0.0, 1.0) <= 0.0 {
+        return;
+    }
+    let snapshot = canvas.clone();
+    let delta = (to.0 - from.0, to.1 - from.1);
+    let length = (delta.0 * delta.0 + delta.1 * delta.1).sqrt();
+    let spacing = spacing.abs().max(1e-3);
+    let steps = (length / spacing).ceil().max(1.0);
+    for step in 0..=steps as u32 {
+        let t = step as f32 / steps;
+        let cx = from.0 + delta.0 * t;
+        let cy = from.1 + delta.1 * t;
+        // Destination bounds touched by this dab
+        let radius = config.radius;
+        let min_x = ((cx - radius).floor() as i64).max(0);
+        let min_y = ((cy - radius).floor() as i64).max(0);
+        let max_x = ((cx + radius).ceil() as i64).min(canvas.width as i64 - 1);
+        let max_y = ((cy + radius).ceil() as i64).min(canvas.height as i64 - 1);
+        if min_x > max_x || min_y > max_y {
+            continue;
+        }
+        let opacity = config.opacity.clamp(0.0, 1.0) as f64;
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                let alpha = brush_dab_alpha((dx * dx + dy * dy).sqrt(), config) * opacity;
+                if alpha <= 0.0 {
+                    continue;
+                }
+                // Source sample coordinates (integer center sampling)
+                let sx = (x as f32 + source_offset.0) as i64;
+                let sy = (y as f32 + source_offset.1) as i64;
+                if sx < 0 || sy < 0 || sx >= snapshot.width as i64 || sy >= snapshot.height as i64 {
+                    continue;
+                }
+                let Some(sample) = snapshot.pixel(sx as u32, sy as u32) else {
+                    continue;
+                };
+                let x = x as u32;
+                let y = y as u32;
+                let Some(destination) = canvas.pixel(x, y) else {
+                    continue;
+                };
+                let inverse = 1.0 - alpha;
+                let blended = [
+                    (sample[0] as f64 * alpha + destination[0] as f64 * inverse)
+                        .round()
+                        .clamp(0.0, 255.0) as u8,
+                    (sample[1] as f64 * alpha + destination[1] as f64 * inverse)
+                        .round()
+                        .clamp(0.0, 255.0) as u8,
+                    (sample[2] as f64 * alpha + destination[2] as f64 * inverse)
+                        .round()
+                        .clamp(0.0, 255.0) as u8,
+                    (sample[3] as f64 * alpha + destination[3] as f64 * inverse)
+                        .round()
+                        .clamp(0.0, 255.0) as u8,
+                ];
+                canvas.set_pixel(x, y, blended);
+            }
+        }
+    }
+}
+
 /// Photographic Levels adjustment: remap input black/white points to output range with gamma.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LevelsConfig {
@@ -2987,5 +3064,75 @@ mod tests {
             max_delta <= 3,
             "full-range image should be nearly unchanged, max delta {max_delta}"
         );
+    }
+
+    #[test]
+    fn clone_stamp_copies_source_region() {
+        // 60x30 canvas: left half red, right half blue
+        let mut canvas = RgbaImage::solid(60, 30, [0, 0, 0, 0]).unwrap();
+        for y in 0..canvas.height {
+            for x in 0..canvas.width {
+                let color = if x < 30 {
+                    [220, 20, 20, 255]
+                } else {
+                    [20, 20, 220, 255]
+                };
+                canvas.set_pixel(x, y, color);
+            }
+        }
+        let config = BrushConfig {
+            radius: 6.0,
+            hardness: 1.0,
+            opacity: 1.0,
+            color: [0, 0, 0, 255],
+        };
+
+        // Clone FROM (10,15) ONTO (40,15): offset is +30 in x. Center of the destination dab
+        // must become the source red.
+        clone_stamp(
+            &mut canvas,
+            (40.0, 15.0),
+            (40.0, 15.0),
+            (-30.0, 0.0),
+            4.0,
+            &config,
+        );
+        let center = canvas.pixel(40, 15).unwrap();
+        assert_eq!(center, [220, 20, 20, 255]);
+        // Just outside the hard brush radius stays blue
+        assert_eq!(canvas.pixel(50, 15).unwrap(), [20, 20, 220, 255]);
+
+        // Source sampling beyond the left edge leaves those pixels untouched
+        let mut edge = RgbaImage::transparent(20, 20).unwrap();
+        edge.set_pixel(5, 5, [9, 9, 9, 255]);
+        clone_stamp(
+            &mut edge,
+            (2.0, 2.0),
+            (2.0, 2.0),
+            (-100.0, 0.0),
+            1.0,
+            &config,
+        );
+        // Nothing sampleable existed at the source; canvas unchanged
+        let unchanged = edge.pixel(19, 19).unwrap();
+        assert_eq!(unchanged, [0, 0, 0, 0]);
+        assert_eq!(edge.pixel(5, 5).unwrap(), [9, 9, 9, 255]);
+
+        // Zero opacity and zero radius are no-ops
+        let mut untouched = RgbaImage::transparent(8, 8).unwrap();
+        untouched.set_pixel(4, 4, [7, 7, 7, 255]);
+        let transparent = BrushConfig {
+            opacity: 0.0,
+            ..config.clone()
+        };
+        clone_stamp(
+            &mut untouched,
+            (4.0, 4.0),
+            (4.0, 4.0),
+            (0.0, 0.0),
+            2.0,
+            &transparent,
+        );
+        assert_eq!(untouched.pixel(4, 4).unwrap(), [7, 7, 7, 255]);
     }
 }

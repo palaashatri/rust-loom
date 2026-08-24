@@ -1693,6 +1693,61 @@ pub fn has_room_for_output(
     Ok(available_bytes >= required)
 }
 
+/// Retry policy for transient encode failures using exponential backoff.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RetryPolicy {
+    /// Maximum attempts including the first try (>= 1).
+    pub max_attempts: u32,
+    /// Delay in seconds before the first retry.
+    pub initial_delay_seconds: f64,
+    /// Multiplier applied to each successive delay (>= 1).
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay_seconds: 2.0,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Validates the policy fields.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_attempts == 0 {
+            return Err("max_attempts must be at least 1".into());
+        }
+        if self.initial_delay_seconds < 0.0 || !self.initial_delay_seconds.is_finite() {
+            return Err("initial delay must be finite and non-negative".into());
+        }
+        if self.backoff_multiplier < 1.0 || !self.backoff_multiplier.is_finite() {
+            return Err("backoff multiplier must be finite and at least 1".into());
+        }
+        Ok(())
+    }
+
+    /// Whether an attempt number (1-based) is allowed by this policy.
+    pub fn allows_attempt(&self, attempt: u32) -> bool {
+        attempt >= 1 && attempt <= self.max_attempts
+    }
+
+    /// Delay in seconds to wait before `attempt` (1-based): zero for the first attempt and
+    /// exponentially compounded afterwards. Attempts beyond the policy yield None.
+    pub fn delay_before_attempt(&self, attempt: u32) -> Option<f64> {
+        if !self.allows_attempt(attempt) {
+            return None;
+        }
+        if attempt == 1 {
+            return Some(0.0);
+        }
+        let exponent = attempt - 2;
+        Some(self.initial_delay_seconds * self.backoff_multiplier.powi(exponent as i32))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2326,5 +2381,50 @@ mod tests {
         // Invalid margins are rejected rather than silently applied
         assert!(has_room_for_output(1, 1, -0.5).is_err());
         assert!(has_room_for_output(1, 1, 1.5).is_err());
+    }
+
+    #[test]
+    fn retry_policy_backoff_schedule() {
+        // Default policy: 3 attempts, 2 s initial delay, doubling backoff
+        let policy = RetryPolicy::default();
+        assert!(policy.validate().is_ok());
+
+        assert_eq!(policy.delay_before_attempt(1), Some(0.0));
+        assert_eq!(policy.delay_before_attempt(2), Some(2.0));
+        assert_eq!(policy.delay_before_attempt(3), Some(4.0));
+        assert_eq!(policy.delay_before_attempt(4), None);
+        assert_eq!(policy.delay_before_attempt(0), None);
+
+        assert!(policy.allows_attempt(1));
+        assert!(policy.allows_attempt(3));
+        assert!(!policy.allows_attempt(4));
+        assert!(!policy.allows_attempt(0));
+
+        // A single-attempt policy never retries
+        let once = RetryPolicy {
+            max_attempts: 1,
+            ..RetryPolicy::default()
+        };
+        assert_eq!(once.delay_before_attempt(2), None);
+
+        // Validation rejects bad fields
+        assert!(RetryPolicy {
+            max_attempts: 0,
+            ..RetryPolicy::default()
+        }
+        .validate()
+        .is_err());
+        assert!(RetryPolicy {
+            initial_delay_seconds: -1.0,
+            ..RetryPolicy::default()
+        }
+        .validate()
+        .is_err());
+        assert!(RetryPolicy {
+            backoff_multiplier: 0.5,
+            ..RetryPolicy::default()
+        }
+        .validate()
+        .is_err());
     }
 }

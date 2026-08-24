@@ -225,6 +225,49 @@ impl Slide {
         }
     }
 
+    /// Arranges the given element ids into a row-major grid of `columns` columns filling
+    /// `area` (x, y, width, height) with equal cell sizes and `gutter` spacing between cells.
+    /// Each element is resized to fill its cell exactly (gutter lives between cells, not
+    /// around the grid). Unknown ids are skipped; extra ids continue past the last row using
+    /// the same cell pitch. Returns the number of elements arranged. Zero columns is a no-op
+    /// returning 0.
+    #[allow(clippy::too_many_arguments)]
+    pub fn arrange_grid(
+        &mut self,
+        ids: &[&str],
+        area_x: f64,
+        area_y: f64,
+        area_w: f64,
+        area_h: f64,
+        columns: usize,
+        gutter: f64,
+    ) -> usize {
+        if columns == 0 {
+            return 0;
+        }
+        let arranged: Vec<usize> = ids
+            .iter()
+            .filter_map(|id| self.elements.iter().position(|e| e.id == *id))
+            .collect();
+        let count = arranged.len();
+        if count == 0 {
+            return 0;
+        }
+        let rows = count.div_ceil(columns);
+        let cell_w = (area_w - gutter * (columns as f64 - 1.0)) / columns as f64;
+        let cell_h = (area_h - gutter * (rows as f64 - 1.0)) / rows as f64;
+        for (slot, &idx) in arranged.iter().enumerate() {
+            let col = (slot % columns) as f64;
+            let row = (slot / columns) as f64;
+            let elem = &mut self.elements[idx];
+            elem.x = (area_x + col * (cell_w + gutter)) as f32;
+            elem.y = (area_y + row * (cell_h + gutter)) as f32;
+            elem.width = cell_w as f32;
+            elem.height = cell_h as f32;
+        }
+        count
+    }
+
     /// Applies a layout preset, configuring placeholder elements with standard positions.
     pub fn apply_layout_preset(&mut self, preset: SlideLayoutPreset) {
         self.elements.clear();
@@ -2497,5 +2540,71 @@ mod tests {
         assert_eq!(elem.y, 150.0);
         assert_eq!(elem.width, 600.0);
         assert_eq!(elem.height, 300.0);
+    }
+
+    #[test]
+    fn grid_arrangement_layout() {
+        let make = |id: &str| SlideElement {
+            id: id.into(),
+            element_type: ElementType::ShapeRectangle,
+            content: "Box".into(),
+            x: -100.0,
+            y: -100.0,
+            width: 10.0,
+            height: 10.0,
+            action: None,
+        };
+        let mut slide = Slide::new("slide-grid", "Grid", "blank");
+        for name in ["a", "b", "c", "d"] {
+            slide.add_element(make(name));
+        }
+
+        // 2x2 grid inside a 1000x800 area at (50,60) with 20px gutters.
+        // cell_w = (1000-20)/2 = 490, cell_h = (800-20)/2 = 390
+        let arranged =
+            slide.arrange_grid(&["a", "b", "c", "d"], 50.0, 60.0, 1000.0, 800.0, 2, 20.0);
+        assert_eq!(arranged, 4);
+
+        let get =
+            |slide: &Slide, id: &str| slide.elements.iter().find(|e| e.id == id).unwrap().clone();
+        let a = get(&slide, "a");
+        let b = get(&slide, "b");
+        let c = get(&slide, "c");
+        let d = get(&slide, "d");
+
+        assert_eq!(a.x, 50.0);
+        assert_eq!(a.y, 60.0);
+        assert_eq!(a.width, 490.0);
+        assert_eq!(a.height, 390.0);
+
+        assert_eq!(b.x, 560.0); // 50 + 490 + 20
+        assert_eq!(b.y, 60.0);
+
+        assert_eq!(c.x, 50.0);
+        assert_eq!(c.y, 470.0); // 60 + 390 + 20
+
+        assert_eq!(d.x, 560.0);
+        assert_eq!(d.y, 470.0);
+
+        // Unknown ids are skipped and do not consume cells
+        let arranged_partial =
+            slide.arrange_grid(&["a", "missing", "d"], 0.0, 0.0, 100.0, 100.0, 1, 0.0);
+        assert_eq!(arranged_partial, 2);
+        let d2 = get(&slide, "d");
+        assert_eq!(d2.x, 0.0);
+        assert_eq!(d2.y, 50.0); // second row of the single-column grid
+
+        // Zero columns is a no-op
+        let noop = slide.arrange_grid(&["a"], 0.0, 0.0, 100.0, 100.0, 0, 5.0);
+        assert_eq!(noop, 0);
+
+        // A lone element fills the entire area exactly
+        let mut solo_slide = Slide::new("slide-solo", "Solo", "blank");
+        solo_slide.add_element(make("solo"));
+        let n = solo_slide.arrange_grid(&["solo"], 0.0, 0.0, 640.0, 480.0, 1, 99.0);
+        assert_eq!(n, 1);
+        let s2 = &solo_slide.elements[0];
+        assert_eq!(s2.width, 640.0);
+        assert_eq!(s2.height, 480.0);
     }
 }

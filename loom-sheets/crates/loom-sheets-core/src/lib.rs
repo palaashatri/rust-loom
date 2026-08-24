@@ -3039,6 +3039,75 @@ where
     Ok(0.5 * (a + b))
 }
 
+/// Returns true for Gregorian leap years (divisible by 4, except centuries unless divisible
+/// by 400).
+pub fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+/// Days in a month (1..=12) for a given year. Month out of range => Err.
+pub fn days_in_month(year: i32, month: u32) -> Result<u32, String> {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => Ok(31),
+        4 | 6 | 9 | 11 => Ok(30),
+        2 if is_leap_year(year) => Ok(29),
+        2 => Ok(28),
+        _ => Err(format!("month must be in 1..=12 but got {month}")),
+    }
+}
+
+/// Converts a civil date to a day count relative to 1970-01-01 using Howard Hinnant's
+/// `days_from_civil` algorithm (pure integer math, valid for any proleptic Gregorian date).
+fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+    let m = i64::from(m);
+    let y = i64::from(y) - if m <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + i64::from(d) - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
+/// Inverse of [`days_from_civil`] (Howard Hinnant's `civil_from_days`).
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = mp + if mp < 10 { 3 } else { -9 }; // [1, 12]
+    ((y + i64::from(m <= 2)) as i32, m as u32, d as u32)
+}
+
+/// Validates that `month` is in 1..=12 and `day` fits that month for `year`.
+fn validate_civil_date(year: i32, month: u32, day: u32) -> Result<(), String> {
+    let last = days_in_month(year, month)?;
+    if day == 0 || day > last {
+        return Err(format!(
+            "day must be in 1..={last} for {year}-{month:02} but got {day}"
+        ));
+    }
+    Ok(())
+}
+
+/// Adds `days` (may be negative) to a civil date (year, month, day), normalizing across month
+/// and year boundaries. Invalid input dates => Err.
+pub fn add_days(year: i32, month: u32, day: u32, days: i64) -> Result<(i32, u32, u32), String> {
+    validate_civil_date(year, month, day)?;
+    let serial = days_from_civil(year, month, day);
+    Ok(civil_from_days(serial + days))
+}
+
+/// Whole days between two civil dates (later - earlier keeps positive sign either direction).
+pub fn days_between(y1: i32, m1: u32, d1: u32, y2: i32, m2: u32, d2: u32) -> Result<i64, String> {
+    validate_civil_date(y1, m1, d1)?;
+    validate_civil_date(y2, m2, d2)?;
+    Ok(days_from_civil(y2, m2, d2) - days_from_civil(y1, m1, d1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3959,5 +4028,37 @@ mod tests {
             "Banana"
         );
         assert!(text_substitute("abc", "", "x", true, 0).is_err());
+    }
+
+    #[test]
+    fn date_arithmetic_civil_calendar() {
+        // Leap years: divisible by 4, except centuries unless divisible by 400.
+        assert!(is_leap_year(2024));
+        assert!(!is_leap_year(1900));
+        assert!(is_leap_year(2000));
+
+        assert_eq!(days_in_month(2024, 2).unwrap(), 29);
+        assert_eq!(days_in_month(1900, 2).unwrap(), 28);
+        assert!(days_in_month(2024, 13).is_err());
+
+        // Month and year boundary crossings in both directions.
+        assert_eq!(add_days(2024, 1, 31, 1).unwrap(), (2024, 2, 1));
+        assert_eq!(add_days(2023, 12, 31, 1).unwrap(), (2024, 1, 1));
+        assert_eq!(add_days(2024, 3, 1, -1).unwrap(), (2024, 2, 29));
+
+        // Whole-day difference spans a leap day; sign reflects direction.
+        assert_eq!(days_between(2023, 3, 1, 2024, 3, 1).unwrap(), 366);
+        assert_eq!(days_between(2024, 3, 1, 2023, 3, 1).unwrap(), -366);
+
+        // Invalid civil dates are rejected before any arithmetic.
+        assert!(add_days(2024, 2, 30, 1).is_err());
+        assert!(days_between(2024, 2, 30, 2024, 3, 1).is_err());
+        assert!(days_in_month(2024, 0).is_err());
+
+        // Large-offset round trip: +10000 days, measure, then subtract back.
+        let (y0, m0, d0) = (2021, 6, 15u32);
+        let (y1, m1, d1) = add_days(y0, m0, d0, 10_000).unwrap();
+        assert_eq!(days_between(y0, m0, d0, y1, m1, d1).unwrap(), 10_000);
+        assert_eq!(add_days(y1, m1, d1, -10_000).unwrap(), (y0, m0, d0));
     }
 }

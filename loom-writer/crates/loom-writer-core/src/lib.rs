@@ -2984,6 +2984,92 @@ pub fn readability_scores(text: &str) -> Result<(f64, f64), String> {
     Ok((flesch, fkgl))
 }
 
+/// One word-level difference operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WordDiffOp {
+    /// Unchanged run of words.
+    Equal(Vec<String>),
+    /// Words removed from the old document.
+    Deleted(Vec<String>),
+    /// Words added in the new document.
+    Inserted(Vec<String>),
+}
+
+/// Computes a word-level LCS diff between two texts.
+///
+/// Tokenization splits on whitespace; punctuation attaches to tokens. The
+/// classic dynamic-programming longest common subsequence is computed over
+/// the word vectors (`O(n*m)` time and space, fine for documents) and walked
+/// forward to emit grouped operations in document order. Deterministic: on
+/// ties prefer deletion before insertion and earlier positions.
+///
+/// Empty inputs behave sensibly: two empty texts produce an empty diff, and
+/// one empty text produces a single `Deleted` or `Inserted` operation
+/// covering every word of the other.
+pub fn word_diff(old_text: &str, new_text: &str) -> Vec<WordDiffOp> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Kind {
+        Equal,
+        Deleted,
+        Inserted,
+    }
+
+    fn push_word(runs: &mut Vec<(Kind, Vec<String>)>, kind: Kind, word: &str) {
+        match runs.last_mut() {
+            Some((run_kind, words)) if *run_kind == kind => words.push(word.to_string()),
+            _ => runs.push((kind, vec![word.to_string()])),
+        }
+    }
+
+    let old: Vec<&str> = old_text.split_whitespace().collect();
+    let new: Vec<&str> = new_text.split_whitespace().collect();
+    let (n, m) = (old.len(), new.len());
+
+    // `table[i][j]` is the LCS length of `old[i..]` and `new[j..]`.
+    let mut table = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            table[i][j] = if old[i] == new[j] {
+                table[i + 1][j + 1] + 1
+            } else {
+                table[i + 1][j].max(table[i][j + 1])
+            };
+        }
+    }
+
+    let mut runs: Vec<(Kind, Vec<String>)> = Vec::new();
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < n && j < m {
+        if old[i] == new[j] {
+            push_word(&mut runs, Kind::Equal, old[i]);
+            i += 1;
+            j += 1;
+        } else if table[i + 1][j] >= table[i][j + 1] {
+            // Ties prefer deletion before insertion.
+            push_word(&mut runs, Kind::Deleted, old[i]);
+            i += 1;
+        } else {
+            push_word(&mut runs, Kind::Inserted, new[j]);
+            j += 1;
+        }
+    }
+    // Whichever side still has words left forms a single trailing run.
+    for word in old[i..].iter().copied() {
+        push_word(&mut runs, Kind::Deleted, word);
+    }
+    for word in new[j..].iter().copied() {
+        push_word(&mut runs, Kind::Inserted, word);
+    }
+
+    runs.into_iter()
+        .map(|(kind, words)| match kind {
+            Kind::Equal => WordDiffOp::Equal(words),
+            Kind::Deleted => WordDiffOp::Deleted(words),
+            Kind::Inserted => WordDiffOp::Inserted(words),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3935,5 +4021,85 @@ mod tests {
             ..CitationEntry::default()
         };
         assert_eq!(single.surname_initial(), "Plato");
+    }
+
+    #[test]
+    fn word_diff_lcs_operations() {
+        // Identical texts collapse into a single equal run.
+        assert_eq!(
+            word_diff("the quick brown fox", "the quick brown fox"),
+            vec![WordDiffOp::Equal(vec![
+                "the".to_string(),
+                "quick".to_string(),
+                "brown".to_string(),
+                "fox".to_string()
+            ])]
+        );
+
+        // One substituted word plus one inserted word; ties prefer deletion
+        // first, so the deleted run precedes the inserted run.
+        assert_eq!(
+            word_diff("the quick fox", "the slow brown fox"),
+            vec![
+                WordDiffOp::Equal(vec!["the".to_string()]),
+                WordDiffOp::Deleted(vec!["quick".to_string()]),
+                WordDiffOp::Inserted(vec!["slow".to_string(), "brown".to_string()]),
+                WordDiffOp::Equal(vec!["fox".to_string()]),
+            ]
+        );
+
+        // Empty old text: every new word is one inserted run.
+        assert_eq!(
+            word_diff("", "alpha beta"),
+            vec![WordDiffOp::Inserted(vec![
+                "alpha".to_string(),
+                "beta".to_string()
+            ])]
+        );
+
+        // Empty new text: every old word is one deleted run.
+        assert_eq!(
+            word_diff("alpha beta", ""),
+            vec![WordDiffOp::Deleted(vec![
+                "alpha".to_string(),
+                "beta".to_string()
+            ])]
+        );
+
+        // Both empty: no operations at all.
+        assert_eq!(word_diff("", ""), Vec::new());
+
+        // Reconstruction property: keeping equal words and applying the
+        // deletions/insertions to the old word stream must reproduce the new
+        // word stream exactly.
+        let words = |t: &str| t.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        let reconstruct = |diff: &[WordDiffOp]| {
+            let mut old_side = Vec::new();
+            let mut new_side = Vec::new();
+            for op in diff {
+                match op {
+                    WordDiffOp::Equal(ws) => {
+                        old_side.extend(ws.iter().cloned());
+                        new_side.extend(ws.iter().cloned());
+                    }
+                    WordDiffOp::Deleted(ws) => old_side.extend(ws.iter().cloned()),
+                    WordDiffOp::Inserted(ws) => new_side.extend(ws.iter().cloned()),
+                }
+            }
+            (old_side, new_side)
+        };
+
+        let old_text = "loom writer tracks every edit with great care";
+        let new_text = "loom editor will track all edits with care";
+        let diff = word_diff(old_text, new_text);
+        let (old_side, new_side) = reconstruct(&diff);
+        assert_eq!(old_side, words(old_text));
+        assert_eq!(new_side, words(new_text));
+
+        // The property also holds for the empty-input edge cases.
+        let (_, new_side) = reconstruct(&word_diff("", "a b c"));
+        assert_eq!(new_side, words("a b c"));
+        let (old_side, _) = reconstruct(&word_diff("x y", ""));
+        assert_eq!(old_side, words("x y"));
     }
 }

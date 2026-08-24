@@ -2233,6 +2233,49 @@ pub fn detect_chord(pitches: &[u8]) -> Option<DetectedChord> {
     })
 }
 
+/// Generates a metronome click track: an accent (higher pitch) on the downbeat of each bar
+/// and a normal click on every other beat. Clicks are short sine bursts with a 5 ms
+/// exponential decay, placed at exact beat boundaries in a mono buffer.
+pub fn generate_click_track(
+    bpm: f64,
+    beats_per_bar: u32,
+    total_beats: u32,
+    sample_rate: u32,
+    accent_hz: f32,
+    click_hz: f32,
+) -> Result<AudioBuffer, String> {
+    if bpm <= 0.0 || !bpm.is_finite() {
+        return Err("bpm must be positive and finite".into());
+    }
+    if beats_per_bar == 0 || total_beats == 0 || sample_rate == 0 {
+        return Err("beats per bar, total beats, and sample rate must be positive".into());
+    }
+
+    let frames = ((total_beats as f64 * 60.0 / bpm) * sample_rate as f64).ceil() as usize;
+    let mut buffer = AudioBuffer::silence(sample_rate, 1, frames as u64)?;
+
+    let seconds_per_beat = 60.0 / bpm;
+    let decay_samples = (0.005 * sample_rate as f64).ceil() as usize;
+
+    for beat in 0..total_beats {
+        let start_frame = (beat as f64 * seconds_per_beat * sample_rate as f64).round() as usize;
+        let is_downbeat = beat % beats_per_bar == 0;
+        let freq = if is_downbeat { accent_hz } else { click_hz };
+        for i in 0..decay_samples {
+            let frame = start_frame + i;
+            if frame >= frames {
+                break;
+            }
+            let t = i as f32 / sample_rate as f32;
+            // Short sine burst with exponential decay
+            let envelope = (-t * 900.0_f32).exp();
+            buffer.samples[frame] = (t * freq * std::f32::consts::TAU).sin() * envelope * 0.8;
+        }
+    }
+
+    Ok(buffer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3038,5 +3081,41 @@ mod studio_runtime_tests {
 
         // Deterministic across repeated calls
         assert_eq!(detect_chord(&[60, 64, 67]), detect_chord(&[60, 64, 67]));
+    }
+
+    #[test]
+    fn click_track_generation() {
+        // 120 BPM, 4/4, 8 beats = 4 seconds = 192000 frames at 48 kHz
+        let clicks = generate_click_track(120.0, 4, 8, 48000, 1600.0, 800.0).unwrap();
+        assert_eq!(clicks.sample_rate, 48000);
+        assert_eq!(clicks.channels, 1);
+        assert_eq!(clicks.samples.len(), 192_000);
+
+        // Downbeat at frame 0 carries the accent pitch; a mid-bar beat does not.
+        let peak_at = |buf: &AudioBuffer, from: usize, to: usize| {
+            buf.samples[from..to]
+                .iter()
+                .fold(0.0f32, |m, s| m.max(s.abs()))
+        };
+        assert!(peak_at(&clicks, 0, 400) > 0.5, "downbeat click is audible");
+        let beat2_start = (0.5f64 * 48000.0).round() as usize; // beat index 1 starts at 0.5 s
+        assert!(
+            peak_at(&clicks, beat2_start + 10, beat2_start + 300) > 0.3,
+            "off-beat click is audible"
+        );
+
+        // Silence between clicks: halfway between beats 1 and 2 there is no energy
+        let midpoint = (0.75 * 48000.0) as usize;
+        assert_eq!(peak_at(&clicks, midpoint - 200, midpoint + 200), 0.0);
+
+        // Determinism
+        let again = generate_click_track(120.0, 4, 8, 48000, 1600.0, 800.0).unwrap();
+        assert_eq!(clicks.samples, again.samples);
+
+        // Invalid parameters are rejected
+        assert!(generate_click_track(-5.0, 4, 8, 48000, 1600.0, 800.0).is_err());
+        assert!(generate_click_track(120.0, 0, 8, 48000, 1600.0, 800.0).is_err());
+        assert!(generate_click_track(120.0, 4, 0, 48000, 1600.0, 800.0).is_err());
+        assert!(generate_click_track(120.0, 4, 8, 0, 1600.0, 800.0).is_err());
     }
 }

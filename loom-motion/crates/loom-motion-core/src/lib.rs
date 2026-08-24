@@ -1281,6 +1281,65 @@ pub fn handheld_offset_track(
     track
 }
 
+/// A sampled 2D layer transform used for hierarchy resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SampledTransform {
+    pub x: f32,
+    pub y: f32,
+    /// Uniform scale where 1 is original size.
+    pub scale: f32,
+    /// Rotation in degrees counter-clockwise.
+    pub rotation_degrees: f32,
+}
+
+/// Composes a child's local transform under its parent: the local position is rotated by the
+/// parent rotation and scaled by the parent scale before being offset by the parent position;
+/// scales multiply and rotations add. Degenerate parent scales (<= 0) are clamped to a
+/// minimum of 1e-6 to keep the fold finite.
+pub fn compose_parented_transform(
+    parent: &SampledTransform,
+    child_local: &SampledTransform,
+) -> SampledTransform {
+    let parent_scale = parent.scale.max(1e-6);
+    let radians = parent.rotation_degrees.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let scaled_x = child_local.x * parent_scale;
+    let scaled_y = child_local.y * parent_scale;
+    SampledTransform {
+        x: parent.x + scaled_x * cos - scaled_y * sin,
+        y: parent.y + scaled_x * sin + scaled_y * cos,
+        scale: parent_scale * child_local.scale.max(1e-6),
+        rotation_degrees: parent.rotation_degrees + child_local.rotation_degrees,
+    }
+}
+
+/// Folds an ancestor chain (root first, leaf last) into one world transform. An empty chain
+/// yields the identity transform.
+pub fn resolve_world_transform(chain: &[SampledTransform]) -> SampledTransform {
+    let mut world = SampledTransform {
+        x: 0.0,
+        y: 0.0,
+        scale: 1.0,
+        rotation_degrees: 0.0,
+    };
+    for node in chain {
+        world = compose_parented_transform(&world, node);
+    }
+    world
+}
+
+/// Samples a [`MotionLayer`]'s own transform at `time_secs` using its keyframe channels with
+/// the same defaults as [`MotionLayer::sample`] (origin, unit scale, zero rotation).
+pub fn sample_layer_transform(layer: &MotionLayer, time_secs: f32) -> SampledTransform {
+    let local_time = time_secs - layer.start_time;
+    SampledTransform {
+        x: sample_keys(&layer.position_x_keys, local_time, 0.0),
+        y: sample_keys(&layer.position_y_keys, local_time, 0.0),
+        scale: sample_keys(&layer.scale_keys, local_time, 1.0).max(0.0),
+        rotation_degrees: sample_keys(&layer.rotation_keys, local_time, 0.0),
+    }
+}
+
 /// Time remapping modes for looping source content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeRemapMode {
@@ -1998,5 +2057,81 @@ mod tests {
         assert_eq!(frames_required(24, 2.0), Ok(12));
         assert!(frames_required(25, 0.0).is_err());
         assert!(frames_required(25, -1.0).is_err());
+    }
+
+    #[test]
+    fn parented_transform_composition() {
+        // Identity parent leaves the child unchanged
+        let child = SampledTransform {
+            x: 100.0,
+            y: 50.0,
+            scale: 2.0,
+            rotation_degrees: 15.0,
+        };
+        let identity = resolve_world_transform(&[]);
+        assert_eq!(compose_parented_transform(&identity, &child), child);
+
+        // Pure translation parent shifts the child
+        let translated = compose_parented_transform(
+            &SampledTransform {
+                x: 10.0,
+                y: 20.0,
+                scale: 1.0,
+                rotation_degrees: 0.0,
+            },
+            &child,
+        );
+        assert_eq!(translated.x, 110.0);
+        assert_eq!(translated.y, 70.0);
+
+        // Rotation of the parent rotates the child's offset around the origin:
+        // local (10, 0) under 90-degree rotation becomes (0, 10)
+        let rotated = compose_parented_transform(
+            &SampledTransform {
+                x: 0.0,
+                y: 0.0,
+                scale: 1.0,
+                rotation_degrees: 90.0,
+            },
+            &SampledTransform {
+                x: 10.0,
+                y: 0.0,
+                scale: 1.0,
+                rotation_degrees: 0.0,
+            },
+        );
+        assert!(rotated.x.abs() < 1e-4);
+        assert!((rotated.y - 10.0).abs() < 1e-4);
+        assert_eq!(rotated.rotation_degrees, 90.0);
+
+        // Scales multiply and rotations add through a three-deep chain
+        let chain = [
+            SampledTransform {
+                x: 5.0,
+                y: 5.0,
+                scale: 2.0,
+                rotation_degrees: 10.0,
+            },
+            SampledTransform {
+                x: 1.0,
+                y: 0.0,
+                scale: 3.0,
+                rotation_degrees: 20.0,
+            },
+            SampledTransform {
+                x: 1.0,
+                y: 0.0,
+                scale: 1.0,
+                rotation_degrees: 0.0,
+            },
+        ];
+        let world = resolve_world_transform(&chain);
+        assert!((world.scale - 6.0).abs() < 1e-4);
+        assert!((world.rotation_degrees - 30.0).abs() < 1e-4);
+        // Root scales+rotates the (1,0) offset: after root transform it lands at
+        // (5 + 2*cos10 + 6*cos30*... ) — verify against manual fold instead:
+        let step1 = compose_parented_transform(&chain[0], &chain[1]);
+        let step2 = compose_parented_transform(&step1, &chain[2]);
+        assert_eq!(world, step2);
     }
 }

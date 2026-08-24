@@ -2026,6 +2026,29 @@ impl ShuttleState {
     }
 }
 
+/// Analyzes a clip's samples and returns the gain in decibels needed to bring the loudest
+/// sample up to `target_peak` (0..=1). Returns Ok(0.0) for silent or empty input. A positive
+/// result means the clip should be amplified; negative means attenuated.
+pub fn suggest_normalize_gain(samples: &[f32], target_peak: f32) -> Result<f64, String> {
+    if !(0.0..=1.0).contains(&target_peak) {
+        return Err("target peak must be within [0, 1]".into());
+    }
+    let peak = samples
+        .iter()
+        .fold(0.0f32, |max, s| max.max(s.abs()))
+        .clamp(0.0, 1.0);
+    if peak <= 1e-6 {
+        return Ok(0.0);
+    }
+    let linear = (target_peak as f64 / peak as f64).min(f64::from(u16::MAX));
+    Ok(20.0 * linear.log10())
+}
+
+/// Clamps a suggested gain into the safe range applied before preview playback.
+pub fn clamp_gain_db(gain_db: f64, max_boost_db: f64) -> f64 {
+    gain_db.clamp(-60.0, max_boost_db.max(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2798,5 +2821,37 @@ mod tests {
         }
         assert_eq!(a, b);
         assert_eq!(top.direction, ShuttleDirection::Forward);
+    }
+
+    #[test]
+    fn normalize_gain_analysis() {
+        // A clip peaking at 0.25 needs +12.04 dB to hit 1.0
+        let clip = [0.0, 0.1, -0.25, 0.05];
+        let gain = suggest_normalize_gain(&clip, 1.0).unwrap();
+        assert!((gain - (20.0 * 4.0f64.log10())).abs() < 1e-9);
+
+        // Halving the target halves the linear ratio (+6.02 dB from 0.25)
+        let half = suggest_normalize_gain(&clip, 0.5).unwrap();
+        assert!((half - (20.0 * 2.0f64.log10())).abs() < 1e-9);
+
+        // Already-peaked clip needs no gain
+        assert!((suggest_normalize_gain(&[1.0, -0.5], 1.0).unwrap()).abs() < 1e-9);
+        // Over-peaked input clamps and attenuates: 0.5 ratio is -6.02 dB
+        let attenuation = suggest_normalize_gain(&[2.0], 0.5).unwrap();
+        assert!((attenuation - (-6.020_599_913_279_624)).abs() < 1e-6);
+
+        // Silence and empty inputs need zero gain
+        assert_eq!(suggest_normalize_gain(&[], 1.0).unwrap(), 0.0);
+        assert_eq!(suggest_normalize_gain(&[0.0; 10], 0.8).unwrap(), 0.0);
+
+        // Invalid target peaks are rejected
+        assert!(suggest_normalize_gain(&[0.5], -0.1).is_err());
+        assert!(suggest_normalize_gain(&[0.5], 1.5).is_err());
+        assert!(suggest_normalize_gain(&[0.5], f32::NAN).is_err());
+
+        // Gain clamping bounds boost but allows attenuation
+        assert_eq!(clamp_gain_db(30.0, 12.0), 12.0);
+        assert_eq!(clamp_gain_db(-90.0, 12.0), -60.0);
+        assert_eq!(clamp_gain_db(3.0, 12.0), 3.0);
     }
 }
