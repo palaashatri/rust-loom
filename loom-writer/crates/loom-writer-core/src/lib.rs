@@ -2791,6 +2791,103 @@ pub fn extract_outline(blocks: &[RichBlock]) -> Vec<OutlineEntry> {
         .collect()
 }
 
+/// Supported bibliography formatting styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CitationStyle {
+    /// American Psychological Association author-date form.
+    #[default]
+    Apa,
+    /// Modern Language Association form.
+    Mla,
+    /// Chicago author-date-style simplified form.
+    Chicago,
+    /// IEEE numeric bracketed form.
+    Ieee,
+}
+
+/// A bibliographic source entry.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CitationEntry {
+    /// Author display name, e.g. "Ada Lovelace".
+    pub author: String,
+    /// Work title.
+    pub title: String,
+    /// Publication year.
+    pub year: u32,
+    /// Publisher or journal name; empty when none.
+    pub publisher: String,
+}
+
+impl CitationEntry {
+    /// Formats the entry per style using these exact deterministic forms
+    /// (when `publisher` is non-empty):
+    ///
+    /// - Apa: `{author} ({year}). {title}. {publisher}.`
+    /// - Mla: `{author}. "{title}." {publisher}, {year}.`
+    /// - Chicago: `{author}. "{title}." {publisher}, {year}.`
+    /// - Ieee: `[{n}] {author}, "{title}," {publisher}, {year}.`
+    ///
+    /// An empty `publisher` omits its whole segment (including the
+    /// surrounding separator) so output never contains doubled spaces or a
+    /// trailing space:
+    ///
+    /// - Apa: `{author} ({year}). {title}.`
+    /// - Mla/Chicago: `{author}. "{title}." {year}.`
+    /// - Ieee: `[{n}] {author}, "{title}," {year}.`
+    pub fn format(&self, style: CitationStyle, number: usize) -> String {
+        let body = match style {
+            CitationStyle::Apa => {
+                format!("{} ({}). {}.", self.author, self.year, self.title)
+            }
+            CitationStyle::Mla | CitationStyle::Chicago => {
+                format!("{}. \"{}.\"", self.author, self.title)
+            }
+            CitationStyle::Ieee => {
+                format!("[{}] {}, \"{},\"", number, self.author, self.title)
+            }
+        };
+        let tail = match style {
+            CitationStyle::Apa => format!("{}.", self.publisher),
+            CitationStyle::Mla | CitationStyle::Chicago | CitationStyle::Ieee => {
+                format!("{}, {}.", self.publisher, self.year)
+            }
+        };
+        if self.publisher.is_empty() && style == CitationStyle::Ieee {
+            // IEEE places the year directly after the quoted title when there
+            // is no venue, instead of after an omitted publisher segment.
+            return format!("{} {}.", body, self.year);
+        }
+        if self.publisher.is_empty() {
+            return match style {
+                CitationStyle::Apa => body,
+                CitationStyle::Mla | CitationStyle::Chicago => {
+                    format!("{} {}.", body, self.year)
+                }
+                CitationStyle::Ieee => unreachable!("handled above"),
+            };
+        }
+        format!("{body} {tail}")
+    }
+
+    /// Derives the "Surname, Initial." reference form from a display name.
+    /// The last whitespace-separated word is treated as the surname and the
+    /// first word contributes the initial; a single-word author passes
+    /// through unchanged.
+    pub fn surname_initial(&self) -> String {
+        let mut parts = self.author.split_whitespace();
+        let Some(first) = parts.next() else {
+            return String::new();
+        };
+        let words: Vec<&str> = std::iter::once(first).chain(parts).collect();
+        if words.len() == 1 {
+            return self.author.clone();
+        }
+        let surname = words[words.len() - 1];
+        let initial = first.chars().next().unwrap_or_default();
+        format!("{surname}, {initial}.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3625,5 +3722,71 @@ mod tests {
         assert_eq!(outline[2].render_indented(), "    Prior Work");
 
         assert!(extract_outline(&[]).is_empty());
+    }
+
+    #[test]
+    fn citation_formatting_styles() {
+        let entry = CitationEntry {
+            author: "Ada Lovelace".to_string(),
+            title: "Notes on the Analytical Engine".to_string(),
+            year: 1843,
+            publisher: "Taylor's Scientific Memoirs".to_string(),
+        };
+
+        // One fixture entry rendered in all four styles with exact forms.
+        assert_eq!(
+            entry.format(CitationStyle::Apa, 1),
+            "Ada Lovelace (1843). Notes on the Analytical Engine. Taylor's Scientific Memoirs."
+        );
+        assert_eq!(
+            entry.format(CitationStyle::Mla, 1),
+            "Ada Lovelace. \"Notes on the Analytical Engine.\" Taylor's Scientific Memoirs, 1843."
+        );
+        assert_eq!(
+            entry.format(CitationStyle::Chicago, 1),
+            "Ada Lovelace. \"Notes on the Analytical Engine.\" Taylor's Scientific Memoirs, 1843."
+        );
+        assert_eq!(
+            entry.format(CitationStyle::Ieee, 1),
+            "[1] Ada Lovelace, \"Notes on the Analytical Engine,\" Taylor's Scientific Memoirs, 1843."
+        );
+
+        // Empty publishers omit their segment without double spaces.
+        let bare = CitationEntry {
+            author: "Ada Lovelace".to_string(),
+            title: "Notes on the Analytical Engine".to_string(),
+            year: 1843,
+            publisher: String::new(),
+        };
+        assert_eq!(
+            bare.format(CitationStyle::Apa, 2),
+            "Ada Lovelace (1843). Notes on the Analytical Engine."
+        );
+        assert_eq!(
+            bare.format(CitationStyle::Mla, 2),
+            "Ada Lovelace. \"Notes on the Analytical Engine.\" 1843."
+        );
+        assert_eq!(
+            bare.format(CitationStyle::Chicago, 2),
+            "Ada Lovelace. \"Notes on the Analytical Engine.\" 1843."
+        );
+        assert_eq!(
+            bare.format(CitationStyle::Ieee, 2),
+            "[2] Ada Lovelace, \"Notes on the Analytical Engine,\" 1843."
+        );
+
+        // Multi-word authors derive "Surname, Initial." from the display name.
+        let multi = CitationEntry {
+            author: "Grace Brewster Hopper".to_string(),
+            ..CitationEntry::default()
+        };
+        assert_eq!(multi.surname_initial(), "Hopper, G.");
+
+        // Single-word authors pass through unchanged.
+        let single = CitationEntry {
+            author: "Plato".to_string(),
+            ..CitationEntry::default()
+        };
+        assert_eq!(single.surname_initial(), "Plato");
     }
 }

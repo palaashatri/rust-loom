@@ -2895,6 +2895,75 @@ impl ChartSpec {
     }
 }
 
+/// Solves f(x) = target for x within [lo, hi] using bisection. `f` must be continuous and
+/// change sign across the bracket after accounting for the target (f(lo)-target and
+/// f(hi)-target opposite signs). Iterates up to `max_iter` times or until the bracket width
+/// < tolerance. Returns Ok(x) or Err describing no-sign-change or invalid inputs
+/// (non-finite lo/hi/tolerance, hi <= lo, max_iter == 0).
+pub fn goal_seek_bisection<F>(
+    mut f: F,
+    lo: f64,
+    hi: f64,
+    target: f64,
+    tolerance: f64,
+    max_iter: u32,
+) -> Result<f64, String>
+where
+    F: FnMut(f64) -> f64,
+{
+    if !lo.is_finite() || !hi.is_finite() || !tolerance.is_finite() {
+        return Err("goal seek requires finite lo, hi, and tolerance".to_string());
+    }
+    if hi <= lo {
+        return Err(format!("goal seek requires hi > lo but got [{lo}, {hi}]"));
+    }
+    if max_iter == 0 {
+        return Err("goal seek requires at least one iteration".to_string());
+    }
+    let g_lo = f(lo) - target;
+    let g_hi = f(hi) - target;
+    if !g_lo.is_finite() || !g_hi.is_finite() {
+        return Err("goal seek produced non-finite values at the bracket ends".to_string());
+    }
+    if g_lo == 0.0 {
+        return Ok(lo);
+    }
+    if g_hi == 0.0 {
+        return Ok(hi);
+    }
+    if g_lo.signum() == g_hi.signum() {
+        return Err(format!(
+            "goal seek found no sign change across [{lo}, {hi}]: \
+             g(lo) = {g_lo}, g(hi) = {g_hi}; the function may never reach {target}"
+        ));
+    }
+    let mut a = lo;
+    let mut b = hi;
+    let mut g_a = g_lo;
+    for _ in 0..max_iter {
+        let mid = 0.5 * (a + b);
+        let g_mid = f(mid) - target;
+        if !g_mid.is_finite() {
+            return Err(format!(
+                "goal seek produced a non-finite value while evaluating inside [{a}, {b}]"
+            ));
+        }
+        if g_mid == 0.0 {
+            return Ok(mid);
+        }
+        if g_a.signum() == g_mid.signum() {
+            a = mid;
+            g_a = g_mid;
+        } else {
+            b = mid;
+        }
+        if b - a < tolerance {
+            break;
+        }
+    }
+    Ok(0.5 * (a + b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3719,5 +3788,50 @@ mod tests {
             nan.validate().unwrap_err(),
             "series 'Revenue' contains a NaN value at index 1"
         );
+    }
+
+    #[test]
+    fn goal_seek_solves_equations() {
+        let x = goal_seek_bisection(|v| v * v, 0.0, 10.0, 25.0, 1e-6, 200).unwrap();
+        assert!((x - 5.0).abs() < 1e-6, "x^2=25 gave {x}");
+
+        let r = goal_seek_bisection(
+            |rate| 100.0 * (1.0 + rate).powi(10),
+            0.0,
+            0.2,
+            200.0,
+            1e-6,
+            200,
+        )
+        .unwrap();
+        let expected_r = 2f64.powf(0.1) - 1.0;
+        assert!((r - expected_r).abs() < 1e-6, "rate solve gave {r}");
+
+        // Linear function whose first midpoint is the exact root: returns after
+        // only the two bracket evaluations plus one midpoint evaluation.
+        let calls = std::cell::Cell::new(0u32);
+        let hit = goal_seek_bisection(
+            |v| {
+                calls.set(calls.get() + 1);
+                v - 4.0
+            },
+            0.0,
+            8.0,
+            0.0,
+            1e-9,
+            1000,
+        )
+        .unwrap();
+        assert_eq!(hit, 4.0);
+        assert_eq!(calls.get(), 3);
+
+        let same_signs = goal_seek_bisection(|v| v + 10.0, -1.0, 1.0, 0.0, 1e-6, 64).unwrap_err();
+        assert!(same_signs.contains("no sign change"), "{same_signs}");
+
+        let inverted = goal_seek_bisection(|v| v * v, 10.0, 0.0, 25.0, 1e-6, 64).unwrap_err();
+        assert!(inverted.contains("hi > lo"), "{inverted}");
+
+        let constant = goal_seek_bisection(|_| 7.0, 0.0, 5.0, 3.0, 1e-6, 64).unwrap_err();
+        assert!(constant.contains("no sign change"), "{constant}");
     }
 }

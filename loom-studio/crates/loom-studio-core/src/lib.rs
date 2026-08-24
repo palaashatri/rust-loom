@@ -1921,6 +1921,221 @@ impl TakeFolder {
     }
 }
 
+/// Tempo assumed by an empty [`TempoMap`] and by fixed-tempo helpers when no
+/// usable bpm is configured, matching [`StudioProject`] defaults.
+const FALLBACK_TEMPO_BPM: f64 = 120.0;
+
+/// One tempo change point.
+///
+/// Nodes are stored inside a [`TempoMap`] sorted by beat. The `linear_ramp` flag
+/// describes how this node is reached: when set, bpm interpolates linearly in
+/// beats from the previous node's bpm across the preceding span; when clear, the
+/// previous bpm holds until this beat and then switches instantly (a step).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TempoNode {
+    /// Position in beats where this tempo becomes active.
+    pub beat: f64,
+    /// Tempo in BPM (> 0).
+    pub bpm: f64,
+    /// Linear interpolation to this node's bpm from the previous node over the preceding span.
+    pub linear_ramp: bool,
+}
+
+/// A piecewise tempo map converting between beats and seconds with optional ramps.
+///
+/// Nodes are kept sorted by beat with unique positions. The first node defines the
+/// initial tempo from beat 0 onward (its own ramp flag is ignored because nothing
+/// precedes it), and the final node's bpm holds to infinity. Ramped spans integrate
+/// `60 / bpm(beat)` in closed form, so conversions are exact up to floating-point
+/// rounding and fully deterministic; step spans create zero-duration discontinuities.
+/// An empty map behaves as a constant 120 BPM map.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TempoMap {
+    /// Nodes sorted by beat; first node defines the initial tempo from beat 0.
+    pub nodes: Vec<TempoNode>,
+}
+
+impl TempoMap {
+    /// Creates a constant-tempo map anchored at beat 0. bpm must be > 0 else Err.
+    pub fn constant(bpm: f64) -> Result<Self, String> {
+        if !bpm.is_finite() || bpm <= 0.0 {
+            return Err(format!("tempo {bpm} must be finite and positive"));
+        }
+        Ok(Self {
+            nodes: vec![TempoNode {
+                beat: 0.0,
+                bpm,
+                linear_ramp: false,
+            }],
+        })
+    }
+
+    /// Adds a node, keeping nodes sorted by beat; replaces any existing node at the
+    /// same beat. bpm must be > 0 and beat >= 0 else Err.
+    pub fn add_node(&mut self, node: TempoNode) -> Result<(), String> {
+        if !node.bpm.is_finite() || node.bpm <= 0.0 {
+            return Err(format!("tempo {} must be finite and positive", node.bpm));
+        }
+        if !node.beat.is_finite() || node.beat < 0.0 {
+            return Err(format!(
+                "tempo node beat {} must be finite and non-negative",
+                node.beat
+            ));
+        }
+        match self
+            .nodes
+            .binary_search_by(|probe| probe.beat.total_cmp(&node.beat))
+        {
+            Ok(index) => self.nodes[index] = node,
+            Err(index) => self.nodes.insert(index, node),
+        }
+        Ok(())
+    }
+
+    /// Active bpm exactly at `beat` (after applying ramp interpolation at that
+    /// instant). Negative beats clamp to 0; beats before the first node or past the
+    /// last node hold the nearest boundary node's bpm; an empty map reports 120 BPM.
+    pub fn bpm_at(&self, beat: f64) -> f64 {
+        let beat = beat.max(0.0);
+        let Some(first) = self.nodes.first() else {
+            return FALLBACK_TEMPO_BPM;
+        };
+        let index = match self
+            .nodes
+            .binary_search_by(|node| node.beat.total_cmp(&beat))
+        {
+            Ok(index) => index,
+            Err(0) => return first.bpm,
+            Err(index) => index - 1,
+        };
+        let active = &self.nodes[index];
+        let Some(next) = self.nodes.get(index + 1) else {
+            return active.bpm;
+        };
+        if !next.linear_ramp {
+            return active.bpm;
+        }
+        let span = next.beat - active.beat;
+        if span <= 0.0 {
+            return next.bpm;
+        }
+        let fraction = ((beat - active.beat) / span).clamp(0.0, 1.0);
+        active.bpm + (next.bpm - active.bpm) * fraction
+    }
+
+    /// Cumulative seconds elapsed from beat 0 to `beat`. Negative beats clamp to 0.
+    ///
+    /// Within a span whose bpm ramps linearly in beats from `start_bpm`, the elapsed
+    /// time integrates `60 / bpm(beat)` to the closed form
+    /// `60 * span * ln(end_bpm / start_bpm) / (end_bpm - start_bpm)`; partial spans
+    /// reuse the same form with the interpolated endpoint bpm. Step spans accumulate
+    /// the previous node's constant bpm until the step position.
+    pub fn beat_to_seconds(&self, beat: f64) -> f64 {
+        let beat = beat.max(0.0);
+        let Some(first) = self.nodes.first() else {
+            return beat * (60.0 / FALLBACK_TEMPO_BPM);
+        };
+        if beat <= first.beat {
+            return beat * (60.0 / first.bpm);
+        }
+        let mut seconds = first.beat * (60.0 / first.bpm);
+        for pair in self.nodes.windows(2) {
+            let start = &pair[0];
+            let end = &pair[1];
+            if beat < end.beat {
+                let traversed = beat - start.beat;
+                let full_span = end.beat - start.beat;
+                let fraction = if full_span > 0.0 {
+                    traversed / full_span
+                } else {
+                    1.0
+                };
+                let ramp_end = if end.linear_ramp {
+                    Some(start.bpm + (end.bpm - start.bpm) * fraction)
+                } else {
+                    None
+                };
+                return seconds + Self::span_seconds(start.bpm, ramp_end, traversed);
+            }
+            let ramp_end = if end.linear_ramp { Some(end.bpm) } else { None };
+            seconds += Self::span_seconds(start.bpm, ramp_end, end.beat - start.beat);
+        }
+        let last = self.nodes.last().expect("nodes non-empty");
+        seconds + (beat - last.beat) * (60.0 / last.bpm)
+    }
+
+    /// Beat reached after `seconds` of playback; the inverse of
+    /// [`TempoMap::beat_to_seconds`]. Negative inputs clamp to 0.
+    ///
+    /// Inversion approach (fixed, deterministic): closed-form piecewise inversion.
+    /// Positive bpm keeps every span strictly time-monotonic, so the inverse is
+    /// unique; each ramp span solves its exponential elapsed-time relation exactly
+    /// via `expm1` instead of iterating, matching the forward transform to
+    /// floating-point precision.
+    pub fn seconds_to_beat(&self, seconds: f64) -> f64 {
+        let seconds = seconds.max(0.0);
+        let Some(first) = self.nodes.first() else {
+            return seconds * (FALLBACK_TEMPO_BPM / 60.0);
+        };
+        let initial_seconds = first.beat * (60.0 / first.bpm);
+        if seconds <= initial_seconds {
+            return seconds * (first.bpm / 60.0);
+        }
+        let mut remaining = seconds - initial_seconds;
+        for pair in self.nodes.windows(2) {
+            let start = &pair[0];
+            let end = &pair[1];
+            let ramp_end = if end.linear_ramp { Some(end.bpm) } else { None };
+            let span_seconds = Self::span_seconds(start.bpm, ramp_end, end.beat - start.beat);
+            if remaining <= span_seconds {
+                return Self::span_beat_at_elapsed(
+                    start.beat, start.bpm, end.beat, ramp_end, remaining,
+                );
+            }
+            remaining -= span_seconds;
+        }
+        let last = self.nodes.last().expect("nodes non-empty");
+        last.beat + remaining * (last.bpm / 60.0)
+    }
+
+    /// Seconds needed to traverse `beats` beats while the tempo moves linearly from
+    /// `start_bpm` to the optional ramp target (`None` holds `start_bpm` constant).
+    fn span_seconds(start_bpm: f64, ramp_end_bpm: Option<f64>, beats: f64) -> f64 {
+        let Some(end_bpm) = ramp_end_bpm else {
+            return beats * (60.0 / start_bpm);
+        };
+        let delta = end_bpm - start_bpm;
+        if delta == 0.0 || beats <= 0.0 {
+            return beats * (60.0 / start_bpm);
+        }
+        60.0 * beats * (end_bpm.ln() - start_bpm.ln()) / delta
+    }
+
+    /// Beat position reached after `elapsed` seconds inside the span from
+    /// `start_beat` to `end_beat`, inverting [`TempoMap::span_seconds`]: constant
+    /// spans scale linearly and ramped spans solve
+    /// `u = (start_bpm / slope) * expm1(elapsed * slope / 60)` with `slope` the
+    /// beats-per-beat bpm gradient.
+    fn span_beat_at_elapsed(
+        start_beat: f64,
+        start_bpm: f64,
+        end_beat: f64,
+        ramp_end_bpm: Option<f64>,
+        elapsed: f64,
+    ) -> f64 {
+        let Some(end_bpm) = ramp_end_bpm else {
+            return start_beat + elapsed * (start_bpm / 60.0);
+        };
+        let delta = end_bpm - start_bpm;
+        let span = end_beat - start_beat;
+        if delta == 0.0 || span <= 0.0 {
+            return start_beat + elapsed * (start_bpm / 60.0);
+        }
+        let slope = delta / span;
+        start_beat + (start_bpm / slope) * (elapsed * slope / 60.0).exp_m1()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2178,6 +2393,119 @@ mod tests {
         // The valid sections above are untouched by every rejected call.
         assert_eq!(folder.comp.len(), 3);
         assert_eq!(folder.comp_duration(), 17.0);
+    }
+
+    #[test]
+    fn tempo_map_beat_second_conversions() {
+        // Constant 120 BPM map: 1 beat = 0.5 s, round-trips in both directions.
+        let constant = TempoMap::constant(120.0).unwrap();
+        assert_eq!(constant.nodes.len(), 1);
+        assert_eq!(constant.beat_to_seconds(1.0), 0.5);
+        assert_eq!(constant.seconds_to_beat(0.5), 1.0);
+        assert!((constant.seconds_to_beat(constant.beat_to_seconds(9.75)) - 9.75).abs() < 1e-9);
+        assert!((constant.beat_to_seconds(constant.seconds_to_beat(3.25)) - 3.25).abs() < 1e-9);
+
+        // Empty map defaults to 120 BPM and clamps negative inputs to beat 0.
+        let empty = TempoMap::default();
+        assert_eq!(empty.bpm_at(3.0), 120.0);
+        assert_eq!(empty.beat_to_seconds(1.0), 0.5);
+        assert_eq!(empty.seconds_to_beat(0.5), 1.0);
+        assert_eq!(empty.beat_to_seconds(-2.0), 0.0);
+        assert_eq!(empty.seconds_to_beat(-1.0), 0.0);
+
+        // Two-node map ramping 60 -> 120 BPM linearly over [0, 4] beats:
+        // bpm(u) = 60 + 15u, so elapsed(u) = (60/15) * ln((60 + 15u) / 60).
+        // Independent closed-form expectations: elapsed(4) = 4 ln 2,
+        // elapsed(2) = 4 ln 1.5, and elapsed(s) = 2 solves to u = 4(sqrt(e) - 1).
+        let mut ramp = TempoMap::default();
+        ramp.add_node(TempoNode {
+            beat: 0.0,
+            bpm: 60.0,
+            linear_ramp: false,
+        })
+        .unwrap();
+        ramp.add_node(TempoNode {
+            beat: 4.0,
+            bpm: 120.0,
+            linear_ramp: true,
+        })
+        .unwrap();
+        let four_ln2 = 4.0 * std::f64::consts::LN_2;
+        assert!((ramp.beat_to_seconds(4.0) - four_ln2).abs() < 1e-6);
+        assert!((ramp.beat_to_seconds(2.0) - 4.0 * 1.5f64.ln()).abs() < 1e-6);
+        let sqrt_e_beats = 4.0 * (std::f64::consts::E.sqrt() - 1.0);
+        assert!((ramp.seconds_to_beat(2.0) - sqrt_e_beats).abs() < 1e-6);
+        assert!((ramp.seconds_to_beat(ramp.beat_to_seconds(3.7)) - 3.7).abs() < 1e-9);
+        assert!((ramp.seconds_to_beat(four_ln2) - 4.0).abs() < 1e-9);
+        assert_eq!(ramp.bpm_at(0.0), 60.0);
+        assert!((ramp.bpm_at(2.0) - 90.0).abs() < 1e-9);
+        assert!((ramp.bpm_at(4.0) - 120.0).abs() < 1e-9);
+        assert_eq!(ramp.bpm_at(5.0), 120.0);
+        assert_eq!(ramp.bpm_at(-3.0), 60.0);
+
+        // A step node creates a zero-duration discontinuity at beat 8.
+        let mut stepped = TempoMap::constant(120.0).unwrap();
+        stepped
+            .add_node(TempoNode {
+                beat: 8.0,
+                bpm: 60.0,
+                linear_ramp: false,
+            })
+            .unwrap();
+        assert_eq!(stepped.bpm_at(7.5), 120.0);
+        assert_eq!(stepped.bpm_at(8.0), 60.0);
+        assert_eq!(stepped.beat_to_seconds(8.0), 4.0);
+        assert_eq!(stepped.beat_to_seconds(10.0), 6.0);
+        assert_eq!(stepped.seconds_to_beat(4.0), 8.0);
+        assert_eq!(stepped.seconds_to_beat(6.0), 10.0);
+
+        // add_node keeps nodes sorted by beat and replaces same-position nodes.
+        let mut sorted = TempoMap::default();
+        sorted
+            .add_node(TempoNode {
+                beat: 4.0,
+                bpm: 90.0,
+                linear_ramp: false,
+            })
+            .unwrap();
+        sorted
+            .add_node(TempoNode {
+                beat: 2.0,
+                bpm: 80.0,
+                linear_ramp: false,
+            })
+            .unwrap();
+        sorted
+            .add_node(TempoNode {
+                beat: 2.0,
+                bpm: 100.0,
+                linear_ramp: false,
+            })
+            .unwrap();
+        assert_eq!(sorted.nodes.len(), 2);
+        assert_eq!(sorted.nodes[0].beat, 2.0);
+        assert_eq!(sorted.nodes[0].bpm, 100.0);
+        assert_eq!(sorted.nodes[1].beat, 4.0);
+
+        // Invalid tempos and beats are rejected without mutating the map.
+        assert!(TempoMap::constant(0.0).is_err());
+        assert!(TempoMap::constant(-30.0).is_err());
+        assert!(TempoMap::constant(f64::NAN).is_err());
+        assert!(sorted
+            .add_node(TempoNode {
+                beat: 3.0,
+                bpm: 0.0,
+                linear_ramp: false,
+            })
+            .is_err());
+        assert!(sorted
+            .add_node(TempoNode {
+                beat: -1.0,
+                bpm: 96.0,
+                linear_ramp: false,
+            })
+            .is_err());
+        assert_eq!(sorted.nodes.len(), 2);
     }
 }
 

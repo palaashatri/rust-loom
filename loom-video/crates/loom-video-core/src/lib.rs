@@ -1878,6 +1878,80 @@ pub fn generate_ducking_envelope(
     Ok(keys)
 }
 
+/// A proxy (edit-friendly stand-in) linked to a source media clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProxyLink {
+    /// Source clip identifier this proxy stands in for.
+    pub source_clip_id: String,
+    pub proxy_path: String,
+    /// Proxy resolution scale relative to source (e.g. 0.5).
+    pub scale: f32,
+    /// Codec used by the proxy file (informational, e.g. "prores_proxy").
+    pub codec: String,
+}
+
+/// Registry of proxy links within a project.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ProxyRegistry {
+    pub links: Vec<ProxyLink>,
+}
+
+impl ProxyRegistry {
+    /// Creates an empty registry.
+    pub fn new() -> Self {
+        Self { links: Vec::new() }
+    }
+
+    /// Adds or replaces the link for a source clip id. Scale must be in (0, 1] and paths
+    /// non-empty else Err.
+    pub fn set_link(&mut self, link: ProxyLink) -> Result<(), String> {
+        if link.source_clip_id.is_empty() {
+            return Err("source_clip_id must not be empty".to_string());
+        }
+        if link.proxy_path.is_empty() {
+            return Err("proxy_path must not be empty".to_string());
+        }
+        if !(link.scale > 0.0 && link.scale <= 1.0) {
+            return Err(format!("scale must be in (0, 1], got {}", link.scale));
+        }
+        match self
+            .links
+            .iter_mut()
+            .find(|l| l.source_clip_id == link.source_clip_id)
+        {
+            Some(existing) => *existing = link,
+            None => self.links.push(link),
+        }
+        Ok(())
+    }
+
+    /// Removes the link for a source clip; true when removed.
+    pub fn remove_link(&mut self, source_clip_id: &str) -> bool {
+        let before = self.links.len();
+        self.links
+            .retain(|link| link.source_clip_id != source_clip_id);
+        self.links.len() != before
+    }
+
+    /// The active proxy path for a source clip, if any.
+    pub fn proxy_for(&self, source_clip_id: &str) -> Option<&str> {
+        self.links
+            .iter()
+            .find(|link| link.source_clip_id == source_clip_id)
+            .map(|link| link.proxy_path.as_str())
+    }
+
+    /// Marks missing proxies: given a predicate answering whether a path exists on disk,
+    /// returns ids of clips whose proxy path fails the predicate.
+    pub fn stale_links<F: Fn(&str) -> bool>(&self, path_exists: F) -> Vec<String> {
+        self.links
+            .iter()
+            .filter(|link| !path_exists(&link.proxy_path))
+            .map(|link| link.source_clip_id.clone())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2527,5 +2601,73 @@ mod tests {
         }
         assert!((keys[0].0 - 3.5).abs() < 1e-9);
         assert!((keys[7].0 - 26.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn proxy_registry_lifecycle() {
+        let mut registry = ProxyRegistry::new();
+        registry
+            .set_link(ProxyLink {
+                source_clip_id: "clip-a".into(),
+                proxy_path: "/media/proxies/a.mov".into(),
+                scale: 0.5,
+                codec: "prores_proxy".into(),
+            })
+            .unwrap();
+        registry
+            .set_link(ProxyLink {
+                source_clip_id: "clip-b".into(),
+                proxy_path: "/media/proxies/b.mov".into(),
+                scale: 0.25,
+                codec: "prores_proxy".into(),
+            })
+            .unwrap();
+        assert_eq!(registry.links.len(), 2);
+
+        // Replacing the link for an existing source clip updates in place.
+        registry
+            .set_link(ProxyLink {
+                source_clip_id: "clip-a".into(),
+                proxy_path: "/media/proxies/a_v2.mov".into(),
+                scale: 0.5,
+                codec: "prores_proxy".into(),
+            })
+            .unwrap();
+        assert_eq!(registry.links.len(), 2);
+        assert_eq!(
+            registry.proxy_for("clip-a"),
+            Some("/media/proxies/a_v2.mov")
+        );
+        assert_eq!(registry.proxy_for("clip-b"), Some("/media/proxies/b.mov"));
+        assert_eq!(registry.proxy_for("clip-missing"), None);
+
+        // Removal succeeds once, then reports false.
+        assert!(registry.remove_link("clip-b"));
+        assert!(!registry.remove_link("clip-b"));
+        assert_eq!(registry.links.len(), 1);
+
+        // Only clip-a's proxy is reported stale when its path fails the predicate.
+        let stale = registry.stale_links(|path| path != "/media/proxies/a_v2.mov");
+        assert_eq!(stale, vec!["clip-a".to_string()]);
+
+        // Validation errors.
+        for bad_scale in [0.0_f32, 1.5] {
+            let result = registry.set_link(ProxyLink {
+                source_clip_id: "clip-c".into(),
+                proxy_path: "/media/proxies/c.mov".into(),
+                scale: bad_scale,
+                codec: "prores_proxy".into(),
+            });
+            assert!(result.is_err(), "scale {bad_scale} must be rejected");
+        }
+        assert!(registry
+            .set_link(ProxyLink {
+                source_clip_id: "clip-c".into(),
+                proxy_path: String::new(),
+                scale: 0.5,
+                codec: "prores_proxy".into(),
+            })
+            .is_err());
+        assert_eq!(registry.links.len(), 1);
     }
 }

@@ -1998,6 +1998,124 @@ pub fn apply_levels(image: &RgbaImage, config: &LevelsConfig) -> Result<RgbaImag
     Ok(out)
 }
 
+/// Ceils a rotated-bound dimension, snapping floating-point fuzz back to exact integers.
+fn snapped_dimension(value: f64) -> u32 {
+    let rounded = value.round();
+    let snapped = if (value - rounded).abs() < 1e-9 {
+        rounded
+    } else {
+        value.ceil()
+    };
+    snapped.clamp(1.0, f64::from(u32::MAX)) as u32
+}
+
+/// Samples `image` at continuous source coordinates by blending the four nearest pixel
+/// centres bilinearly; neighbours outside the source contribute full transparency.
+fn bilinear_sample(image: &RgbaImage, sx: f64, sy: f64) -> [u8; 4] {
+    let grid_x = sx - 0.5;
+    let grid_y = sy - 0.5;
+    let x0 = grid_x.floor() as i64;
+    let y0 = grid_y.floor() as i64;
+    let tx = grid_x - x0 as f64;
+    let ty = grid_y - y0 as f64;
+    let mut acc = [0.0f64; 4];
+    for (ny, wy) in [(y0, 1.0 - ty), (y0 + 1, ty)] {
+        if ny < 0 || ny >= i64::from(image.height) {
+            continue;
+        }
+        for (nx, wx) in [(x0, 1.0 - tx), (x0 + 1, tx)] {
+            if nx < 0 || nx >= i64::from(image.width) {
+                continue;
+            }
+            let weight = wx * wy;
+            if weight == 0.0 {
+                continue;
+            }
+            let index = ((ny as usize * image.width as usize) + nx as usize) * 4;
+            for (channel, value) in acc.iter_mut().zip(&image.pixels[index..index + 4]) {
+                *channel += weight * f64::from(*value);
+            }
+        }
+    }
+    [
+        acc[0].round().clamp(0.0, 255.0) as u8,
+        acc[1].round().clamp(0.0, 255.0) as u8,
+        acc[2].round().clamp(0.0, 255.0) as u8,
+        acc[3].round().clamp(0.0, 255.0) as u8,
+    ]
+}
+
+/// Rotates the image clockwise by `degrees` about its center, returning a new image
+/// large enough to contain the rotated bounds (width/height recomputed from the rotated
+/// corners, ceiling). Destination pixels sample the source bilinearly; out-of-source pixels
+/// become fully transparent [0,0,0,0]. Angle normalization: any finite angle accepted,
+/// reduced modulo 360 degrees. Multiples of 90 degrees take an exact integer fast path
+/// that matches [`RgbaImage::rotate_90_cw`] and [`RgbaImage::rotate_180`] instead of the
+/// bilinear path.
+pub fn rotate_image_arbitrary(image: &RgbaImage, degrees: f64) -> Result<RgbaImage, String> {
+    if !degrees.is_finite() {
+        return Err("rotation angle must be finite".into());
+    }
+    let normalized = degrees.rem_euclid(360.0);
+    let quarter = (normalized / 90.0).round();
+    if (normalized - quarter * 90.0).abs() < 1e-9 {
+        return match (quarter as i32) % 4 {
+            0 => Ok(image.clone()),
+            1 => image.rotate_90_cw(),
+            2 => image.rotate_180(),
+            _ => {
+                let mut output = RgbaImage::transparent(image.height, image.width)?;
+                for y in 0..image.height {
+                    for x in 0..image.width {
+                        let pixel = image.pixel(x, y).expect("pixel within bounds");
+                        output.set_pixel(y, image.width - 1 - x, pixel);
+                    }
+                }
+                Ok(output)
+            }
+        };
+    }
+    let theta = normalized.to_radians();
+    let (sin, cos) = theta.sin_cos();
+    let half_w = f64::from(image.width) / 2.0;
+    let half_h = f64::from(image.height) / 2.0;
+    let mut max_abs_u = 0.0f64;
+    let mut max_abs_v = 0.0f64;
+    for &(corner_u, corner_v) in &[
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (-half_w, half_h),
+        (half_w, half_h),
+    ] {
+        let rotated_u = corner_u * cos - corner_v * sin;
+        let rotated_v = corner_u * sin + corner_v * cos;
+        max_abs_u = max_abs_u.max(rotated_u.abs());
+        max_abs_v = max_abs_v.max(rotated_v.abs());
+    }
+    let new_width = snapped_dimension(2.0 * max_abs_u);
+    let new_height = snapped_dimension(2.0 * max_abs_v);
+    let mut output = RgbaImage::transparent(new_width, new_height)?;
+    let dest_half_w = f64::from(new_width) / 2.0;
+    let dest_half_h = f64::from(new_height) / 2.0;
+    for dy in 0..new_height {
+        for dx in 0..new_width {
+            let dest_u = f64::from(dx) + 0.5 - dest_half_w;
+            let dest_v = f64::from(dy) + 0.5 - dest_half_h;
+            let source_u = dest_u * cos + dest_v * sin;
+            let source_v = -dest_u * sin + dest_v * cos;
+            let sx = source_u + half_w;
+            let sy = source_v + half_h;
+            if !(0.0..f64::from(image.width)).contains(&sx)
+                || !(0.0..f64::from(image.height)).contains(&sy)
+            {
+                continue;
+            }
+            output.set_pixel(dx, dy, bilinear_sample(image, sx, sy));
+        }
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2166,6 +2284,51 @@ mod tests {
         assert_eq!(rotated.width, 2);
         assert_eq!(rotated.height, 2);
         assert_eq!(rotated.pixel(1, 0).unwrap(), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn arbitrary_rotation_geometry() {
+        let mut asymmetric = RgbaImage::transparent(3, 2).unwrap();
+        for index in 0..6usize {
+            asymmetric.pixels[index * 4] = (index * 40 + 10) as u8;
+            asymmetric.pixels[index * 4 + 1] = (index * 30 + 5) as u8;
+            asymmetric.pixels[index * 4 + 2] = (index * 20 + 1) as u8;
+            asymmetric.pixels[index * 4 + 3] = 255;
+        }
+
+        let zero = rotate_image_arbitrary(&asymmetric, 0.0).unwrap();
+        assert_eq!((zero.width, zero.height), (3, 2));
+        assert_eq!(zero.pixels, asymmetric.pixels);
+
+        let half_turn = rotate_image_arbitrary(&asymmetric, 180.0).unwrap();
+        let expected_half_turn = asymmetric.rotate_180().unwrap();
+        assert_eq!((half_turn.width, half_turn.height), (3, 2));
+        assert_eq!(half_turn.pixels, expected_half_turn.pixels);
+
+        let mut row = RgbaImage::transparent(2, 1).unwrap();
+        row.set_pixel(0, 0, [255, 0, 0, 255]);
+        row.set_pixel(1, 0, [0, 255, 0, 255]);
+        let quarter_turn = rotate_image_arbitrary(&row, 90.0).unwrap();
+        assert_eq!((quarter_turn.width, quarter_turn.height), (1, 2));
+        assert_eq!(quarter_turn.pixel(0, 0).unwrap(), [255, 0, 0, 255]);
+        assert_eq!(quarter_turn.pixel(0, 1).unwrap(), [0, 255, 0, 255]);
+        assert_eq!(quarter_turn.pixels, row.rotate_90_cw().unwrap().pixels);
+
+        let red = RgbaImage::solid(100, 100, [255, 0, 0, 255]).unwrap();
+        let tilted = rotate_image_arbitrary(&red, 30.0).unwrap();
+        assert_eq!((tilted.width, tilted.height), (137, 137));
+        assert_eq!(tilted.pixel(68, 68).unwrap(), [255, 0, 0, 255]);
+        for (corner_x, corner_y) in [(0, 0), (136, 0), (0, 136), (136, 136)] {
+            assert_eq!(
+                tilted.pixel(corner_x, corner_y).unwrap(),
+                [0, 0, 0, 0],
+                "corner ({corner_x}, {corner_y}) should be transparent"
+            );
+        }
+
+        assert!(rotate_image_arbitrary(&red, f64::NAN).is_err());
+        assert!(rotate_image_arbitrary(&red, f64::INFINITY).is_err());
+        assert!(rotate_image_arbitrary(&red, f64::NEG_INFINITY).is_err());
     }
 
     #[test]

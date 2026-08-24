@@ -1184,6 +1184,103 @@ pub fn accumulate_motion_samples(positions: &[(f32, f32)]) -> (f32, f32) {
     (sum_x / count, sum_y / count)
 }
 
+/// Handheld camera simulation parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HandheldConfig {
+    /// Maximum positional offset magnitude in pixels at amplitude 1.
+    pub amplitude_px: f32,
+    /// Low-frequency sway rate Hz.
+    pub sway_hz: f32,
+    /// Higher-frequency jitter rate Hz.
+    pub jitter_hz: f32,
+    /// Fraction of jitter vs sway in [0, 1].
+    pub jitter_mix: f32,
+}
+
+impl Default for HandheldConfig {
+    fn default() -> Self {
+        Self {
+            amplitude_px: 12.0,
+            sway_hz: 0.8,
+            jitter_hz: 4.5,
+            jitter_mix: 0.35,
+        }
+    }
+}
+
+/// Per-seed phase offset in radians `[0, 2*pi)` for one handheld shake channel, derived by
+/// integer hashing (SplitMix64-style finalizer) so identical seeds always produce identical
+/// motion without an RNG crate.
+fn handheld_channel_phase(seed: u64, channel: u64) -> f32 {
+    let mut hash = seed ^ channel.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    hash ^= hash >> 30;
+    hash = hash.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    hash ^= hash >> 27;
+    hash = hash.wrapping_mul(0x94D0_49BB_1331_11EB);
+    hash ^= hash >> 31;
+    (hash >> 40) as f32 / (1u64 << 24) as f32 * 2.0 * std::f32::consts::PI
+}
+
+/// Computes the layered handheld offset at time `t` seconds for `seed`: two phase-shifted
+/// sines per axis (sway + jitter) with per-seed phase offsets derived from integer hashing;
+/// deterministic. Returns `(dx, dy)` each bounded by `+-amplitude_px`.
+///
+/// Non-finite times and non-positive amplitudes yield `(0.0, 0.0)`; negative rates are
+/// treated as zero and `jitter_mix` is clamped to `[0, 1]`.
+pub fn calculate_handheld_offset(t: f64, seed: u64, config: &HandheldConfig) -> (f32, f32) {
+    let amplitude = config.amplitude_px.max(0.0);
+    if !t.is_finite() || amplitude == 0.0 {
+        return (0.0, 0.0);
+    }
+    let sway_hz = config.sway_hz.max(0.0);
+    let jitter_hz = config.jitter_hz.max(0.0);
+    let jitter_mix = config.jitter_mix.clamp(0.0, 1.0);
+    let sway_weight = 1.0 - jitter_mix;
+
+    let time = t as f32;
+    let two_pi = 2.0 * std::f32::consts::PI;
+    let sway_angle = two_pi * sway_hz * time;
+    let jitter_angle = two_pi * jitter_hz * time;
+
+    let dx_raw = sway_weight * (sway_angle + handheld_channel_phase(seed, 0)).sin()
+        + jitter_mix * (jitter_angle + handheld_channel_phase(seed, 1)).sin();
+    let dy_raw = sway_weight * (sway_angle + handheld_channel_phase(seed, 2)).sin()
+        + jitter_mix * (jitter_angle + handheld_channel_phase(seed, 3)).sin();
+
+    (
+        (dx_raw * amplitude).clamp(-amplitude, amplitude),
+        (dy_raw * amplitude).clamp(-amplitude, amplitude),
+    )
+}
+
+/// Convenience: samples offsets across `[start, end]` at uniform `dt` producing a `Vec` of
+/// `(t, dx, dy)` with sample times `t_i = start + i * dt`. The end time is included only
+/// when `(end - start)` lands exactly on a `dt` multiple; otherwise sampling stops at the
+/// last interior sample. Returns an empty vector unless `dt > 0` and `end >= start`
+/// (both finite).
+pub fn handheld_offset_track(
+    start: f64,
+    end: f64,
+    dt: f64,
+    seed: u64,
+    config: &HandheldConfig,
+) -> Vec<(f64, f32, f32)> {
+    if !dt.is_finite() || dt <= 0.0 || !start.is_finite() || !end.is_finite() || end < start {
+        return Vec::new();
+    }
+    let steps = ((end - start) / dt).floor().max(0.0) as u64;
+    let mut track = Vec::new();
+    for i in 0..=steps {
+        let t = start + i as f64 * dt;
+        if t > end {
+            break;
+        }
+        let (dx, dy) = calculate_handheld_offset(t, seed, config);
+        track.push((t, dx, dy));
+    }
+    track
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1730,5 +1827,58 @@ mod tests {
 
         // A single sample accumulates to itself.
         assert_eq!(accumulate_motion_samples(&[(-5.5, 12.25)]), (-5.5, 12.25));
+    }
+
+    #[test]
+    fn handheld_shake_deterministic_and_bounded() {
+        let config = HandheldConfig::default();
+        assert_eq!(
+            HandheldConfig::default(),
+            HandheldConfig {
+                amplitude_px: 12.0,
+                sway_hz: 0.8,
+                jitter_hz: 4.5,
+                jitter_mix: 0.35,
+            }
+        );
+
+        // Same seed produces bit-identical tracks across calls.
+        let track_a = handheld_offset_track(0.0, 1.0, 0.125, 12345, &config);
+        let track_b = handheld_offset_track(0.0, 1.0, 0.125, 12345, &config);
+        assert_eq!(track_a, track_b);
+
+        // Known range/dt: floor(1.0 / 0.125) = 8 steps -> 9 samples including both endpoints.
+        assert_eq!(track_a.len(), 9);
+        assert_eq!(track_a.first().unwrap().0, 0.0);
+        assert_eq!(track_a.last().unwrap().0, 1.0);
+
+        // Point sampling agrees with track sampling at shared timestamps.
+        for (t, dx, dy) in &track_a {
+            let (expected_dx, expected_dy) = calculate_handheld_offset(*t, 12345, &config);
+            assert_eq!((*dx, *dy), (expected_dx, expected_dy));
+        }
+
+        // Different seeds produce different motion over the same window.
+        let track_other_seed = handheld_offset_track(0.0, 1.0, 0.125, 999, &config);
+        assert_ne!(track_a, track_other_seed);
+
+        // Every offset stays within +-amplitude_px.
+        let amplitude = config.amplitude_px;
+        for (_, dx, dy) in &track_other_seed {
+            assert!(dx.abs() <= amplitude);
+            assert!(dy.abs() <= amplitude);
+        }
+        // Bounds also hold far outside a single period.
+        for t in [7.3f64, 61.25, 404.5] {
+            let (dx, dy) = calculate_handheld_offset(t, 7, &config);
+            assert!(dx.abs() <= amplitude && dy.abs() <= amplitude);
+        }
+
+        // Non-positive dt yields no samples.
+        assert!(handheld_offset_track(0.0, 1.0, 0.0, 1, &config).is_empty());
+        assert!(handheld_offset_track(0.0, 1.0, -0.05, 1, &config).is_empty());
+
+        // Inverted ranges yield no samples.
+        assert!(handheld_offset_track(1.0, 0.0, 0.125, 1, &config).is_empty());
     }
 }

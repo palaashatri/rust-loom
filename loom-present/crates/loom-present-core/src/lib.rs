@@ -161,6 +161,70 @@ impl Slide {
         }
     }
 
+    /// Distributes selected element centers evenly between the first and last element
+    /// (by current center) along the horizontal axis. Fewer than three selected
+    /// elements is a no-op.
+    pub fn distribute_horizontally(&mut self, ids: &[&str]) {
+        let mut indices: Vec<usize> = self
+            .elements
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| ids.contains(&e.id.as_str()))
+            .map(|(i, _)| i)
+            .collect();
+        if indices.len() < 3 {
+            return;
+        }
+        indices.sort_by(|&a, &b| {
+            let ca = self.elements[a].x + self.elements[a].width / 2.0;
+            let cb = self.elements[b].x + self.elements[b].width / 2.0;
+            ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let first = indices[0];
+        let last = *indices.last().expect("non-empty checked above");
+        let start_center = self.elements[first].x + self.elements[first].width / 2.0;
+        let end_center = self.elements[last].x + self.elements[last].width / 2.0;
+        let count = indices.len();
+        for (slot, &idx) in indices.iter().enumerate().skip(1).take(count - 2) {
+            let target =
+                start_center + (end_center - start_center) * slot as f32 / (count - 1) as f32;
+            let elem = &mut self.elements[idx];
+            elem.x = target - elem.width / 2.0;
+        }
+    }
+
+    /// Distributes selected element centers evenly between the first and last element
+    /// (by current center) along the vertical axis. Fewer than three selected
+    /// elements is a no-op.
+    pub fn distribute_vertically(&mut self, ids: &[&str]) {
+        let mut indices: Vec<usize> = self
+            .elements
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| ids.contains(&e.id.as_str()))
+            .map(|(i, _)| i)
+            .collect();
+        if indices.len() < 3 {
+            return;
+        }
+        indices.sort_by(|&a, &b| {
+            let ca = self.elements[a].y + self.elements[a].height / 2.0;
+            let cb = self.elements[b].y + self.elements[b].height / 2.0;
+            ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let first = indices[0];
+        let last = *indices.last().expect("non-empty checked above");
+        let start_center = self.elements[first].y + self.elements[first].height / 2.0;
+        let end_center = self.elements[last].y + self.elements[last].height / 2.0;
+        let count = indices.len();
+        for (slot, &idx) in indices.iter().enumerate().skip(1).take(count - 2) {
+            let target =
+                start_center + (end_center - start_center) * slot as f32 / (count - 1) as f32;
+            let elem = &mut self.elements[idx];
+            elem.y = target - elem.height / 2.0;
+        }
+    }
+
     /// Applies a layout preset, configuring placeholder elements with standard positions.
     pub fn apply_layout_preset(&mut self, preset: SlideLayoutPreset) {
         self.elements.clear();
@@ -1804,6 +1868,66 @@ mod tests {
 
         assert!(slide.remove_element("e1"));
         assert_eq!(slide.elements.len(), 1);
+    }
+
+    #[test]
+    fn element_distribution_spacing() {
+        let mut slide = Slide::new("slide-dist", "Distribution", "blank");
+        let make = |id: &str, x: f32, y: f32| {
+            let (width, height) = match id {
+                "e2" => (150.0, 150.0),
+                "e4" => (200.0, 200.0),
+                _ => (100.0, 100.0),
+            };
+            SlideElement {
+                id: id.into(),
+                element_type: ElementType::ShapeRectangle,
+                content: "Box".into(),
+                x,
+                y,
+                width,
+                height,
+                action: None,
+            }
+        };
+        // Centers: e1=(50,50) e2=(525,425) e3=(950,750) e4=(1850,1850)
+        slide.add_element(make("e1", 0.0, 0.0));
+        slide.add_element(make("e2", 450.0, 350.0));
+        slide.add_element(make("e3", 900.0, 700.0));
+        slide.add_element(make("e4", 1750.0, 1750.0));
+
+        slide.distribute_horizontally(&["e1", "e2", "e3", "e4"]);
+        // First (50) and last (1850) centers fixed; intermediates at 650 and 1250.
+        assert_eq!(slide.elements[0].x, 0.0);
+        assert_eq!(slide.elements[1].x, 650.0 - 75.0);
+        assert_eq!(slide.elements[2].x, 1250.0 - 50.0);
+        assert_eq!(slide.elements[3].x, 1750.0);
+
+        slide.distribute_vertically(&["e1", "e2", "e3", "e4"]);
+        // First (50) and last (1850) centers fixed; intermediates at 650 and 1250.
+        assert_eq!(slide.elements[0].y, 0.0);
+        assert_eq!(slide.elements[1].y, 650.0 - 75.0);
+        assert_eq!(slide.elements[2].y, 1250.0 - 50.0);
+        assert_eq!(slide.elements[3].y, 1750.0);
+
+        // Two-element distribution is a no-op.
+        let mut pair = Slide::new("slide-pair", "Pair", "blank");
+        pair.add_element(make("e1", 10.0, 20.0));
+        pair.add_element(make("e3", 300.0, 400.0));
+        pair.distribute_horizontally(&["e1", "e3"]);
+        pair.distribute_vertically(&["e1", "e3"]);
+        assert_eq!(pair.elements[0].x, 10.0);
+        assert_eq!(pair.elements[0].y, 20.0);
+        assert_eq!(pair.elements[1].x, 300.0);
+        assert_eq!(pair.elements[1].y, 400.0);
+
+        // Single-element distribution is a no-op.
+        let mut single = Slide::new("slide-single", "Single", "blank");
+        single.add_element(make("e1", 42.0, 24.0));
+        single.distribute_horizontally(&["e1"]);
+        single.distribute_vertically(&["e1"]);
+        assert_eq!(single.elements[0].x, 42.0);
+        assert_eq!(single.elements[0].y, 24.0);
     }
 
     #[test]

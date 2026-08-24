@@ -1552,6 +1552,119 @@ impl WatchFolderRule {
     }
 }
 
+/// Resolves duplicate output filenames in a batch by appending " - 2", " - 3", ... before the
+/// extension (order of first occurrence wins the original name). Returns the resolved list in
+/// input order. Empty stems/names pass through unchanged. Case-insensitive collision detection
+/// (A.MP4 vs a.mp4 collide). Paths may include directories; only the stem gets the suffix.
+pub fn resolve_output_collisions(outputs: &[String]) -> Vec<String> {
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut resolved = Vec::with_capacity(outputs.len());
+    for output in outputs {
+        if output.trim().is_empty() {
+            resolved.push(output.clone());
+            continue;
+        }
+        let path = std::path::Path::new(output);
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(output.as_str());
+        let extension = path.extension().and_then(|value| value.to_str());
+        let mut attempt = 1;
+        loop {
+            let numbered_stem = if attempt == 1 {
+                stem.to_string()
+            } else {
+                format!("{stem} - {attempt}")
+            };
+            let candidate_file_name = match extension {
+                Some(extension) if !extension.is_empty() => {
+                    format!("{numbered_stem}.{extension}")
+                }
+                _ => numbered_stem,
+            };
+            let candidate = match path.parent() {
+                Some(directory) if !directory.as_os_str().is_empty() => {
+                    directory.join(&candidate_file_name)
+                }
+                _ => std::path::PathBuf::from(&candidate_file_name),
+            };
+            let candidate = candidate.to_string_lossy().into_owned();
+            if claimed.insert(candidate.to_lowercase()) {
+                resolved.push(candidate);
+                break;
+            }
+            attempt += 1;
+        }
+    }
+    resolved
+}
+
+/// Sanitizes a filename for cross-platform safety: replaces characters invalid on common
+/// filesystems (\ / : * ? " < > | and control chars) with '_', collapses whitespace runs,
+/// trims leading/trailing dots and spaces, caps length at `max_len` bytes without splitting a
+/// UTF-8 char boundary, preserving the extension when possible.
+pub fn sanitize_output_filename(name: &str, max_len: usize) -> String {
+    let is_forbidden = |character: char| {
+        matches!(
+            character,
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+        ) || character.is_control()
+    };
+    let mut cleaned = String::with_capacity(name.len());
+    let mut previous_was_space = false;
+    for character in name.chars() {
+        if character.is_whitespace() {
+            if !previous_was_space {
+                cleaned.push(' ');
+            }
+            previous_was_space = true;
+            continue;
+        }
+        previous_was_space = false;
+        if is_forbidden(character) {
+            cleaned.push('_');
+        } else {
+            cleaned.push(character);
+        }
+    }
+    let trimmed = cleaned.trim_matches(['.', ' ']);
+    if trimmed.len() <= max_len {
+        return trimmed.to_string();
+    }
+    let trimmed_path = std::path::Path::new(trimmed);
+    let stem = trimmed_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(trimmed);
+    let Some(extension) = trimmed_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+    else {
+        return truncate_on_char_boundary(stem, max_len).to_string();
+    };
+    let extension_bytes = extension.len() + 1;
+    if extension_bytes >= max_len {
+        return truncate_on_char_boundary(stem, max_len).to_string();
+    }
+    let stem_budget = max_len - extension_bytes;
+    let truncated_stem = truncate_on_char_boundary(stem, stem_budget).trim_matches(['.', ' ']);
+    format!("{truncated_stem}.{extension}")
+}
+
+/// Shortens `value` to at most `limit` bytes without splitting a UTF-8 character boundary.
+fn truncate_on_char_boundary(value: &str, limit: usize) -> &str {
+    if value.len() <= limit {
+        return value;
+    }
+    let mut end = limit;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1718,6 +1831,71 @@ mod tests {
         // Without extension placeholder
         let out2 = format_output_template("{name}_converted", "Clip1.mkv", "ProRes", "mov");
         assert_eq!(out2, "Clip1_converted.mov");
+    }
+
+    #[test]
+    fn collision_resolution_and_sanitization() {
+        // First occurrence keeps the name; later duplicates count across case-insensitive
+        // matches ("MOVIE.mp4" collides with both prior entries, so it becomes " - 3").
+        assert_eq!(
+            resolve_output_collisions(&[
+                "movie.mp4".to_string(),
+                "movie.mp4".to_string(),
+                "MOVIE.mp4".to_string(),
+                "other.mp4".to_string(),
+            ]),
+            vec![
+                "movie.mp4".to_string(),
+                "movie - 2.mp4".to_string(),
+                "MOVIE - 3.mp4".to_string(),
+                "other.mp4".to_string(),
+            ]
+        );
+
+        // Directories are preserved; only the stem receives a suffix.
+        assert_eq!(
+            resolve_output_collisions(&[
+                "exports/clip.mkv".to_string(),
+                "exports/clip.mkv".to_string(),
+            ]),
+            vec![
+                "exports/clip.mkv".to_string(),
+                "exports/clip - 2.mkv".to_string(),
+            ]
+        );
+
+        // Extension-less names still collide and resolve.
+        assert_eq!(
+            resolve_output_collisions(&["archive".to_string(), "archive".to_string()]),
+            vec!["archive".to_string(), "archive - 2".to_string()]
+        );
+
+        // Empty names pass through unchanged.
+        assert_eq!(resolve_output_collisions(&[]), Vec::<String>::new());
+        assert_eq!(
+            resolve_output_collisions(&[String::new(), String::new()]),
+            vec![String::new(), String::new()]
+        );
+
+        // Illegal filesystem characters become underscores; control characters too.
+        assert_eq!(
+            sanitize_output_filename("a<b>:c*d?e\"f|g", 255),
+            "a_b__c_d_e_f_g"
+        );
+        assert_eq!(sanitize_output_filename("a\u{0}b", 16), "a_b");
+
+        // Whitespace runs collapse; leading/trailing dots and spaces are trimmed.
+        assert_eq!(
+            sanitize_output_filename("  ..my  report .final..  ", 255),
+            "my report .final"
+        );
+
+        // Unicode letters survive; truncation keeps whole characters and preserves ".png".
+        assert_eq!(sanitize_output_filename("héllo wörld.png", 10), "héllo.png");
+        assert_eq!(
+            sanitize_output_filename("verylongfilename.mp4", 12),
+            "verylong.mp4"
+        );
     }
 
     #[test]
