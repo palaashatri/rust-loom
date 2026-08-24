@@ -1015,6 +1015,42 @@ pub fn wiggle_2d(
     )
 }
 
+/// Spring overshoot and inertial bounce damping parameters for keyframe arrivals.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InertialBounceConfig {
+    /// Initial overshoot amplitude factor (e.g. 0.1 for 10% bounce).
+    pub amplitude: f32,
+    /// Oscillation frequency in hertz.
+    pub frequency_hz: f32,
+    /// Damping decay rate per second.
+    pub decay: f32,
+}
+
+impl Default for InertialBounceConfig {
+    fn default() -> Self {
+        Self {
+            amplitude: 0.1,
+            frequency_hz: 3.5,
+            decay: 6.0,
+        }
+    }
+}
+
+/// Computes the damped harmonic spring overshoot offset following a keyframe landing.
+pub fn calculate_inertial_bounce(
+    time_past_keyframe: f64,
+    delta_value: f32,
+    config: &InertialBounceConfig,
+) -> f32 {
+    if time_past_keyframe <= 0.0 || delta_value.abs() < 1e-5 {
+        return 0.0;
+    }
+    let t = time_past_keyframe as f32;
+    let decay_factor = (-config.decay * t).exp();
+    let oscillation = (2.0 * std::f32::consts::PI * config.frequency_hz * t).sin();
+    delta_value * config.amplitude * oscillation * decay_factor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1470,5 +1506,25 @@ mod tests {
         let (dx, dy) = wiggle_2d(0.5, &config, &config_y);
         assert!(dx.abs() <= 150.0);
         assert!(dy.abs() <= 75.0);
+    }
+
+    #[test]
+    fn inertial_bounce_damping_physics() {
+        let config = InertialBounceConfig {
+            amplitude: 0.1,
+            frequency_hz: 2.0,
+            decay: 4.0,
+        };
+
+        // At t = 0 (exact keyframe), bounce offset is 0.0
+        assert_eq!(calculate_inertial_bounce(0.0, 500.0, &config), 0.0);
+
+        // At t = 0.125 (quarter wave of 2Hz -> sin(pi/2) = 1.0), bounce is peak positive
+        let peak = calculate_inertial_bounce(0.125, 500.0, &config);
+        assert!(peak > 20.0); // 500 * 0.1 * 1.0 * exp(-4 * 0.125) = 50 * exp(-0.5) ~ 30.32
+
+        // At t = 2.0s (after decay), bounce has decayed to near 0
+        let late = calculate_inertial_bounce(2.0, 500.0, &config);
+        assert!(late.abs() < 0.1);
     }
 }

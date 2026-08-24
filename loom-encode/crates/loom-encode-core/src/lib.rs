@@ -856,6 +856,39 @@ impl AnimatedImageConfig {
     }
 }
 
+/// Standardized audio downmixing matrix profiles (e.g. ITU-R BS.775).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AudioDownmixMatrix {
+    #[default]
+    StereoToMono,
+    Surround51ToStereo,
+    Surround71ToStereo,
+}
+
+impl AudioDownmixMatrix {
+    /// Generates FFmpeg pan / downmix audio filter arguments.
+    pub fn generate_downmix_args(&self) -> Vec<String> {
+        match self {
+            AudioDownmixMatrix::StereoToMono => {
+                vec!["-filter:a".into(), "pan=mono|c0=0.5*c0+0.5*c1".into()]
+            }
+            AudioDownmixMatrix::Surround51ToStereo => {
+                // ITU-R BS.775 standard coefficients (FL + 0.707*FC + 0.707*BL)
+                vec![
+                    "-filter:a".into(),
+                    "pan=stereo|FL=0.5*c0+0.3535*c2+0.3535*c4|FR=0.5*c1+0.3535*c2+0.3535*c5".into(),
+                ]
+            }
+            AudioDownmixMatrix::Surround71ToStereo => {
+                vec![
+                    "-filter:a".into(),
+                    "pan=stereo|FL=0.5*c0+0.3535*c2+0.3535*c4+0.3535*c6|FR=0.5*c1+0.3535*c2+0.3535*c5+0.3535*c7".into(),
+                ]
+            }
+        }
+    }
+}
+
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
     let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
@@ -1752,5 +1785,20 @@ mod tests {
         assert_eq!(webp_args[3], "fps=24");
         assert_eq!(webp_args[4], "-loop");
         assert_eq!(webp_args[5], "3");
+    }
+
+    #[test]
+    fn audio_downmix_arguments() {
+        let stereo_to_mono = AudioDownmixMatrix::StereoToMono;
+        let mono_args = stereo_to_mono.generate_downmix_args();
+        assert_eq!(mono_args[0], "-filter:a");
+        assert!(mono_args[1].contains("pan=mono"));
+
+        let surround_51 = AudioDownmixMatrix::Surround51ToStereo;
+        let s51_args = surround_51.generate_downmix_args();
+        assert_eq!(s51_args[0], "-filter:a");
+        assert!(s51_args[1].contains("pan=stereo"));
+        assert!(s51_args[1].contains("FL="));
+        assert!(s51_args[1].contains("FR="));
     }
 }

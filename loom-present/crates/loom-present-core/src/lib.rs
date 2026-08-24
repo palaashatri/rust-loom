@@ -707,7 +707,54 @@ impl RehearsalReport {
     }
 }
 
-/// Live presentation session state tracking slide progression, timers, and display modes.
+/// Live presenter drawing annotation tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AnnotationDrawingTool {
+    #[default]
+    Pen,
+    Highlighter,
+    LaserPointer,
+    Eraser,
+}
+
+/// A freehand vector stroke drawn on a presentation slide during a live session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnnotationStroke {
+    pub tool: AnnotationDrawingTool,
+    pub color: String,
+    pub width: f32,
+    pub points: Vec<(f32, f32)>,
+}
+
+/// Collection of annotations drawn over a single slide.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SlideAnnotationOverlay {
+    pub slide_index: usize,
+    pub strokes: Vec<AnnotationStroke>,
+}
+
+impl SlideAnnotationOverlay {
+    pub fn new(slide_index: usize) -> Self {
+        Self {
+            slide_index,
+            strokes: Vec::new(),
+        }
+    }
+
+    pub fn add_stroke(&mut self, stroke: AnnotationStroke) {
+        self.strokes.push(stroke);
+    }
+
+    pub fn clear(&mut self) {
+        self.strokes.clear();
+    }
+
+    pub fn total_points(&self) -> usize {
+        self.strokes.iter().map(|s| s.points.len()).sum()
+    }
+}
+
+/// Live presentation session state tracking slide progression, timers, display modes, and drawing annotations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PresenterSession {
     pub current_slide_index: usize,
@@ -717,6 +764,7 @@ pub struct PresenterSession {
     pub is_paused: bool,
     pub is_blanked: bool,
     pub recorded_timings: Vec<SlideTimingRecord>,
+    pub annotations: std::collections::BTreeMap<usize, SlideAnnotationOverlay>,
 }
 
 impl PresenterSession {
@@ -729,6 +777,23 @@ impl PresenterSession {
             is_paused: false,
             is_blanked: false,
             recorded_timings: Vec::new(),
+            annotations: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Adds an annotation stroke to the current slide.
+    pub fn add_annotation_stroke(&mut self, stroke: AnnotationStroke) {
+        let entry = self
+            .annotations
+            .entry(self.current_slide_index)
+            .or_insert_with(|| SlideAnnotationOverlay::new(self.current_slide_index));
+        entry.add_stroke(stroke);
+    }
+
+    /// Clears annotations on the specified slide index.
+    pub fn clear_annotations(&mut self, slide_index: usize) {
+        if let Some(overlay) = self.annotations.get_mut(&slide_index) {
+            overlay.clear();
         }
     }
 
@@ -1945,5 +2010,42 @@ mod tests {
             doc.execute_action(&SlideActionTrigger::LastSlide, 0),
             Some(2)
         );
+    }
+
+    #[test]
+    fn presenter_drawing_annotations() {
+        let mut session = PresenterSession::new(3);
+        assert_eq!(session.annotations.len(), 0);
+
+        let stroke1 = AnnotationStroke {
+            tool: AnnotationDrawingTool::Pen,
+            color: "#ff0000".into(),
+            width: 3.0,
+            points: vec![(0.1, 0.1), (0.2, 0.2), (0.3, 0.3)],
+        };
+        session.add_annotation_stroke(stroke1);
+
+        assert_eq!(session.annotations.len(), 1);
+        let overlay = session.annotations.get(&0).unwrap();
+        assert_eq!(overlay.strokes.len(), 1);
+        assert_eq!(overlay.total_points(), 3);
+
+        // Advance to slide 1 and draw highlighter stroke
+        assert!(session.advance_slide());
+        let stroke2 = AnnotationStroke {
+            tool: AnnotationDrawingTool::Highlighter,
+            color: "#ffff00".into(),
+            width: 12.0,
+            points: vec![(0.5, 0.5), (0.6, 0.5)],
+        };
+        session.add_annotation_stroke(stroke2);
+
+        assert_eq!(session.annotations.len(), 2);
+
+        // Clear slide 0 annotations
+        session.clear_annotations(0);
+        assert_eq!(session.annotations.get(&0).unwrap().strokes.len(), 0);
+        // Slide 1 remains untouched
+        assert_eq!(session.annotations.get(&1).unwrap().strokes.len(), 1);
     }
 }

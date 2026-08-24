@@ -2091,6 +2091,94 @@ pub fn calculate_footnote_marker(index: usize, style: FootnoteNumberingStyle) ->
     }
 }
 
+/// Advanced text search and replace matching configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SearchOptions {
+    /// Case-sensitive matching if true.
+    pub case_sensitive: bool,
+    /// Match whole words only (delimited by word boundaries).
+    pub match_whole_word: bool,
+}
+
+/// Locates all occurrence byte ranges `(start, end)` satisfying `SearchOptions`.
+pub fn find_matches_with_options(
+    text: &str,
+    query: &str,
+    options: &SearchOptions,
+) -> Vec<(usize, usize)> {
+    if text.is_empty() || query.is_empty() {
+        return Vec::new();
+    }
+
+    let mut matches = Vec::new();
+    let text_norm = if options.case_sensitive {
+        text.to_string()
+    } else {
+        text.to_lowercase()
+    };
+    let query_norm = if options.case_sensitive {
+        query.to_string()
+    } else {
+        query.to_lowercase()
+    };
+
+    let mut offset = 0;
+    while let Some(found_idx) = text_norm[offset..].find(&query_norm) {
+        let abs_start = offset + found_idx;
+        let abs_end = abs_start + query_norm.len();
+
+        let passes_whole_word = if options.match_whole_word {
+            let is_start_boundary = abs_start == 0
+                || text[..abs_start]
+                    .chars()
+                    .last()
+                    .map(|c| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(true);
+            let is_end_boundary = abs_end == text.len()
+                || text[abs_end..]
+                    .chars()
+                    .next()
+                    .map(|c| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(true);
+            is_start_boundary && is_end_boundary
+        } else {
+            true
+        };
+
+        if passes_whole_word {
+            matches.push((abs_start, abs_end));
+        }
+
+        // Advance past current match
+        offset = abs_start + query_norm.len().max(1);
+    }
+
+    matches
+}
+
+/// Replaces all query occurrences satisfying `SearchOptions` with `replacement`.
+pub fn replace_matches(
+    text: &str,
+    query: &str,
+    replacement: &str,
+    options: &SearchOptions,
+) -> String {
+    let matches = find_matches_with_options(text, query, options);
+    if matches.is_empty() {
+        return text.to_string();
+    }
+
+    let mut result = String::with_capacity(text.len());
+    let mut last_idx = 0;
+    for (start, end) in matches {
+        result.push_str(&text[last_idx..start]);
+        result.push_str(replacement);
+        last_idx = end;
+    }
+    result.push_str(&text[last_idx..]);
+    result
+}
+
 /// One block fragment assigned to a page by the reference paginator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageFragment {
@@ -3333,5 +3421,39 @@ mod tests {
             calculate_footnote_marker(7, FootnoteNumberingStyle::Symbols),
             "**"
         ); // Wrapped second pass
+    }
+
+    #[test]
+    fn advanced_search_and_replace_with_options() {
+        let sample = "The quick brown fox jumps over the lazy Fox.";
+
+        // Case-sensitive search for "Fox"
+        let case_sens = SearchOptions {
+            case_sensitive: true,
+            match_whole_word: false,
+        };
+        let m_case = find_matches_with_options(sample, "Fox", &case_sens);
+        assert_eq!(m_case.len(), 1);
+        assert_eq!(&sample[m_case[0].0..m_case[0].1], "Fox");
+
+        // Case-insensitive search for "fox"
+        let case_insens = SearchOptions {
+            case_sensitive: false,
+            match_whole_word: false,
+        };
+        let m_all = find_matches_with_options(sample, "fox", &case_insens);
+        assert_eq!(m_all.len(), 2);
+
+        // Whole word search for "the"
+        let whole_word = SearchOptions {
+            case_sensitive: false,
+            match_whole_word: true,
+        };
+        let m_the = find_matches_with_options(sample, "the", &whole_word);
+        assert_eq!(m_the.len(), 2);
+
+        // Replace all "fox" with "dog"
+        let replaced = replace_matches(sample, "fox", "dog", &case_insens);
+        assert_eq!(replaced, "The quick brown dog jumps over the lazy dog.");
     }
 }

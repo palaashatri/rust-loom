@@ -711,6 +711,36 @@ pub fn snap_timeline_to_edit_points(
     best_snap
 }
 
+/// Aligns timeline clip start times to the nearest musical beat grid (BPM) if within `snap_threshold_secs`.
+/// Returns the number of clips aligned.
+pub fn align_clips_to_beat_grid(
+    clips: &mut [Clip],
+    bpm: f64,
+    time_offset_secs: f64,
+    snap_threshold_secs: f64,
+) -> usize {
+    if bpm <= 0.0 || snap_threshold_secs <= 0.0 {
+        return 0;
+    }
+
+    let beat_interval = 60.0 / bpm;
+    let mut aligned_count = 0;
+
+    for clip in clips.iter_mut() {
+        let relative_time = clip.start_time - time_offset_secs;
+        let nearest_beat_idx = (relative_time / beat_interval).round();
+        let nearest_beat_time = (time_offset_secs + nearest_beat_idx * beat_interval).max(0.0);
+
+        let delta = (clip.start_time - nearest_beat_time).abs();
+        if delta <= snap_threshold_secs && delta > 1e-4 {
+            clip.start_time = nearest_beat_time;
+            aligned_count += 1;
+        }
+    }
+
+    aligned_count
+}
+
 /// Performs a Roll Edit between two adjacent clips, shifting the cut point by `delta_secs`.
 /// The left clip's duration increases by `delta_secs` while the right clip's in_point and start_time
 /// shift by `delta_secs` and its duration decreases by `delta_secs`.
@@ -2265,5 +2295,30 @@ mod tests {
         clip.set_color_tag(ClipColorTag::Teal);
         assert_eq!(clip.color_tag, ClipColorTag::Teal);
         assert_eq!(clip.color_tag.hex_color(), "#14b8a6");
+    }
+
+    #[test]
+    fn align_clips_to_beat_grid_bpm() {
+        // At 120 BPM, 1 beat = 0.5s. Beats occur at 0.0, 0.5, 1.0, 1.5, 2.0...
+        let mut clips = vec![
+            Clip {
+                start_time: 0.53, // within 0.05s of 0.5s beat -> snaps to 0.5
+                ..Clip::new("c1", "Clip 1", 2.0)
+            },
+            Clip {
+                start_time: 1.25, // 0.25s away from 1.0 and 1.5 -> does NOT snap with 0.1s threshold
+                ..Clip::new("c2", "Clip 2", 2.0)
+            },
+            Clip {
+                start_time: 1.98, // within 0.05s of 2.0s beat -> snaps to 2.0
+                ..Clip::new("c3", "Clip 3", 2.0)
+            },
+        ];
+
+        let aligned = align_clips_to_beat_grid(&mut clips, 120.0, 0.0, 0.05);
+        assert_eq!(aligned, 2);
+        assert_eq!(clips[0].start_time, 0.5);
+        assert_eq!(clips[1].start_time, 1.25);
+        assert_eq!(clips[2].start_time, 2.0);
     }
 }

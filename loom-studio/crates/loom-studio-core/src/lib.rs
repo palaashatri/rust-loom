@@ -614,7 +614,7 @@ impl MixerBus {
 }
 
 /// Waveform shape presets for synthesis and test tone calibration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OscillatorWaveform {
     #[default]
     Sine,
@@ -941,6 +941,72 @@ impl AutoPanEffect {
             let r_idx = frame_idx * 2 + 1;
             buffer.samples[l_idx] *= left_gain;
             buffer.samples[r_idx] *= right_gain;
+        }
+    }
+}
+
+/// Ring modulator / carrier frequency multiplication audio DSP effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RingModulatorEffect {
+    /// Carrier oscillator frequency in hertz (e.g. 440.0 Hz).
+    pub carrier_hz: f32,
+    /// Carrier waveform shape.
+    pub waveform: OscillatorWaveform,
+    /// Wet / dry mix ratio [0.0, 1.0].
+    pub mix: f32,
+}
+
+impl Default for RingModulatorEffect {
+    fn default() -> Self {
+        Self {
+            carrier_hz: 440.0,
+            waveform: OscillatorWaveform::Sine,
+            mix: 0.5,
+        }
+    }
+}
+
+impl RingModulatorEffect {
+    /// In-place ring modulation carrier multiplication on audio buffers.
+    pub fn process(&self, buffer: &mut AudioBuffer) {
+        if buffer.samples.is_empty() || buffer.sample_rate == 0 || buffer.channels == 0 {
+            return;
+        }
+
+        let mix = self.mix.clamp(0.0, 1.0);
+        let channels = buffer.channels as usize;
+        let frames = buffer.samples.len() / channels;
+
+        for frame_idx in 0..frames {
+            let t = frame_idx as f32 / buffer.sample_rate as f32;
+            let carrier = match self.waveform {
+                OscillatorWaveform::Sine => {
+                    (2.0 * std::f32::consts::PI * self.carrier_hz * t).sin()
+                }
+                OscillatorWaveform::Square => {
+                    if (2.0 * std::f32::consts::PI * self.carrier_hz * t).sin() >= 0.0 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
+                OscillatorWaveform::Triangle => {
+                    let phase = (t * self.carrier_hz).fract();
+                    if phase < 0.5 {
+                        4.0 * phase - 1.0
+                    } else {
+                        3.0 - 4.0 * phase
+                    }
+                }
+                OscillatorWaveform::Sawtooth => 2.0 * (t * self.carrier_hz).fract() - 1.0,
+            };
+
+            for ch in 0..channels {
+                let idx = frame_idx * channels + ch;
+                let dry = buffer.samples[idx];
+                let wet = dry * carrier;
+                buffer.samples[idx] = dry * (1.0 - mix) + wet * mix;
+            }
         }
     }
 }
@@ -2199,5 +2265,32 @@ mod studio_runtime_tests {
 
         assert!(right_val > 0.95);
         assert!(left_val < 0.1);
+    }
+
+    #[test]
+    fn ring_modulator_carrier_processing() {
+        let mut buffer = AudioBuffer {
+            sample_rate: 44100,
+            channels: 1,
+            // 44100 samples of 1.0 (DC)
+            samples: vec![1.0f32; 44100],
+        };
+
+        let ring_mod = RingModulatorEffect {
+            carrier_hz: 440.0,
+            waveform: OscillatorWaveform::Sine,
+            mix: 1.0, // 100% wet
+        };
+
+        ring_mod.process(&mut buffer);
+
+        // Output should match pure sine wave of 440Hz
+        let expected_t0 = (2.0 * std::f32::consts::PI * 440.0 * 0.0).sin();
+        assert!((buffer.samples[0] - expected_t0).abs() < 1e-5);
+
+        // Bounded within [-1.0, 1.0]
+        for &s in &buffer.samples {
+            assert!(s >= -1.0 - 1e-5 && s <= 1.0 + 1e-5);
+        }
     }
 }

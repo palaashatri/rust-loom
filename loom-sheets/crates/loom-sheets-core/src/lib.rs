@@ -928,6 +928,68 @@ pub fn pv(rate: f64, nper: f64, pmt: f64, fv: f64, end_of_period: bool) -> Resul
     Ok(pv_val)
 }
 
+/// Calculates the statistical mode (most frequently occurring number).
+pub fn mode_single(values: &[f64]) -> Result<f64, String> {
+    if values.is_empty() {
+        return Err("MODE requires at least one value".into());
+    }
+
+    let mut counts: std::collections::BTreeMap<i64, (f64, usize)> =
+        std::collections::BTreeMap::new();
+    for &v in values {
+        let key = (v * 1_000_000.0).round() as i64;
+        counts.entry(key).and_modify(|e| e.1 += 1).or_insert((v, 1));
+    }
+
+    let mut max_count = 0;
+    let mut mode_val = None;
+
+    for (_, (val, count)) in counts {
+        if count > max_count {
+            max_count = count;
+            mode_val = Some(val);
+        }
+    }
+
+    if max_count > 1 {
+        Ok(mode_val.unwrap())
+    } else {
+        Err("No duplicate values found for MODE".into())
+    }
+}
+
+/// Calculates the population variance (VAR.P).
+pub fn var_p(values: &[f64]) -> Result<f64, String> {
+    if values.is_empty() {
+        return Err("VAR.P requires at least one value".into());
+    }
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let sum_sq_diff: f64 = values.iter().map(|&x| (x - mean).powi(2)).sum();
+    Ok(sum_sq_diff / n)
+}
+
+/// Calculates the sample variance (VAR.S).
+pub fn var_s(values: &[f64]) -> Result<f64, String> {
+    if values.len() < 2 {
+        return Err("VAR.S requires at least two values".into());
+    }
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let sum_sq_diff: f64 = values.iter().map(|&x| (x - mean).powi(2)).sum();
+    Ok(sum_sq_diff / (n - 1.0))
+}
+
+/// Calculates the population standard deviation (STDEV.P).
+pub fn stdev_p(values: &[f64]) -> Result<f64, String> {
+    var_p(values).map(|v| v.sqrt())
+}
+
+/// Calculates the sample standard deviation (STDEV.S).
+pub fn stdev_s(values: &[f64]) -> Result<f64, String> {
+    var_s(values).map(|v| v.sqrt())
+}
+
 impl Sheet {
     /// Set a cell. Coordinates A1-style.
     pub fn set_str(&mut self, a1: &str, raw: &str) {
@@ -3356,5 +3418,22 @@ mod tests {
         let present_val = pv(0.05, 5.0, 0.0, 10000.0, true).unwrap();
         // PV should be approximately -$7,835.26
         assert!((present_val - (-7835.26)).abs() < 1.0);
+    }
+
+    #[test]
+    fn statistical_formulas_mode_stdev_var() {
+        let dataset = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+
+        // Mode of dataset is 4.0
+        assert_eq!(mode_single(&dataset).unwrap(), 4.0);
+
+        // Population variance & stdev: mean = 5.0, sum((x-5)^2) = 9+1+1+1+0+0+4+16 = 32. var = 32/8 = 4.0. stdev = 2.0
+        assert_eq!(var_p(&dataset).unwrap(), 4.0);
+        assert_eq!(stdev_p(&dataset).unwrap(), 2.0);
+
+        // Sample variance: 32 / 7 = 4.5714...
+        let v_s = var_s(&dataset).unwrap();
+        assert!((v_s - (32.0 / 7.0)).abs() < 1e-5);
+        assert!((stdev_s(&dataset).unwrap() - (32.0 / 7.0f64).sqrt()).abs() < 1e-5);
     }
 }

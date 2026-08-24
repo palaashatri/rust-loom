@@ -764,6 +764,59 @@ impl RgbaImage {
         Ok(out)
     }
 
+    /// Simulates analog photographic film grain with luminance-dependent density.
+    pub fn apply_film_grain(&self, config: &FilmGrainConfig) -> Result<Self, String> {
+        let mut out = self.clone();
+        let amount = config.amount.clamp(0.0, 1.0);
+        if amount == 0.0 {
+            return Ok(out);
+        }
+
+        // Pseudo-random hash helper
+        let hash = |x: u32, y: u32, seed: u64, channel: u32| -> f32 {
+            let mut h = (seed
+                .wrapping_add(x as u64 * 374761393)
+                .wrapping_add(y as u64 * 668265263))
+            .wrapping_add(channel as u64 * 961748941);
+            h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+            let val = ((h ^ (h >> 16)) & 0xFFFF) as f32 / 65535.0; // in [0, 1]
+            val * 2.0 - 1.0 // in [-1.0, 1.0]
+        };
+
+        for y in 0..out.height {
+            for x in 0..out.width {
+                let px = out.pixel(x, y).unwrap();
+                let r = px[0] as f32 / 255.0;
+                let g = px[1] as f32 / 255.0;
+                let b = px[2] as f32 / 255.0;
+                let a = px[3];
+
+                let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                // Physical film grain is most prominent in midtones and shadows
+                let luma_scale = (1.0 - (luma - 0.4).abs() * 1.2).clamp(0.2, 1.0);
+
+                let (nr, ng, nb) = if config.is_colored {
+                    (
+                        hash(x, y, config.seed, 0),
+                        hash(x, y, config.seed, 1),
+                        hash(x, y, config.seed, 2),
+                    )
+                } else {
+                    let mono = hash(x, y, config.seed, 0);
+                    (mono, mono, mono)
+                };
+
+                let grain_scale = amount * luma_scale;
+                let r_out = ((r + nr * grain_scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+                let g_out = ((g + ng * grain_scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+                let b_out = ((b + nb * grain_scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+
+                out.set_pixel(x, y, [r_out, g_out, b_out, a]);
+            }
+        }
+        Ok(out)
+    }
+
     /// Encodes a portable pixmap (P6), flattening alpha against `background`.
     pub fn to_ppm(&self, background: [u8; 3]) -> Vec<u8> {
         let mut output = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
@@ -1053,6 +1106,27 @@ impl Default for SplitToningConfig {
             highlights_hue_deg: 35.0, // Warm amber/orange
             highlights_saturation: 0.25,
             balance: 0.0,
+        }
+    }
+}
+
+/// Analog photographic film grain simulation parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilmGrainConfig {
+    /// Grain intensity / amount [0.0, 1.0].
+    pub amount: f32,
+    /// Color noise vs monochromatic film grain.
+    pub is_colored: bool,
+    /// Randomization seed.
+    pub seed: u64,
+}
+
+impl Default for FilmGrainConfig {
+    fn default() -> Self {
+        Self {
+            amount: 0.12,
+            is_colored: false,
+            seed: 1337,
         }
     }
 }
@@ -2229,5 +2303,34 @@ mod tests {
 
         // Highlight pixel should have more red than blue
         assert!(highlight_px[0] > highlight_px[2]);
+    }
+
+    #[test]
+    fn film_grain_simulation() {
+        let mut img = RgbaImage::transparent(8, 8).unwrap();
+        // Midtone gray image (128, 128, 128)
+        for y in 0..8 {
+            for x in 0..8 {
+                img.set_pixel(x, y, [128, 128, 128, 255]);
+            }
+        }
+
+        let config = FilmGrainConfig {
+            amount: 0.2,
+            is_colored: false,
+            seed: 9876,
+        };
+
+        let grained = img.apply_film_grain(&config).unwrap();
+        let p0 = grained.pixel(0, 0).unwrap();
+        let p1 = grained.pixel(1, 1).unwrap();
+
+        // Grain should alter pixel values around 128
+        assert_ne!(p0[0], 128);
+        assert_ne!(p0, p1);
+
+        // Monochromatic grain keeps R == G == B
+        assert_eq!(p0[0], p0[1]);
+        assert_eq!(p0[1], p0[2]);
     }
 }
