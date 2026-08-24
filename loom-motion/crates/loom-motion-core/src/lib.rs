@@ -710,6 +710,152 @@ pub fn interpolate_polygon_points(
     Ok(points)
 }
 
+/// One parsed SVG path command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SvgPathCommand {
+    /// MoveTo absolute.
+    MoveTo(f32, f32),
+    /// LineTo absolute.
+    LineTo(f32, f32),
+    /// ClosePath.
+    Close,
+}
+
+/// Parses a subset of the SVG path grammar: M/L commands (absolute and relative lowercase
+/// variants) with space/comma-separated coordinate pairs, plus 'Z'/'z' close commands.
+/// Multiple coordinate pairs after a command letter repeat that command (per SVG spec);
+/// pairs following a moveto become implicit linetos. Relative commands are resolved to
+/// absolute output using the running pen position, which starts at (0, 0) until the first
+/// moveto. Returns Err naming the byte position of malformed input.
+pub fn parse_svg_path(d: &str) -> Result<Vec<SvgPathCommand>, String> {
+    let bytes = d.as_bytes();
+    let mut commands = Vec::new();
+    let mut i = 0usize;
+    let mut pen_x = 0.0f32;
+    let mut pen_y = 0.0f32;
+    // Active command letter awaiting coordinate pairs; cleared by closepath.
+    let mut command: Option<u8> = None;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() || b == b',' {
+            i += 1;
+            continue;
+        }
+        if b.is_ascii_alphabetic() {
+            match b {
+                b'M' | b'm' | b'L' | b'l' => command = Some(b),
+                b'Z' | b'z' => {
+                    commands.push(SvgPathCommand::Close);
+                    command = None;
+                }
+                _ => {
+                    return Err(format!(
+                        "unsupported path command '{}' at byte {}",
+                        b as char, i
+                    ))
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        let cmd = command.ok_or_else(|| {
+            format!(
+                "path data must start with a command letter, found '{}' at byte {}",
+                b as char, i
+            )
+        })?;
+
+        let (x, next) = parse_svg_number(bytes, i)?;
+        i = next;
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+            i += 1;
+        }
+        if i >= bytes.len() || !matches!(bytes[i], b'0'..=b'9' | b'.' | b'+' | b'-') {
+            return Err(format!(
+                "incomplete coordinate pair for command '{}' at byte {}",
+                cmd as char, i
+            ));
+        }
+        let (y, next) = parse_svg_number(bytes, i)?;
+        i = next;
+
+        match cmd {
+            b'M' => {
+                pen_x = x;
+                pen_y = y;
+                commands.push(SvgPathCommand::MoveTo(x, y));
+                // Subsequent pairs after a moveto are implicit linetos per the SVG spec.
+                command = Some(b'L');
+            }
+            b'm' => {
+                pen_x += x;
+                pen_y += y;
+                commands.push(SvgPathCommand::MoveTo(pen_x, pen_y));
+                command = Some(b'l');
+            }
+            b'L' => {
+                pen_x = x;
+                pen_y = y;
+                commands.push(SvgPathCommand::LineTo(x, y));
+            }
+            _ => {
+                pen_x += x;
+                pen_y += y;
+                commands.push(SvgPathCommand::LineTo(pen_x, pen_y));
+            }
+        }
+    }
+
+    Ok(commands)
+}
+
+/// Scans a single SVG-style number token (`12`, `-3.5`, `.5`, `+2`) starting at `start`.
+/// Returns the parsed value and the index just past the token.
+fn parse_svg_number(bytes: &[u8], start: usize) -> Result<(f32, usize), String> {
+    let mut i = start;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        i += 1;
+    }
+    let int_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    let int_digits = i - int_start;
+    let mut frac_digits = 0usize;
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        let frac_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        frac_digits = i - frac_start;
+    }
+    if int_digits == 0 && frac_digits == 0 {
+        return Err(format!("malformed number at byte {}", start));
+    }
+    let text = std::str::from_utf8(&bytes[start..i]).expect("number tokens are ASCII");
+    let value: f32 = text
+        .parse()
+        .map_err(|_| format!("malformed number at byte {}", start))?;
+    Ok((value, i))
+}
+
+/// Converts parsed path commands into polyline points, resolving implicit lineto repetition.
+/// MoveTo starts a new sub-path; this helper concatenates all sub-paths into one point list.
+/// Z contributes nothing to the point list. An empty command list yields an empty Vec.
+pub fn svg_path_points(commands: &[SvgPathCommand]) -> Vec<(f32, f32)> {
+    let mut points = Vec::with_capacity(commands.len());
+    for command in commands {
+        match command {
+            SvgPathCommand::MoveTo(x, y) | SvgPathCommand::LineTo(x, y) => points.push((*x, *y)),
+            SvgPathCommand::Close => {}
+        }
+    }
+    points
+}
+
 /// Realtime playback clock and transport timebase for motion compositions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompositionClock {
@@ -1735,6 +1881,69 @@ mod tests {
         // Mismatched lengths should error
         let triangle = vec![[0.0, 0.0], [5.0, 10.0], [10.0, 0.0]];
         assert!(interpolate_polygon_points(&square, &triangle, 0.5).is_err());
+    }
+
+    #[test]
+    fn svg_path_parsing_subset() {
+        // Plain absolute polyline: exact commands and flattened points.
+        let cmds = parse_svg_path("M 10 20 L 30 40 L 50 60").unwrap();
+        assert_eq!(
+            cmds,
+            vec![
+                SvgPathCommand::MoveTo(10.0, 20.0),
+                SvgPathCommand::LineTo(30.0, 40.0),
+                SvgPathCommand::LineTo(50.0, 60.0),
+            ]
+        );
+        assert_eq!(
+            svg_path_points(&cmds),
+            vec![(10.0, 20.0), (30.0, 40.0), (50.0, 60.0)]
+        );
+
+        // Relative commands resolve against the running pen position.
+        let rel = parse_svg_path("m 10 10 l 5 0").unwrap();
+        assert_eq!(
+            rel,
+            vec![
+                SvgPathCommand::MoveTo(10.0, 10.0),
+                SvgPathCommand::LineTo(15.0, 10.0),
+            ]
+        );
+        assert_eq!(svg_path_points(&rel), vec![(10.0, 10.0), (15.0, 10.0)]);
+
+        // Compact form without separators plus a close command.
+        let compact = parse_svg_path("M0,0L8,8Z").unwrap();
+        assert_eq!(
+            compact,
+            vec![
+                SvgPathCommand::MoveTo(0.0, 0.0),
+                SvgPathCommand::LineTo(8.0, 8.0),
+                SvgPathCommand::Close,
+            ]
+        );
+        assert_eq!(svg_path_points(&compact), vec![(0.0, 0.0), (8.0, 8.0)]);
+
+        // Repeated pairs after moveto become an implicit lineto per the SVG spec.
+        let implicit = parse_svg_path("M 1 1 2 2").unwrap();
+        assert_eq!(
+            implicit,
+            vec![
+                SvgPathCommand::MoveTo(1.0, 1.0),
+                SvgPathCommand::LineTo(2.0, 2.0),
+            ]
+        );
+
+        // Malformed inputs error and name the offending byte position.
+        let truncated = parse_svg_path("M 10").unwrap_err();
+        assert!(
+            truncated.contains("byte"),
+            "error should name position: {truncated}"
+        );
+        let unknown = parse_svg_path("X 5 5").unwrap_err();
+        assert!(
+            unknown.contains("byte 0"),
+            "error should name position of 'X': {unknown}"
+        );
     }
 
     #[test]

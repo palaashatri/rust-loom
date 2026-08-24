@@ -1214,6 +1214,66 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     pdf.serialize()
 }
 
+/// Builds slides from an indented text outline: top-level lines become slide titles,
+/// indented child lines (any consistent leading whitespace >= 2 spaces or one tab) become
+/// bullet content elements on that slide. Lines before the first top-level entry are ignored.
+///
+/// Deterministic identifier scheme:
+/// - slide ids: `outline-slide-N` where N is the 1-based slide position in the returned vector;
+/// - each slide gets exactly one [`ElementType::Title`] element with id `title-N`;
+/// - each child line becomes one [`ElementType::BodyText`] element with id
+///   `bullet-N-K` where K is the 1-based bullet index within that slide.
+///
+/// Child lines are stripped of their leading whitespace and of a single leading `- `
+/// bullet marker. Blank lines are skipped. Returns Err when no top-level entries exist.
+pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
+    let mut slides: Vec<Slide> = Vec::new();
+    for raw_line in outline.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.trim().is_empty() {
+            continue;
+        }
+        let is_child = line.starts_with("  ") || line.starts_with('\t');
+        let slide_number = slides.len();
+        if is_child {
+            if let Some(slide) = slides.last_mut() {
+                let text = line.trim_start();
+                let text = text.strip_prefix("- ").unwrap_or(text);
+                let bullet_number = slide.elements.len();
+                slide.add_element(SlideElement {
+                    id: format!("bullet-{}-{}", slide_number, bullet_number),
+                    element_type: ElementType::BodyText,
+                    content: text.to_string(),
+                    x: 80.0,
+                    y: 200.0,
+                    width: 1760.0,
+                    height: 780.0,
+                    action: None,
+                });
+            }
+        } else {
+            let title_text = line.trim();
+            let index = slides.len() + 1;
+            let mut slide = Slide::new(format!("outline-slide-{}", index), title_text, "outline");
+            slide.add_element(SlideElement {
+                id: format!("title-{}", index),
+                element_type: ElementType::Title,
+                content: title_text.to_string(),
+                x: 80.0,
+                y: 60.0,
+                width: 1760.0,
+                height: 100.0,
+                action: None,
+            });
+            slides.push(slide);
+        }
+    }
+    if slides.is_empty() {
+        return Err("outline contains no top-level entries".to_string());
+    }
+    Ok(slides)
+}
+
 /// Built-in transition between two slides.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum TransitionKind {
@@ -2125,6 +2185,46 @@ mod tests {
         let (light_bg, light_fg, _) = DeckThemePreset::ClassicLight.palette();
         assert_eq!(light_bg, "#FFFFFF");
         assert_eq!(light_fg, "#0F172A");
+    }
+
+    #[test]
+    fn deck_outline_import_structure() {
+        let outline = "
+  orphan bullet before the first top-level entry
+
+Roadmap Review
+  - Q1 milestones
+\tTeam updates
+Hiring Plan
+";
+        let slides = deck_from_outline(outline).expect("outline should parse");
+        assert_eq!(slides.len(), 2);
+
+        // Slide 1: title element plus two bullets with deterministic ids.
+        assert_eq!(slides[0].id, "outline-slide-1");
+        assert_eq!(slides[0].title, "Roadmap Review");
+        assert_eq!(slides[0].elements[0].id, "title-1");
+        assert_eq!(slides[0].elements[0].element_type, ElementType::Title);
+        assert_eq!(slides[0].elements[0].content, "Roadmap Review");
+        assert_eq!(slides[0].elements[1].id, "bullet-1-1");
+        assert_eq!(slides[0].elements[1].element_type, ElementType::BodyText);
+        assert_eq!(slides[0].elements[1].content, "Q1 milestones");
+        assert_eq!(slides[0].elements[2].id, "bullet-1-2");
+        assert_eq!(slides[0].elements[2].content, "Team updates");
+        assert_eq!(slides[0].elements.len(), 3);
+
+        // Slide 2: zero children, so only its title element exists.
+        assert_eq!(slides[1].id, "outline-slide-2");
+        assert_eq!(slides[1].title, "Hiring Plan");
+        assert_eq!(slides[1].elements.len(), 1);
+        assert_eq!(slides[1].elements[0].id, "title-2");
+        assert_eq!(slides[1].elements[0].element_type, ElementType::Title);
+        assert_eq!(slides[1].elements[0].content, "Hiring Plan");
+
+        // All-indented input has no top-level entries and must error.
+        let err = deck_from_outline("  - orphan\n\tmore\n").unwrap_err();
+        assert!(!err.is_empty());
+        assert!(deck_from_outline("").is_err());
     }
 
     #[test]

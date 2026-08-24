@@ -2258,6 +2258,116 @@ impl RgbaImage {
     }
 }
 
+/// One parsed PNG chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PngChunk {
+    /// Four-byte chunk type as ASCII (e.g. "IHDR").
+    pub chunk_type: String,
+    pub data_length: u32,
+    /// True when the chunk's CRC validated against its data.
+    pub crc_valid: bool,
+}
+
+/// Walks a PNG byte stream after the 8-byte signature and parses chunk headers until IHDR-end
+/// or IEND. Returns Err when the signature is missing or a chunk header/data runs past the
+/// buffer end. CRC validation uses CRC-32 (IEEE 802.3) over type+data compared to the stored value.
+///
+/// Parsing stops at IEND inclusive; bytes after IEND are ignored.
+pub fn parse_png_chunks(bytes: &[u8]) -> Result<Vec<PngChunk>, String> {
+    const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    if bytes.len() < SIGNATURE.len() || bytes[..SIGNATURE.len()] != SIGNATURE {
+        return Err("missing PNG signature".to_string());
+    }
+    let mut chunks = Vec::new();
+    let mut offset = SIGNATURE.len();
+    loop {
+        let header_end = offset + 8;
+        if header_end > bytes.len() {
+            return Err(format!(
+                "PNG chunk header at byte {offset} runs past end of stream"
+            ));
+        }
+        let data_length = u32::from_be_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
+        let type_bytes = &bytes[offset + 4..header_end];
+        let chunk_type = match std::str::from_utf8(type_bytes) {
+            Ok(name) if name.bytes().all(|byte| byte.is_ascii_alphabetic()) => name.to_string(),
+            _ => {
+                return Err(format!(
+                    "PNG chunk type {type_bytes:?} is not four ASCII letters"
+                ));
+            }
+        };
+        let data_start = header_end;
+        let Ok(data_len) = usize::try_from(data_length) else {
+            return Err(format!(
+                "PNG chunk {chunk_type} length exceeds addressable size"
+            ));
+        };
+        let Some(chunk_end) = data_start
+            .checked_add(data_len)
+            .and_then(|data_end| data_end.checked_add(4))
+        else {
+            return Err(format!("PNG chunk {chunk_type} spans an impossible length"));
+        };
+        if chunk_end > bytes.len() {
+            return Err(format!(
+                "PNG chunk {chunk_type} data or CRC runs past end of stream"
+            ));
+        }
+        let stored_crc = u32::from_be_bytes([
+            bytes[chunk_end - 4],
+            bytes[chunk_end - 3],
+            bytes[chunk_end - 2],
+            bytes[chunk_end - 1],
+        ]);
+        let crc_valid = crc32_ieee(&bytes[offset + 4..chunk_end - 4]) == stored_crc;
+        chunks.push(PngChunk {
+            chunk_type: chunk_type.clone(),
+            data_length,
+            crc_valid,
+        });
+        if chunk_type == "IEND" {
+            return Ok(chunks);
+        }
+        offset = chunk_end;
+    }
+}
+
+/// Decodes the IHDR payload into `(width, height, bit_depth, color_type)`. Err if malformed.
+///
+/// The payload is the 13-byte data field of the IHDR chunk reported by [`parse_png_chunks`]:
+/// big-endian width and height followed by bit depth, colour type, compression, filter, and
+/// interlace bytes.
+pub fn parse_png_ihdr(bytes: &[u8]) -> Result<(u32, u32, u8, u8), String> {
+    if bytes.len() < 13 {
+        return Err(format!("IHDR payload needs 13 bytes, got {}", bytes.len()));
+    }
+    let width = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let height = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    Ok((width, height, bytes[8], bytes[9]))
+}
+
+/// Computes CRC-32 (IEEE 802.3, reflected polynomial `0xEDB88320`) table-free.
+fn crc32_ieee(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2392,6 +2502,61 @@ mod tests {
         assert!(jpeg.starts_with(&[0xff, 0xd8, 0xff]));
         let decoded = decode_raster(&jpeg).unwrap();
         assert_eq!((decoded.width, decoded.height), (3, 2));
+    }
+
+    #[test]
+    fn png_chunk_parsing_and_ihdr() {
+        fn make_chunk(chunk_type: &str, data: &[u8]) -> Vec<u8> {
+            assert_eq!(chunk_type.len(), 4);
+            let mut out = Vec::new();
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            out.extend_from_slice(chunk_type.as_bytes());
+            out.extend_from_slice(data);
+            let crc_input = [&chunk_type.as_bytes()[..], data].concat();
+            out.extend_from_slice(&crc32_ieee(&crc_input).to_be_bytes());
+            out
+        }
+
+        let signature = [0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let ihdr_payload = [
+            &4u32.to_be_bytes()[..],
+            &3u32.to_be_bytes()[..],
+            &[8, 6, 0, 0, 0],
+        ]
+        .concat();
+        assert_eq!(ihdr_payload.len(), 13);
+        let png = [
+            &signature[..],
+            &make_chunk("IHDR", &ihdr_payload),
+            &make_chunk("IEND", &[]),
+        ]
+        .concat();
+
+        let chunks = parse_png_chunks(&png).unwrap();
+        let types: Vec<&str> = chunks.iter().map(|c| c.chunk_type.as_str()).collect();
+        assert_eq!(types, ["IHDR", "IEND"]);
+        assert_eq!(chunks[0].data_length, 13);
+        assert_eq!(chunks[1].data_length, 0);
+        assert!(chunks.iter().all(|c| c.crc_valid));
+        assert_eq!(parse_png_ihdr(&ihdr_payload).unwrap(), (4, 3, 8, 6));
+
+        // Truncated streams err: cut inside the IEND CRC and mid-chunk-header.
+        assert!(parse_png_chunks(&png[..png.len() - 1]).is_err());
+        assert!(parse_png_chunks(&png[..png.len() - 9]).is_err());
+
+        // Wrong signature errs without parsing anything.
+        let mut bad_signature = png.clone();
+        bad_signature[0] = 0x88;
+        assert!(parse_png_chunks(&bad_signature).is_err());
+
+        // Corrupting a stored CRC byte flags the chunk but still parses the stream.
+        let mut corrupted = png.clone();
+        let ihdr_crc_index = signature.len() + 4 + 4 + ihdr_payload.len();
+        corrupted[ihdr_crc_index] ^= 0xFF;
+        let corrupted_chunks = parse_png_chunks(&corrupted).unwrap();
+        assert_eq!(corrupted_chunks.len(), 2);
+        assert!(!corrupted_chunks[0].crc_valid);
+        assert!(corrupted_chunks[1].crc_valid);
     }
 
     #[test]

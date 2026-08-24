@@ -2276,6 +2276,214 @@ pub fn generate_click_track(
     Ok(buffer)
 }
 
+/// A parsed Standard MIDI File header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmfHeader {
+    pub format: u16,
+    pub track_count: u16,
+    /// Ticks per quarter note (metrical time division).
+    pub ticks_per_quarter: u16,
+}
+
+/// One note extracted from an SMF track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParsedMidiNote {
+    /// Start offset in ticks from the track start.
+    pub start_tick: u32,
+    pub duration_ticks: u32,
+    pub channel: u8,
+    /// MIDI key number 0..=127.
+    pub key: u8,
+    /// Note-on velocity 0..=127.
+    pub velocity: u8,
+}
+
+fn read_vlq(bytes: &[u8], cursor: &mut usize) -> Result<u32, String> {
+    let mut value: u32 = 0;
+    for _ in 0..4 {
+        if *cursor >= bytes.len() {
+            return Err("variable-length quantity runs past end of track".into());
+        }
+        let byte = bytes[*cursor];
+        *cursor += 1;
+        value = (value << 7) | u32::from(byte & 0x7F);
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+    }
+    Err("variable-length quantity exceeds four bytes".into())
+}
+
+/// Parses a Standard MIDI File subset: validates the MThd chunk, then extracts
+/// note-on/note-off pairs from every MTrk chunk, skipping other events by correct lengths
+/// (meta/sysex use variable-length payload sizes). Running status is not supported. Notes
+/// still sounding at a track's end close at that point. Returns Err for malformed input.
+pub fn parse_midi_file(bytes: &[u8]) -> Result<(SmfHeader, Vec<ParsedMidiNote>), String> {
+    const HEADER_MAGIC: [u8; 4] = *b"MThd";
+
+    if bytes.len() < 14 || bytes[0..4] != HEADER_MAGIC {
+        return Err("missing MThd header".into());
+    }
+    let header_len = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    if header_len < 6 || 8 + header_len > bytes.len() {
+        return Err("invalid MThd length".into());
+    }
+    let format = u16::from_be_bytes([bytes[8], bytes[9]]);
+    let track_count = u16::from_be_bytes([bytes[10], bytes[11]]);
+    let division_raw = u16::from_be_bytes([bytes[12], bytes[13]]);
+    if division_raw & 0x8000 != 0 {
+        return Err("SMPTE time division is not supported".into());
+    }
+    let ticks_per_quarter = division_raw;
+
+    let mut notes = Vec::new();
+    let mut cursor = 8 + header_len;
+
+    for track in 0..u32::from(track_count) {
+        if cursor + 8 > bytes.len() || bytes[cursor..cursor + 4] != *b"MTrk" {
+            return Err(format!("track {track}: missing MTrk header"));
+        }
+        let track_len = u32::from_be_bytes([
+            bytes[cursor + 4],
+            bytes[cursor + 5],
+            bytes[cursor + 6],
+            bytes[cursor + 7],
+        ]) as usize;
+        cursor += 8;
+        let track_end = cursor
+            .checked_add(track_len)
+            .ok_or_else(|| "track length overflow".to_string())?;
+        if track_end > bytes.len() {
+            return Err(format!("track {track}: data runs past end of file"));
+        }
+        let track_bytes = &bytes[cursor..track_end];
+
+        // (channel, key) -> (start_tick, velocity)
+        let mut open: Vec<(u8, u8, (u32, u8))> = Vec::new();
+        let mut tick: u32 = 0;
+        let mut pos = 0usize;
+
+        while pos < track_bytes.len() {
+            tick += read_vlq(track_bytes, &mut pos)?;
+            if pos >= track_bytes.len() {
+                return Err(format!("track {track}: missing event after delta time"));
+            }
+            let status = track_bytes[pos];
+            pos += 1;
+            match status {
+                // Note-off
+                0x80..=0x8F => {
+                    if pos + 2 > track_bytes.len() {
+                        return Err(format!("track {track}: truncated note-off"));
+                    }
+                    let channel = status & 0x0F;
+                    let key = track_bytes[pos];
+                    pos += 2;
+                    if let Some(index) =
+                        open.iter().position(|(c, k, _)| *c == channel && *k == key)
+                    {
+                        let (_, _, (start_tick, velocity)) = open.swap_remove(index);
+                        notes.push(ParsedMidiNote {
+                            start_tick,
+                            duration_ticks: tick - start_tick,
+                            channel,
+                            key,
+                            velocity,
+                        });
+                    }
+                }
+                // Note-on
+                0x90..=0x9F => {
+                    if pos + 2 > track_bytes.len() {
+                        return Err(format!("track {track}: truncated note-on"));
+                    }
+                    let channel = status & 0x0F;
+                    let key = track_bytes[pos];
+                    let velocity = track_bytes[pos + 1];
+                    pos += 2;
+                    if velocity == 0 {
+                        if let Some(index) =
+                            open.iter().position(|(c, k, _)| *c == channel && *k == key)
+                        {
+                            let (_, _, (start_tick, vel)) = open.swap_remove(index);
+                            notes.push(ParsedMidiNote {
+                                start_tick,
+                                duration_ticks: tick - start_tick,
+                                channel,
+                                key,
+                                velocity: vel,
+                            });
+                        }
+                    } else {
+                        open.push((channel, key, (tick, velocity)));
+                    }
+                }
+                // Two-data-byte channel messages
+                0xA0..=0xAF | 0xB0..=0xBF | 0xE0..=0xEF => {
+                    pos += 2;
+                    if pos > track_bytes.len() {
+                        return Err(format!("track {track}: truncated channel event"));
+                    }
+                }
+                // One-data-byte channel messages
+                0xC0..=0xDF => {
+                    pos += 1;
+                    if pos > track_bytes.len() {
+                        return Err(format!("track {track}: truncated program change"));
+                    }
+                }
+                // Meta events
+                0xFF => {
+                    if pos >= track_bytes.len() {
+                        return Err(format!("track {track}: truncated meta event"));
+                    }
+                    pos += 1;
+                    let length = read_vlq(track_bytes, &mut pos)? as usize;
+                    pos += length;
+                    if pos > track_bytes.len() {
+                        return Err(format!("track {track}: meta payload runs past end"));
+                    }
+                }
+                // Sysex escapes
+                0xF0 | 0xF7 => {
+                    let length = read_vlq(track_bytes, &mut pos)? as usize;
+                    pos += length;
+                    if pos > track_bytes.len() {
+                        return Err(format!("track {track}: sysex payload runs past end"));
+                    }
+                }
+                other => {
+                    return Err(format!(
+                        "track {track}: unsupported running-status or unknown byte {other:#04x}"
+                    ));
+                }
+            }
+        }
+
+        // Close any hanging notes at the track end
+        for (channel, key, (start_tick, velocity)) in open.drain(..) {
+            notes.push(ParsedMidiNote {
+                start_tick,
+                duration_ticks: tick - start_tick,
+                channel,
+                key,
+                velocity,
+            });
+        }
+
+        cursor = track_end;
+    }
+
+    Ok((
+        SmfHeader {
+            format,
+            track_count,
+            ticks_per_quarter,
+        },
+        notes,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3117,5 +3325,74 @@ mod studio_runtime_tests {
         assert!(generate_click_track(120.0, 0, 8, 48000, 1600.0, 800.0).is_err());
         assert!(generate_click_track(120.0, 4, 0, 48000, 1600.0, 800.0).is_err());
         assert!(generate_click_track(120.0, 4, 8, 0, 1600.0, 800.0).is_err());
+    }
+
+    #[test]
+    fn smf_parsing_notes_and_header() {
+        // Hand-build a format-0 SMF: one track with two notes.
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(b"MThd");
+        bytes.extend_from_slice(&6u32.to_be_bytes());
+        bytes.extend_from_slice(&0u16.to_be_bytes()); // format 0
+        bytes.extend_from_slice(&1u16.to_be_bytes()); // one track
+        bytes.extend_from_slice(&480u16.to_be_bytes()); // ticks per quarter
+
+        let mut track: Vec<u8> = Vec::new();
+        // delta 0, note-on ch0 key60 vel100
+        track.extend_from_slice(&[0x00, 0x90, 60, 100]);
+        // delta 480, note-off key60
+        track.extend_from_slice(&[0x83, 0x60, 0x80, 60, 64]);
+        // delta 0, note-on ch0 key64 vel90
+        track.extend_from_slice(&[0x00, 0x90, 64, 90]);
+        // delta 240, note-on vel0 acts as note-off for key64
+        track.extend_from_slice(&[0x81, 0x70, 0x90, 64, 0]);
+        // End of track meta event
+        track.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
+
+        bytes.extend_from_slice(b"MTrk");
+        bytes.extend_from_slice(&(track.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&track);
+
+        let (header, notes) = parse_midi_file(&bytes).unwrap();
+        assert_eq!(header.format, 0);
+        assert_eq!(header.track_count, 1);
+        assert_eq!(header.ticks_per_quarter, 480);
+
+        assert_eq!(notes.len(), 2);
+        // VLQ 0x83 0x60 decodes to (3 << 7) | 0x60 = 480
+        assert_eq!(
+            notes[0],
+            ParsedMidiNote {
+                start_tick: 0,
+                duration_ticks: 480,
+                channel: 0,
+                key: 60,
+                velocity: 100
+            }
+        );
+        assert_eq!(
+            notes[1],
+            ParsedMidiNote {
+                start_tick: 480,
+                duration_ticks: 240,
+                channel: 0,
+                key: 64,
+                velocity: 90
+            }
+        );
+
+        // Bad magic is rejected
+        let mut bad = bytes.clone();
+        bad[0] = b'X';
+        assert!(parse_midi_file(&bad).is_err());
+
+        // Truncated header is rejected
+        assert!(parse_midi_file(&bytes[..10]).is_err());
+
+        // Track data running past the buffer is rejected
+        let mut lying = bytes.clone();
+        let len_pos = 14 + 4; // after MThd + "MTrk"
+        lying[len_pos..len_pos + 4].copy_from_slice(&9999u32.to_be_bytes());
+        assert!(parse_midi_file(&lying).is_err());
     }
 }

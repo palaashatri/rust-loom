@@ -3070,6 +3070,37 @@ pub fn word_diff(old_text: &str, new_text: &str) -> Vec<WordDiffOp> {
         .collect()
 }
 
+/// Imports plain text as document blocks: paragraphs are separated by one or more blank
+/// lines; single newlines within a group are treated as soft line breaks inside one
+/// paragraph. Leading and trailing blank lines are ignored. Returns Err when the input has
+/// no paragraph content.
+pub fn import_text_paragraphs(text: &str) -> Result<Vec<String>, String> {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut paragraphs = Vec::new();
+    let mut current = String::new();
+    for line in normalized.split('\n') {
+        if line.trim().is_empty() && current.trim().is_empty() {
+            continue;
+        }
+        if line.trim().is_empty() {
+            paragraphs.push(current.trim_end().to_string());
+            current.clear();
+        } else {
+            if !current.is_empty() {
+                current.push('\n');
+            }
+            current.push_str(line);
+        }
+    }
+    if !current.trim().is_empty() {
+        paragraphs.push(current);
+    }
+    if paragraphs.is_empty() {
+        return Err("no paragraph content found".into());
+    }
+    Ok(paragraphs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4101,5 +4132,34 @@ mod tests {
         assert_eq!(new_side, words("a b c"));
         let (old_side, _) = reconstruct(&word_diff("x y", ""));
         assert_eq!(old_side, words("x y"));
+    }
+
+    #[test]
+    fn text_import_paragraph_detection() {
+        // Blank-line separated paragraphs; soft single newlines stay inside a paragraph
+        let imported = import_text_paragraphs("First para.\nStill first.\n\nSecond para.").unwrap();
+        assert_eq!(
+            imported,
+            vec![
+                "First para.\nStill first.".to_string(),
+                "Second para.".to_string()
+            ]
+        );
+
+        // Leading/trailing blank lines and CRLF are normalized away
+        let padded = import_text_paragraphs("\r\n\r\nAlpha\r\nBeta\r\n\r\n").unwrap();
+        assert_eq!(padded, vec!["Alpha\nBeta".to_string()]);
+
+        // Multiple consecutive blank lines collapse into one break
+        let gapped = import_text_paragraphs("One\n\n\n\nTwo").unwrap();
+        assert_eq!(gapped, vec!["One".to_string(), "Two".to_string()]);
+
+        // Whitespace-only lines count as blank
+        let spaced = import_text_paragraphs("A\n   \nB").unwrap();
+        assert_eq!(spaced, vec!["A".to_string(), "B".to_string()]);
+
+        // Empty or blank-only input is an error
+        assert!(import_text_paragraphs("").is_err());
+        assert!(import_text_paragraphs("\n\n  \n").is_err());
     }
 }

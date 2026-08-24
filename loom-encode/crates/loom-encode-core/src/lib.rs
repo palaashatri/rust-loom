@@ -1489,6 +1489,54 @@ pub fn generate_conformance_probe_args(output: &str, checks: &[ConformanceCheck]
     probes
 }
 
+/// Extracts the duration in seconds from raw `ffprobe -show_entries format=duration` default
+/// output ("[FORMAT]\nduration=12.345000\n...[/FORMAT]") or from bare-value output
+/// ("-of default=noprint_wrappers=1:nokey=1" giving just "12.345000"). Tolerates surrounding
+/// whitespace/newlines. Err when no parsable finite non-negative value exists.
+pub fn parse_probe_duration(probe_output: &str) -> Result<f64, String> {
+    let trimmed = probe_output.trim();
+    let raw_value = if let Some(block_start) = trimmed.find("[FORMAT]") {
+        let body = &trimmed[block_start + "[FORMAT]".len()..];
+        let body_end = body
+            .find("[/FORMAT]")
+            .ok_or_else(|| "ffprobe output has an unterminated [FORMAT] block".to_string())?;
+        body[..body_end]
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("duration="))
+            .ok_or_else(|| "ffprobe [FORMAT] block contains no duration entry".to_string())?
+    } else {
+        trimmed
+    };
+    let duration: f64 = raw_value
+        .trim()
+        .parse()
+        .map_err(|_| format!("cannot parse ffprobe duration from '{raw_value}'"))?;
+    if !duration.is_finite() || duration < 0.0 {
+        return Err(format!(
+            "ffprobe duration '{raw_value}' is not finite and non-negative"
+        ));
+    }
+    Ok(duration)
+}
+
+/// Evaluates a DurationTolerance-style check: |measured - expected| <= tolerance.
+pub fn duration_within_tolerance(
+    measured_seconds: f64,
+    expected_seconds: f64,
+    tolerance_seconds: f64,
+) -> bool {
+    (measured_seconds - expected_seconds).abs() <= tolerance_seconds
+}
+
+/// Counts stream lines from `ffprobe -show_entries stream=index` csv output
+/// ("-of csv=p=0" prints one index per line). Blank lines ignored.
+pub fn count_probe_streams(stream_output: &str) -> usize {
+    stream_output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count()
+}
+
 /// A watched-folder ingestion rule: files appearing in `watch_path` whose extension matches
 /// are queued for transcoding with the named destination preset after a stability delay.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2308,6 +2356,40 @@ mod tests {
         );
 
         assert!(generate_conformance_probe_args("unused.mp4", &[]).is_empty());
+    }
+
+    #[test]
+    fn probe_output_parsing_conformance() {
+        // Bracketed default-writer FORMAT block with the duration entry mid-section.
+        let bracketed = "[FORMAT]\nfilename=out.mp4\nduration=12.345000\nsize=1048576\n[/FORMAT]";
+        assert_eq!(parse_probe_duration(bracketed).unwrap(), 12.345);
+
+        // Bare noprint_wrappers=nokey value
+        assert_eq!(parse_probe_duration("12.345000").unwrap(), 12.345);
+
+        // Surrounding whitespace and newlines are tolerated in both shapes
+        assert_eq!(parse_probe_duration("\n \n12.345000\n\n ").unwrap(), 12.345);
+        assert_eq!(
+            parse_probe_duration("\n\n[FORMAT]\nduration=12.345000\n[/FORMAT]\n").unwrap(),
+            12.345
+        );
+
+        // Zero is a valid finite non-negative duration
+        assert_eq!(parse_probe_duration("0").unwrap(), 0.0);
+
+        // Garbage, empty output, negatives, and non-finite values all err
+        assert!(parse_probe_duration("not_a_number").is_err());
+        assert!(parse_probe_duration("").is_err());
+        assert!(parse_probe_duration("-3.5").is_err());
+        assert!(parse_probe_duration("NaN").is_err());
+
+        // Tolerance boundary: |measured - expected| <= tolerance, inclusive edge
+        assert!(duration_within_tolerance(90.5, 90.0, 0.5));
+        assert!(!duration_within_tolerance(90.5001, 90.0, 0.5));
+
+        // Stream counting ignores blank lines and handles empty output
+        assert_eq!(count_probe_streams("0\n1\n2\n\n"), 3);
+        assert_eq!(count_probe_streams(""), 0);
     }
 
     #[test]

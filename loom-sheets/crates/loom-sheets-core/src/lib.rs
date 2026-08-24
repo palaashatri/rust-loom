@@ -2249,6 +2249,104 @@ pub fn parse_csv_records(csv: &str, delimiter: char) -> Vec<Vec<String>> {
     records
 }
 
+/// A detected CSV dialect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CsvDialect {
+    pub delimiter: char,
+    /// True when fields were observed wrapped in double quotes.
+    pub quoted: bool,
+}
+
+/// Sniffs the CSV dialect used by `sample`.
+///
+/// The delimiter is detected among `','`, `';'`, `'\t'`, and `'|'` by counting,
+/// for each candidate, its occurrences outside double quotes in the first ten
+/// non-empty lines. A candidate is *consistent* when every sampled line contains
+/// the same number of occurrences, and the winner is the consistent candidate
+/// with the highest count.
+///
+/// Exact tie-breaking: candidates are visited in the fixed order `','`, `';'`,
+/// `'\t'`, `'|'`, and a candidate only replaces the current winner on a
+/// strictly greater count, so ties always prefer the earlier candidate in that
+/// list. When every candidate scores zero (or none is consistent) the dialect
+/// defaults to `','`.
+///
+/// `quoted` is true when any sampled field starts and ends with `'"'` after
+/// splitting on the detected delimiter. Empty input (no non-empty lines)
+/// returns `Err`.
+pub fn sniff_csv_dialect(sample: &str) -> Result<CsvDialect, String> {
+    let mut lines = Vec::new();
+    for line in sample.lines() {
+        if !line.trim().is_empty() {
+            lines.push(line);
+            if lines.len() >= CSV_SNIFF_SAMPLE_LINES {
+                break;
+            }
+        }
+    }
+    if lines.is_empty() {
+        return Err("cannot sniff CSV dialect from empty input".to_string());
+    }
+
+    let csv_delimiter_candidates = [',', ';', '\t', '|'];
+    let mut best_count = 0usize;
+    let mut delimiter = ',';
+    for candidate in csv_delimiter_candidates {
+        let counts: Vec<usize> = lines
+            .iter()
+            .map(|line| {
+                csv_fields_outside_quotes(line, candidate)
+                    .len()
+                    .saturating_sub(1)
+            })
+            .collect();
+        let first = counts[0];
+        let consistent = counts.iter().all(|&count| count == first);
+        if consistent && first > best_count {
+            best_count = first;
+            delimiter = candidate;
+        }
+    }
+
+    let quoted = lines.iter().any(|line| {
+        csv_fields_outside_quotes(line, delimiter)
+            .into_iter()
+            .any(|field| field.len() > 1 && field.starts_with('"') && field.ends_with('"'))
+    });
+
+    Ok(CsvDialect { delimiter, quoted })
+}
+
+const CSV_SNIFF_SAMPLE_LINES: usize = 10;
+
+/// Split `line` on `delimiter`, treating double-quoted spans as opaque, mirroring
+/// the quoting conventions of [`parse_csv_records`]. Delimiters inside quotes are
+/// not field boundaries, so the number of boundaries is `fields.len() - 1`.
+fn csv_fields_outside_quotes(line: &str, delimiter: char) -> Vec<&str> {
+    let mut fields = Vec::new();
+    let mut field_start = 0usize;
+    let mut in_quotes = false;
+    let mut chars = line.char_indices().peekable();
+    while let Some((idx, c)) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                if chars.peek().map(|&(_, next)| next) == Some('"') {
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            }
+        } else if c == '"' {
+            in_quotes = true;
+        } else if c == delimiter {
+            fields.push(&line[field_start..idx]);
+            field_start = idx + c.len_utf8();
+        }
+    }
+    fields.push(&line[field_start..]);
+    fields
+}
+
 /// Import a CSV into a sheet.
 pub fn from_csv(name: &str, csv: &str) -> Sheet {
     let mut sheet = Sheet::new(name);
@@ -3534,6 +3632,41 @@ mod tests {
         let semi_records = parse_csv_records(semi_csv, ';');
         assert_eq!(semi_records.len(), 2);
         assert_eq!(semi_records[1], vec!["1", "2", "3"]);
+    }
+
+    #[test]
+    fn csv_dialect_sniffing() {
+        // Comma detected with comma.
+        let dialect = sniff_csv_dialect("a,b,c\n1,2,3").unwrap();
+        assert_eq!(dialect.delimiter, ',');
+        assert_eq!(dialect.quoted, false);
+
+        // Semicolon-separated input.
+        let dialect = sniff_csv_dialect("a;b\nc;d").unwrap();
+        assert_eq!(dialect.delimiter, ';');
+        assert_eq!(dialect.quoted, false);
+
+        // Tab delimiter.
+        let dialect = sniff_csv_dialect("a\tb\n1\t2").unwrap();
+        assert_eq!(dialect.delimiter, '\t');
+
+        // Pipe delimiter.
+        let dialect = sniff_csv_dialect("a|b\n1|2").unwrap();
+        assert_eq!(dialect.delimiter, '|');
+
+        // Quoted fields are detected; the comma inside quotes is not counted.
+        let dialect = sniff_csv_dialect("\"x,y\",z").unwrap();
+        assert_eq!(dialect.delimiter, ',');
+        assert_eq!(dialect.quoted, true);
+
+        // Empty input errors.
+        assert!(sniff_csv_dialect("").is_err());
+        assert!(sniff_csv_dialect("  \n\t\n").is_err());
+
+        // All candidates at zero occurrences: documented default to ','.
+        let dialect = sniff_csv_dialect("abc\ndef").unwrap();
+        assert_eq!(dialect.delimiter, ',');
+        assert_eq!(dialect.quoted, false);
     }
 
     #[test]

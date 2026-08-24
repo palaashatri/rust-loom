@@ -2049,6 +2049,181 @@ pub fn clamp_gain_db(gain_db: f64, max_boost_db: f64) -> f64 {
     gain_db.clamp(-60.0, max_boost_db.max(0.0))
 }
 
+/// One timed subtitle cue.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubtitleCue {
+    /// Zero-based sequential cue number.
+    pub index: usize,
+    /// Start time in seconds from the media start.
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    /// Cue text; multi-line cues keep their interior newlines.
+    pub text: String,
+}
+
+/// Parses SRT subtitle content into cues. Accepts \r\n and \n. Timestamps use
+/// HH:MM:SS,mmm (also tolerate '.' as millisecond separator). Blocks separated by one or
+/// more blank lines. Returns Err naming the malformed block when timestamps or structure are invalid.
+pub fn parse_srt(content: &str) -> Result<Vec<SubtitleCue>, String> {
+    let normalized = content.replace("\r\n", "\n");
+    let mut cues = Vec::new();
+    let mut block_lines: Vec<&str> = Vec::new();
+    let mut block_number = 0usize;
+
+    let mut flush_block = |block_lines: &mut Vec<&str>| -> Result<(), String> {
+        if block_lines.is_empty() {
+            return Ok(());
+        }
+        block_number += 1;
+        let block = block_lines.join("\n");
+        block_lines.clear();
+        cues.push(parse_srt_block(&block, block_number)?);
+        Ok(())
+    };
+
+    for line in normalized.split('\n') {
+        if line.trim().is_empty() {
+            flush_block(&mut block_lines)?;
+        } else {
+            block_lines.push(line);
+        }
+    }
+    flush_block(&mut block_lines)?;
+    Ok(cues)
+}
+
+/// Parses a single blank-line-delimited SRT block into one cue.
+fn parse_srt_block(block: &str, block_number: usize) -> Result<SubtitleCue, String> {
+    let lines: Vec<&str> = block.lines().collect();
+    if lines.len() < 2 {
+        return Err(format!(
+            "subtitle block {block_number}: expected an index line and a timestamp line, found {} line(s)",
+            lines.len()
+        ));
+    }
+
+    let first_trimmed = lines[0].trim();
+    let looks_like_index = !first_trimmed.is_empty()
+        && first_trimmed.chars().all(|c| c.is_ascii_digit())
+        && lines[1].contains("-->");
+    let body_start = if looks_like_index {
+        1
+    } else if lines[0].contains("-->") {
+        0
+    } else {
+        return Err(format!(
+            "subtitle block {block_number}: unexpected opening line {first_trimmed:?}; expected a cue index or a timestamp"
+        ));
+    };
+    let index = if looks_like_index {
+        first_trimmed.parse::<usize>().map_err(|_| {
+            format!("subtitle block {block_number}: invalid cue index {first_trimmed:?}")
+        })?
+    } else {
+        block_number.saturating_sub(1)
+    };
+
+    let (start_seconds, end_seconds) = parse_srt_time_line(lines[body_start], block_number)?;
+    if end_seconds <= start_seconds {
+        return Err(format!(
+            "subtitle block {block_number}: end timestamp {end_seconds}s must be greater than start {start_seconds}s"
+        ));
+    }
+    let text = lines[body_start + 1..].join("\n");
+    Ok(SubtitleCue {
+        index,
+        start_seconds,
+        end_seconds,
+        text,
+    })
+}
+
+/// Parses an `HH:MM:SS,mmm --> HH:MM:SS,mmm` timing line into start/end seconds.
+fn parse_srt_time_line(line: &str, block_number: usize) -> Result<(f64, f64), String> {
+    const ARROW: &str = "-->";
+    let arrow = line.find(ARROW).ok_or_else(|| {
+        format!("subtitle block {block_number}: missing '{ARROW}' separator in {line:?}")
+    })?;
+    let start = parse_srt_timestamp(&line[..arrow], block_number)?;
+    let end = parse_srt_timestamp(&line[arrow + ARROW.len()..], block_number)?;
+    Ok((start, end))
+}
+
+/// Parses one `HH:MM:SS,mmm` (or `HH:MM:SS.mmm`) timestamp into seconds.
+fn parse_srt_timestamp(raw: &str, block_number: usize) -> Result<f64, String> {
+    let text = raw.trim();
+    let invalid = || format!("subtitle block {block_number}: invalid timestamp {text:?}");
+
+    let (clock, fraction) = match text.split_once([',', '.']) {
+        Some((clock, fraction)) => (clock, fraction),
+        None => (text, ""),
+    };
+
+    let mut clock_parts = clock.split(':');
+    let hours: u64 = clock_parts
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .parse()
+        .map_err(|_| invalid())?;
+    let minutes: u64 = clock_parts
+        .next()
+        .ok_or_else(invalid)?
+        .trim()
+        .parse()
+        .map_err(|_| invalid())?;
+    let seconds: u64 = clock_parts
+        .next()
+        .ok_or_else(invalid)?
+        .trim()
+        .parse()
+        .map_err(|_| invalid())?;
+    if clock_parts.next().is_some() {
+        return Err(invalid());
+    }
+
+    let millis = if fraction.is_empty() {
+        0
+    } else {
+        let digits = fraction.trim();
+        if digits.len() > 3 || !digits.chars().all(|c| c.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        digits.parse::<u64>().map_err(|_| invalid())? * 10u64.pow(3 - digits.len() as u32)
+    };
+
+    Ok((hours * 3600 + minutes * 60 + seconds) as f64 + millis as f64 / 1000.0)
+}
+
+/// Formats seconds as an `HH:MM:SS,mmm` SRT timestamp, rounded to the nearest millisecond.
+fn format_srt_timestamp(seconds: f64) -> String {
+    let total_millis = (seconds.max(0.0) * 1000.0).round() as u64;
+    let millis = total_millis % 1000;
+    let whole_seconds = total_millis / 1000;
+    format!(
+        "{:02}:{:02}:{:02},{millis:03}",
+        whole_seconds / 3600,
+        (whole_seconds / 60) % 60,
+        whole_seconds % 60
+    )
+}
+
+/// Serializes cues back to standard SRT text with \r\n line endings and trailing newline.
+pub fn write_srt(cues: &[SubtitleCue]) -> String {
+    let mut out = String::new();
+    for cue in cues {
+        out.push_str(&cue.index.to_string());
+        out.push_str("\r\n");
+        out.push_str(&format_srt_timestamp(cue.start_seconds));
+        out.push_str(" --> ");
+        out.push_str(&format_srt_timestamp(cue.end_seconds));
+        out.push_str("\r\n");
+        out.push_str(&cue.text.replace('\n', "\r\n"));
+        out.push_str("\r\n\r\n");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2853,5 +3028,40 @@ mod tests {
         assert_eq!(clamp_gain_db(30.0, 12.0), 12.0);
         assert_eq!(clamp_gain_db(-90.0, 12.0), -60.0);
         assert_eq!(clamp_gain_db(3.0, 12.0), 3.0);
+    }
+
+    #[test]
+    fn srt_round_trip_parsing() {
+        let sample = "1\r\n00:00:01,000 --> 00:00:02,500\r\nHello there.\r\n\r\n\
+                      2\r\n00:00:03.250 --> 00:00:05,750\r\nSecond cue,\r\nkeeps interior newlines.\r\n";
+        let cues = parse_srt(sample).expect("sample should parse");
+        assert_eq!(cues.len(), 2);
+        assert_eq!(
+            cues[0],
+            SubtitleCue {
+                index: 1,
+                start_seconds: 1.0,
+                end_seconds: 2.5,
+                text: "Hello there.".into(),
+            }
+        );
+        assert_eq!(cues[1].start_seconds, 3.25);
+        assert_eq!(cues[1].end_seconds, 5.75);
+        assert_eq!(cues[1].text, "Second cue,\nkeeps interior newlines.");
+
+        let written = write_srt(&cues);
+        assert!(written.contains("00:00:01,000 --> 00:00:02,500"));
+        assert!(written.contains("00:00:03,250 --> 00:00:05,750"));
+        let reparsed = parse_srt(&written).expect("written SRT should re-parse");
+        assert_eq!(reparsed, cues);
+
+        // Malformed timestamp block names the offending block.
+        let malformed = parse_srt("1\r\n00:00:01,000 --> 00:00:02,500\r\nFine.\r\n\r\n2\r\n00:00:zz --> 00:00:02,500\r\nBad.\r\n");
+        assert!(malformed.is_err());
+        assert!(malformed.unwrap_err().contains("block 2"));
+
+        // End not after start is rejected.
+        assert!(parse_srt("1\r\n00:00:02,000 --> 00:00:01,000\r\nBackwards.\r\n").is_err());
+        assert!(parse_srt("1\r\n00:00:01,000 --> 00:00:01,000\r\nZero length.\r\n").is_err());
     }
 }
