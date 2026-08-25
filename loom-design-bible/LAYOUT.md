@@ -1,115 +1,151 @@
-# Layout
+# Loom Layout Contract
 
-The layout contract for Loom application windows. All values are DPI-scaled
-logical pixels.
+Exact values and responsive thresholds are machine-readable in [`contracts/desktop-ui.toml`](contracts/desktop-ui.toml). This document defines composition. Application layouts may not invent a second geometry system.
 
-## 1. Window anatomy (main window)
+## Shared vertical chrome
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ title bar                      (40 px)                    │
-├─────────────┬────────────────────────────────────────────┤
-│             │  context toolbar            (40 px)        │
-│  sidebar    ├────────────────────────────────────────────┤
-│  (240 px)   │                                            │
-│             │            content canvas (fills)          │
-│  collapsible│                                            │
-│             │                                            │
-│  (drag to   │                                            │
-│   resize)   │                                            │
-├─────────────┴────────────────────────────────────────────┤
-│ status bar                         (28 px)               │
-└──────────────────────────────────────────────────────────┘
+A normal Loom document window is composed in this order when those regions apply:
+
+```text
+Document/title chrome
+Context toolbar or app-specific persistent control row
+Primary work area
+Status bar
 ```
 
-Fixed chrome heights:
+The title region and toolbar are separate semantic regions even when a platform later integrates them visually.
 
-* Title bar: **40 px**. Contains window controls (left on Linux, or platform
-  convention), document title (truncates with ellipsis), and the command
-  palette/help entry point on the right.
-* Context toolbar: **40 px**, single row (see `TOOLBARS.md`).
-* Sidebar: **240 px** default width, collapsible, resizable 180–400 px
-  (see `SIDEBARS.md`).
-* Inspector: **280 px** default width, resizable 240–360 px, may dock left or
-  right; never appears while the sidebar is open on the same side
-  (see `INSPECTORS.md`).
-* Status bar: **28 px**. Progress, cancellation, transient status messages,
-  and zoom/snapping readouts (see `NOTIFICATIONS.md`).
-* Canvas: fills the remainder; never has a fixed size.
+Rules:
 
-## 2. Grid and spacing rules
+- chrome is compact and neutral;
+- the document/project name is the useful title;
+- the application name is not repeated as a large banner inside the window;
+- persistent "Local", package-format, prototype, or implementation-status badges are forbidden unless the state changes a user decision;
+- the primary work area stretches before any decorative region;
+- no persistent overlay covers a canvas, stage, viewer, grid, or document page;
+- below a comfortable width, optional panels collapse before primary content violates its minimum size.
 
-* All chrome spacing uses the spacing scale (2, 4, 6, 8, 12, 16, 20, 24, 32,
-  40, 48, 64 px). Only these values, with the single documented exception of
-  1 px hairlines inside components.
-* Panel padding: `space-16`. Section spacing inside panels: `space-20`.
-  Control-to-control gaps: `space-8`. Control-to-label: `space-8`.
-  Component internal padding: `space-4`–`space-8` per `COMPONENTS.md`.
-* Alignment: chrome edges align to the window edge at `space-0`; panels align
-  flush to chrome; content never floats with arbitrary margins.
-* Minimum window sizes: content-first apps (Writer, Sheets) 800 × 600;
-  canvas-first apps (Photo, Motion, Video, Present) 1024 × 640; Studio
-  1024 × 640. Below minimums, chrome collapses (sidebar auto-collapses) before
-  content suffers.
-* Baseline alignment: text baselines align across a toolbar row where control
-  heights differ; labels align to control text baselines, not control boxes.
+## Shared horizontal work-area grammar
 
-## 3. Content surfaces
+When all regions exist:
 
-* Document pages: on `color-surface-canvas` with a drop page shadow* — *no*:
-  pages sit on the canvas flat (depth by color only), with a 1 px
-  `border-width-hairline` in dark theme to separate page from canvas.
-* Media beds (image viewers, video scopes, previews): `color-surface-sunken`
-  wells. Media never touches `color-surface-canvas` directly without a well.
-* Tables, grids, spreadsheets: header rows on `color-surface-sunken`, body on
-  `color-surface-raised` (Spreadsheet app uses canvas/raised per
-  `SPREADSHEET.md`).
+```text
+optional left sidebar | primary work surface | optional right inspector
+```
 
-## 4. Toolbar layout
+The sidebar and inspector use contract widths and resize ranges. They are flush surfaces separated by hairlines. They are not floating rounded cards.
 
-* Single row, 40 px, horizontal, scrollable? — never scrollable. Overflow
-  goes to an overflow popover (`overflow-ellipsis` icon at the row end); see
-  `TOOLBARS.md`.
-* Left: primary tools for the current context. Center-right: contextual
-  actions. Right: suite actions that are always available (search, share*,
-  help) — `share` is out of scope; right side hosts commands, zoom, and
-  export.
-* No groups separated by vertical rules; groups are separated by `space-8`
-  gaps and, at most, a hairline between major groups.
+The primary surface must meet the per-app `primary-share-min` rule at the reference viewport. If it cannot, collapse optional chrome rather than squeeze controls or content.
 
-## 5. Sidebar layout
+## Application shells
 
-* Media/collections sidebar (left): panel stack, each panel with a header
-  (24 px) and body. Panels collapse to headers; the sidebar itself collapses
-  to 0 and the toolbar's toggle restores the last width.
-* Width is dragged at the sidebar's right edge (left edge when docked right);
-  drag hit area is 4 px (2 px visual + 2 px grace) with an inset resize
-  cursor. See `SIDEBARS.md`.
+### Writer
 
-## 6. Inspector layout
+```text
+Title 40
+Formatting/context toolbar 40
+Document canvas: flexible, dominant
+Status 28
+```
 
-* Sections: object, style, document, metadata, advanced (see
-  `INSPECTORS.md`). Section headers 32 px; section body padding `space-16`;
-  two-column property rows (label left, control right) on a 12-column grid
-  within the panel width.
-* The inspector never scrolls the whole panel with nested scrolls; sections
-  collapse and the panel scrolls as one surface.
+No sidebar or inspector is open by default. Pages are centered inside the flexible canvas with contract fit margins. Formatting chrome must not consume enough width to clip; lower-priority commands overflow.
 
-## 7. Status bar layout
+### Sheets
 
-* Left: primary progress/cancellation area (longest message wins, truncates
-  with ellipsis; full text in tooltip).
-* Right: readouts (zoom, snapping, color space, transport state in Studio/
-  Video). Readouts are `type-size-11`, `color-ink-secondary`, tabular figures
-  for numbers.
+```text
+Title 40
+Formula bar 32
+Virtualized grid: fills width and height
+Sheet tabs 30
+Status 28
+```
 
-## 8. DPI and scaling
+The visible grid expands to the viewport. Empty space after an arbitrary fixed column count is a defect, not intentional whitespace.
 
-* All layout units are logical pixels at 1.0 text scale; the UI must render
-  correctly at 1×, 2×, and 1.5× text scale (`TYPOGRAPHY.md` §8).
-* Canvas contents (documents, images) may render at their own zoom
-  (25–800%) independent of UI scaling — zoom is a content property
-  (`CANVAS.md`).
-* Visual QA captures at 1280 × 800 logical, software renderer, 1.0 scale
-  (`VISUAL_QA.md`); additional captures at 1.5 text scale are required for
-  the layout-stress gate.
+### Present
+
+```text
+Title 40
+Context toolbar 40
+Slide navigator 220 default | Stage flexible | Inspector 280 optional
+Status 28
+```
+
+Navigator and inspector collapse before the stage becomes unusably narrow.
+
+### Photo
+
+```text
+Title 40
+Context toolbar 40
+Tool rail 40 | Image canvas flexible | Layers/Inspector 280-ish
+Status 28
+```
+
+Tool/mode/status hints are chrome or transient gesture feedback, never permanent image overlays.
+
+### Motion / Video
+
+```text
+Title 40
+Context toolbar 40
+Browser 240 | Viewer flexible | Inspector 280 optional
+Shared timeline >= 220 high
+Status 28
+```
+
+Transport/timecode is placed in chrome. Timeline controls do not occupy the ruler's content lane. Viewer, media browser, and timeline must agree about loaded project/media state.
+
+### Studio
+
+```text
+Title/transport chrome
+Track headers 180 | Arrangement flexible
+Optional mixer/inspector
+Status 28
+```
+
+Track names may ellipsize with tooltip. Transport and command labels never truncate.
+
+### Encode
+
+```text
+Title 40
+Queue toolbar / batch controls
+Queue 280 | Selected-job settings flexible/300
+Status 28
+```
+
+Job identity and destination/settings have greater hierarchy than progress percentage. Progress is a property of the selected job or batch, not a hero element.
+
+## Responsive algorithm
+
+At every required viewport:
+
+1. Reserve mandatory title/status regions.
+2. Reserve the primary work surface minimum.
+3. Allocate required fixed chrome.
+4. Allocate optional panels at preferred width.
+5. Shrink optional panels toward their minimums.
+6. Collapse optional panels if the primary surface would otherwise violate its minimum.
+7. Apply toolbar priority collapse/overflow.
+8. Never reduce action controls below their contract dimensions.
+9. Never wrap a toolbar.
+10. Never overlap or clip a control to satisfy width.
+
+This ordering is mandatory. Arbitrary `compact-layout` branches that merely change paddings without following this ordering do not satisfy the contract.
+
+## Scaling
+
+Required release matrix: all contract viewports at text scale 1.0, plus reference/stress captures at 1.25 and 1.5. 2.0 is the accessibility stress target.
+
+Larger text does **not** automatically multiply every chrome dimension. Controls remain coherent desktop controls; when labels no longer fit, responsive composition changes, rows stack where allowed, and lower-priority toolbar actions overflow. Content zoom is independent of UI text scale.
+
+## Alignment
+
+- sibling controls align to the same baseline/center line;
+- panel and toolbar edges align to shared boundaries;
+- no arbitrary floating margins in chrome;
+- text baselines, not box tops, govern mixed control/label alignment;
+- hairlines are one logical pixel;
+- every persistent 1 px separator must land on a deterministic logical boundary under the software renderer.
