@@ -16,8 +16,12 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **90/100**, hardening durability and integrity verification across the suite
+approximately **91/100**, adding semantic Office Open XML import to the durability groundwork across the suite
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
+DOCX paragraph extraction with heading-style mapping into navigable blocks (`extract_docx_blocks`) in Writer;
+XLSX cell-grid extraction resolving shared strings, inline strings, numerics, and booleans (`extract_xlsx_grid`) in Sheets; and
+PPTX title extraction in numeric slide order with outline-import deck skeletons (`extract_pptx_titles`, `slides_from_pptx`) in Present.
+The suite also ships durability and integrity verification:
 a crash-tolerant append-only recovery journal with per-record CRC-32 framing, torn-tail truncation on replay,
 and re-appendability after damage (`JournalRecord`, `RecoveryJournal`) in the loom-history platform crate;
 uniform FNV-1a 64-bit state integrity digests over user-authored content in every application core —
@@ -27,7 +31,7 @@ deck slides/elements/notes (`PresentationDocument::integrity_digest`), raster pi
 (`CompositionDocument::integrity_digest`), timeline tracks/clips/markers (`VideoProject::timeline_digest`),
 session tracks/regions (`StudioSession::session_digest`), and queue jobs/states (`EncodeQueue::queue_digest`). All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 644 passing automated tests.
+gates with 650 passing automated tests.
 a shared Vision transfer vocabulary of provenance-carrying OCR text blocks and a run-length segmentation mask codec
 (`OcrTextBlock`, `MaskSpan`, `mask_to_spans`, `spans_to_mask`) in the loom-vision-core platform crate;
 OCR-to-editable paragraph conversion preserving block-index provenance (`OcrTextBlock`, `paragraphs_from_ocr_blocks`) in Writer;
@@ -102,7 +106,8 @@ parity or product completion.
   refreshable snapshots (`LinkedTableRegion`), hierarchical dotted outline numbering with deep-jump clamping
   (`numbered_outline`), OCR-to-editable paragraph conversion preserving block-index provenance
   (`paragraphs_from_ocr_blocks`), FNV-1a content digests for save/reload verification
-  (`fnv1a64`, `writer_document_digest`), document outline extraction with indented heading navigation entries
+  (`fnv1a64`, `writer_document_digest`), DOCX paragraph extraction with heading-style mapping into navigable
+  blocks (`extract_docx_blocks`), document outline extraction with indented heading navigation entries
   (`OutlineEntry`, `extract_outline`), bounded/coalesced history, recovery, search/pagination metrics, word boundary expansion
   (`find_word_boundaries`), query occurrence counting (`count_matches`), options-aware search and
   replace with case sensitivity and whole-word matching (`SearchOptions`, `find_matches_with_options`,
@@ -137,7 +142,8 @@ parity or product completion.
   tab, and pipe delimiters with quote detection (`CsvDialect`, `sniff_csv_dialect`), chart-placement export descriptors
   binding ranges to host documents under update policies (`ChartPlacement`, `ChartUpdatePolicy`), Vision table
   extraction into dense editable grids with per-cell confidence (`OcrTableCell`, `grid_from_ocr_table`), workbook integrity
-  digests over populated cells (`Workbook::integrity_digest`), TEXTJOIN-style joining, delimiter splitting,
+  digests over populated cells (`Workbook::integrity_digest`), XLSX cell-grid extraction resolving shared strings,
+  inline strings, numerics, and booleans (`extract_xlsx_grid`), TEXTJOIN-style joining, delimiter splitting,
   repetition, and nth-instance substitution (`text_join`, `split_text_to_columns`, `text_repeat`, `text_substitute`),
   chart data-series specifications with validation,
   value ranges, and normalized plotting points (`ChartKind`, `ChartSeries`, `ChartSpec`), statistical analysis formulas for mode,
@@ -172,7 +178,8 @@ parity or product completion.
   from indented hierarchies (`deck_from_outline`), externally linked slide assets with Missing/Modified/Relinked
   lifecycle states (`LinkedAsset`, `LinkedAssetState`), accessibility alt-text coverage auditing with clean-fraction summaries
   (`AccessibilityFinding`, `audit_accessibility`), deck integrity digests over slides, elements, and notes
-  (`PresentationDocument::integrity_digest`), text-outline deck export round-tripping
+  (`PresentationDocument::integrity_digest`), PPTX title extraction in numeric slide order with outline-import deck
+  skeletons (`extract_pptx_titles`, `slides_from_pptx`), text-outline deck export round-tripping
   `deck_from_outline` (`deck_to_text_outline`), aspect-ratio-preserving fit of elements into target
   boxes with centered letterboxing (`fit_rect_into_box`, `fit_element_to_box`), accessibility reading-order assignment with element resequencing and
   validity checks (`ReadingOrder`), live presenter annotation

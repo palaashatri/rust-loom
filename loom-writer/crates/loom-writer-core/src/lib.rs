@@ -3125,6 +3125,132 @@ pub fn word_diff(old_text: &str, new_text: &str) -> Vec<WordDiffOp> {
 /// lines; single newlines within a group are treated as soft line breaks inside one
 /// paragraph. Leading and trailing blank lines are ignored. Returns Err when the input has
 /// no paragraph content.
+/// Extracts paragraphs from a `.docx` archive as RichBlocks in document order.
+///
+/// Reads `word/document.xml` and iterates `<w:p>...</w:p>` blocks (self-closing `<w:p/>`
+/// produce nothing after the whitespace rule), concatenating each block's `<w:t...>` runs
+/// and unescaping the five XML entities. A `<w:pStyle w:val="HeadingN"/>` inside the
+/// paragraph properties maps the block kind to `headingN`; everything else is a plain
+/// `"paragraph"`. Paragraphs whose combined text is entirely whitespace are skipped —
+/// document spacing is not part of the semantic content. Err on unreadable archives or a
+/// missing `word/document.xml`.
+pub fn extract_docx_blocks(docx_bytes: &[u8]) -> Result<Vec<RichBlock>, String> {
+    let archive = PackageArchive::from_bytes(docx_bytes)
+        .map_err(|e| format!("unreadable docx archive: {e}"))?;
+    let document_xml = archive
+        .get("word/document.xml")
+        .ok_or_else(|| "docx archive missing word/document.xml".to_string())?;
+    let xml = std::str::from_utf8(document_xml)
+        .map_err(|_| "document.xml is not valid UTF-8".to_string())?;
+
+    let mut blocks: Vec<RichBlock> = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(open_rel) = xml[cursor..].find("<w:p>") {
+        let open_abs = cursor + open_rel;
+        let close_rel = match xml[open_abs..].find("</w:p>") {
+            Some(found) => found,
+            None => break,
+        };
+        let paragraph = &xml[open_abs..open_abs + close_rel];
+        cursor = open_abs + close_rel + "</w:p>".len();
+
+        // Heading level from the style element, when present.
+        let mut kind = "paragraph".to_string();
+        if let Some(style_start) = paragraph.find("<w:pStyle") {
+            if let Some(val_start) = paragraph[style_start..].find("w:val=\"Heading") {
+                let digits_start = style_start + val_start + "w:val=\"Heading".len();
+                let digits: String = paragraph[digits_start..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if let Ok(level) = digits.parse::<u8>() {
+                    if (1..=6).contains(&level) {
+                        kind = format!("heading{level}");
+                    }
+                }
+            }
+        }
+
+        // Concatenate every <w:t ...>run</w:t> inside this paragraph.
+        let mut text = String::new();
+        let mut run_cursor = 0usize;
+        while let Some(run_open) = paragraph[run_cursor..].find("<w:t") {
+            let run_abs = run_cursor + run_open;
+            // Name-boundary check: <w:t must be followed by space, '>', or '/>'.
+            let after = &paragraph[run_abs + 4..];
+            if !after.starts_with('>') && !after.starts_with(' ') && !after.starts_with('/') {
+                run_cursor = run_abs + 4;
+                continue;
+            }
+            let Some(inner_rel) = paragraph[run_abs..].find('>') else {
+                break;
+            };
+            let content_start = run_abs + inner_rel + 1;
+            let Some(close_rel) = paragraph[content_start..].find("</w:t>") else {
+                break;
+            };
+            text.push_str(&xml_unescape(
+                &paragraph[content_start..content_start + close_rel],
+            ));
+            run_cursor = content_start + close_rel;
+        }
+
+        if text.trim().is_empty() {
+            continue;
+        }
+        blocks.push(RichBlock::new(blocks.len() as u64, &kind, &text));
+    }
+
+    Ok(blocks)
+}
+
+/// Unescapes the five predefined XML entities in one left-to-right pass.
+fn xml_unescape(value: &str) -> String {
+    if !value.contains('&') {
+        return value.to_string();
+    }
+    let mut out = String::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'&' {
+            let rest = &value[index..];
+            if rest.starts_with("&lt;") {
+                out.push('<');
+                index += 4;
+                continue;
+            }
+            if rest.starts_with("&gt;") {
+                out.push('>');
+                index += 4;
+                continue;
+            }
+            if rest.starts_with("&quot;") {
+                out.push('"');
+                index += 6;
+                continue;
+            }
+            if rest.starts_with("&apos;") {
+                out.push('\'');
+                index += 6;
+                continue;
+            }
+            if rest.starts_with("&amp;") {
+                out.push('&');
+                index += 5;
+                continue;
+            }
+        }
+        let ch = value[index..]
+            .chars()
+            .next()
+            .expect("index on char boundary");
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    out
+}
+
 pub fn import_text_paragraphs(text: &str) -> Result<Vec<String>, String> {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut paragraphs = Vec::new();
@@ -4606,5 +4732,61 @@ mod tests {
         assert_eq!(numbered_outline(&reset), vec!["1. A", "1.1. B", "2. C"]);
 
         assert!(numbered_outline(&[]).is_empty());
+    }
+
+    #[test]
+    fn docx_extraction_paragraphs_and_headings() {
+        let document_xml = "<?xml version=\"1.0\"?>\
+            <w:document><w:body>\
+            <w:p><w:r><w:t>Hello </w:t></w:r><w:r><w:t>World</w:t></w:r></w:p>\
+            <w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Chapter</w:t></w:r></w:p>\
+            <w:p><w:r><w:t xml:space=\"preserve\">A &amp;amp; B</w:t></w:r></w:p>\
+            <w:p><w:r><w:t>   </w:t></w:r></w:p>\
+            <w:p/>\
+            <w:p><w:pPr><w:pStyle w:val=\"Heading3\"/></w:pPr><w:r><w:t>Nested &lt;Section&gt;</w:t></w:r></w:p>\
+            </w:body></w:document>";
+
+        let mut archive = PackageArchive::new();
+        archive
+            .add("word/document.xml", document_xml.as_bytes().to_vec())
+            .unwrap();
+        let docx_bytes = archive.to_bytes().unwrap();
+
+        let blocks = extract_docx_blocks(&docx_bytes).unwrap();
+        assert_eq!(
+            blocks.len(),
+            4,
+            "whitespace and empty paragraphs are skipped"
+        );
+
+        assert_eq!(blocks[0].kind, "paragraph");
+        assert_eq!(blocks[0].text.as_str(), "Hello World");
+
+        assert_eq!(blocks[1].kind, "heading1");
+        assert_eq!(blocks[1].text.as_str(), "Chapter");
+
+        // Entities unescape exactly once: "&amp;amp;" renders as the literal "&amp;"
+        assert_eq!(blocks[2].text.as_str(), "A &amp; B");
+
+        assert_eq!(blocks[3].kind, "heading3");
+        assert_eq!(blocks[3].text.as_str(), "Nested <Section>");
+
+        // The heading is navigable through the existing outline machinery.
+        let outline = extract_outline(&blocks);
+        assert_eq!(outline.len(), 2);
+        assert_eq!(outline[0].level, 1);
+        assert_eq!(outline[0].title, "Chapter");
+        assert_eq!(outline[1].level, 3);
+
+        // Corrupt archives are rejected with named errors.
+        assert!(
+            extract_docx_blocks(&[0x00, 0x01, 0x02]).is_err(),
+            "non-zip bytes must not parse"
+        );
+        let mut empty_archive = PackageArchive::new();
+        empty_archive
+            .add("other.txt", b"no document".to_vec())
+            .unwrap();
+        assert!(extract_docx_blocks(&empty_archive.to_bytes().unwrap()).is_err());
     }
 }

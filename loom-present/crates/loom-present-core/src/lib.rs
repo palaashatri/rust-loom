@@ -1304,6 +1304,148 @@ pub fn deck_to_text_outline(slides: &[Slide]) -> Result<String, String> {
     Ok(outline)
 }
 
+/// Archive prefix under which PPTX slide parts live.
+const PPTX_SLIDE_PART_PREFIX: &str = "ppt/slides/slide";
+
+/// Extracts slide titles from a .pptx archive in slide order. Discovers slide parts among
+/// archive paths matching `ppt/slides/slide<N>.xml`, sorts N numerically, then per slide
+/// extracts the FIRST `<a:p>...</a:p>` paragraph's concatenated `<a:t>` runs as the title
+/// (documented heuristic: first paragraph = title line for extraction purposes). Slides
+/// whose first paragraph has no text yield an empty-string title. The five predefined XML
+/// entities are unescaped in run text. Returns Err on unreadable archives or when no slide
+/// parts exist.
+///
+/// This is a targeted byte scan, not a validating XML parser: malformed or unusual slide
+/// markup degrades to an empty title rather than failing the whole import.
+pub fn extract_pptx_titles(pptx_bytes: &[u8]) -> Result<Vec<String>, String> {
+    let archive = PackageArchive::from_bytes(pptx_bytes)
+        .map_err(|err| format!("unreadable pptx archive: {err}"))?;
+    let mut slide_parts: Vec<(u64, &str)> = Vec::new();
+    for path in archive.paths() {
+        let Some(number) = path
+            .strip_prefix(PPTX_SLIDE_PART_PREFIX)
+            .and_then(|rest| rest.strip_suffix(".xml"))
+        else {
+            continue;
+        };
+        if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        if let Ok(parsed) = number.parse::<u64>() {
+            slide_parts.push((parsed, path));
+        }
+    }
+    if slide_parts.is_empty() {
+        return Err(
+            "pptx archive contains no slide parts (expected ppt/slides/slide<N>.xml)".to_string(),
+        );
+    }
+    slide_parts.sort_unstable_by_key(|(number, _)| *number);
+    slide_parts
+        .iter()
+        .map(|(_, path)| {
+            let data = archive
+                .get(path)
+                .ok_or_else(|| format!("missing slide part {path}"))?;
+            Ok(pptx_first_paragraph_title(&String::from_utf8_lossy(data)))
+        })
+        .collect()
+}
+
+/// Convenience building a full outline-importable deck skeleton from a .pptx archive: one
+/// [`Slide`] per extracted title (see [`extract_pptx_titles`]) with ids `pptx-slide-N`
+/// (N is the 1-based slide position) and layout `imported-pptx`. Error conditions are
+/// inherited from [`extract_pptx_titles`].
+pub fn slides_from_pptx(pptx_bytes: &[u8]) -> Result<Vec<Slide>, String> {
+    Ok(extract_pptx_titles(pptx_bytes)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, title)| {
+            Slide::new(format!("pptx-slide-{}", index + 1), title, "imported-pptx")
+        })
+        .collect())
+}
+
+/// Extracts the concatenated `<a:t>` run text of the FIRST `<a:p>` paragraph in a slide
+/// part, or an empty string when the slide has no usable first paragraph.
+fn pptx_first_paragraph_title(slide_xml: &str) -> String {
+    let Some((open, close)) = next_xml_element_inner(slide_xml, 0, "a:p") else {
+        return String::new();
+    };
+    let paragraph = &slide_xml[open..close];
+    let mut title = String::new();
+    let mut cursor = 0usize;
+    while let Some((run_open, run_close)) = next_xml_element_inner(paragraph, cursor, "a:t") {
+        title.push_str(&unescape_xml_entities(&paragraph[run_open..run_close]));
+        cursor = run_close;
+    }
+    title
+}
+
+/// Scans `xml` from byte offset `from` for the inner span of the next `<tag ...>...</tag>`
+/// element, returning `(inner_start, inner_end)`. Handles attribute-bearing open tags by
+/// skipping ahead to the open tag's closing `>`; a self-closing `<tag/>` yields an empty
+/// span so callers observe that the element existed without content. Longer tags that share
+/// the prefix (such as `<a:pPr>` for tag `a:p`) are skipped. Returns None when no further
+/// occurrence exists or an open tag is never closed.
+fn next_xml_element_inner(xml: &str, from: usize, tag: &str) -> Option<(usize, usize)> {
+    let open_needle = format!("<{tag}");
+    let close_needle = format!("</{tag}>");
+    let bytes = xml.as_bytes();
+    let mut pos = from;
+    while let Some(rel) = xml[pos..].find(&open_needle) {
+        let after_name = pos + rel + open_needle.len();
+        match bytes.get(after_name) {
+            Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n') => {
+                let inner_start =
+                    after_name + bytes[after_name..].iter().position(|&b| b == b'>')? + 1;
+                let close_rel = xml[inner_start..].find(&close_needle)?;
+                return Some((inner_start, inner_start + close_rel));
+            }
+            Some(b'/') if bytes.get(after_name + 1) == Some(&b'>') => {
+                return Some((after_name + 2, after_name + 2));
+            }
+            _ => pos = after_name,
+        }
+    }
+    None
+}
+
+/// Unescapes the five predefined XML entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`,
+/// `&apos;`) in a single left-to-right pass, so escaped text such as `&amp;lt;` decodes to
+/// `&lt;` rather than being double-decoded to `<`. Unknown or malformed entities pass
+/// through unchanged.
+fn unescape_xml_entities(text: &str) -> String {
+    const ENTITIES: [(&str, char); 5] = [
+        ("&amp;", '&'),
+        ("&lt;", '<'),
+        ("&gt;", '>'),
+        ("&quot;", '"'),
+        ("&apos;", '\''),
+    ];
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.char_indices();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '&' {
+            let rest = &text[index..];
+            if let Some((entity, decoded)) =
+                ENTITIES.iter().find(|(name, _)| rest.starts_with(*name))
+            {
+                out.push(*decoded);
+                for _ in 1..entity.chars().count() {
+                    chars.next();
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// Built-in transition between two slides.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum TransitionKind {
@@ -3164,5 +3306,131 @@ Hiring Plan
         let mut reordered = doc.clone();
         assert!(reordered.slides[1].bring_to_front("elem-body"));
         assert_ne!(reordered.integrity_digest(), baseline);
+    }
+
+    #[test]
+    fn pptx_title_extraction_orders_numerically_and_joins_runs() {
+        fn run(text: &str) -> String {
+            format!("<a:r><a:rPr lang=\"en-US\"/><a:t>{text}</a:t></a:r>")
+        }
+        fn paragraph(runs: &[String]) -> String {
+            format!("<a:p>{}</a:p>", runs.concat())
+        }
+        fn slide_xml(paragraphs: &[String]) -> Vec<u8> {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+                 <p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" \
+                 xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" \
+                 xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">\
+                 <p:cSld><p:spTree><p:sp><p:txBody><a:bodyPr/><a:lstStyle/>{}</p:txBody>\
+                 </p:sp></p:spTree></p:cSld></p:sld>",
+                paragraphs.concat()
+            )
+            .into_bytes()
+        }
+
+        let mut pptx = PackageArchive::new();
+        pptx.add("[Content_Types].xml", b"<Types/>".to_vec())
+            .unwrap();
+        pptx.add(
+            "ppt/slides/slide1.xml",
+            slide_xml(&[paragraph(&[run("Title One")])]),
+        )
+        .unwrap();
+        // Lexicographic path order would place slide10 before slide2; numeric order wins.
+        pptx.add(
+            "ppt/slides/slide10.xml",
+            slide_xml(&[paragraph(&[run("Deck Ten")])]),
+        )
+        .unwrap();
+        pptx.add(
+            "ppt/slides/slide2.xml",
+            slide_xml(&[
+                paragraph(&[run("Split "), run("Title")]),
+                paragraph(&[run("Second paragraph must be ignored")]),
+            ]),
+        )
+        .unwrap();
+
+        let bytes = pptx.to_bytes().unwrap();
+        let titles = extract_pptx_titles(&bytes).unwrap();
+        assert_eq!(titles, vec!["Title One", "Split Title", "Deck Ten"]);
+
+        let slides = slides_from_pptx(&bytes).unwrap();
+        assert_eq!(slides.len(), 3);
+        assert_eq!(
+            slides.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
+            vec!["Title One", "Split Title", "Deck Ten"]
+        );
+        for (index, slide) in slides.iter().enumerate() {
+            assert_eq!(slide.id, format!("pptx-slide-{}", index + 1));
+            assert_eq!(slide.layout, "imported-pptx");
+        }
+
+        // An archive without any ppt/slides/slide<N>.xml parts must error.
+        let mut slideless = PackageArchive::new();
+        slideless
+            .add("[Content_Types].xml", b"<Types/>".to_vec())
+            .unwrap();
+        slideless
+            .add("ppt/presentation.xml", b"<p:presentation/>".to_vec())
+            .unwrap();
+        assert!(extract_pptx_titles(&slideless.to_bytes().unwrap()).is_err());
+        assert!(slides_from_pptx(&slideless.to_bytes().unwrap()).is_err());
+
+        // Garbage bytes and a truncated valid archive must error, not panic or guess.
+        assert!(extract_pptx_titles(b"this is not a zip archive").is_err());
+        let truncated = &bytes[..bytes.len() / 2];
+        assert!(extract_pptx_titles(truncated).is_err());
+    }
+
+    #[test]
+    fn pptx_title_unescapes_entities_and_handles_empty_first_paragraphs() {
+        fn one_slide_archive(slide_body: &str) -> Vec<u8> {
+            let mut pptx = PackageArchive::new();
+            pptx.add(
+                "ppt/slides/slide1.xml",
+                format!("<p:sld><p:cSld><p:spTree>{slide_body}</p:spTree></p:cSld></p:sld>")
+                    .into_bytes(),
+            )
+            .unwrap();
+            pptx.to_bytes().unwrap()
+        }
+
+        // All five entities decode once, across runs, including an attribute-bearing <a:t>.
+        let entities = one_slide_archive(
+            "<a:txBody><a:p>\
+             <a:r><a:t>&amp;&lt;&gt;</a:t></a:r>\
+             <a:r><a:t xml:space=\"preserve\"> &quot;&apos;</a:t></a:r>\
+             </a:p>\
+             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
+        );
+        assert_eq!(extract_pptx_titles(&entities).unwrap(), vec!["&<> \"'"]);
+
+        // First paragraph with only formatting yields an empty title, not the body text.
+        let empty_first = one_slide_archive(
+            "<a:txBody><a:p><a:endParaRPr lang=\"en-US\"/></a:p>\
+             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
+        );
+        assert_eq!(extract_pptx_titles(&empty_first).unwrap(), vec![""]);
+        let slides = slides_from_pptx(&empty_first).unwrap();
+        assert_eq!(slides.len(), 1);
+        assert_eq!(slides[0].title, "");
+        assert_eq!(slides[0].layout, "imported-pptx");
+
+        // A self-closing first paragraph behaves identically.
+        let self_closing = one_slide_archive(
+            "<a:txBody><a:p/>\
+             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
+        );
+        assert_eq!(extract_pptx_titles(&self_closing).unwrap(), vec![""]);
+
+        // Escaped ampersand sequences are not double-decoded.
+        let double_escape =
+            one_slide_archive("<a:p><a:r><a:t>&amp;amp; stays literal</a:t></a:r></a:p>");
+        assert_eq!(
+            extract_pptx_titles(&double_escape).unwrap(),
+            vec!["&amp; stays literal"]
+        );
     }
 }

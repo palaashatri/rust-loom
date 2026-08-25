@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use loom_package::zip::PackageArchive;
 use serde::{Deserialize, Serialize};
 
 /// A cell coordinate.
@@ -3387,6 +3388,340 @@ impl Workbook {
     }
 }
 
+// ---- XLSX semantic cell extraction (READ_PARTIAL-class import) -----------
+
+/// Upper bounds on worksheet coordinates, mirroring the OOXML sheet limits of
+/// 1,048,576 rows by 16,384 columns. Cells outside them cannot occur in valid
+/// files and are ignored so hostile archives cannot drive allocation.
+const MAX_XLSX_ROWS: u32 = 1_048_576;
+const MAX_XLSX_COLS: u32 = 16_384;
+
+/// Dense grids above this many cells are rejected instead of allocated; a
+/// sparse import path remains future work.
+const MAX_XLSX_DENSE_CELLS: usize = 10_000_000;
+
+/// Extracts the used range of the first worksheet from a .xlsx archive as a dense grid of
+/// display strings. Reads `xl/sharedStrings.xml` (when present) into the shared-string
+/// table, then `xl/worksheets/sheet1.xml`, resolving each `<c>` cell:
+/// - t="s": <v> holds a shared-string index
+/// - t="inlineStr": uses <is><t>...</t></is>
+/// - otherwise: <v> holds the raw value (numbers, booleans as "1"/"0" -> "TRUE"/"FALSE")
+///
+/// Cells map by their `r="A1"` coordinate; gaps become empty strings. Err on unreadable
+/// archives or missing sheet part.
+///
+/// This is a targeted scanner, not a full XML parser: shared strings are read by
+/// concatenating every `<t>` run inside each `<si>` block, cells by matching `<c>`
+/// elements. Only the five predefined XML entities are unescaped; CDATA sections and
+/// namespaces are not interpreted. An out-of-range or malformed shared-string index
+/// errs, as does a used range beyond [`MAX_XLSX_DENSE_CELLS`]. A sheet with no cells
+/// yields an empty grid.
+pub fn extract_xlsx_grid(xlsx_bytes: &[u8]) -> Result<Vec<Vec<String>>, String> {
+    let archive = PackageArchive::from_bytes(xlsx_bytes)
+        .map_err(|e| format!("unreadable xlsx archive: {e}"))?;
+
+    let shared: Vec<String> = match archive.get("xl/sharedStrings.xml") {
+        Some(bytes) => {
+            let xml = std::str::from_utf8(bytes)
+                .map_err(|_| "xl/sharedStrings.xml is not valid UTF-8".to_string())?;
+            parse_shared_strings(xml)
+        }
+        None => Vec::new(),
+    };
+
+    let sheet_bytes = archive
+        .get("xl/worksheets/sheet1.xml")
+        .ok_or_else(|| "missing worksheet part xl/worksheets/sheet1.xml".to_string())?;
+    let sheet_xml = std::str::from_utf8(sheet_bytes)
+        .map_err(|_| "xl/worksheets/sheet1.xml is not valid UTF-8".to_string())?;
+
+    extract_sheet_grid(sheet_xml, &shared)
+}
+
+/// Walks `sheet_xml`, resolves every `<c>` against `shared`, and densifies the
+/// used range up to the maximum row/column actually seen.
+fn extract_sheet_grid(sheet_xml: &str, shared: &[String]) -> Result<Vec<Vec<String>>, String> {
+    let mut placed: Vec<(u32, u32, String)> = Vec::new();
+    let mut max_row = 0u32;
+    let mut max_col = 0u32;
+    let mut rest = sheet_xml;
+    while let Some(offset) = next_tag_open(rest, "c") {
+        rest = &rest[offset..];
+        // Opening tag runs to the first '>' (attributes cannot contain one).
+        let Some(tag_end) = rest.find('>') else {
+            break;
+        };
+        let attrs = &rest[1..tag_end];
+        let self_closing = attrs.ends_with('/');
+        rest = &rest[tag_end + 1..];
+        if self_closing {
+            continue;
+        }
+        let Some(close_rel) = rest.find("</c>") else {
+            break;
+        };
+        let body = &rest[..close_rel];
+        rest = &rest[close_rel + 4..];
+
+        // A cell without a usable coordinate cannot be placed; skip it.
+        let Some((col, row)) = attribute_value(attrs, "r").and_then(parse_cell_coordinate) else {
+            continue;
+        };
+        if row >= MAX_XLSX_ROWS || col >= MAX_XLSX_COLS {
+            continue;
+        }
+
+        let cell_type = attribute_value(attrs, "t").unwrap_or("");
+        let text = match cell_type {
+            "s" => {
+                let raw = first_element_text(body, "v")
+                    .ok_or_else(|| "shared-string cell without <v>".to_string())?;
+                let index: usize = raw
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("shared-string index {raw:?} is not a number"))?;
+                shared.get(index).cloned().ok_or_else(|| {
+                    format!(
+                        "shared-string index {index} out of range ({} entries)",
+                        shared.len()
+                    )
+                })?
+            }
+            "inlineStr" => match first_element_block(body, "is") {
+                Some(block) => rich_text(block),
+                None => String::new(),
+            },
+            "b" => match first_element_text(body, "v") {
+                Some(v) => match v.trim() {
+                    "0" => "FALSE".to_string(),
+                    "1" => "TRUE".to_string(),
+                    other => other.to_string(),
+                },
+                None => String::new(),
+            },
+            _ => first_element_text(body, "v").unwrap_or_default(),
+        };
+        placed.push((row, col, text));
+        max_row = max_row.max(row);
+        max_col = max_col.max(col);
+    }
+
+    if placed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let n_rows = max_row as usize + 1;
+    let n_cols = max_col as usize + 1;
+    if n_rows.saturating_mul(n_cols) > MAX_XLSX_DENSE_CELLS {
+        return Err(format!(
+            "worksheet used range {n_rows}x{n_cols} exceeds dense import budget \
+             ({MAX_XLSX_DENSE_CELLS} cells)"
+        ));
+    }
+    let mut grid = vec![vec![String::new(); n_cols]; n_rows];
+    for (row, col, text) in placed {
+        grid[row as usize][col as usize] = text;
+    }
+    Ok(grid)
+}
+
+/// Builds the shared-string table by concatenating the `<t>` runs of every
+/// `<si>` block. Self-closing `<si/>` yields an empty entry so indices stay
+/// aligned with the file's numbering.
+fn parse_shared_strings(xml: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut rest = xml;
+    while let Some(offset) = next_tag_open(rest, "si") {
+        rest = &rest[offset..];
+        let after_name = &rest[1 + "si".len()..];
+        if let Some(stripped) = after_name.strip_prefix('/') {
+            match stripped.find('>') {
+                Some(gt) => {
+                    items.push(String::new());
+                    rest = &stripped[gt + 1..];
+                }
+                None => break,
+            }
+            continue;
+        }
+        let Some(gt) = after_name.find('>') else {
+            break;
+        };
+        let body = &after_name[gt + 1..];
+        match body.find("</si>") {
+            Some(end) => {
+                items.push(rich_text(&body[..end]));
+                rest = &body[end + "</si>".len()..];
+            }
+            None => break,
+        }
+    }
+    items
+}
+
+/// Offset of the next opening tag named `tag`, requiring the name to be
+/// followed by `>`, whitespace, or `/` so `<cols>` never matches `<c>`.
+fn next_tag_open(xml: &str, tag: &str) -> Option<usize> {
+    let mut from = 0usize;
+    while let Some(rel) = xml[from..].find('<') {
+        let abs = from + rel;
+        let after = &xml[abs + 1..];
+        if after.len() >= tag.len()
+            && after.as_bytes()[..tag.len()] == tag.as_bytes()[..]
+            && after[tag.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c == '>' || c == ' ' || c == '/')
+        {
+            return Some(abs);
+        }
+        from = abs + 1;
+    }
+    None
+}
+
+/// Raw (still escaped) inner texts of every non-self-closing `tag` element in
+/// document order.
+fn element_texts<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
+    let close = format!("</{tag}>");
+    let mut texts = Vec::new();
+    let mut rest = xml;
+    while let Some(offset) = next_tag_open(rest, tag) {
+        rest = &rest[offset..];
+        let after_name = &rest[1 + tag.len()..];
+        if let Some(stripped) = after_name.strip_prefix('/') {
+            match stripped.find('>') {
+                Some(gt) => rest = &stripped[gt + 1..],
+                None => break,
+            }
+            continue;
+        }
+        let Some(gt) = after_name.find('>') else {
+            break;
+        };
+        let body = &after_name[gt + 1..];
+        match body.find(&close) {
+            Some(end) => {
+                texts.push(&body[..end]);
+                rest = &body[end + close.len()..];
+            }
+            None => break,
+        }
+    }
+    texts
+}
+
+/// Unescaped text of the first `tag` element in `xml`, if present.
+fn first_element_text(xml: &str, tag: &str) -> Option<String> {
+    element_texts(xml, tag).into_iter().next().map(xml_unescape)
+}
+
+/// Inner content of the first non-self-closing `tag` element in `xml`.
+fn first_element_block<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let offset = next_tag_open(xml, tag)?;
+    let after_name = &xml[offset + 1 + tag.len()..];
+    if after_name.starts_with('/') {
+        return None;
+    }
+    let gt = after_name.find('>')?;
+    let body = &after_name[gt + 1..];
+    let end = body.find(&format!("</{tag}>"))?;
+    Some(&body[..end])
+}
+
+/// Concatenated, unescaped `<t>` run text of an `<si>` or `<is>` block.
+fn rich_text(block: &str) -> String {
+    let mut out = String::new();
+    for raw in element_texts(block, "t") {
+        out.push_str(&xml_unescape(raw));
+    }
+    out
+}
+
+/// Reads attribute `name` from an opening-tag fragment such as
+/// `<c r="B2" t="s"`. The name must start at an attribute boundary and the
+/// value must be quoted with `"` or `'`; anything else keeps scanning.
+fn attribute_value<'a>(open_tag: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=");
+    let mut from = 0usize;
+    while from <= open_tag.len() {
+        let rel = open_tag[from..].find(&needle)?;
+        let abs = from + rel;
+        let at_boundary = abs == 0
+            || open_tag[..abs]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let tail = &open_tag[abs + needle.len()..];
+        let quote = tail.chars().next();
+        if at_boundary && matches!(quote, Some('"') | Some('\'')) {
+            let q = quote.unwrap_or('"');
+            let inner = &tail[1..];
+            let end = inner.find(q)?;
+            return Some(&inner[..end]);
+        }
+        from = abs + needle.len();
+    }
+    None
+}
+
+/// Parses an A1-style coordinate such as `AB12` into zero-based
+/// (column, row). Rejects missing letters, zero rows, non-digit tails, and
+/// values beyond `u32` range so hostile input cannot overflow.
+fn parse_cell_coordinate(raw: &str) -> Option<(u32, u32)> {
+    let coord = raw.trim();
+    let bytes = coord.as_bytes();
+    let mut col: u64 = 0;
+    let mut idx = 0usize;
+    while idx < bytes.len() && bytes[idx].is_ascii_alphabetic() {
+        col = col
+            .checked_mul(26)?
+            .checked_add(u64::from(bytes[idx].to_ascii_uppercase() - b'A') + 1)?;
+        idx += 1;
+    }
+    if idx == 0 || !coord[idx..].bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let row: u64 = coord[idx..].parse().ok()?;
+    if col == 0 || row == 0 || col > u64::from(u32::MAX) || row > u64::from(u32::MAX) {
+        return None;
+    }
+    Some(((col - 1) as u32, (row - 1) as u32))
+}
+
+/// Unescapes the five predefined XML entities in a single left-to-right pass,
+/// so `&amp;lt;` correctly decodes to the literal `&lt;`. Unknown escapes pass
+/// through unchanged.
+fn xml_unescape(text: &str) -> String {
+    const ENTITIES: [(&str, &str); 5] = [
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", "\""),
+        ("&apos;", "'"),
+        ("&amp;", "&"),
+    ];
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        let tail = &rest[pos..];
+        match ENTITIES.iter().find(|(name, _)| tail.starts_with(name)) {
+            Some((name, replacement)) => {
+                out.push_str(replacement);
+                rest = &tail[name.len()..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4595,5 +4930,115 @@ mod tests {
         let (y1, m1, d1) = add_days(y0, m0, d0, 10_000).unwrap();
         assert_eq!(days_between(y0, m0, d0, y1, m1, d1).unwrap(), 10_000);
         assert_eq!(add_days(y1, m1, d1, -10_000).unwrap(), (y0, m0, d0));
+    }
+
+    /// Builds an in-memory xlsx image with the given part contents.
+    fn build_xlsx(parts: &[(&str, &str)]) -> Vec<u8> {
+        let mut archive = PackageArchive::new();
+        for (path, xml) in parts {
+            archive
+                .add(path, xml.as_bytes().to_vec())
+                .expect("part adds");
+        }
+        archive.to_bytes().expect("archive serializes")
+    }
+
+    #[test]
+    fn extract_xlsx_grid_resolves_shared_inline_numeric_and_boolean_cells() {
+        let xlsx = build_xlsx(&[
+            (
+                "xl/sharedStrings.xml",
+                r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                    <si><t>Alpha</t></si>
+                    <si><t>Beta &amp; Gamma</t></si>
+                </sst>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                    <sheetData>
+                        <row r="1">
+                            <c r="A1" t="s"><v>0</v></c>
+                            <c r="B1" t="s"><v>1</v></c>
+                        </row>
+                        <row r="2">
+                            <c r="A2"><v>42</v></c>
+                            <c r="B2" t="b"><v>1</v></c>
+                        </row>
+                        <row r="3">
+                            <c r="C3" t="inlineStr"><is><t>Inline</t></is></c>
+                        </row>
+                    </sheetData>
+                </worksheet>"#,
+            ),
+        ]);
+
+        let grid = extract_xlsx_grid(&xlsx).expect("extraction succeeds");
+        assert_eq!(grid.len(), 3);
+        assert_eq!(
+            grid,
+            vec![
+                vec![
+                    "Alpha".to_string(),
+                    "Beta & Gamma".to_string(),
+                    String::new()
+                ],
+                vec!["42".to_string(), "TRUE".to_string(), String::new()],
+                vec![String::new(), String::new(), "Inline".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_xlsx_grid_errs_on_corrupt_archive_or_missing_sheet_part() {
+        assert!(extract_xlsx_grid(b"not a zip at all")
+            .unwrap_err()
+            .contains("unreadable xlsx archive"));
+
+        // A well-formed archive without the worksheet part must also err.
+        let xlsx = build_xlsx(&[("xl/sharedStrings.xml", "<sst><si><t>Alpha</t></si></sst>")]);
+        assert!(extract_xlsx_grid(&xlsx)
+            .unwrap_err()
+            .contains("missing worksheet part xl/worksheets/sheet1.xml"));
+    }
+
+    #[test]
+    fn xlsx_extraction_helpers_handle_entities_coordinates_and_gaps() {
+        // Single-pass entity decoding must not double-decode.
+        assert_eq!(xml_unescape("Beta &amp; Gamma"), "Beta & Gamma");
+        assert_eq!(xml_unescape("&amp;lt;"), "&lt;");
+        assert_eq!(
+            xml_unescape("&lt;a&gt; &quot;q&quot; &apos;p&apos;"),
+            "<a> \"q\" 'p'"
+        );
+        assert_eq!(
+            xml_unescape("plain & unknown; stays"),
+            "plain & unknown; stays"
+        );
+
+        // Coordinate parsing: letters to zero-based column, digits to row-1.
+        assert_eq!(parse_cell_coordinate("A1"), Some((0, 0)));
+        assert_eq!(parse_cell_coordinate("AB12"), Some((27, 11)));
+        assert_eq!(parse_cell_coordinate(" C3 "), Some((2, 2)));
+        assert_eq!(parse_cell_coordinate(""), None);
+        assert_eq!(parse_cell_coordinate("1A"), None);
+        assert_eq!(parse_cell_coordinate("A0"), None);
+
+        // Out-of-range shared-string index errs instead of emitting a value.
+        let sheet = r#"<sheetData><row r="1"><c r="A1" t="s"><v>9</v></c></row></sheetData>"#;
+        let err = extract_sheet_grid(sheet, &["Alpha".to_string()]).unwrap_err();
+        assert!(err.contains("out of range"), "unexpected error: {err}");
+
+        // Cells beyond the used range densify as empty strings.
+        let sparse = r#"<sheetData>
+            <row r="1"><c r="B1"><v>7</v></c></row>
+            <row r="4"><c r="E4"><v>x</v></c></row>
+        </sheetData>"#;
+        let grid = extract_sheet_grid(sparse, &[]).expect("sparse extraction");
+        assert_eq!(grid.len(), 4);
+        assert!(grid.iter().all(|row| row.len() == 5));
+        assert_eq!(grid[0][1], "7");
+        assert_eq!(grid[3][4], "x");
+        assert_eq!(grid[0][0], "");
     }
 }
