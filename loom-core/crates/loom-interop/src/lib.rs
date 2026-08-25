@@ -731,14 +731,12 @@ pub fn format_support_level(format: Format) -> FormatSupportLevel {
         Format::Text => FormatSupportLevel::RoundTripSupported,
         Format::Markdown | Format::Csv => FormatSupportLevel::ReadSupported,
 
-        // Writer exports and re-imports minimal DOCX documents today; the rest of the
-        // office family remains detection-only pending broader fidelity work.
-        Format::Docx => FormatSupportLevel::WritePartial,
+        // Writer/Sheets/Present export and re-import their minimal DOCX/XLSX/PPTX
+        // subsets today; ODF family remains detection-only pending fidelity work.
+        Format::Docx | Format::Xlsx | Format::Pptx => FormatSupportLevel::WritePartial,
 
-        // Office containers detected today beyond DOCX.
-        Format::Xlsx | Format::Pptx | Format::Odt | Format::Ods | Format::Odp => {
-            FormatSupportLevel::DetectOnly
-        }
+        // Office containers detected today beyond the OOXML subset.
+        Format::Odt | Format::Ods | Format::Odp => FormatSupportLevel::DetectOnly,
 
         // Layered image interchange is detection-only pending semantic comparisons.
         Format::Psd => FormatSupportLevel::DetectOnly,
@@ -956,8 +954,10 @@ mod tests {
                 "{format:?} is detection-only today"
             );
         }
-        // Writer's minimal DOCX writer upgrades it above detection-only.
-        assert!(level_of(Format::Docx) >= FormatSupportLevel::WritePartial);
+        // The OOXML writer subset upgrades those formats above detection-only.
+        for format in [Format::Docx, Format::Xlsx, Format::Pptx] {
+            assert!(level_of(format) >= FormatSupportLevel::WritePartial);
+        }
 
         // Text round-trips; CSV and Markdown are semantically read.
         assert_eq!(

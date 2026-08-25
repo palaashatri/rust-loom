@@ -16,7 +16,8 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **93/100**, adding DOCX export round-trip capability alongside persistence failure proofs and Office Open XML import across the suite
+approximately **94/100**, completing the minimal OOXML round-trip family (DOCX, XLSX, PPTX) alongside persistence
+failure proofs across the suite
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
 a bounded deterministic fuzz suite proving `PackageArchive::from_bytes` never panics on arbitrary input plus an exhaustive
 truncation property test proving every prefix of a saved archive either fails or parses identically (`truncated_archives_never_parse_as_half_valid`),
@@ -25,8 +26,10 @@ never a half-document (`truncated_saves_never_load_as_half_documents`).
 The suite also adds semantic Office Open XML import:
 DOCX paragraph extraction with heading-style mapping into navigable blocks (`extract_docx_blocks`) and a minimal
 valid DOCX writer that round-trips kinds/texts through the importer (`export_document_as_docx`, `xml_escape_text`) in Writer;
-XLSX cell-grid extraction resolving shared strings, inline strings, numerics, and booleans (`extract_xlsx_grid`) in Sheets; and
-PPTX title extraction in numeric slide order with outline-import deck skeletons (`extract_pptx_titles`, `slides_from_pptx`) in Present.
+XLSX cell-grid extraction resolving shared strings, inline strings, numerics, and booleans (`extract_xlsx_grid`)
+with a shared-string writer round-tripping populated grids (`export_xlsx_from_grid`) in Sheets; and
+PPTX title extraction in numeric slide order with outline-import deck skeletons (`extract_pptx_titles`,
+`slides_from_pptx`) plus a slide-part writer preserving order and empty slides (`export_pptx_from_titles`) in Present.
 The suite also ships durability and integrity verification:
 a crash-tolerant append-only recovery journal with per-record CRC-32 framing, torn-tail truncation on replay,
 and re-appendability after damage (`JournalRecord`, `RecoveryJournal`) in the loom-history platform crate;
@@ -37,7 +40,7 @@ deck slides/elements/notes (`PresentationDocument::integrity_digest`), raster pi
 (`CompositionDocument::integrity_digest`), timeline tracks/clips/markers (`VideoProject::timeline_digest`),
 session tracks/regions (`StudioSession::session_digest`), and queue jobs/states (`EncodeQueue::queue_digest`). All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 654 passing automated tests.
+gates with 656 passing automated tests.
 a shared Vision transfer vocabulary of provenance-carrying OCR text blocks and a run-length segmentation mask codec
 (`OcrTextBlock`, `MaskSpan`, `mask_to_spans`, `spans_to_mask`) in the loom-vision-core platform crate;
 OCR-to-editable paragraph conversion preserving block-index provenance (`OcrTextBlock`, `paragraphs_from_ocr_blocks`) in Writer;
@@ -83,8 +86,8 @@ parity or product completion.
 - A declared interoperability support matrix (`loom_interop::format_support_matrix`)
   labeling every boundary format with the mandated vocabulary from `DetectOnly`
   through `ConformanceValidated`, updated only alongside real engine behavior.
-  DOCX is currently `WritePartial` (Writer export + re-import); PSD and the
-  remaining office containers are `DetectOnly`.
+  DOCX, XLSX, and PPTX are currently `WritePartial` (minimal export + verified
+  re-import); PSD, ODF, and remaining containers are `DetectOnly`.
 - A shared cross-app clipboard entry model (`loom_runtime::CrossAppClipboard`) carrying
   Loom-native editable payloads with source provenance plus required standard fallback
   formats, protected by a reserved `text/x-loom-*` native namespace.

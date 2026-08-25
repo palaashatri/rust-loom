@@ -1317,6 +1317,85 @@ const PPTX_SLIDE_PART_PREFIX: &str = "ppt/slides/slide";
 ///
 /// This is a targeted byte scan, not a validating XML parser: malformed or unusual slide
 /// markup degrades to an empty title rather than failing the whole import.
+/// Exports slide titles into a minimal valid `.pptx` archive: one slide part per title,
+/// each carrying a single text paragraph. Round-trips through [`extract_pptx_titles`]
+/// in order; empty titles are preserved as slides with empty first paragraphs.
+pub fn export_pptx_from_titles(titles: &[String]) -> Result<Vec<u8>, String> {
+    let mut content_overrides = String::new();
+    let mut presentation_refs = String::new();
+    let mut presentation_rels = String::new();
+    let mut slide_parts: Vec<(String, Vec<u8>)> = Vec::new();
+
+    for (index, title) in titles.iter().enumerate() {
+        let number = index + 1;
+        content_overrides.push_str(&format!(
+            "<Override PartName=\"/ppt/slides/slide{number}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>"
+        ));
+        presentation_refs.push_str(&format!(
+            "<p:sldId id=\"{number}\" r:id=\"rIdSlide{number}\"/>"
+        ));
+        presentation_rels.push_str(&format!(
+            "<Relationship Id=\"rIdSlide{number}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide{number}.xml\"/>"
+        ));
+
+        let escaped = xml_escape_pptx(title);
+        let slide_xml = format!(
+            "<?xml version=\"1.0\"?><p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{escaped}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+        );
+        slide_parts.push((
+            format!("ppt/slides/slide{number}.xml"),
+            slide_xml.into_bytes(),
+        ));
+    }
+
+    let mut parts: Vec<(String, Vec<u8>)> = vec![
+        (
+            "[Content_Types].xml".to_string(),
+            format!(
+                "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/>{content_overrides}</Types>"
+            )
+            .into_bytes(),
+        ),
+        (
+            "_rels/.rels".to_string(),
+            "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"ppt/presentation.xml\"/></Relationships>".to_string().into_bytes(),
+        ),
+        (
+            "ppt/presentation.xml".to_string(),
+            format!(
+                "<?xml version=\"1.0\"?><p:presentation xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:sldIdLst>{presentation_refs}</p:sldIdLst></p:presentation>"
+            )
+            .into_bytes(),
+        ),
+        (
+            "ppt/_rels/presentation.xml.rels".to_string(),
+            format!(
+                "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{presentation_rels}</Relationships>"
+            )
+            .into_bytes(),
+        ),
+    ];
+    parts.extend(slide_parts);
+
+    let mut archive = PackageArchive::new();
+    for (path, data) in &parts {
+        archive
+            .add(path, data.clone())
+            .map_err(|e| format!("pptx export failed: {e}"))?;
+    }
+    archive
+        .to_bytes()
+        .map_err(|e| format!("pptx export failed: {e}"))
+}
+
+/// Escapes XML attribute/text characters for presentation parts.
+fn xml_escape_pptx(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 pub fn extract_pptx_titles(pptx_bytes: &[u8]) -> Result<Vec<String>, String> {
     let archive = PackageArchive::from_bytes(pptx_bytes)
         .map_err(|err| format!("unreadable pptx archive: {err}"))?;
@@ -3432,5 +3511,35 @@ Hiring Plan
             extract_pptx_titles(&double_escape).unwrap(),
             vec!["&amp; stays literal"]
         );
+    }
+
+    #[test]
+    fn pptx_export_round_trips_through_import() {
+        let titles = vec![
+            "Opening".to_string(),
+            "Split & <Escaped>".to_string(),
+            String::new(),
+            "Closing".to_string(),
+        ];
+
+        let pptx = export_pptx_from_titles(&titles).expect("export succeeds");
+        let extracted = extract_pptx_titles(&pptx).expect("re-import succeeds");
+
+        // Titles round-trip in order, including empty slides and entities.
+        assert_eq!(extracted, titles);
+
+        // Numeric slide ordering holds beyond nine parts.
+        let many: Vec<String> = (0..12).map(|i| format!("Slide {i}")).collect();
+        let big = export_pptx_from_titles(&many).unwrap();
+        assert_eq!(extract_pptx_titles(&big).unwrap(), many);
+
+        // Deck skeletons build from the export.
+        let deck = slides_from_pptx(&pptx).unwrap();
+        assert_eq!(deck.len(), 4);
+        assert_eq!(deck[2].title, "");
+
+        // Empty decks are rejected by the importer's no-parts rule.
+        let none = export_pptx_from_titles(&[]).unwrap();
+        assert!(extract_pptx_titles(&none).is_err());
     }
 }

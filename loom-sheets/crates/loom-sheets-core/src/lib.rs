@@ -3416,6 +3416,111 @@ const MAX_XLSX_DENSE_CELLS: usize = 10_000_000;
 /// namespaces are not interpreted. An out-of-range or malformed shared-string index
 /// errs, as does a used range beyond [`MAX_XLSX_DENSE_CELLS`]. A sheet with no cells
 /// yields an empty grid.
+/// Exports a dense grid into a minimal valid `.xlsx` archive. Every cell is written as a
+/// shared-string reference (numbers export in their display form); empty strings become
+/// cell gaps and fully empty rows are dropped (absence is not content). Round-trips
+/// losslessly through [`extract_xlsx_grid`] for all populated rows.
+pub fn export_xlsx_from_grid(grid: &[Vec<String>]) -> Result<Vec<u8>, String> {
+    use std::collections::BTreeMap;
+
+    let mut table: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut ordered: Vec<&str> = Vec::new();
+    for row in grid {
+        for value in row {
+            if !value.is_empty() && !table.contains_key(value.as_str()) {
+                table.insert(value, ordered.len());
+                ordered.push(value);
+            }
+        }
+    }
+
+    let column_letters = |mut col: usize| -> String {
+        let mut letters = String::new();
+        loop {
+            letters.insert(0, (b'A' + (col % 26) as u8) as char);
+            if col < 26 {
+                break;
+            }
+            col = col / 26 - 1;
+        }
+        letters
+    };
+
+    let mut sheet_rows = String::new();
+    for (row_index_zero_based, row) in grid.iter().enumerate() {
+        if row.iter().all(|value| value.is_empty()) {
+            continue;
+        }
+        let row_index = row_index_zero_based;
+        let mut cells = String::new();
+        for (col_index, value) in row.iter().enumerate() {
+            if value.is_empty() {
+                continue;
+            }
+            let index = table[value.as_str()];
+            let letter = column_letters(col_index);
+            let row_no = row_index + 1;
+            cells.push_str(&format!(
+                "<c r=\"{letter}{row_no}\" t=\"s\"><v>{index}</v></c>"
+            ));
+        }
+        let row_no = row_index + 1;
+        sheet_rows.push_str(&format!("<row r=\"{row_no}\">{cells}</row>"));
+    }
+
+    let shared_strings: String = ordered
+        .iter()
+        .map(|s| {
+            format!(
+                "<si><t xml:space=\"preserve\">{}</t></si>",
+                xml_escape_cell(s)
+            )
+        })
+        .collect();
+
+    let content_types = "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/></Types>";
+    let root_rels = "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>";
+    let workbook = "<?xml version=\"1.0\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
+    let workbook_rels = "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>";
+    let shared_xml = format!(
+        "<?xml version=\"1.0\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{0}\" uniqueCount=\"{0}\">{shared_strings}</sst>",
+        ordered.len()
+    );
+    let sheet_xml = format!(
+        "<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>{sheet_rows}</sheetData></worksheet>"
+    );
+
+    let parts: Vec<(&str, Vec<u8>)> = vec![
+        ("[Content_Types].xml", content_types.as_bytes().to_vec()),
+        ("_rels/.rels", root_rels.as_bytes().to_vec()),
+        ("xl/workbook.xml", workbook.as_bytes().to_vec()),
+        (
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels.as_bytes().to_vec(),
+        ),
+        ("xl/sharedStrings.xml", shared_xml.into_bytes()),
+        ("xl/worksheets/sheet1.xml", sheet_xml.into_bytes()),
+    ];
+
+    let mut archive = PackageArchive::new();
+    for (path, data) in &parts {
+        archive
+            .add(path, data.clone())
+            .map_err(|e| format!("xlsx export failed: {e}"))?;
+    }
+    archive
+        .to_bytes()
+        .map_err(|e| format!("xlsx export failed: {e}"))
+}
+
+/// Escapes XML text content for spreadsheet cells.
+fn xml_escape_cell(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 pub fn extract_xlsx_grid(xlsx_bytes: &[u8]) -> Result<Vec<Vec<String>>, String> {
     let archive = PackageArchive::from_bytes(xlsx_bytes)
         .map_err(|e| format!("unreadable xlsx archive: {e}"))?;
@@ -5040,5 +5145,43 @@ mod tests {
         assert_eq!(grid[0][1], "7");
         assert_eq!(grid[3][4], "x");
         assert_eq!(grid[0][0], "");
+    }
+
+    #[test]
+    fn xlsx_export_round_trips_through_import() {
+        let grid = vec![
+            vec!["Region".to_string(), "Q1".to_string(), "Q2".to_string()],
+            vec!["East".to_string(), "10".to_string(), String::new()],
+            vec![
+                "West & Co <Ltd>".to_string(),
+                String::new(),
+                "TRUE".to_string(),
+            ],
+            vec![String::new(); 3],
+        ];
+
+        let xlsx = export_xlsx_from_grid(&grid).expect("export succeeds");
+        let parsed = extract_xlsx_grid(&xlsx).expect("re-import succeeds");
+
+        // Populated rows round-trip exactly; the trailing all-empty row is dropped
+        // (documented rule: absence is not content).
+        assert_eq!(parsed.len(), grid.len() - 1);
+        for (expected, actual) in grid.iter().zip(parsed.iter()) {
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(parsed[2][0], "West & Co <Ltd>");
+        assert_eq!(parsed[1][2], "");
+        assert_eq!(parsed[0], grid[0]);
+
+        // Repeated strings share one shared-string entry (structural check).
+        let archive = PackageArchive::from_bytes(&xlsx).unwrap();
+        let sst = std::str::from_utf8(archive.get("xl/sharedStrings.xml").unwrap()).unwrap();
+        let unique = sst.matches("<si>").count();
+        let referenced = sst.matches("count=\"").count() > 0;
+        assert!(referenced && unique == 7, "unique={unique}");
+
+        // Empty grids export an empty sheet and import back empty.
+        let empty = export_xlsx_from_grid(&[]).unwrap();
+        assert!(extract_xlsx_grid(&empty).unwrap().is_empty());
     }
 }
