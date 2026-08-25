@@ -1,258 +1,309 @@
-# Loom Design Tokens — canonical source of truth
+# Loom Design Tokens — canonical primitive/semantic token source
 #
-# Single source for every design value in the Loom suite. DESIGN_TOKENS.md
-# and THEMING.md mirror this file exactly; a token generator (loom-core)
-# emits Slint constants from it. The TOML wins on any conflict.
-#
-# Conventions:
-#   * Name format: category-role-scale (see docs/adrs/ADR-0001-design-tokens.md).
-#   * Palette tokens vary by theme; all other tokens are theme-independent.
-#   * Order is deterministic: categories in the order below, values sorted
-#     ascending. Do not reorder.
-#   * Colors are sRGB hex, the canonical values for the software renderer.
+# `contracts/desktop-ui.toml` defines component geometry, shell composition,
+# responsive behavior, forbidden patterns, and acceptance policy. This file
+# defines the values consumed by themes/components. Runtime theme values must
+# match this file exactly; CI must reject drift.
 
-format-version = "1.0.0"
+format-version = "2.0.0"
 
 [meta]
 name = "loom-design-tokens"
-version = "1.0.0"
-owner = "design-system-lead"
-generated-by = "loom-design-bible"
-reference = "DESIGN_TOKENS.md, THEMING.md"
+version = "2.0.0"
+owner = "loom-ui"
+geometry-contract = "../contracts/desktop-ui.toml"
 
-# ============================================================================
-# 1. Palette
-# ============================================================================
-
-# Light theme — default. Warm neutrals; terracotta accent.
+# ---------------------------------------------------------------------------
+# Palette. Neutral chrome keeps visual weight on user content; terracotta is
+# reserved for focus, selection, primary actions, and meaningful emphasis.
+# ---------------------------------------------------------------------------
 [palette.light]
-canvas          = "#FAF9F7"  # window and canvas ground
-surface         = "#FFFFFF"  # raised: panels, dialogs, controls, cards
-surface-sunken  = "#F1EFEA"  # wells, inputs, media beds, disabled regions
-ink             = "#26221C"  # primary text (15.0:1 on canvas)
-ink-secondary   = "#5C564C"  # secondary text, captions (6.9:1 on canvas)
-accent          = "#B4552D"  # warm terracotta: selection, focus, primary actions
-accent-ink      = "#FFFFFF"  # text/icons on accent fills (4.9:1 on accent)
-accent-hover    = "#C9643A"  # accent hover/pressed state
-success         = "#3E6B4F"  # success signals (6.1:1 on white)
-warning         = "#A8681E"  # warning signals (4.5:1 on white)
-danger          = "#A43424"  # errors, destructive actions (6.8:1 on white)
-info            = "#3B5E7A"  # informational signals (6.9:1 on white)
+canvas = "#F2F2F4"
+canvas-alt = "#EAEAEC"
+surface = "#F7F7F8"
+surface-raised = "#FFFFFF"
+surface-sunken = "#EDEDEF"
+chrome = "#F6F6F7"
+panel = "#F4F4F5"
+overlay = "#FFFFFFF2"
+ink = "#1D1D1F"
+ink-secondary = "#6E6E73"
+ink-disabled = "#A1A1A6"
+accent = "#B4552D"
+accent-hover = "#C9643A"
+accent-pressed = "#994724"
+accent-ink = "#FFFFFF"
+success = "#347A50"
+warning = "#966019"
+danger = "#A43424"
+info = "#356D9A"
+border = "#D1D1D6"
+border-strong = "#B8B8BD"
+focus = "#B4552D"
+selection = "#B4552D"
+selection-soft = "#F1DDD4"
+danger-surface = "#F6DEDA"
+shadow = "#0000001F"
+scrim = "#00000066"
+grid-major = "#C7C7CC"
+grid-minor = "#E1E1E4"
+paper = "#FFFFFF"
+paper-ink = "#1D1D1F"
+paper-muted = "#6E6E73"
+paper-line = "#D1D1D6"
+media-stage = "#0B0B0C"
+content-accent = "#B4552D"
+content-accent-soft = "#F1DDD4"
+content-cool = "#3E6680"
+content-cool-soft = "#E5EDF2"
+meter-good = "#4FA96D"
+meter-warn = "#D49A3F"
 
-# Dark theme — low-light and media review.
 [palette.dark]
-canvas          = "#201D19"
-surface         = "#2A2621"
-surface-sunken  = "#171512"
-ink             = "#F2EFE9"  # (14.6:1 on canvas)
-ink-secondary   = "#B9B2A6"  # (8.0:1 on canvas)
-accent          = "#D97A4A"  # lightened for dark ground
-accent-ink      = "#1F1710"  # derived: >= 4.5:1 on accent (5.7:1)
-accent-hover    = "#E88B5E"  # derived: hover step of accent
-success         = "#7FA98C"
-warning         = "#D5A14A"
-danger          = "#E0654F"
-info            = "#7FA3C4"
+canvas = "#1C1C1E"
+canvas-alt = "#18181A"
+surface = "#242426"
+surface-raised = "#2C2C2E"
+surface-sunken = "#151517"
+chrome = "#242426"
+panel = "#202022"
+overlay = "#2C2C2EF2"
+ink = "#F5F5F7"
+ink-secondary = "#AEAEB2"
+ink-disabled = "#6C6C70"
+accent = "#D97A4A"
+accent-hover = "#E88B5E"
+accent-pressed = "#BE653B"
+accent-ink = "#1C1C1E"
+success = "#66BB84"
+warning = "#DFA553"
+danger = "#E27065"
+info = "#78A9D2"
+border = "#3A3A3C"
+border-strong = "#545458"
+focus = "#E88B5E"
+selection = "#D97A4A"
+selection-soft = "#3D2B22"
+danger-surface = "#3D2322"
+shadow = "#00000080"
+scrim = "#00000099"
+grid-major = "#48484A"
+grid-minor = "#303033"
+paper = "#F8F8FA"
+paper-ink = "#1D1D1F"
+paper-muted = "#6E6E73"
+paper-line = "#D1D1D6"
+media-stage = "#070708"
+content-accent = "#D97A4A"
+content-accent-soft = "#3D2B22"
+content-cool = "#6F9AB4"
+content-cool-soft = "#22313A"
+meter-good = "#58B478"
+meter-warn = "#E0A24B"
 
-# High-contrast theme — accessibility: true black/white, doubled-contrast
-# accents (all >= 7:1 against pure black). Surfaces collapse to black;
-# separation is carried by white borders and text tiers.
 [palette.high-contrast]
-canvas          = "#000000"
-surface         = "#000000"
-surface-sunken  = "#000000"
-ink             = "#FFFFFF"
-ink-secondary   = "#E6E6E6"  # tertiary labels only (16.8:1)
-accent          = "#FF8A3C"  # (8.95:1 on black; 2.35:1 on white — use on black)
-accent-ink      = "#000000"
-accent-hover    = "#FFA266"
-success         = "#4ADE80"
-warning         = "#FFC24D"
-danger          = "#FF6B5E"
-info            = "#6CB2FF"
+canvas = "#000000"
+canvas-alt = "#000000"
+surface = "#000000"
+surface-raised = "#161616"
+surface-sunken = "#000000"
+chrome = "#000000"
+panel = "#000000"
+overlay = "#000000F2"
+ink = "#FFFFFF"
+ink-secondary = "#FFFFFF"
+ink-disabled = "#C8C8C8"
+accent = "#FFD84D"
+accent-hover = "#FFE681"
+accent-pressed = "#E7BD25"
+accent-ink = "#000000"
+success = "#80FF80"
+warning = "#FFBD52"
+danger = "#FF7164"
+info = "#80CCFF"
+border = "#FFFFFF"
+border-strong = "#FFFFFF"
+focus = "#FFD84D"
+selection = "#FFD84D"
+selection-soft = "#3A3200"
+danger-surface = "#3D0D09"
+shadow = "#000000"
+scrim = "#000000CC"
+grid-major = "#FFFFFF"
+grid-minor = "#777777"
+paper = "#FFFFFF"
+paper-ink = "#000000"
+paper-muted = "#222222"
+paper-line = "#000000"
+media-stage = "#000000"
+content-accent = "#FFD84D"
+content-accent-soft = "#FFFFFF"
+content-cool = "#003CFF"
+content-cool-soft = "#FFFFFF"
+meter-good = "#00FF66"
+meter-warn = "#FFD84D"
 
-# ============================================================================
-# 1b. Semantic token names (category-role-scale)
-# ============================================================================
-# Maps every semantic token name to its value source. The generator and CI
-# resolve names through this table; DESIGN_TOKENS.md and THEMING.md must
-# reference only names listed here. "palette.{theme}.<role>" resolves to the
-# same role key in each of palette.light, palette.dark, palette.high-contrast.
+# ---------------------------------------------------------------------------
+# Semantic token mapping. Components consume semantic roles; apps consume
+# components. Application UI may consume content-specific paper/media/grid
+# roles but may not create local palette values.
+# ---------------------------------------------------------------------------
 [semantic]
-color-surface-canvas  = { source = "palette.{theme}.canvas" }
-color-surface-raised  = { source = "palette.{theme}.surface" }
-color-surface-sunken  = { source = "palette.{theme}.surface-sunken" }
-color-ink-primary     = { source = "palette.{theme}.ink" }
-color-ink-secondary   = { source = "palette.{theme}.ink-secondary" }
-color-accent-default  = { source = "palette.{theme}.accent" }
-color-accent-ink      = { source = "palette.{theme}.accent-ink" }
-color-accent-hover    = { source = "palette.{theme}.accent-hover" }
-color-status-success  = { source = "palette.{theme}.success" }
-color-status-warning  = { source = "palette.{theme}.warning" }
-color-status-danger   = { source = "palette.{theme}.danger" }
-color-status-info     = { source = "palette.{theme}.info" }
-space-2               = { source = "spacing.scale[0]" }
-space-4               = { source = "spacing.scale[1]" }
-space-6               = { source = "spacing.scale[2]" }
-space-8               = { source = "spacing.scale[3]" }
-space-12              = { source = "spacing.scale[4]" }
-space-16              = { source = "spacing.scale[5]" }
-space-20              = { source = "spacing.scale[6]" }
-space-24              = { source = "spacing.scale[7]" }
-space-32              = { source = "spacing.scale[8]" }
-space-40              = { source = "spacing.scale[9]" }
-space-48              = { source = "spacing.scale[10]" }
-space-64              = { source = "spacing.scale[11]" }
-radius-2              = { source = "radius.scale[0]" }
-radius-4              = { source = "radius.scale[1]" }
-radius-6              = { source = "radius.scale[2]" }
-radius-8              = { source = "radius.scale[3]" }
-radius-12             = { source = "radius.scale[4]" }
-border-width-hairline = { source = "border.hairline" }
-border-width-default  = { source = "border.default" }
-border-width-strong   = { source = "border.strong" }
-type-size-11          = { source = "type.size.\"11\"" }
-type-size-12          = { source = "type.size.\"12\"" }
-type-size-13          = { source = "type.size.\"13\"" }
-type-size-14          = { source = "type.size.\"14\"" }
-type-size-16          = { source = "type.size.\"16\"" }
-type-size-20          = { source = "type.size.\"20\"" }
-type-size-24          = { source = "type.size.\"24\"" }
-type-size-32          = { source = "type.size.\"32\"" }
-type-size-40          = { source = "type.size.\"40\"" }
-type-leading-compact  = { source = "type.leading.compact" }
-type-leading-body     = { source = "type.leading.body" }
-type-leading-relaxed  = { source = "type.leading.relaxed" }
-type-weight-regular   = { source = "type.weight.regular" }
-type-weight-medium    = { source = "type.weight.medium" }
-type-weight-semibold  = { source = "type.weight.semibold" }
-type-weight-bold      = { source = "type.weight.bold" }
-motion-duration-instant    = { source = "motion.duration.instant" }
-motion-duration-fast       = { source = "motion.duration.fast" }
-motion-duration-standard   = { source = "motion.duration.standard" }
-motion-duration-deliberate = { source = "motion.duration.deliberate" }
-motion-duration-slow       = { source = "motion.duration.slow" }
-motion-easing-out-quad = { source = "motion.easing.out-quad" }
-motion-easing-in-out   = { source = "motion.easing.in-out" }
-motion-easing-out-back = { source = "motion.easing.out-back" }
-shadow-none            = { source = "shadow.none" }
-shadow-popover         = { source = "shadow.popover" }
-icon-viewbox-20        = { source = "icon.viewbox" }
-icon-stroke-width-15   = { source = "icon.stroke-width", note = "1.5px encoded as 15 (x10)" }
-icon-corner-radius-2   = { source = "icon.corner-radius" }
+color-surface-canvas = { source = "palette.{theme}.canvas" }
+color-surface-canvas-alt = { source = "palette.{theme}.canvas-alt" }
+color-surface-default = { source = "palette.{theme}.surface" }
+color-surface-raised = { source = "palette.{theme}.surface-raised" }
+color-surface-sunken = { source = "palette.{theme}.surface-sunken" }
+color-surface-chrome = { source = "palette.{theme}.chrome" }
+color-surface-panel = { source = "palette.{theme}.panel" }
+color-surface-overlay = { source = "palette.{theme}.overlay" }
+color-ink-primary = { source = "palette.{theme}.ink" }
+color-ink-secondary = { source = "palette.{theme}.ink-secondary" }
+color-ink-disabled = { source = "palette.{theme}.ink-disabled" }
+color-accent-default = { source = "palette.{theme}.accent" }
+color-accent-hover = { source = "palette.{theme}.accent-hover" }
+color-accent-pressed = { source = "palette.{theme}.accent-pressed" }
+color-accent-ink = { source = "palette.{theme}.accent-ink" }
+color-status-success = { source = "palette.{theme}.success" }
+color-status-warning = { source = "palette.{theme}.warning" }
+color-status-danger = { source = "palette.{theme}.danger" }
+color-status-info = { source = "palette.{theme}.info" }
+color-border-default = { source = "palette.{theme}.border" }
+color-border-strong = { source = "palette.{theme}.border-strong" }
+color-focus = { source = "palette.{theme}.focus" }
+color-selection = { source = "palette.{theme}.selection" }
+color-selection-soft = { source = "palette.{theme}.selection-soft" }
+color-scrim = { source = "palette.{theme}.scrim" }
+color-grid-major = { source = "palette.{theme}.grid-major" }
+color-grid-minor = { source = "palette.{theme}.grid-minor" }
+color-paper = { source = "palette.{theme}.paper" }
+color-paper-ink = { source = "palette.{theme}.paper-ink" }
+color-media-stage = { source = "palette.{theme}.media-stage" }
 
-# ============================================================================
-# 2. Spacing scale (px) — the only allowed spacing values
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Spacing — only these values are permitted for chrome/component spacing.
+# ---------------------------------------------------------------------------
 [spacing]
 units = "px"
 scale = [2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
 
-# ============================================================================
-# 3. Corner radii (px)
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Radii. Flush work panels use 0; rounded values are for controls, content
+# cards with semantic grouping, menus/popovers, and modal surfaces.
+# ---------------------------------------------------------------------------
 [radius]
 units = "px"
-scale = [2, 4, 6, 8, 12]
+scale = [2, 4, 6, 8, 10, 12]
+control = 6
+compact = 4
+popover = 10
 
-# ============================================================================
-# 4. Border widths (px)
-# ============================================================================
 [border]
 units = "px"
-hairline = 1   # dividers inside panels
-default  = 1   # control outlines, panel edges
-strong   = 2   # focus rings (equals space-2), emphasized grouping
+hairline = 1
+default = 1
+strong = 2
 
-# ============================================================================
-# 5. Type
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Typography — logical px follow desktop point-like sizing. UI labels use 13;
+# user document/media content is independent of this scale.
+# ---------------------------------------------------------------------------
 [type.size]
 units = "px"
-"11" = 11   # caption
-"12" = 12   # small labels
-"13" = 13   # ui labels
-"14" = 14   # body (default)
-"16" = 16   # body-large
-"20" = 20   # subtitle
-"24" = 24   # heading
-"32" = 32   # display-1
-"40" = 40   # display-2
+"10" = 10
+"11" = 11
+"12" = 12
+"13" = 13
+"14" = 14
+"16" = 16
+"20" = 20
+"24" = 24
+"32" = 32
+"40" = 40
 
-[type.leading]  # ratio of line height to font size
-compact = 1.4   # headings, dense UI
-body    = 1.45  # default body
-relaxed = 1.5   # long-form text, small sizes
+[type.role]
+micro = 10
+caption = 11
+small = 12
+ui = 13
+body = 14
+subtitle = 16
+heading = 20
+large-heading = 24
+display = 32
+
+[type.leading]
+ui = 18
+caption = 15
+body = 20
+compact-ratio = 1.35
+body-ratio = 1.43
+relaxed-ratio = 1.5
 
 [type.weight]
 regular = 400
-medium  = 500
+medium = 500
 semibold = 600
-bold    = 700
+bold = 700
 
 [type.family]
-ui    = "Noto Sans"                        # default sans for all chrome
-serif = "Noto Serif"                       # document content option
-mono  = "Noto Sans Mono"                   # code, logs, timecode where required
-fallback = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans KR",
-            "Noto Sans Arabic", "Noto Sans Devanagari", "DejaVu Sans",
-            "sans-serif"]
+ui = "Noto Sans"
+serif = "Noto Serif"
+mono = "Noto Sans Mono"
+fallback = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans KR", "Noto Sans Arabic", "Noto Sans Devanagari", "DejaVu Sans", "sans-serif"]
 
-# ============================================================================
-# 6. Motion
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Component/chrome metrics. Duplicated in desktop-ui.toml intentionally and
+# checked by CI: token value and behavioral contract are allowed to diverge
+# only in a reviewed migration commit that updates both.
+# ---------------------------------------------------------------------------
+[metrics]
+control-height = 28
+compact-control-height = 24
+prominent-control-height = 32
+toolbar-height = 40
+header-height = 40
+panel-header-height = 32
+status-height = 28
+icon-standard = 16
+icon-small = 14
+focus-ring = 2
+focus-offset = 2
+
 [motion.duration]
 units = "ms"
-instant    = 0     # hover onset, press, focus change
-fast       = 120   # tiny state changes, reduced-motion opacity cap
-standard   = 200   # default for all panel/selection/state transitions
-deliberate = 320   # larger surfaces: sidebar, dialog, reorder settle
-slow       = 500   # emphasis only; never per-frame UI
+instant = 0
+fast = 120
+standard = 180
+deliberate = 220
+slow = 250
 
-[motion.easing]    # cubic-bezier control points (x1, y1, x2, y2)
-out-quad = [0.33, 1.00, 0.68, 1.00]   # default entrance/state change
-in-out   = [0.65, 0.00, 0.35, 1.00]   # value transitions, cross-fades
-out-back = [0.34, 1.56, 0.64, 1.00]   # spring-ish arrival, sparingly
+[motion.easing]
+out-quad = [0.33, 1.00, 0.68, 1.00]
+in-out = [0.65, 0.00, 0.35, 1.00]
 
-# ============================================================================
-# 7. Shadows
-# ============================================================================
 [shadow]
-# Flat by principle: depth via color steps. shadow-none is the default for
-# every surface; shadow-popover is the ONLY allowed shadow.
-none       = "none"
-popover    = "0 1px 3px rgba(38, 34, 28, 0.12)"   # popovers, menus, tooltips
+none = "none"
+popover = "0 1px 3px rgba(0, 0, 0, 0.18)"
 
-# ============================================================================
-# 8. Icon grid
-# ============================================================================
 [icon]
 units = "px"
-viewbox      = 20    # all icons authored on the 20px grid
-stroke-width = 1.5   # uniform stroke weight (token: icon-stroke-width-15)
-corner-radius = 2    # corner radius for shapes with corners
-align-guides = [4, 8, 12, 16]  # optical alignment guides at 20/40/60/80% marks
+viewbox = 20
+render-standard = 16
+render-large = 20
+stroke-width = 1.5
+corner-radius = 2
+align-guides = [4, 8, 12, 16]
 
-# ============================================================================
-# 9. Data visualization
-# ============================================================================
 [data-viz]
-# Categorical series palette; valid in light and dark. Max 6 series, then
-# group. Never pair with color-status-* in the same chart; disambiguate by
-# pattern/label, never color alone.
-categorical = ["#B4552D",  # terracotta (suite accent; series 1)
-               "#2E7D6E",  # teal
-               "#C98A2E",  # ochre (>= 3:1 as large marks only)
-               "#4A6B8A",  # slate
-               "#7A5C8A",  # plum
-               "#6B8A4A"]  # moss
+categorical = ["#B4552D", "#2E7D6E", "#C98A2E", "#4A6B8A", "#7A5C8A", "#6B8A4A"]
 
-# ============================================================================
-# 10. Accessibility floors (informational; enforced by CI)
-# ============================================================================
 [a11y]
-contrast-body   = 4.5   # body text, captions (WCAG 2.x ratio)
-contrast-large  = 3.0   # large text (>= 24px or >= 18.66px bold)
-contrast-ui     = 3.0   # UI components, iconographic indicators
-target-minimum  = 44    # minimum pointer target, logical px
-text-scale      = [1.0, 1.25, 1.5]
+contrast-body = 4.5
+contrast-large = 3.0
+contrast-ui = 3.0
+# Loom is a pointer/keyboard desktop suite. 28 px is the default target; 20 px
+# is permitted only for specialized dense affordances with a >=28 px hit area.
+target-default = 28
+target-visual-minimum = 20
+text-scale = [1.0, 1.25, 1.5, 2.0]
