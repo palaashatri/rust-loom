@@ -1,7 +1,8 @@
 import {
-    AppHeader, WorkspaceToolbar, ToolButton, IconButton, StatusBar, MetricChip,
-    CommandPalette, CommandPaletteItem
-} from "components.slint";
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, ToolkitStatusBar
+} from "toolkit.slint";
+import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
@@ -20,8 +21,8 @@ component FormulaBarField inherits Rectangle {
     background: Theme.palette().surface-raised;
 
     text-input := TextInput {
-        x: 11px;
-        width: parent.width - 22px;
+        x: 8px;
+        width: parent.width - 16px;
         single-line: true;
         vertical-alignment: center;
         font-size: Theme.tokens.typography.body;
@@ -38,8 +39,8 @@ component FormulaBarField inherits Rectangle {
     }
 
     if root.value == "" : Text {
-        x: 11px;
-        width: parent.width - 22px;
+        x: 8px;
+        width: parent.width - 16px;
         vertical-alignment: center;
         font-size: Theme.tokens.typography.body;
         color: Theme.palette().ink-disabled;
@@ -52,10 +53,11 @@ component FormulaBarField inherits Rectangle {
 
 export component SheetsApp inherits Window {
     title: "Loom Sheets";
-    min-width: 900px;
-    min-height: 680px;
+    min-width: 1024px;
+    min-height: 720px;
     background: Theme.palette().canvas;
-    property <bool> compact-layout: root.width < 1120px;
+    property <bool> show-quick-formulas: root.width >= 1320px;
+    property <bool> labeled-export: root.width >= 1180px;
 
     in property <string> sheet-name: "Untitled";
     in property <string> status-left: "";
@@ -71,9 +73,6 @@ export component SheetsApp inherits Window {
     in property <string> selection-formula: "";
     property <string> formula-edit-buffer: "";
     in property <string> selection-value: "";
-
-    // Only the persisted single-sheet workbook is surfaced until
-    // multi-sheet storage and cell-format persistence exist in the engine.
     in-out property <string> formula-feedback: "Ready";
 
     callback new-sheet;
@@ -138,137 +137,148 @@ export component SheetsApp inherits Window {
         }
 
         VerticalLayout {
-        spacing: 0px;
+            spacing: 0px;
+            padding: 0px;
 
-        AppHeader {
-            app-name: "Loom Sheets";
-            document-title: root.sheet-name;
-            icon: "table";
-            context: root.rows.length + " × " + root.cols.length + " visible grid";
-            state-text: "Calculated locally";
-            state-tone: 0;
-        }
+            DocumentChrome {
+                title: root.sheet-name;
+            }
 
-        WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New"; clicked => { root.new-sheet(); } }
-            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-sheet(); } }
-            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-sheet(); } }
-            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-sheet(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            IconButton { icon: "undo"; label: "Undo"; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo"; clicked => { root.redo(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { text: "SUM"; clicked => { root.quick-formula("SUM"); } }
-            ToolButton { text: root.compact-layout ? "AVG" : "AVERAGE"; clicked => { root.quick-formula("AVERAGE"); } }
-            ToolButton { text: "COUNT"; clicked => { root.quick-formula("COUNT"); } }
-            ToolButton { text: "MIN"; clicked => { root.quick-formula("MIN"); } }
-            ToolButton { text: "MAX"; clicked => { root.quick-formula("MAX"); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            MetricChip { label: root.selected-cell; value: root.selection-value == "" ? "Empty" : root.selection-value; }
-            ToolButton { icon: "export"; text: root.compact-layout ? "CSV" : "Export CSV"; clicked => { root.export-csv(); } }
-        }
+            Toolbar {
+                ToolbarGroup {
+                    ToolbarIconButton { icon: "new"; label: "New sheet"; clicked => { root.new-sheet(); } }
+                    ToolbarIconButton { icon: "open"; label: "Open workbook"; clicked => { root.open-sheet(); } }
+                    ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-sheet(); } }
+                    ToolbarIconButton { icon: "undo"; label: "Undo"; clicked => { root.undo(); } }
+                    ToolbarIconButton { icon: "redo"; label: "Redo"; clicked => { root.redo(); } }
+                }
 
-        Rectangle {
-            height: 44px;
-            background: Theme.palette().panel;
-            border-width: 0px;
+                if root.show-quick-formulas : ToolbarGroup {
+                    leading-separation: true;
+                    ToolbarButton { label: "SUM"; clicked => { root.quick-formula("SUM"); } }
+                    ToolbarButton { label: "AVERAGE"; clicked => { root.quick-formula("AVERAGE"); } }
+                    ToolbarButton { label: "COUNT"; clicked => { root.quick-formula("COUNT"); } }
+                    ToolbarButton { label: "MIN"; clicked => { root.quick-formula("MIN"); } }
+                    ToolbarButton { label: "MAX"; clicked => { root.quick-formula("MAX"); } }
+                }
 
-            HorizontalLayout {
-                spacing: 8px;
-                padding-left: 10px;
-                padding-right: 10px;
-                cross-axis-alignment: center;
+                ToolbarSpacer { }
 
-                Rectangle {
-                    width: root.compact-layout ? 52px : 62px;
-                    height: Theme.tokens.metrics.control-height;
-                    border-radius: Theme.tokens.metrics.radius-medium;
-                    border-width: 1px;
-                    border-color: Theme.palette().border;
-                    background: Theme.palette().surface-sunken;
+                ToolbarGroup {
                     Text {
-                        text: root.selected-cell;
-                        font-weight: 700;
+                        text: root.selected-cell + (root.selection-value == "" ? "" : "  " + root.selection-value);
+                        max-width: 220px;
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 500;
+                        color: Theme.palette().ink-secondary;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if root.labeled-export : ToolbarButton {
+                        icon: "export";
+                        label: "Export CSV";
+                        primary: true;
+                        clicked => { root.export-csv(); }
+                    }
+                    if !root.labeled-export : ToolbarIconButton {
+                        icon: "export";
+                        label: "Export CSV";
+                        clicked => { root.export-csv(); }
+                    }
+                }
+            }
+
+            Rectangle {
+                min-height: 32px;
+                max-height: 32px;
+                background: Theme.palette().chrome;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 2px;
+                    padding-bottom: 2px;
+                    cross-axis-alignment: center;
+
+                    Rectangle {
+                        width: 56px;
+                        height: Theme.tokens.metrics.control-height;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        background: Theme.palette().surface-sunken;
+                        Text {
+                            text: root.selected-cell;
+                            font-weight: 600;
+                            font-size: Theme.tokens.typography.body;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Text {
+                        text: "fx";
+                        width: 24px;
                         font-size: Theme.tokens.typography.body;
-                        color: Theme.palette().ink;
+                        font-weight: 600;
+                        color: Theme.palette().ink-secondary;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
-                }
 
-                Text {
-                    text: "fx";
-                    width: 24px;
-                    font-size: Theme.tokens.typography.body-large;
-                    font-weight: 700;
-                    color: Theme.palette().accent;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+                    FormulaBarField {
+                        label: "Selected cell formula or value";
+                        placeholder: "Enter a value or formula";
+                        value <=> root.formula-edit-buffer;
+                        horizontal-stretch: 1;
+                        committed(text) => { root.commit-selected-cell(text); }
+                        cancelled => {
+                            root.formula-edit-buffer = root.selection-formula;
+                            root.cancel-selected-cell();
+                        }
+                    }
 
-                FormulaBarField {
-                    label: "Selected cell formula or value";
-                    placeholder: "Enter a value or formula";
-                    value <=> root.formula-edit-buffer;
-                    horizontal-stretch: 1;
-                    committed(text) => { root.commit-selected-cell(text); }
-                    cancelled => {
-                        root.formula-edit-buffer = root.selection-formula;
-                        root.cancel-selected-cell();
+                    ToolbarIconButton {
+                        icon: "check";
+                        label: "Commit formula";
+                        clicked => { root.commit-selected-cell(root.formula-edit-buffer); }
+                    }
+                    ToolbarIconButton {
+                        icon: "close";
+                        label: "Cancel editing";
+                        clicked => {
+                            root.formula-edit-buffer = root.selection-formula;
+                            root.cancel-selected-cell();
+                        }
                     }
                 }
 
-                IconButton {
-                    icon: "check";
-                    label: "Commit formula";
-                    clicked => { root.commit-selected-cell(root.formula-edit-buffer); }
-                }
-                IconButton {
-                    icon: "close";
-                    label: "Cancel editing";
-                    clicked => {
-                        root.formula-edit-buffer = root.selection-formula;
-                        root.cancel-selected-cell();
-                    }
-                }
-
-                if root.formula-feedback != "" : Text {
-                    text: root.formula-feedback;
-                    max-width: root.compact-layout ? 96px : 180px;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                    vertical-alignment: center;
-                    overflow: elide;
+                Rectangle {
+                    x: 0px;
+                    y: parent.height - 1px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.palette().border;
                 }
             }
-        }
-
-        Rectangle { height: 1px; background: Theme.palette().border; }
-
-        Rectangle {
-            vertical-stretch: 1;
-            background: Theme.palette().canvas-alt;
 
             Rectangle {
-                x: 10px;
-                y: 10px;
-                width: parent.width - 20px;
-                height: parent.height - 20px;
-                border-radius: 11px;
-                border-width: 1px;
-                border-color: Theme.palette().border;
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
                 background: Theme.palette().surface;
                 clip: true;
 
                 GridLayout {
-                    max-width: 10000px;
-                    max-height: 10000px;
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
                     spacing: 0px;
 
                     Row {
                         Rectangle {
-                            min-width: 46px;
-                            max-width: 46px;
+                            width: 44px;
                             min-height: 30px;
                             max-height: 30px;
                             background: Theme.palette().chrome;
@@ -276,24 +286,18 @@ export component SheetsApp inherits Window {
                             border-color: Theme.palette().border;
                         }
                         for c in root.cols : Rectangle {
-                            min-width: root.compact-layout ? 104px : 132px;
-                            max-width: root.compact-layout ? 104px : 132px;
+                            min-width: 96px;
+                            horizontal-stretch: 1;
                             min-height: 30px;
                             max-height: 30px;
-                            background: c == root.selected-col
-                                ? Theme.palette().selection-soft
-                                : Theme.palette().chrome;
+                            background: c == root.selected-col ? Theme.palette().selection-soft : Theme.palette().chrome;
                             border-width: 1px;
-                            border-color: c == root.selected-col
-                                ? Theme.palette().accent
-                                : Theme.palette().border;
+                            border-color: c == root.selected-col ? Theme.palette().accent : Theme.palette().border;
                             Text {
                                 text: root.column-headers[c];
                                 font-size: Theme.tokens.typography.caption;
-                                font-weight: c == root.selected-col ? 700 : 600;
-                                color: c == root.selected-col
-                                    ? Theme.palette().accent
-                                    : Theme.palette().ink-secondary;
+                                font-weight: c == root.selected-col ? 600 : 500;
+                                color: c == root.selected-col ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -302,47 +306,36 @@ export component SheetsApp inherits Window {
 
                     for r in root.rows : Row {
                         Rectangle {
-                            min-width: 46px;
-                            max-width: 46px;
+                            width: 44px;
                             min-height: 32px;
                             max-height: 32px;
-                            background: r == root.selected-row
-                                ? Theme.palette().selection-soft
-                                : Theme.palette().chrome;
+                            background: r == root.selected-row ? Theme.palette().selection-soft : Theme.palette().chrome;
                             border-width: 1px;
-                            border-color: r == root.selected-row
-                                ? Theme.palette().accent
-                                : Theme.palette().border;
+                            border-color: r == root.selected-row ? Theme.palette().accent : Theme.palette().border;
                             Text {
                                 text: root.row-headers[r];
                                 font-size: Theme.tokens.typography.caption;
-                                font-weight: r == root.selected-row ? 700 : 500;
-                                color: r == root.selected-row
-                                    ? Theme.palette().accent
-                                    : Theme.palette().ink-secondary;
+                                font-weight: r == root.selected-row ? 600 : 500;
+                                color: r == root.selected-row ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
                         }
 
                         for c in root.cols : Rectangle {
-                            min-width: root.compact-layout ? 104px : 132px;
-                            max-width: root.compact-layout ? 104px : 132px;
+                            min-width: 96px;
+                            horizontal-stretch: 1;
                             min-height: 32px;
                             max-height: 32px;
                             border-width: r == root.selected-row && c == root.selected-col ? 2px : 1px;
-                            border-color: r == root.selected-row && c == root.selected-col
-                                ? Theme.palette().accent
-                                : Theme.palette().grid-minor;
+                            border-color: r == root.selected-row && c == root.selected-col ? Theme.palette().accent : Theme.palette().grid-minor;
                             background: r == root.selected-row && c == root.selected-col
                                 ? Theme.palette().selection-soft
-                                : cell-touch.has-hover
-                                    ? Theme.palette().surface-raised
-                                    : Theme.palette().surface;
+                                : cell-touch.has-hover ? Theme.palette().surface-raised : Theme.palette().surface;
 
                             Text {
-                                x: 7px;
-                                width: parent.width - 14px;
+                                x: 8px;
+                                width: parent.width - 16px;
                                 text: root.cells[r * root.cols.length + c];
                                 font-size: Theme.tokens.typography.body;
                                 font-weight: r == root.selected-row && c == root.selected-col ? 600 : 400;
@@ -352,9 +345,7 @@ export component SheetsApp inherits Window {
                                 overflow: elide;
                             }
 
-                            cell-touch := TouchArea {
-                                clicked => { root.cell-clicked(r, c); }
-                            }
+                            cell-touch := TouchArea { clicked => { root.cell-clicked(r, c); } }
                             accessible-role: button;
                             accessible-label: "Cell " + root.column-headers[c] + root.row-headers[r]
                                 + ", " + root.cells[r * root.cols.length + c];
@@ -362,83 +353,76 @@ export component SheetsApp inherits Window {
                     }
                 }
             }
-        }
 
-        Rectangle {
-            height: 36px;
-            background: Theme.palette().panel;
-            border-width: 0px;
-
-            HorizontalLayout {
-                spacing: 6px;
-                padding-left: 10px;
-                padding-right: 10px;
-                cross-axis-alignment: center;
+            Rectangle {
+                min-height: 30px;
+                max-height: 30px;
+                background: Theme.palette().chrome;
 
                 Rectangle {
-                    height: 27px;
-                    min-width: 112px;
-                    border-radius: 8px;
-                    border-width: 1px;
-                    border-color: Theme.palette().accent;
-                    background: Theme.palette().selection-soft;
-                    Text {
-                        text: root.sheet-name;
-                        x: 12px;
-                        width: parent.width - 24px;
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
+                    y: 0px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.palette().border;
                 }
 
-                Text {
-                    text: "Single-sheet package";
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-disabled;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 1px;
+                    padding-bottom: 1px;
+                    cross-axis-alignment: center;
+
+                    Rectangle {
+                        height: 28px;
+                        min-width: 112px;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        border-width: 1px;
+                        border-color: Theme.palette().accent;
+                        background: Theme.palette().selection-soft;
+                        Text {
+                            text: root.sheet-name;
+                            x: 10px;
+                            width: parent.width - 20px;
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
                 }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+
+            ToolkitStatusBar {
+                leading: root.status-left + (root.formula-feedback == "" ? "" : "  •  " + root.formula-feedback);
+                trailing: root.status-right;
             }
         }
 
-        StatusBar {
-            status-left: root.status-left;
-            status-right: root.status-right;
+        palette := CommandPalette {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            open: root.palette-open;
+            commands: root.palette-commands;
+            query: root.palette-query;
+            selected: root.palette-selected;
+            command-invoked(idx) => { root.palette-invoked(idx); }
+            query-changed(q) => {
+                root.palette-query = q;
+                root.palette-query-changed(q);
+            }
+            move-selection(delta) => { root.palette-move(delta); }
+            key-text(text) => { root.palette-key-text(text); }
+            backspace => { root.palette-backspace(); }
+            close-requested => {
+                root.palette-open = false;
+                app-focus.focus();
+            }
         }
-    }
-
-    palette := CommandPalette {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        open: root.palette-open;
-        commands: root.palette-commands;
-        query: root.palette-query;
-        selected: root.palette-selected;
-        command-invoked(idx) => {
-            root.palette-invoked(idx);
-        }
-        query-changed(q) => {
-            root.palette-query = q;
-            root.palette-query-changed(q);
-        }
-        move-selection(delta) => {
-            root.palette-move(delta);
-        }
-        key-text(text) => {
-            root.palette-key-text(text);
-        }
-        backspace => {
-            root.palette-backspace();
-        }
-        close-requested => {
-            root.palette-open = false;
-            app-focus.focus();
-        }
-    }
     }
 }
