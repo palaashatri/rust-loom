@@ -1,99 +1,58 @@
-// Loom UI smoke fixture: one window exercising every shared component,
-// used by the crate visual test and as the integration reference for
-// applications. Not part of the library API.
+// Loom UI deterministic component reference surface.
 //
-// The window chrome is built inline (mirroring LoomWindow) because a
-// component that inherits Window cannot be nested inside another window.
-//
-// Layout notes (verified empirically against Slint 1.17.1):
-// * Toolbar/bottom rows use `height: parent.height` plus
-//   `cross-axis-alignment: center` on the inner layout; `alignment` on the
-//   main axis forces the inner layout to fill its parent and centers the
-//   whole group, which breaks the stretch spacer.
-// * A stretch row must not wrap its children in a plain Rectangle: a plain
-//   item's default `height: 100%` resolves circularly inside a layout and
-//   pins the row to its preferred height. Place container components
-//   directly in the row and declare `vertical-stretch: 1` on every child
-//   that should share the cross-axis space.
-// * A stretched child (component, Rectangle, or a nested layout such as
-//   GridLayout) is capped at its preferred size unless it also declares a
-//   large explicit `max-width` / `max-height` (10000px is the house
-//   convention). Without it the layout never grows into the shared space.
+// This is not a marketing screenshot. It is the executable specimen for the
+// shared desktop toolkit: common controls, selected/disabled states, panel
+// hierarchy, toolbar density, and status chrome are rendered together from
+// the same components applications consume. Human-approved captures of this
+// surface become regression evidence; agents must not bless arbitrary output
+// by replacing a baseline without review.
 
-import { ToolButton, IconButton, PrimaryButton, SearchField, SegmentedControl, Field, EmptyState, Panel, InspectorSection, StatusBar, CommandPalette } from "components.slint";
-import { Icon } from "icons.slint";
+import {
+    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton,
+    SearchField, SegmentedControl, Field, Slider, Switch, TabControl,
+    EmptyState, Panel, InspectorSection, StatusBar, StatusPill,
+    CommandPalette, CommandPaletteItem
+} from "components.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
 export component SmokeWindow inherits Window {
-    title: "Loom UI Smoke";
-    width: 900px;
-    height: 600px;
+    title: "Loom UI Reference";
+    width: 1280px;
+    height: 800px;
+    min-width: 1024px;
+    min-height: 720px;
     background: Theme.palette().canvas;
+
+    in-out property <[CommandPaletteItem]> palette-commands: [
+        { id: "document.new", label: "New Document", shortcut: "Ctrl+N", enabled: true },
+        { id: "document.open", label: "Open…", shortcut: "Ctrl+O", enabled: true },
+        { id: "document.save", label: "Save", shortcut: "Ctrl+S", enabled: true },
+        { id: "document.export", label: "Export…", shortcut: "Ctrl+E", enabled: false },
+    ];
 
     VerticalLayout {
         spacing: 0px;
         padding: 0px;
 
-        Rectangle {
-            min-height: 41px;
-            max-height: 41px;
-            background: Theme.palette().surface;
-
-            VerticalLayout {
-                spacing: 0px;
-                padding: 0px;
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    padding-left: 6px;
-                    padding-right: 12px;
-                    Icon {
-                        icon: "layers";
-                        size: 18px;
-                        tint: Theme.palette().accent;
-                        y: (parent.height - 18px) / 2;
-                    }
-                    Text {
-                        text: "Loom Writer";
-                        font-size: Theme.tokens.typography.title;
-                        font-weight: 700;
-                        color: Theme.palette().ink;
-                        vertical-alignment: center;
-                    }
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                }
-
-                Rectangle {
-                    height: 1px;
-                    background: Theme.palette().border;
-                }
-            }
+        AppHeader {
+            app-name: "Loom";
+            document-title: "Component Reference";
+            icon: "layers";
+            context: "";
+            state-text: "Local";
+            state-tone: 0;
         }
 
-        Rectangle {
-            min-height: 40px;
-            max-height: 40px;
-            background: Theme.palette().surface-sunken;
-
-            HorizontalLayout {
-                height: parent.height;
-                cross-axis-alignment: center;
-                spacing: 6px;
-                padding-left: 8px;
-                padding-right: 8px;
-
-                ToolButton { icon: "new"; text: "New"; }
-                ToolButton { icon: "open"; text: "Open"; }
-                ToolButton { icon: "save"; text: "Save"; }
-                ToolButton { icon: "undo"; }
-                ToolButton { icon: "redo"; }
-
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                SearchField { placeholder: "Search document"; }
-                IconButton { icon: "settings"; label: "Settings"; }
-            }
+        WorkspaceToolbar {
+            ToolButton { icon: "new"; text: "New"; }
+            ToolButton { icon: "open"; text: "Open"; }
+            ToolButton { icon: "save"; text: "Save"; }
+            IconButton { icon: "undo"; label: "Undo"; enabled: false; }
+            IconButton { icon: "redo"; label: "Redo"; enabled: false; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            SearchField { placeholder: "Search"; width: 180px; }
+            ToolButton { icon: "export"; text: "Export"; }
         }
 
         HorizontalLayout {
@@ -102,22 +61,33 @@ export component SmokeWindow inherits Window {
             vertical-stretch: 1;
 
             Panel {
-                width: 240px;
+                width: 256px;
                 vertical-stretch: 1;
-                header: "Inspector";
+                header: "Controls";
 
                 VerticalLayout {
-                    spacing: 8px;
+                    spacing: 12px;
                     padding-left: 12px;
                     padding-right: 12px;
                     padding-top: 12px;
                     padding-bottom: 12px;
 
-                    InspectorSection { title: "Character"; }
-                    Field { label: "Font size"; value: "12 pt"; }
-                    SegmentedControl { items: ["Normal", "Bold", "Italic"]; }
-                    InspectorSection { title: "Paragraph"; }
-                    Field { label: "Spacing"; value: "1.5 lines"; }
+                    InspectorSection { title: "Buttons"; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        ToolButton { icon: "bold"; text: "Bold"; checked: true; }
+                        IconButton { icon: "italic"; label: "Italic"; }
+                        IconButton { icon: "underline"; label: "Underline"; enabled: false; }
+                    }
+                    PrimaryButton { text: "Primary Action"; }
+
+                    InspectorSection { title: "Fields"; }
+                    Field { label: "Name"; placeholder: "Untitled"; value: "Project 01"; }
+                    SearchField { placeholder: "Filter items"; }
+
+                    InspectorSection { title: "Choice"; }
+                    SegmentedControl { label: "Alignment"; items: ["Left", "Center", "Right"]; current: 0; }
+                    Switch { text: "Snap to guides"; checked: true; }
                 }
             }
 
@@ -126,54 +96,86 @@ export component SmokeWindow inherits Window {
                 vertical-stretch: 1;
                 background: Theme.palette().canvas;
 
-                EmptyState {
-                    width: 100%;
-                    height: 100%;
-                    icon: "document";
-                    title: "No document open";
-                    description: "Create a new document or open an existing one to start writing.";
-                    action-text: "New Document";
+                VerticalLayout {
+                    spacing: 12px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 16px;
+                    padding-bottom: 16px;
+
+                    Panel {
+                        header: "Workspace hierarchy";
+                        vertical-stretch: 1;
+                        EmptyState {
+                            width: 100%;
+                            height: 100%;
+                            icon: "document";
+                            title: "Content owns the window";
+                            description: "Chrome is compact and neutral. Actions remain readable, panels are subordinate, and the primary work surface expands first.";
+                            action-text: "Create Document";
+                        }
+                    }
+
+                    Panel {
+                        min-height: 118px;
+                        max-height: 118px;
+                        header: "Navigation and state";
+                        VerticalLayout {
+                            spacing: 8px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            TabControl { tabs: ["Document", "Comments", "History"]; current-tab: 0; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                StatusPill { text: "Selected"; tone: 1; }
+                                StatusPill { text: "Ready"; tone: 2; }
+                                StatusPill { text: "Warning"; tone: 3; }
+                                StatusPill { text: "Error"; tone: 4; }
+                            }
+                        }
+                    }
                 }
             }
-        }
 
-        Rectangle {
-            min-height: 32px;
-            max-height: 32px;
-            background: Theme.palette().surface;
+            Panel {
+                width: 292px;
+                vertical-stretch: 1;
+                header: "Inspector";
 
-            HorizontalLayout {
-                height: parent.height;
-                cross-axis-alignment: center;
-                spacing: 6px;
-                padding-left: 8px;
-                padding-right: 8px;
+                VerticalLayout {
+                    spacing: 12px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
 
-                PrimaryButton { text: "Export PDF"; }
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-                Text {
-                    text: "Saved automatically";
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-disabled;
-                    vertical-alignment: center;
+                    InspectorSection { title: "Transform"; }
+                    Field { label: "X"; value: "120 px"; }
+                    Field { label: "Y"; value: "84 px"; }
+
+                    InspectorSection { title: "Appearance"; }
+                    Slider { label: "Opacity"; value: 72; minimum: 0; maximum: 100; }
+                    SegmentedControl { label: "Blend mode"; items: ["Normal", "Multiply", "Screen"]; current: 0; }
+
+                    InspectorSection { title: "Accessibility"; }
+                    Field { label: "Description"; placeholder: "Describe selection"; }
+                    Switch { text: "Include in reading order"; checked: true; }
                 }
             }
         }
 
         StatusBar {
-            status-left: "Paragraph 12 of 34";
-            status-right: "Zoom 100%";
+            status-left: "Reference fixture • deterministic software renderer";
+            status-right: "1280 × 800";
         }
     }
 
     CommandPalette {
-        open: true;
-        selected: 1;
-        query: "exp";
-        commands: [
-            { id: "export.pdf", label: "Export PDF", shortcut: "Ctrl+P", enabled: true },
-            { id: "export.epub", label: "Export EPUB", shortcut: "", enabled: true },
-            { id: "document.search", label: "Search document", shortcut: "Ctrl+F", enabled: false },
-        ];
+        open: false;
+        selected: 0;
+        query: "";
+        commands: root.palette-commands;
     }
 }
