@@ -6,6 +6,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ["writer", "sheets", "present", "photo", "motion", "video", "studio", "encode"]
+TOOLKIT_MIGRATED_APPS = {"writer"}
 failures = []
 emoji = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF]")
 slint_reference = re.compile(r'(?:from\s+|export\s+\{[^}]+\}\s+from\s+)["\']([^"\']+\.slint)["\']')
@@ -65,11 +66,7 @@ def application_ui_text(app: str) -> str:
 
 
 def audit_mechanical_design_contract() -> None:
-    """Enforce the source-of-truth chain before inspecting application UI.
-
-    This intentionally does not use image understanding. Geometry and palette
-    values are read from TOML and must agree with the runtime Slint theme.
-    """
+    """Enforce the source-of-truth chain before inspecting application UI."""
     contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
     tokens_path = ROOT / "loom-design-bible/tokens/loom.toml"
     standard_path = ROOT / "loom-design-bible/MECHANICAL_DESIGN_STANDARD.md"
@@ -91,9 +88,6 @@ def audit_mechanical_design_contract() -> None:
     if tokens.get("format-version") != "2.0.0":
         failures.append("design system: unsupported design token version")
 
-    # Token and behavior contracts deliberately duplicate palette values so
-    # drift can be caught mechanically. The contract wins only after both are
-    # changed in the same reviewed migration.
     for theme_name in ("light", "dark", "high-contrast"):
         contract_palette = contract.get("palette", {}).get(theme_name, {})
         token_palette = tokens.get("palette", {}).get(theme_name, {})
@@ -140,7 +134,40 @@ def audit_mechanical_design_contract() -> None:
         failures.append("design system: default desktop pointer target must remain 28px")
 
 
+def audit_toolkit_source() -> None:
+    path = ROOT / "loom-core/crates/loom-ui/ui/toolkit.slint"
+    if not path.is_file():
+        failures.append("shared UI: missing toolkit.slint migration target")
+        return
+    text = path.read_text(encoding="utf-8")
+    required = (
+        "DocumentChrome",
+        "Toolbar",
+        "ToolbarGroup",
+        "ToolbarButton",
+        "ToolbarIconButton",
+        "SidebarSurface",
+        "InspectorSurface",
+        "SectionHeader",
+        "ToolkitStatusBar",
+        "CanvasSurface",
+    )
+    for component in required:
+        if f"export component {component}" not in text:
+            failures.append(f"shared toolkit: missing {component}")
+    for component in ("ToolbarButton", "ToolbarIconButton"):
+        start = text.find(f"export component {component}")
+        end = text.find("\nexport component ", start + 1)
+        block = text[start:] if end < 0 else text[start:end]
+        for token in ("accessible-role", "accessible-label", "accessible-action-default", "key-pressed(event)"):
+            if token not in block:
+                failures.append(f"shared toolkit: {component} missing {token}")
+    if re.search(r"#[0-9a-fA-F]{6,8}", text):
+        failures.append("shared toolkit: hard-coded color outside semantic theme")
+
+
 audit_mechanical_design_contract()
+audit_toolkit_source()
 
 application_texts: dict[str, str] = {}
 for app in APPS:
@@ -151,15 +178,39 @@ for app in APPS:
         failures.append(f"{app}: missing Rust application entry point")
         continue
     main_text = main.read_text(encoding="utf-8")
+
+    if app in TOOLKIT_MIGRATED_APPS:
+        for token, message in (
+            ('from "toolkit.slint"', "does not import the desktop toolkit"),
+            ("DocumentChrome {", "missing toolkit DocumentChrome"),
+            ("Toolbar {", "missing toolkit Toolbar"),
+            ("ToolbarGroup {", "missing deterministic toolbar grouping"),
+            ("ToolkitStatusBar {", "missing toolkit status bar"),
+        ):
+            if token not in text:
+                failures.append(f"{app}: {message}")
+        for forbidden, message in (
+            ("AppHeader {", "still uses legacy AppHeader after toolkit migration"),
+            ("WorkspaceToolbar {", "still uses legacy WorkspaceToolbar after toolkit migration"),
+            ("StatusBar {", "still uses legacy StatusBar after toolkit migration"),
+        ):
+            if forbidden in text:
+                failures.append(f"{app}: {message}")
+    else:
+        for token, message in (
+            ("AppHeader {", "missing shared AppHeader"),
+            ("StatusBar {", "missing shared StatusBar"),
+            ("compact-layout", "missing compact desktop layout policy"),
+        ):
+            if token not in text:
+                failures.append(f"{app}: {message}")
+
     for token, message in (
-        ("AppHeader {", "missing shared AppHeader"),
-        ("StatusBar {", "missing shared StatusBar"),
         ("Theme.palette()", "bypasses semantic palette"),
         ("min-width:", "missing minimum responsive width"),
         ("min-height:", "missing minimum responsive height"),
         ("horizontal-stretch", "missing horizontal adaptive layout"),
         ("vertical-stretch", "missing vertical adaptive layout"),
-        ("compact-layout", "missing compact desktop layout policy"),
     ):
         if token not in text:
             failures.append(f"{app}: {message}")
