@@ -1,17 +1,17 @@
 // Loom UI deterministic component reference surface.
 //
-// This is not a marketing screenshot. It is the executable specimen for the
-// shared desktop toolkit: common controls, selected/disabled states, panel
-// hierarchy, toolbar density, and status chrome are rendered together from
-// the same components applications consume. Human-approved captures of this
-// surface become regression evidence; agents must not bless arbitrary output
-// by replacing a baseline without review.
+// This is the executable specimen for the shared desktop toolkit. Human-
+// approved captures become regression evidence; an agent may not bless an
+// arbitrary changed screenshot merely by replacing a baseline.
 
 import {
-    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton,
-    SearchField, SegmentedControl, Field, Slider, Switch, TabControl,
-    EmptyState, Panel, InspectorSection, StatusBar, StatusPill,
-    CommandPalette, CommandPaletteItem
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer,
+    ToolbarButton, ToolbarIconButton, SidebarSurface, InspectorSurface,
+    SectionHeader, ToolkitStatusBar
+} from "toolkit.slint";
+import {
+    PrimaryButton, SearchField, SegmentedControl, Field, Slider, Switch,
+    TabControl, EmptyState, StatusPill, CommandPalette, CommandPaletteItem
 } from "components.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -35,24 +35,26 @@ export component SmokeWindow inherits Window {
         spacing: 0px;
         padding: 0px;
 
-        AppHeader {
-            app-name: "Loom";
-            document-title: "Component Reference";
-            icon: "layers";
-            context: "";
-            state-text: "Local";
-            state-tone: 0;
+        DocumentChrome {
+            title: "Component Reference";
+            trailing-text: "1280 × 800";
         }
 
-        WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New"; }
-            ToolButton { icon: "open"; text: "Open"; }
-            ToolButton { icon: "save"; text: "Save"; }
-            IconButton { icon: "undo"; label: "Undo"; enabled: false; }
-            IconButton { icon: "redo"; label: "Redo"; enabled: false; }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            SearchField { placeholder: "Search"; width: 180px; }
-            ToolButton { icon: "export"; text: "Export"; }
+        Toolbar {
+            ToolbarGroup {
+                ToolbarButton { icon: "new"; label: "New"; }
+                ToolbarButton { icon: "open"; label: "Open"; }
+                ToolbarIconButton { icon: "save"; label: "Save"; }
+            }
+            ToolbarGroup { leading-separation: true;
+                ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: false; }
+                ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: false; }
+            }
+            ToolbarSpacer { }
+            ToolbarGroup {
+                SearchField { placeholder: "Search"; width: 180px; }
+                ToolbarButton { icon: "export"; label: "Export"; primary: true; }
+            }
         }
 
         HorizontalLayout {
@@ -60,10 +62,9 @@ export component SmokeWindow inherits Window {
             padding: 0px;
             vertical-stretch: 1;
 
-            Panel {
-                width: 256px;
-                vertical-stretch: 1;
-                header: "Controls";
+            SidebarSurface {
+                width: 240px;
+                title: "Controls";
 
                 VerticalLayout {
                     spacing: 12px;
@@ -72,20 +73,20 @@ export component SmokeWindow inherits Window {
                     padding-top: 12px;
                     padding-bottom: 12px;
 
-                    InspectorSection { title: "Buttons"; }
+                    SectionHeader { title: "Buttons"; }
                     HorizontalLayout {
                         spacing: 6px;
-                        ToolButton { icon: "bold"; text: "Bold"; checked: true; }
-                        IconButton { icon: "italic"; label: "Italic"; }
-                        IconButton { icon: "underline"; label: "Underline"; enabled: false; }
+                        ToolbarButton { icon: "bold"; label: "Bold"; checked: true; }
+                        ToolbarIconButton { icon: "italic"; label: "Italic"; }
+                        ToolbarIconButton { icon: "underline"; label: "Underline"; enabled: false; }
                     }
                     PrimaryButton { text: "Primary Action"; }
 
-                    InspectorSection { title: "Fields"; }
+                    SectionHeader { title: "Fields"; }
                     Field { label: "Name"; placeholder: "Untitled"; value: "Project 01"; }
                     SearchField { placeholder: "Filter items"; }
 
-                    InspectorSection { title: "Choice"; }
+                    SectionHeader { title: "Choice"; }
                     SegmentedControl { label: "Alignment"; items: ["Left", "Center", "Right"]; current: 0; }
                     Switch { text: "Snap to guides"; checked: true; }
                 }
@@ -103,9 +104,13 @@ export component SmokeWindow inherits Window {
                     padding-top: 16px;
                     padding-bottom: 16px;
 
-                    Panel {
-                        header: "Workspace hierarchy";
+                    Rectangle {
                         vertical-stretch: 1;
+                        background: Theme.palette().surface-raised;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+
                         EmptyState {
                             width: 100%;
                             height: 100%;
@@ -116,10 +121,13 @@ export component SmokeWindow inherits Window {
                         }
                     }
 
-                    Panel {
-                        min-height: 118px;
-                        max-height: 118px;
-                        header: "Navigation and state";
+                    Rectangle {
+                        min-height: 112px;
+                        max-height: 112px;
+                        background: Theme.palette().surface-raised;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
                         VerticalLayout {
                             spacing: 8px;
                             padding-left: 12px;
@@ -139,10 +147,9 @@ export component SmokeWindow inherits Window {
                 }
             }
 
-            Panel {
-                width: 292px;
-                vertical-stretch: 1;
-                header: "Inspector";
+            InspectorSurface {
+                width: 280px;
+                title: "Inspector";
 
                 VerticalLayout {
                     spacing: 12px;
@@ -151,24 +158,24 @@ export component SmokeWindow inherits Window {
                     padding-top: 12px;
                     padding-bottom: 12px;
 
-                    InspectorSection { title: "Transform"; }
+                    SectionHeader { title: "Transform"; }
                     Field { label: "X"; value: "120 px"; }
                     Field { label: "Y"; value: "84 px"; }
 
-                    InspectorSection { title: "Appearance"; }
+                    SectionHeader { title: "Appearance"; }
                     Slider { label: "Opacity"; value: 72; minimum: 0; maximum: 100; }
                     SegmentedControl { label: "Blend mode"; items: ["Normal", "Multiply", "Screen"]; current: 0; }
 
-                    InspectorSection { title: "Accessibility"; }
+                    SectionHeader { title: "Accessibility"; }
                     Field { label: "Description"; placeholder: "Describe selection"; }
                     Switch { text: "Include in reading order"; checked: true; }
                 }
             }
         }
 
-        StatusBar {
-            status-left: "Reference fixture • deterministic software renderer";
-            status-right: "1280 × 800";
+        ToolkitStatusBar {
+            leading: "Reference fixture • deterministic software renderer";
+            trailing: "Ready";
         }
     }
 
