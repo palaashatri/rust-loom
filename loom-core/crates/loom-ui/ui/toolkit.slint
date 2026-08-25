@@ -12,7 +12,6 @@ export component DocumentChrome inherits Rectangle {
     in property <bool> modified: false;
     in property <string> trailing-text: "";
 
-    height: Theme.tokens.metrics.header-height;
     min-height: Theme.tokens.metrics.header-height;
     max-height: Theme.tokens.metrics.header-height;
     background: Theme.palette().chrome;
@@ -76,7 +75,8 @@ export component Toolbar inherits Rectangle {
 export component ToolbarGroup inherits Rectangle {
     in property <bool> leading-separation: false;
 
-    min-height: 28px;
+    min-height: Theme.tokens.metrics.control-height;
+    max-height: Theme.tokens.metrics.control-height;
     background: transparent;
 
     HorizontalLayout {
@@ -101,10 +101,6 @@ export component ToolbarIconButton inherits Rectangle {
 
     width: Theme.tokens.metrics.control-height;
     height: Theme.tokens.metrics.control-height;
-    min-width: Theme.tokens.metrics.control-height;
-    max-width: Theme.tokens.metrics.control-height;
-    min-height: Theme.tokens.metrics.control-height;
-    max-height: Theme.tokens.metrics.control-height;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus : checked ? Theme.palette().border-strong : transparent;
@@ -119,9 +115,9 @@ export component ToolbarIconButton inherits Rectangle {
     accessible-action-default => { if (enabled) { clicked(); } }
 
     Icon {
-        x: (root.width - 16px) / 2;
-        y: (root.height - 16px) / 2;
-        size: 16px;
+        x: (root.width - Theme.tokens.metrics.icon-size) / 2;
+        y: (root.height - Theme.tokens.metrics.icon-size) / 2;
+        size: Theme.tokens.metrics.icon-size;
         icon: root.icon;
         tint: !root.enabled ? Theme.palette().ink-disabled
             : root.checked ? Theme.palette().accent
@@ -157,9 +153,7 @@ export component ToolbarButton inherits Rectangle {
     callback clicked;
 
     height: Theme.tokens.metrics.control-height;
-    min-height: Theme.tokens.metrics.control-height;
-    max-height: Theme.tokens.metrics.control-height;
-    min-width: 28px;
+    min-width: Theme.tokens.metrics.control-height;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.primary || root.checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus
@@ -185,7 +179,7 @@ export component ToolbarButton inherits Rectangle {
         cross-axis-alignment: center;
 
         if root.icon != "" : Icon {
-            size: 16px;
+            size: Theme.tokens.metrics.icon-size;
             icon: root.icon;
             tint: !root.enabled ? Theme.palette().ink-disabled
                 : root.primary ? Theme.palette().accent-ink
@@ -321,8 +315,8 @@ export component ToolkitStatusBar inherits Rectangle {
     in property <string> leading: "";
     in property <string> trailing: "";
 
-    min-height: 28px;
-    max-height: 28px;
+    min-height: Theme.tokens.metrics.status-height;
+    max-height: Theme.tokens.metrics.status-height;
     background: Theme.palette().chrome;
 
     Rectangle {
