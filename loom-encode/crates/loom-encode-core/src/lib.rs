@@ -1796,6 +1796,103 @@ impl RetryPolicy {
     }
 }
 
+/// The suite application submitting a job into the Encode queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SourceApp {
+    #[default]
+    Writer,
+    Sheets,
+    Present,
+    Photo,
+    Motion,
+    Video,
+    Studio,
+}
+
+/// A typed job submitted into the encode queue by another Loom application. The submitter
+/// references its own project without mutating it; destination overrides live here only.
+///
+/// Validation contract: `label`, `preset_id`, and `project_path` must each be non-empty.
+/// This model deliberately carries no inline media channel, so an empty `project_path`
+/// is rejected rather than silently interpreted as "rendered bytes attached": an
+/// application holding rendered bytes instead of a saved project must stage them to a
+/// file first and submit that path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InboundJobRequest {
+    pub source_app: SourceApp,
+    /// Path of the exporting project document on disk. Must be non-empty; see the
+    /// validation contract above for rendered-byte submissions.
+    pub project_path: String,
+    /// Preset id requested as the starting point.
+    pub preset_id: String,
+    /// Optional destination directory overriding the preset default.
+    pub output_directory_override: Option<String>,
+    /// Human-facing label shown in the queue (e.g. "Sequence 3 — Final").
+    pub label: String,
+}
+
+impl InboundJobRequest {
+    /// Validates the request per the validation contract on the struct.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.label.trim().is_empty() {
+            return Err("label must not be empty".into());
+        }
+        if self.preset_id.trim().is_empty() {
+            return Err("preset id must not be empty".into());
+        }
+        if self.project_path.trim().is_empty() {
+            return Err(
+                "project path must not be empty; stage rendered bytes to a file and submit that path"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Resolves the effective output directory: an explicit override wins over the
+    /// preset's default directory.
+    pub fn effective_output_directory(&self, preset_default_directory: &str) -> String {
+        self.output_directory_override
+            .clone()
+            .unwrap_or_else(|| preset_default_directory.to_string())
+    }
+}
+
+/// Intake log entry recording a submission for queue audit history.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntakeRecord {
+    pub received_at_unix_ms: u64,
+    pub request: InboundJobRequest,
+    pub accepted: bool,
+    pub reason: String,
+}
+
+impl IntakeRecord {
+    /// Records a submission by running `validate_request` against it. Acceptance stores a
+    /// fixed confirmation reason and rejection stores the validator's error verbatim, so
+    /// the same request and validator always produce the same record.
+    pub fn new(
+        received_at_unix_ms: u64,
+        request: InboundJobRequest,
+        validate_request: impl Fn(&InboundJobRequest) -> Result<(), String>,
+    ) -> Self {
+        match validate_request(&request) {
+            Ok(()) => Self {
+                received_at_unix_ms,
+                request,
+                accepted: true,
+                reason: "accepted".to_string(),
+            },
+            Err(reason) => Self {
+                received_at_unix_ms,
+                request,
+                accepted: false,
+                reason,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2508,5 +2605,66 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn inbound_job_intake_and_overrides() {
+        let valid = InboundJobRequest {
+            source_app: SourceApp::Video,
+            project_path: "/projects/sequence_3.loomvid".into(),
+            preset_id: "h264-1080p".into(),
+            output_directory_override: None,
+            label: "Sequence 3 — Final".into(),
+        };
+        assert!(valid.validate().is_ok());
+
+        // Empty labels are rejected
+        let mut no_label = valid.clone();
+        no_label.label = String::new();
+        assert!(no_label.validate().is_err());
+        // So are empty preset ids and empty project paths
+        let mut no_preset = valid.clone();
+        no_preset.preset_id = "  ".into();
+        assert!(no_preset.validate().is_err());
+        let mut no_path = valid.clone();
+        no_path.project_path = String::new();
+        assert!(no_path.validate().is_err());
+
+        // An explicit override wins over the preset's default directory
+        let mut overridden = valid.clone();
+        overridden.output_directory_override = Some("/exports/final".into());
+        assert_eq!(
+            overridden.effective_output_directory("/exports/default"),
+            "/exports/final"
+        );
+
+        // Without an override the preset default applies
+        assert_eq!(
+            valid.effective_output_directory("/exports/default"),
+            "/exports/default"
+        );
+
+        // Intake records apply the supplied validator deterministically: a valid
+        // request is accepted with a fixed reason
+        let accepted = IntakeRecord::new(1_700_000_000_000, valid.clone(), |request| {
+            request.validate()
+        });
+        assert!(accepted.accepted);
+        assert_eq!(accepted.reason, "accepted");
+
+        // An invalid request is rejected with the validator's error verbatim
+        let mut rejected_request = valid.clone();
+        rejected_request.preset_id = String::new();
+        let rejected = IntakeRecord::new(
+            1_700_000_000_001,
+            rejected_request,
+            InboundJobRequest::validate,
+        );
+        assert!(!rejected.accepted);
+        assert_eq!(rejected.reason, "preset id must not be empty");
+
+        // Re-evaluating the same inputs yields an identical record
+        let replay = IntakeRecord::new(1_700_000_000_000, valid, |request| request.validate());
+        assert_eq!(replay, accepted);
     }
 }

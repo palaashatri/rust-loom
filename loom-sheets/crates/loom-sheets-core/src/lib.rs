@@ -3068,6 +3068,96 @@ impl ChartSpec {
     }
 }
 
+/// How a placed chart receives updates after being exported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ChartUpdatePolicy {
+    /// Snapshot only; host never refreshes.
+    #[default]
+    StaticSnapshot,
+    /// Host may re-read the bound range on demand.
+    RefreshOnOpen,
+}
+
+/// Describes one chart exported to a host document, keeping the source range addressable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChartPlacement {
+    pub chart_id: String,
+    pub sheet_name: String,
+    /// A1-style range feeding the series, e.g. "B2:D9".
+    pub source_range: String,
+    pub spec: ChartSpec,
+    pub update_policy: ChartUpdatePolicy,
+}
+
+/// True when `part` is one corner of an A1 range: ASCII column letters followed by ASCII
+/// row digits (case-insensitive), e.g. "B2" or "aa10".
+fn is_a1_corner(part: &str) -> bool {
+    let mut chars = part.chars();
+    let mut saw_letter = false;
+    let mut saw_digit = false;
+    for character in chars.by_ref() {
+        if character.is_ascii_alphabetic() {
+            if saw_digit {
+                return false;
+            }
+            saw_letter = true;
+        } else if character.is_ascii_digit() {
+            if !saw_letter {
+                return false;
+            }
+            saw_digit = true;
+        } else {
+            return false;
+        }
+    }
+    saw_letter && saw_digit
+}
+
+impl ChartPlacement {
+    /// Validates: non-empty chart id and sheet name; non-empty source range matching
+    /// loose A1 grammar of column letters + row digits on both sides of exactly one ':'
+    /// (e.g. B2:D9, case-insensitive). Err names the violated rule.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.chart_id.trim().is_empty() {
+            return Err("chart placement id must not be empty".to_string());
+        }
+        if self.sheet_name.trim().is_empty() {
+            return Err("chart placement sheet name must not be empty".to_string());
+        }
+        if self.source_range.is_empty() {
+            return Err("chart placement source range must not be empty".to_string());
+        }
+        let corners: Vec<&str> = self.source_range.split(':').collect();
+        if corners.len() != 2 {
+            return Err(format!(
+                "source range '{}' must contain exactly one ':' separator",
+                self.source_range
+            ));
+        }
+        for corner in corners {
+            if !is_a1_corner(corner) {
+                return Err(format!(
+                    "source range corner '{}' must be column letters followed by row digits",
+                    corner
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// True when two placements would collide in a host document: same chart_id, or
+    /// identical sheet_name+source_range while at least one side updates non-statically.
+    pub fn collides_with(&self, other: &ChartPlacement) -> bool {
+        if self.chart_id == other.chart_id {
+            return true;
+        }
+        self.sheet_name == other.sheet_name
+            && self.source_range == other.source_range
+            && (self.update_policy != ChartUpdatePolicy::StaticSnapshot
+                || other.update_policy != ChartUpdatePolicy::StaticSnapshot)
+    }
+}
+
 /// Solves f(x) = target for x within [lo, hi] using bisection. `f` must be continuous and
 /// change sign across the bracket after accounting for the target (f(lo)-target and
 /// f(hi)-target opposite signs). Iterates up to `max_iter` times or until the bracket width
@@ -4065,6 +4155,98 @@ mod tests {
             nan.validate().unwrap_err(),
             "series 'Revenue' contains a NaN value at index 1"
         );
+    }
+
+    #[test]
+    fn chart_placement_export_validation() {
+        let spec = ChartSpec {
+            kind: ChartKind::Bar,
+            title: "Quarterly".to_string(),
+            series: vec![ChartSeries {
+                name: "Revenue".to_string(),
+                categories: vec!["Q1".to_string(), "Q2".to_string()],
+                values: vec![1.0, 2.0],
+            }],
+        };
+        let placement = |chart_id: &str, range: &str, policy: ChartUpdatePolicy| ChartPlacement {
+            chart_id: chart_id.to_string(),
+            sheet_name: "Sales".to_string(),
+            source_range: range.to_string(),
+            spec: spec.clone(),
+            update_policy: policy,
+        };
+
+        // Valid ranges pass, including lowercase corners.
+        let valid = placement("chart-1", "B2:D9", ChartUpdatePolicy::RefreshOnOpen);
+        assert!(valid.validate().is_ok());
+        assert!(
+            placement("chart-1", "b2:d9", ChartUpdatePolicy::StaticSnapshot)
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            placement("chart-1", "AA10:AB11", ChartUpdatePolicy::StaticSnapshot)
+                .validate()
+                .is_ok()
+        );
+
+        // Bad range shapes name the violated rule.
+        let missing_separator = placement("chart-1", "B2", ChartUpdatePolicy::StaticSnapshot);
+        assert_eq!(
+            missing_separator.validate().unwrap_err(),
+            "source range 'B2' must contain exactly one ':' separator"
+        );
+
+        let digits_first = placement("chart-1", "2B:B2", ChartUpdatePolicy::StaticSnapshot);
+        assert_eq!(
+            digits_first.validate().unwrap_err(),
+            "source range corner '2B' must be column letters followed by row digits"
+        );
+
+        let open_ended = placement("chart-1", "B2:", ChartUpdatePolicy::StaticSnapshot);
+        assert_eq!(
+            open_ended.validate().unwrap_err(),
+            "source range corner '' must be column letters followed by row digits"
+        );
+
+        let letters_only = placement("chart-1", "B:D", ChartUpdatePolicy::StaticSnapshot);
+        assert!(letters_only.validate().is_err());
+
+        // Empty ids and sheet names are rejected.
+        assert!(placement("", "B2:D9", ChartUpdatePolicy::StaticSnapshot)
+            .validate()
+            .is_err());
+        let no_sheet = ChartPlacement {
+            chart_id: "chart-1".to_string(),
+            sheet_name: String::new(),
+            source_range: "B2:D9".to_string(),
+            spec: spec.clone(),
+            update_policy: ChartUpdatePolicy::StaticSnapshot,
+        };
+        assert!(no_sheet.validate().is_err());
+
+        // Collision rule 1: same chart_id collides regardless of range or policy.
+        let same_id = placement("chart-1", "C3:E8", ChartUpdatePolicy::StaticSnapshot);
+        assert!(valid.collides_with(&same_id));
+        assert!(same_id.collides_with(&valid));
+
+        // Collision rule 2: identical sheet+range with a non-static policy collides.
+        let refreshed = placement("chart-2", "B2:D9", ChartUpdatePolicy::RefreshOnOpen);
+        assert!(valid.collides_with(&refreshed));
+
+        // A static twin still collides because the refreshed side re-reads the shared range.
+        let static_twin = placement("chart-2", "B2:D9", ChartUpdatePolicy::StaticSnapshot);
+        assert!(valid.collides_with(&static_twin));
+
+        // Two pure snapshots sharing the range never fight over updates.
+        let static_pair_a = placement("chart-2", "B2:D9", ChartUpdatePolicy::StaticSnapshot);
+        let static_pair_b = placement("chart-3", "B2:D9", ChartUpdatePolicy::StaticSnapshot);
+        assert!(!static_pair_a.collides_with(&static_pair_b));
+
+        // Fully distinct placements never collide.
+        let distinct =
+            placement("chart-4", "F1:G4", ChartUpdatePolicy::RefreshOnOpen).collides_with(&valid);
+        assert!(!distinct);
     }
 
     #[test]

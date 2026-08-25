@@ -1546,6 +1546,108 @@ pub fn frames_required(source_frames: u32, speed: f64) -> Result<u32, String> {
     Ok((source_frames as f64 / speed).ceil() as u32)
 }
 
+/// Value types a template may safely expose to host applications.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TemplateValue {
+    Text(String),
+    Number(f64),
+    Color([u8; 4]),
+    Boolean(bool),
+}
+
+/// One exposed template parameter with optional clamping for numbers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TemplateParameter {
+    pub name: String,
+    pub default_value: TemplateValue,
+    /// Inclusive numeric bounds applied when the value is a Number; ignored otherwise.
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+
+impl TemplateParameter {
+    /// Creates an unbounded parameter, rejecting empty or whitespace-only names.
+    pub fn new(name: impl Into<String>, default_value: TemplateValue) -> Result<Self, String> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err("template parameter name must not be empty".into());
+        }
+        Ok(Self {
+            name,
+            default_value,
+            min: None,
+            max: None,
+        })
+    }
+
+    /// Clamps a candidate value to this parameter: Numbers clamp to [min,max] when present;
+    /// other types pass through unchanged. Empty names were rejected at construction via
+    /// `new` returning Err.
+    pub fn clamp_value(&self, value: TemplateValue) -> TemplateValue {
+        let TemplateValue::Number(number) = value else {
+            return value;
+        };
+        let mut clamped = number;
+        if let Some(min) = self.min {
+            clamped = clamped.max(min);
+        }
+        if let Some(max) = self.max {
+            clamped = clamped.min(max);
+        }
+        TemplateValue::Number(clamped)
+    }
+}
+
+/// A versioned template description exposing parameters to host applications such as
+/// Loom Video and Loom Present.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionTemplate {
+    pub template_id: String,
+    pub schema_version: u32,
+    pub parameters: Vec<TemplateParameter>,
+}
+
+impl MotionTemplate {
+    /// Applies a set of named values to the template's parameters: unknown names are skipped;
+    /// known names get clamped; returns the resolved list of (name, final value) in parameter
+    /// declaration order including defaults for unbound parameters.
+    pub fn resolve(&self, bindings: &[(String, TemplateValue)]) -> Vec<(String, TemplateValue)> {
+        self.parameters
+            .iter()
+            .map(|parameter| {
+                let value = match bindings.iter().find(|(name, _)| *name == parameter.name) {
+                    Some((_, bound)) => parameter.clamp_value(bound.clone()),
+                    None => parameter.default_value.clone(),
+                };
+                (parameter.name.clone(), value)
+            })
+            .collect()
+    }
+
+    /// True when every number-typed default respects its own bounds.
+    pub fn defaults_are_valid(&self) -> bool {
+        self.parameters.iter().all(|parameter| {
+            let TemplateValue::Number(value) = parameter.default_value else {
+                return true;
+            };
+            if !value.is_finite() {
+                return false;
+            }
+            if let Some(min) = parameter.min {
+                if value < min {
+                    return false;
+                }
+            }
+            if let Some(max) = parameter.max {
+                if value > max {
+                    return false;
+                }
+            }
+            true
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2342,5 +2444,56 @@ mod tests {
         let step1 = compose_parented_transform(&chain[0], &chain[1]);
         let step2 = compose_parented_transform(&step1, &chain[2]);
         assert_eq!(world, step2);
+    }
+
+    #[test]
+    fn template_parameter_resolution() {
+        let title = TemplateParameter::new("title", TemplateValue::Text("Lower Third".into()))
+            .expect("valid title parameter");
+        let mut opacity =
+            TemplateParameter::new("opacity", TemplateValue::Number(0.8)).expect("valid opacity");
+        opacity.min = Some(0.0);
+        opacity.max = Some(1.0);
+        let accent = TemplateParameter::new("accent", TemplateValue::Color([200, 40, 40, 255]))
+            .expect("valid accent parameter");
+
+        let template = MotionTemplate {
+            template_id: "lower-third-basic".into(),
+            schema_version: 1,
+            parameters: vec![title, opacity, accent],
+        };
+
+        assert!(template.defaults_are_valid());
+
+        let resolved = template.resolve(&[
+            ("opacity".to_string(), TemplateValue::Number(1.5)),
+            ("bogus".to_string(), TemplateValue::Boolean(true)),
+        ]);
+        assert_eq!(
+            resolved,
+            vec![
+                (
+                    "title".to_string(),
+                    TemplateValue::Text("Lower Third".to_string())
+                ),
+                ("opacity".to_string(), TemplateValue::Number(1.0)),
+                (
+                    "accent".to_string(),
+                    TemplateValue::Color([200, 40, 40, 255])
+                ),
+            ]
+        );
+
+        let mut invalid_default =
+            TemplateParameter::new("gain", TemplateValue::Number(5.0)).expect("valid gain");
+        invalid_default.max = Some(1.0);
+        let invalid_template = MotionTemplate {
+            template_id: "invalid-defaults".into(),
+            schema_version: 1,
+            parameters: vec![invalid_default],
+        };
+        assert!(!invalid_template.defaults_are_valid());
+
+        assert!(TemplateParameter::new("", TemplateValue::Number(0.0)).is_err());
     }
 }

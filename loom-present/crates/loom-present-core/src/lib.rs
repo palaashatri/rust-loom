@@ -1861,6 +1861,79 @@ pub fn fit_element_to_box(
     Ok(())
 }
 
+/// Lifecycle state of an externally linked asset placed on a slide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum LinkedAssetState {
+    /// Path resolves and content hash matches.
+    #[default]
+    Linked,
+    /// Path no longer resolves on disk.
+    Missing,
+    /// Path resolves but the content hash changed since placement.
+    Modified,
+    /// User replaced the file and confirmed the new link target.
+    Relinked,
+}
+
+/// An external asset referenced by a slide deck.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinkedAsset {
+    pub asset_id: String,
+    /// Absolute or relative path at link time.
+    pub path: String,
+    /// FNV-1a style 64-bit content hash captured when linked.
+    pub content_hash: u64,
+    pub state: LinkedAssetState,
+}
+
+impl LinkedAsset {
+    pub fn new(asset_id: impl Into<String>, path: impl Into<String>, content_hash: u64) -> Self {
+        Self {
+            asset_id: asset_id.into(),
+            path: path.into(),
+            content_hash,
+            state: LinkedAssetState::Linked,
+        }
+    }
+
+    /// Recomputes state against disk reality using injected predicates (`path_exists`,
+    /// `hash_for_path`). A missing path yields [`LinkedAssetState::Missing`]; a hash
+    /// mismatch yields [`LinkedAssetState::Modified`]; a match yields
+    /// [`LinkedAssetState::Linked`]. Never sets [`LinkedAssetState::Relinked`] — that
+    /// is user-confirmed via [`LinkedAsset::relink`].
+    pub fn refresh_state<F: Fn(&str) -> bool, G: Fn(&str) -> u64>(
+        &mut self,
+        path_exists: F,
+        hash_for_path: G,
+    ) {
+        if !path_exists(&self.path) {
+            self.state = LinkedAssetState::Missing;
+        } else if hash_for_path(&self.path) != self.content_hash {
+            self.state = LinkedAssetState::Modified;
+        } else {
+            self.state = LinkedAssetState::Linked;
+        }
+    }
+
+    /// Points the asset at a replacement path and captures its new hash, marking
+    /// the asset [`LinkedAssetState::Relinked`].
+    pub fn relink<G: Fn(&str) -> u64>(&mut self, new_path: &str, hash_for_path: G) {
+        self.path = new_path.to_string();
+        self.content_hash = hash_for_path(new_path);
+        self.state = LinkedAssetState::Relinked;
+    }
+
+    /// FNV-1a 64-bit over bytes — public so callers and tests share one implementation.
+    pub fn hash_bytes(bytes: &[u8]) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2706,5 +2779,53 @@ Hiring Plan
         let s2 = &solo_slide.elements[0];
         assert_eq!(s2.width, 640.0);
         assert_eq!(s2.height, 480.0);
+    }
+
+    #[test]
+    fn linked_asset_relink_lifecycle() {
+        let original_hash = LinkedAsset::hash_bytes(b"original image bytes");
+        let mut asset = LinkedAsset::new("asset-1", "/assets/hero.png", original_hash);
+        assert_eq!(asset.state, LinkedAssetState::Linked);
+
+        // Missing path => Missing.
+        asset.refresh_state(|_| false, |_| original_hash);
+        assert_eq!(asset.state, LinkedAssetState::Missing);
+
+        // Path resolves with the same hash => back to Linked.
+        asset.refresh_state(|_| true, |_| original_hash);
+        assert_eq!(asset.state, LinkedAssetState::Linked);
+
+        // Path resolves but content changed => Modified.
+        asset.refresh_state(|_| true, |_| original_hash ^ 0xff);
+        assert_eq!(asset.state, LinkedAssetState::Modified);
+
+        // Refresh never sets Relinked on its own.
+        asset.refresh_state(|_| true, |_| original_hash ^ 0xff);
+        assert_eq!(asset.state, LinkedAssetState::Modified);
+
+        // User relinks to a replacement path: path updated, rehashed, Relinked.
+        let replacement_hash = LinkedAsset::hash_bytes(b"replacement image bytes");
+        asset.relink("/assets/hero-v2.png", |_| replacement_hash);
+        assert_eq!(asset.path, "/assets/hero-v2.png");
+        assert_eq!(asset.content_hash, replacement_hash);
+        assert_eq!(asset.state, LinkedAssetState::Relinked);
+
+        // Refreshing after relink against matching disk state stays consistent.
+        asset.refresh_state(|p| p == "/assets/hero-v2.png", |_| replacement_hash);
+        assert_eq!(asset.state, LinkedAssetState::Linked);
+
+        // hash_bytes is deterministic and input-sensitive.
+        assert_eq!(
+            LinkedAsset::hash_bytes(b"lorem ipsum"),
+            LinkedAsset::hash_bytes(b"lorem ipsum")
+        );
+        assert_ne!(
+            LinkedAsset::hash_bytes(b"lorem ipsum"),
+            LinkedAsset::hash_bytes(b"lorem ipsum!")
+        );
+        assert_ne!(
+            LinkedAsset::hash_bytes(b""),
+            LinkedAsset::hash_bytes(b"\x00")
+        );
     }
 }

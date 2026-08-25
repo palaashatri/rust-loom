@@ -3101,6 +3101,115 @@ pub fn import_text_paragraphs(text: &str) -> Result<Vec<String>, String> {
     Ok(paragraphs)
 }
 
+/// Provenance of tabular data pasted into a Writer document.
+///
+/// When a Sheets range is pasted into Writer (Stage E cross-application
+/// workflow 5), the document records where the data came from so the paste can
+/// remain traceable and, optionally, refreshable. The pasted cell texts are
+/// snapshotted here rather than referenced live: the document stays
+/// local-first and renders identically without the source workbook present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedTableRegion {
+    /// Stable identifier for this region within the document.
+    pub region_id: String,
+    /// Source workbook path on disk.
+    pub source_workbook: String,
+    /// Source sheet name within the workbook.
+    pub source_sheet: String,
+    /// A1-style source range, e.g. "A1:C9".
+    pub source_range: String,
+    /// Snapshot of the pasted cell texts (row-major).
+    pub snapshot_rows: Vec<Vec<String>>,
+    /// Whether the host may refresh this region from the live workbook.
+    pub refreshable: bool,
+}
+
+impl LinkedTableRegion {
+    /// Validates the region's invariants.
+    ///
+    /// Rules, checked in order; the error names the violated rule:
+    ///
+    /// - `region_id`, `source_sheet`, and `source_range` are non-empty;
+    /// - `source_range` contains exactly one `':'` and both halves are
+    ///   non-empty (e.g. "A1:C9");
+    /// - every snapshot row has the same number of cells.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.region_id.is_empty() {
+            return Err("region id must not be empty".to_string());
+        }
+        if self.source_sheet.is_empty() {
+            return Err("source sheet must not be empty".to_string());
+        }
+        if self.source_range.is_empty() {
+            return Err("source range must not be empty".to_string());
+        }
+        let colons = self.source_range.matches(':').count();
+        if colons != 1 {
+            return Err(format!(
+                "source range must contain exactly one ':', found {}",
+                colons
+            ));
+        }
+        let mut halves = self.source_range.split(':');
+        let start = halves.next().unwrap_or_default();
+        let end = halves.next().unwrap_or_default();
+        if start.is_empty() || end.is_empty() {
+            return Err("both ends of the source range must be non-empty".to_string());
+        }
+        if let Some(width) = self.snapshot_rows.first().map(Vec::len) {
+            for (i, row) in self.snapshot_rows.iter().enumerate() {
+                if row.len() != width {
+                    return Err(format!(
+                        "snapshot row {} has {} cells but the table width is {}",
+                        i,
+                        row.len(),
+                        width
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Renders the snapshot as plain text: cells within a row joined by
+    /// `" | "` and rows joined by `"\n"` (the documented paste format).
+    pub fn render_plain(&self) -> String {
+        self.snapshot_rows
+            .iter()
+            .map(|row| row.join(" | "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Replaces the snapshot with `rows`.
+    ///
+    /// Every new row must have the same number of cells as the existing
+    /// table width (the length of the first existing row); otherwise the
+    /// snapshot is left unchanged and `Err` names the mismatch. When the
+    /// current snapshot is empty, the first new row defines the new width
+    /// and the remaining rows must match it.
+    pub fn update_snapshot(&mut self, rows: Vec<Vec<String>>) -> Result<(), String> {
+        let expected = match self.snapshot_rows.first() {
+            Some(first) => Some(first.len()),
+            None => rows.first().map(Vec::len),
+        };
+        if let Some(expected) = expected {
+            for (i, row) in rows.iter().enumerate() {
+                if row.len() != expected {
+                    return Err(format!(
+                        "new snapshot row {} has {} cells but the table width is {}",
+                        i,
+                        row.len(),
+                        expected
+                    ));
+                }
+            }
+        }
+        self.snapshot_rows = rows;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4161,5 +4270,82 @@ mod tests {
         // Empty or blank-only input is an error
         assert!(import_text_paragraphs("").is_err());
         assert!(import_text_paragraphs("\n\n  \n").is_err());
+    }
+
+    #[test]
+    fn linked_table_paste_validation() {
+        let mut region = LinkedTableRegion {
+            region_id: "lt-1".into(),
+            source_workbook: "/tmp/budget.loomsheet".into(),
+            source_sheet: "Summary".into(),
+            source_range: "A1:B2".into(),
+            snapshot_rows: vec![
+                vec!["Item".to_string(), "Cost".to_string()],
+                vec!["Desk".to_string(), "120".to_string()],
+            ],
+            refreshable: true,
+        };
+
+        // A well-formed region validates.
+        assert_eq!(region.validate(), Ok(()));
+
+        // Exact plain rendering of a 2x2 snapshot.
+        assert_eq!(region.render_plain(), "Item | Cost\nDesk | 120");
+
+        // update_snapshot replaces the snapshot and re-renders from it.
+        region
+            .update_snapshot(vec![
+                vec!["Item".to_string(), "Cost".to_string()],
+                vec!["Chair".to_string(), "85".to_string()],
+            ])
+            .unwrap();
+        assert_eq!(region.render_plain(), "Item | Cost\nChair | 85");
+        assert_eq!(region.validate(), Ok(()));
+
+        // Ragged snapshot rows are rejected by validate.
+        let ragged = LinkedTableRegion {
+            region_id: "lt-2".into(),
+            source_workbook: "/tmp/wb.loomsheet".into(),
+            source_sheet: "Data".into(),
+            source_range: "A1:C2".into(),
+            snapshot_rows: vec![
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                vec!["d".to_string()],
+            ],
+            refreshable: false,
+        };
+        assert_eq!(
+            ragged.validate().unwrap_err(),
+            "snapshot row 1 has 1 cells but the table width is 3"
+        );
+
+        // update_snapshot rejects rows whose width differs and leaves the
+        // snapshot untouched on failure.
+        assert_eq!(
+            region
+                .update_snapshot(vec![
+                    vec!["x".to_string(), "y".to_string()],
+                    vec!["z".to_string()],
+                ])
+                .unwrap_err(),
+            "new snapshot row 1 has 1 cells but the table width is 2"
+        );
+        assert_eq!(region.render_plain(), "Item | Cost\nChair | 85");
+
+        // An empty source range is invalid; so is one without exactly one ':'.
+        for bad in ["", "A1B2", "A1:", ":C9", "A1:B2:C9"] {
+            let mut broken = LinkedTableRegion {
+                region_id: "lt-3".into(),
+                source_workbook: "/tmp/wb.loomsheet".into(),
+                source_sheet: "Data".into(),
+                source_range: bad.to_string(),
+                snapshot_rows: vec![vec!["a".to_string()]],
+                refreshable: false,
+            };
+            assert!(broken.validate().is_err());
+            // Sanity: fixing only the range makes it valid again.
+            broken.source_range = "A1:A1".into();
+            assert_eq!(broken.validate(), Ok(()));
+        }
     }
 }

@@ -2224,6 +2224,70 @@ pub fn write_srt(cues: &[SubtitleCue]) -> String {
     out
 }
 
+/// Host-side reference to an installed motion template with resolved parameter values.
+///
+/// This is the Video-side consumption shape for Motion templates (M9): the timeline stores
+/// plain local data and never depends on the Motion crate itself. Parameter values are
+/// strings because the template host performs final typed coercion at render time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionTemplateBinding {
+    /// Installed template identifier from the template library.
+    pub template_id: String,
+    /// Template schema version the binding was authored against.
+    pub schema_version: u32,
+    /// Resolved parameter name/value pairs (already validated against the template).
+    pub parameters: Vec<(String, String)>,
+    /// Timeline placement seconds.
+    pub start_seconds: f64,
+    pub duration_seconds: f64,
+}
+
+impl MotionTemplateBinding {
+    /// Validates the binding: non-empty `template_id`, positive duration, non-negative
+    /// start, and parameter names that are unique and non-empty. Err names the violated rule.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.template_id.is_empty() {
+            return Err("template_id must be non-empty".to_string());
+        }
+        if !self.duration_seconds.is_finite() || self.duration_seconds <= 0.0 {
+            return Err(format!(
+                "duration_seconds {} must be positive",
+                self.duration_seconds
+            ));
+        }
+        if !self.start_seconds.is_finite() || self.start_seconds < 0.0 {
+            return Err(format!(
+                "start_seconds {} must be non-negative",
+                self.start_seconds
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (name, _) in &self.parameters {
+            if name.is_empty() {
+                return Err("parameter names must be non-empty".to_string());
+            }
+            if !seen.insert(name.as_str()) {
+                return Err(format!("duplicate parameter name {name:?}"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The value bound to a parameter name, if present.
+    pub fn parameter(&self, name: &str) -> Option<&str> {
+        self.parameters
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// True when this binding was authored against a different schema version than the
+    /// installed template now provides (needs migration review).
+    pub fn needs_migration(&self, installed_schema_version: u32) -> bool {
+        self.schema_version != installed_schema_version
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3063,5 +3127,74 @@ mod tests {
         // End not after start is rejected.
         assert!(parse_srt("1\r\n00:00:02,000 --> 00:00:01,000\r\nBackwards.\r\n").is_err());
         assert!(parse_srt("1\r\n00:00:01,000 --> 00:00:01,000\r\nZero length.\r\n").is_err());
+    }
+
+    #[test]
+    fn motion_template_binding_validation() {
+        let valid = MotionTemplateBinding {
+            template_id: "loom.motion.lower-third".into(),
+            schema_version: 2,
+            parameters: vec![
+                ("title".into(), "Interview".into()),
+                ("accent_color".into(), "#3b82f6".into()),
+            ],
+            start_seconds: 4.5,
+            duration_seconds: 6.0,
+        };
+        valid.validate().expect("valid binding must validate");
+
+        // Parameter lookup hits and misses.
+        assert_eq!(valid.parameter("title"), Some("Interview"));
+        assert_eq!(valid.parameter("accent_color"), Some("#3b82f6"));
+        assert_eq!(valid.parameter("missing"), None);
+        assert_eq!(valid.parameter(""), None);
+
+        // Schema migration review is required only on version mismatch.
+        assert!(!valid.needs_migration(2));
+        assert!(valid.needs_migration(3));
+        assert!(valid.needs_migration(1));
+
+        // Empty template id names its rule.
+        let no_id = MotionTemplateBinding {
+            template_id: String::new(),
+            ..valid.clone()
+        };
+        let err = no_id.validate().unwrap_err();
+        assert!(err.contains("template_id"), "unexpected error: {err}");
+
+        // Zero and negative durations are rejected.
+        for bad_duration in [0.0_f64, -1.5] {
+            let bad = MotionTemplateBinding {
+                duration_seconds: bad_duration,
+                ..valid.clone()
+            };
+            let err = bad.validate().unwrap_err();
+            assert!(
+                err.contains("duration_seconds"),
+                "duration {bad_duration} not rejected: {err}"
+            );
+        }
+
+        // Negative start is rejected.
+        let negative_start = MotionTemplateBinding {
+            start_seconds: -0.25,
+            ..valid.clone()
+        };
+        let err = negative_start.validate().unwrap_err();
+        assert!(
+            err.contains("start_seconds") && !err.contains("duration_seconds"),
+            "unexpected error: {err}"
+        );
+
+        // Duplicate parameter names are rejected.
+        let duplicated = MotionTemplateBinding {
+            parameters: vec![
+                ("title".into(), "First".into()),
+                ("title".into(), "Second".into()),
+            ],
+            ..valid.clone()
+        };
+        let err = duplicated.validate().unwrap_err();
+        assert!(err.contains("duplicate"), "unexpected error: {err}");
     }
 }

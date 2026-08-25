@@ -2368,6 +2368,115 @@ fn crc32_ieee(bytes: &[u8]) -> u32 {
     !crc
 }
 
+/// An externally referenced asset used by a photo project (e.g. linked RAW, font, LUT file).
+///
+/// `content_hash` records the fingerprint observed when the asset was last linked so later
+/// audits can detect whether the referenced file changed on disk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetReference {
+    pub reference_id: String,
+    pub path: String,
+    pub content_hash: u64,
+}
+
+/// Registry tracking all external references of one project.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AssetRegistry {
+    pub references: Vec<AssetReference>,
+}
+
+impl AssetRegistry {
+    /// Creates an empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds `reference`, or replaces an existing entry with the same `reference_id`.
+    ///
+    /// Err if `reference.path` is empty.
+    pub fn upsert(&mut self, reference: AssetReference) -> Result<(), String> {
+        if reference.path.is_empty() {
+            return Err(format!(
+                "asset reference {} needs a non-empty path",
+                reference.reference_id
+            ));
+        }
+        match self
+            .references
+            .iter_mut()
+            .find(|existing| existing.reference_id == reference.reference_id)
+        {
+            Some(existing) => *existing = reference,
+            None => self.references.push(reference),
+        }
+        Ok(())
+    }
+
+    /// Removes the reference with `reference_id`; true when removed.
+    pub fn remove(&mut self, reference_id: &str) -> bool {
+        let before = self.references.len();
+        self.references
+            .retain(|reference| reference.reference_id != reference_id);
+        self.references.len() != before
+    }
+
+    /// Classifies every reference using injected predicates.
+    ///
+    /// Returns `(reference_id, state, current_hash)` triples where `state` is `"missing"`
+    /// when `path_exists` rejects the path, `"modified"` when `hash_for_path` disagrees
+    /// with the stored `content_hash`, and `"ok"` otherwise. A missing path reports a
+    /// `current_hash` of `0` because no hash can be observed.
+    pub fn audit<F: Fn(&str) -> bool, G: Fn(&str) -> u64>(
+        &self,
+        path_exists: F,
+        hash_for_path: G,
+    ) -> Vec<(String, String, u64)> {
+        self.references
+            .iter()
+            .map(|reference| {
+                if !path_exists(&reference.path) {
+                    (reference.reference_id.clone(), "missing".to_string(), 0)
+                } else {
+                    let current_hash = hash_for_path(&reference.path);
+                    let state = if current_hash == reference.content_hash {
+                        "ok"
+                    } else {
+                        "modified"
+                    };
+                    (
+                        reference.reference_id.clone(),
+                        state.to_string(),
+                        current_hash,
+                    )
+                }
+            })
+            .collect()
+    }
+
+    /// Rewrites one reference's `path` and `content_hash` (the relink action).
+    ///
+    /// Err when `reference_id` does not match any registered reference.
+    pub fn relink(
+        &mut self,
+        reference_id: &str,
+        new_path: &str,
+        new_hash: u64,
+    ) -> Result<(), String> {
+        match self
+            .references
+            .iter_mut()
+            .find(|reference| reference.reference_id == reference_id)
+        {
+            Some(reference) => {
+                reference.path = new_path.to_string();
+                reference.content_hash = new_hash;
+                Ok(())
+            }
+            None => Err(format!("unknown asset reference {reference_id}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3299,5 +3408,94 @@ mod tests {
             &transparent,
         );
         assert_eq!(untouched.pixel(4, 4).unwrap(), [7, 7, 7, 255]);
+    }
+
+    #[test]
+    fn asset_registry_audit_and_relink() {
+        let mut registry = AssetRegistry::new();
+        registry
+            .upsert(AssetReference {
+                reference_id: "raw-link".to_string(),
+                path: "/assets/scene.raw".to_string(),
+                content_hash: 111,
+            })
+            .unwrap();
+        registry
+            .upsert(AssetReference {
+                reference_id: "lut-link".to_string(),
+                path: "/assets/film.cube".to_string(),
+                content_hash: 222,
+            })
+            .unwrap();
+
+        // Upserting an existing id replaces in place instead of duplicating.
+        registry
+            .upsert(AssetReference {
+                reference_id: "raw-link".to_string(),
+                path: "/assets/scene_v2.raw".to_string(),
+                content_hash: 333,
+            })
+            .unwrap();
+        assert_eq!(registry.references.len(), 2);
+        assert_eq!(registry.references[0].reference_id, "raw-link");
+        assert_eq!(registry.references[0].content_hash, 333);
+
+        // Empty paths are rejected.
+        assert!(registry
+            .upsert(AssetReference {
+                reference_id: "bad-link".to_string(),
+                path: String::new(),
+                content_hash: 1,
+            })
+            .is_err());
+
+        // The RAW file matches its stored hash; the LUT file cannot be found on disk.
+        let report = registry.audit(
+            |path| path != "/assets/film.cube",
+            |path| {
+                if path == "/assets/scene_v2.raw" {
+                    333
+                } else {
+                    777
+                }
+            },
+        );
+        assert_eq!(
+            report,
+            vec![
+                ("raw-link".to_string(), "ok".to_string(), 333),
+                ("lut-link".to_string(), "missing".to_string(), 0),
+            ]
+        );
+
+        // Relinking repoints the LUT at its new location and fingerprint...
+        registry
+            .relink("lut-link", "/assets/graded.cube", 888)
+            .unwrap();
+        assert_eq!(registry.references[1].path, "/assets/graded.cube");
+        assert_eq!(registry.references[1].content_hash, 888);
+        assert!(registry.relink("no-such-asset", "/x", 1).is_err());
+
+        // ...but this disk copy hashes differently from the freshly linked one.
+        let report = registry.audit(
+            |_| true,
+            |path| match path {
+                "/assets/scene_v2.raw" => 333,
+                "/assets/graded.cube" => 12345,
+                _ => 0,
+            },
+        );
+        assert_eq!(
+            report,
+            vec![
+                ("raw-link".to_string(), "ok".to_string(), 333),
+                ("lut-link".to_string(), "modified".to_string(), 12345),
+            ]
+        );
+
+        // Removal reports whether anything was actually removed.
+        assert!(registry.remove("lut-link"));
+        assert!(!registry.remove("lut-link"));
+        assert_eq!(registry.references.len(), 1);
     }
 }

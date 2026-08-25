@@ -750,6 +750,142 @@ fn valid_mime(mime: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'+' | b'.'))
 }
 
+/// The suite application that produced a cross-app clipboard payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LoomApp {
+    /// Loom Writer document content.
+    Writer,
+    /// Loom Sheets workbook ranges.
+    Sheets,
+    /// Loom Present deck elements.
+    Present,
+    /// Loom Photo raster layers.
+    Photo,
+    /// Loom Motion compositions.
+    Motion,
+    /// Loom Video timeline material.
+    Video,
+    /// Loom Studio session regions.
+    Studio,
+    /// Loom Encode queue artifacts.
+    Encode,
+}
+
+impl LoomApp {
+    /// Stable lowercase identifier used inside native clipboard MIME types.
+    pub fn id(&self) -> &'static str {
+        match self {
+            LoomApp::Writer => "writer",
+            LoomApp::Sheets => "sheets",
+            LoomApp::Present => "present",
+            LoomApp::Photo => "photo",
+            LoomApp::Motion => "motion",
+            LoomApp::Video => "video",
+            LoomApp::Studio => "studio",
+            LoomApp::Encode => "encode",
+        }
+    }
+}
+
+/// A cross-app clipboard entry carrying a Loom-native editable representation plus standard
+/// fallback formats (plain text, HTML, images, or file URLs). The native payload always uses
+/// the reserved `text/x-loom-<app>-<kind>` namespace so hosts can detect editability.
+#[derive(Debug, Clone)]
+pub struct CrossAppClipboard {
+    source_app: LoomApp,
+    source_document_id: String,
+    native_mime: String,
+    payload: ClipboardPayload,
+    created_at_unix_ms: u64,
+}
+
+impl CrossAppClipboard {
+    /// Creates an entry with provenance and the MIME type of its editable representation.
+    /// The native MIME must start with `text/x-loom-` followed by the source app id.
+    pub fn new(
+        source_app: LoomApp,
+        source_document_id: impl Into<String>,
+        native_mime: &str,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, RuntimeError> {
+        if !valid_mime(native_mime)
+            || !native_mime.starts_with(&format!("text/x-loom-{}-", source_app.id()))
+        {
+            return Err(RuntimeError::InvalidData(format!(
+                "native clipboard type must be text/x-loom-{}-<kind>, got {native_mime:?}",
+                source_app.id()
+            )));
+        }
+        Ok(Self {
+            source_app,
+            source_document_id: source_document_id.into(),
+            native_mime: native_mime.to_ascii_lowercase(),
+            payload: ClipboardPayload::default(),
+            created_at_unix_ms,
+        })
+    }
+
+    /// The producing application.
+    pub fn source_app(&self) -> LoomApp {
+        self.source_app
+    }
+
+    /// Identifier of the document the payload was copied from.
+    pub fn source_document_id(&self) -> &str {
+        &self.source_document_id
+    }
+
+    /// MIME type of the Loom-native editable representation.
+    pub fn native_mime(&self) -> &str {
+        &self.native_mime
+    }
+
+    /// Creation timestamp in Unix milliseconds.
+    pub fn created_at_unix_ms(&self) -> u64 {
+        self.created_at_unix_ms
+    }
+
+    /// Stores or replaces the Loom-native editable representation.
+    pub fn set_native(&mut self, bytes: Vec<u8>) -> Result<(), RuntimeError> {
+        self.payload.insert(&self.native_mime, bytes)
+    }
+
+    /// The Loom-native editable representation.
+    pub fn native(&self) -> Option<&[u8]> {
+        self.payload.get(&self.native_mime)
+    }
+
+    /// Stores one standard fallback format.
+    pub fn set_fallback(&mut self, mime: &str, bytes: Vec<u8>) -> Result<(), RuntimeError> {
+        if mime.to_ascii_lowercase() == self.native_mime {
+            return Err(RuntimeError::InvalidData(
+                "use set_native for the loom-native format".into(),
+            ));
+        }
+        self.payload.insert(mime, bytes)
+    }
+
+    /// Reads one fallback format; never returns the native representation.
+    pub fn fallback(&self, mime: &str) -> Option<&[u8]> {
+        let lowered = mime.to_ascii_lowercase();
+        if lowered == self.native_mime {
+            None
+        } else {
+            self.payload.get(&lowered)
+        }
+    }
+
+    /// True when every listed fallback MIME is present.
+    pub fn has_required_fallbacks(&self, required: &[&str]) -> bool {
+        required.iter().all(|mime| self.fallback(mime).is_some())
+    }
+
+    /// True when this entry originated from the given app/document pair.
+    pub fn is_from_same_document(&self, app: LoomApp, document_id: &str) -> bool {
+        self.source_app == app && self.source_document_id == document_id
+    }
+}
+
 /// Stable recent-file list with deduplication and bounded length.
 #[derive(Debug, Clone)]
 pub struct RecentFiles {
@@ -915,5 +1051,46 @@ mod tests {
             Duration::from_secs(30),
             start - Duration::from_secs(1)
         ));
+    }
+
+    #[test]
+    fn cross_app_clipboard_provenance_and_fallbacks() {
+        // Native MIME must carry the source-app namespace
+        let mut entry =
+            CrossAppClipboard::new(LoomApp::Sheets, "wb-42", "text/x-loom-sheets-range", 1_000)
+                .unwrap();
+        assert!(CrossAppClipboard::new(LoomApp::Writer, "doc", "text/plain", 1).is_err());
+        assert!(
+            CrossAppClipboard::new(LoomApp::Writer, "doc", "text/x-loom-sheets-range", 1).is_err()
+        );
+
+        // Native payload round-trips; fallbacks stay separate
+        entry.set_native(b"A1\tB1".to_vec()).unwrap();
+        entry.set_fallback("text/plain", b"A1 B1".to_vec()).unwrap();
+        entry
+            .set_fallback("text/html", b"<table><tr><td>A1</td></tr></table>".to_vec())
+            .unwrap();
+
+        assert_eq!(entry.native().unwrap(), b"A1\tB1");
+        assert_eq!(entry.fallback("text/plain").unwrap(), b"A1 B1");
+        assert_eq!(entry.native_mime(), "text/x-loom-sheets-range");
+
+        // fallback() never leaks the native representation
+        assert!(entry.fallback("text/x-loom-sheets-range").is_none());
+        assert!(entry
+            .set_fallback("TEXT/X-LOOM-SHEETS-RANGE", vec![])
+            .is_err());
+        assert!(!entry.has_required_fallbacks(&["text/csv"]));
+        assert!(entry.has_required_fallbacks(&["text/plain", "text/html"]));
+
+        // Provenance checks
+        assert!(entry.is_from_same_document(LoomApp::Sheets, "wb-42"));
+        assert!(!entry.is_from_same_document(LoomApp::Sheets, "other"));
+        assert!(!entry.is_from_same_document(LoomApp::Present, "wb-42"));
+        assert_eq!(entry.created_at_unix_ms(), 1_000);
+
+        // Size cap still enforced through the underlying payload
+        let result = entry.set_native(vec![0u8; 200 * 1024 * 1024]);
+        assert!(matches!(result, Err(RuntimeError::LimitExceeded(_))));
     }
 }
