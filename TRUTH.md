@@ -83,6 +83,8 @@ parity or product completion.
 - A declared interoperability support matrix (`loom_interop::format_support_matrix`)
   labeling every boundary format with the mandated vocabulary from `DetectOnly`
   through `ConformanceValidated`, updated only alongside real engine behavior.
+  DOCX is currently `WritePartial` (Writer export + re-import); PSD and the
+  remaining office containers are `DetectOnly`.
 - A shared cross-app clipboard entry model (`loom_runtime::CrossAppClipboard`) carrying
   Loom-native editable payloads with source provenance plus required standard fallback
   formats, protected by a reserved `text/x-loom-*` native namespace.

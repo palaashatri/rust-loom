@@ -731,8 +731,12 @@ pub fn format_support_level(format: Format) -> FormatSupportLevel {
         Format::Text => FormatSupportLevel::RoundTripSupported,
         Format::Markdown | Format::Csv => FormatSupportLevel::ReadSupported,
 
-        // Office and presentation containers are detected and partially read today.
-        Format::Docx | Format::Xlsx | Format::Pptx | Format::Odt | Format::Ods | Format::Odp => {
+        // Writer exports and re-imports minimal DOCX documents today; the rest of the
+        // office family remains detection-only pending broader fidelity work.
+        Format::Docx => FormatSupportLevel::WritePartial,
+
+        // Office containers detected today beyond DOCX.
+        Format::Xlsx | Format::Pptx | Format::Odt | Format::Ods | Format::Odp => {
             FormatSupportLevel::DetectOnly
         }
 
@@ -945,13 +949,15 @@ mod tests {
         };
 
         // Detection-only formats must never be reported as supported.
-        for format in [Format::Docx, Format::Psd, Format::Odp] {
+        for format in [Format::Psd, Format::Odp] {
             assert_eq!(
                 level_of(format),
                 FormatSupportLevel::DetectOnly,
                 "{format:?} is detection-only today"
             );
         }
+        // Writer's minimal DOCX writer upgrades it above detection-only.
+        assert!(level_of(Format::Docx) >= FormatSupportLevel::WritePartial);
 
         // Text round-trips; CSV and Markdown are semantically read.
         assert_eq!(
