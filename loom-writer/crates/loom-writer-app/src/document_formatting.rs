@@ -1,11 +1,12 @@
-//! Document-wide formatting operations used until Writer exposes a stable
-//! selection/caret range from the Slint editor.
+//! Writer formatting semantics.
 //!
-//! These operations are intentionally explicit about their scope: they mutate
-//! every non-empty block in the authoritative `WriterDocument`, preserve
-//! existing style-run boundaries where present, and are persisted by the normal
-//! Writer package serializer. They are not represented as selection-aware rich
-//! text operations.
+//! The legacy document-wide operations remain explicit because the current
+//! Slint TextEdit cannot report its live selection offsets. New code below
+//! defines the selection/range semantics the structured editor must use once
+//! its input surface owns the selection model. This keeps UI limitations from
+//! leaking into the document model.
+
+use std::collections::BTreeSet;
 
 use loom_text::{Alignment, CharacterStyle, FontWeight, StyleRun};
 use loom_writer_core::{RichBlock, WriterDocument};
@@ -19,6 +20,267 @@ pub struct DocumentFormattingState {
     pub heading_level: i32,
     pub alignment: i32,
 }
+
+/// UTF-8 byte offsets in Writer's canonical `editor_text()` representation.
+/// Anchor/focus retain selection direction; formatting always uses the ordered
+/// range. Offsets are clamped down to valid character boundaries before use.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DocumentSelection {
+    pub anchor: usize,
+    pub focus: usize,
+}
+
+impl DocumentSelection {
+    pub fn caret(offset: usize) -> Self {
+        Self {
+            anchor: offset,
+            focus: offset,
+        }
+    }
+
+    pub fn range(anchor: usize, focus: usize) -> Self {
+        Self { anchor, focus }
+    }
+
+    pub fn is_collapsed(self) -> bool {
+        self.anchor == self.focus
+    }
+
+    fn ordered(self) -> (usize, usize) {
+        if self.anchor <= self.focus {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+}
+
+fn floor_char_boundary(text: &str, offset: usize) -> usize {
+    let mut value = offset.min(text.len());
+    while value > 0 && !text.is_char_boundary(value) {
+        value -= 1;
+    }
+    value
+}
+
+fn normalized_selection(document: &WriterDocument, selection: DocumentSelection) -> (usize, usize) {
+    let text = document.editor_text();
+    let (start, end) = selection.ordered();
+    (
+        floor_char_boundary(&text, start),
+        floor_char_boundary(&text, end),
+    )
+}
+
+/// Return `(block_index, local_start, local_end)` for text actually covered by
+/// a non-collapsed selection. Newline separators are document structure, not
+/// styleable characters, and are intentionally omitted from spans.
+pub fn selection_text_spans(
+    document: &WriterDocument,
+    selection: DocumentSelection,
+) -> Vec<(usize, usize, usize)> {
+    let (start, end) = normalized_selection(document, selection);
+    if start == end {
+        return Vec::new();
+    }
+
+    let mut spans = Vec::new();
+    let mut global_start = 0usize;
+    for (index, block) in document.blocks.iter().enumerate() {
+        let block_len = block.text.as_str().len();
+        let global_end = global_start + block_len;
+        let overlap_start = start.max(global_start);
+        let overlap_end = end.min(global_end);
+        if overlap_start < overlap_end {
+            let local_start = floor_char_boundary(block.text.as_str(), overlap_start - global_start);
+            let local_end = floor_char_boundary(block.text.as_str(), overlap_end - global_start);
+            if local_start < local_end {
+                spans.push((index, local_start, local_end));
+            }
+        }
+        global_start = global_end + usize::from(index + 1 < document.blocks.len());
+    }
+    spans
+}
+
+fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
+    if document.blocks.is_empty() {
+        return None;
+    }
+    let text = document.editor_text();
+    let offset = floor_char_boundary(&text, offset);
+    let mut global_start = 0usize;
+    for (index, block) in document.blocks.iter().enumerate() {
+        let global_end = global_start + block.text.as_str().len();
+        if offset <= global_end || index + 1 == document.blocks.len() {
+            return Some(index);
+        }
+        global_start = global_end + 1;
+    }
+    Some(document.blocks.len() - 1)
+}
+
+/// Paragraph blocks affected by the selection. A collapsed caret affects one
+/// paragraph. A range crossing paragraph separators affects the paragraphs it
+/// enters, even when a paragraph itself is empty.
+pub fn selected_block_indices(
+    document: &WriterDocument,
+    selection: DocumentSelection,
+) -> Vec<usize> {
+    let (start, end) = normalized_selection(document, selection);
+    let Some(first) = block_at_offset(document, start) else {
+        return Vec::new();
+    };
+    if start == end {
+        return vec![first];
+    }
+    let last_probe = end.saturating_sub(1);
+    let last = block_at_offset(document, last_probe).unwrap_or(first);
+    (first.min(last)..=first.max(last)).collect()
+}
+
+fn style_at(block: &RichBlock, byte_offset: usize) -> CharacterStyle {
+    block
+        .runs
+        .iter()
+        .find(|run| run.start <= byte_offset && byte_offset < run.end)
+        .map(|run| run.style.clone())
+        .unwrap_or_default()
+}
+
+fn coalesce_runs(runs: Vec<StyleRun>) -> Vec<StyleRun> {
+    let mut result: Vec<StyleRun> = Vec::with_capacity(runs.len());
+    for run in runs {
+        if run.start == run.end {
+            continue;
+        }
+        if let Some(last) = result.last_mut() {
+            if last.end == run.start && last.style == run.style {
+                last.end = run.end;
+                continue;
+            }
+        }
+        result.push(run);
+    }
+    result
+}
+
+fn mutate_character_range(
+    block: &mut RichBlock,
+    start: usize,
+    end: usize,
+    mut operation: impl FnMut(&mut CharacterStyle),
+) {
+    let text = block.text.as_str();
+    let start = floor_char_boundary(text, start);
+    let end = floor_char_boundary(text, end);
+    if start >= end || text.is_empty() {
+        return;
+    }
+
+    let mut boundaries = BTreeSet::from([0usize, text.len(), start, end]);
+    for run in &block.runs {
+        boundaries.insert(floor_char_boundary(text, run.start));
+        boundaries.insert(floor_char_boundary(text, run.end));
+    }
+    let boundaries: Vec<usize> = boundaries.into_iter().collect();
+    let mut next = Vec::new();
+    for pair in boundaries.windows(2) {
+        let interval_start = pair[0];
+        let interval_end = pair[1];
+        if interval_start >= interval_end {
+            continue;
+        }
+        let mut style = style_at(block, interval_start);
+        if interval_start < end && interval_end > start {
+            operation(&mut style);
+        }
+        next.push(StyleRun {
+            start: interval_start,
+            end: interval_end,
+            style,
+        });
+    }
+    block.runs = coalesce_runs(next);
+}
+
+fn mutate_selection_character_styles(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    mut operation: impl FnMut(&mut CharacterStyle),
+) {
+    let spans = selection_text_spans(document, selection);
+    for (block_index, start, end) in spans {
+        mutate_character_range(&mut document.blocks[block_index], start, end, &mut operation);
+    }
+}
+
+pub fn set_selection_bold(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    enabled: bool,
+) {
+    mutate_selection_character_styles(document, selection, |style| {
+        style.weight = if enabled {
+            FontWeight::Bold
+        } else {
+            FontWeight::Regular
+        };
+    });
+}
+
+pub fn set_selection_italic(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    enabled: bool,
+) {
+    mutate_selection_character_styles(document, selection, |style| style.italic = enabled);
+}
+
+pub fn set_selection_underline(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    enabled: bool,
+) {
+    mutate_selection_character_styles(document, selection, |style| style.underline = enabled);
+}
+
+pub fn set_selection_heading(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    level: i32,
+) {
+    let kind = match level {
+        1 => "heading1",
+        2 => "heading2",
+        3 => "heading3",
+        _ => "paragraph",
+    };
+    for index in selected_block_indices(document, selection) {
+        document.blocks[index].kind = kind.to_string();
+    }
+}
+
+pub fn set_selection_alignment(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    index: i32,
+) {
+    let alignment = match index {
+        1 => Alignment::Center,
+        2 => Alignment::Right,
+        3 => Alignment::Justify,
+        _ => Alignment::Left,
+    };
+    for block_index in selected_block_indices(document, selection) {
+        document.blocks[block_index].style.alignment = alignment;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Explicit legacy document-wide operations. These remain wired only until the
+// structured input surface can provide DocumentSelection to the callbacks.
+// -------------------------------------------------------------------------
 
 fn mutate_character_styles(
     document: &mut WriterDocument,
@@ -42,15 +304,10 @@ fn mutate_character_styles(
             continue;
         }
 
-        // Preserve any authored run boundaries. The existing Writer surface
-        // creates whole-block runs, but imported documents may already contain
-        // multiple ranges.
         for run in &mut block.runs {
             operation(&mut run.style);
         }
 
-        // Ensure leading/trailing unstyled text also receives the document-wide
-        // operation without destroying the existing runs.
         block.runs.sort_by_key(|run| (run.start, run.end));
         let first_start = block.runs.first().map_or(0, |run| run.start.min(text_len));
         if first_start > 0 {
@@ -153,15 +410,12 @@ fn all_non_empty_blocks_match(
 }
 
 fn uniform_heading_level(document: &WriterDocument) -> i32 {
-    let mut levels = document
-        .blocks
-        .iter()
-        .map(|block| match block.kind.as_str() {
-            "heading1" => 1,
-            "heading2" => 2,
-            "heading3" => 3,
-            _ => 0,
-        });
+    let mut levels = document.blocks.iter().map(|block| match block.kind.as_str() {
+        "heading1" => 1,
+        "heading2" => 2,
+        "heading3" => 3,
+        _ => 0,
+    });
     let Some(first) = levels.next() else {
         return 0;
     };
@@ -173,15 +427,12 @@ fn uniform_heading_level(document: &WriterDocument) -> i32 {
 }
 
 fn uniform_alignment(document: &WriterDocument) -> i32 {
-    let mut alignments = document
-        .blocks
-        .iter()
-        .map(|block| match block.style.alignment {
-            Alignment::Center => 1,
-            Alignment::Right => 2,
-            Alignment::Justify => 3,
-            Alignment::Left => 0,
-        });
+    let mut alignments = document.blocks.iter().map(|block| match block.style.alignment {
+        Alignment::Center => 1,
+        Alignment::Right => 2,
+        Alignment::Justify => 3,
+        Alignment::Left => 0,
+    });
     let Some(first) = alignments.next() else {
         return 0;
     };
@@ -214,6 +465,68 @@ mod tests {
     }
 
     #[test]
+    fn selection_offsets_are_direction_independent_and_utf8_safe() {
+        let mut document = WriterDocument::new("utf8", "UTF-8");
+        document.push(RichBlock::new(1, "paragraph", "AéB"));
+        document.push(RichBlock::new(2, "paragraph", "C"));
+
+        // Offset 2 lands inside the two-byte é. It must floor to byte 1.
+        let spans = selection_text_spans(&document, DocumentSelection::range(4, 2));
+        assert_eq!(spans, vec![(0, 1, 4)]);
+    }
+
+    #[test]
+    fn selection_character_formatting_splits_and_coalesces_runs() {
+        let mut document = WriterDocument::new("selection", "Selection");
+        document.push(RichBlock::new(1, "paragraph", "abcdef"));
+
+        set_selection_bold(&mut document, DocumentSelection::range(2, 5), true);
+        assert_eq!(document.blocks[0].runs.len(), 3);
+        assert_eq!((document.blocks[0].runs[0].start, document.blocks[0].runs[0].end), (0, 2));
+        assert_eq!((document.blocks[0].runs[1].start, document.blocks[0].runs[1].end), (2, 5));
+        assert_eq!(document.blocks[0].runs[1].style.weight, FontWeight::Bold);
+        assert_eq!((document.blocks[0].runs[2].start, document.blocks[0].runs[2].end), (5, 6));
+
+        set_selection_bold(&mut document, DocumentSelection::range(2, 5), false);
+        assert_eq!(document.blocks[0].runs.len(), 1);
+        assert_eq!((document.blocks[0].runs[0].start, document.blocks[0].runs[0].end), (0, 6));
+        assert_eq!(document.blocks[0].runs[0].style.weight, FontWeight::Regular);
+    }
+
+    #[test]
+    fn multi_paragraph_selection_formats_only_intersecting_text() {
+        let mut document = WriterDocument::new("multi", "Multi");
+        document.push(RichBlock::new(1, "paragraph", "alpha"));
+        document.push(RichBlock::new(2, "paragraph", "beta"));
+        document.push(RichBlock::new(3, "paragraph", "gamma"));
+
+        // editor_text: "alpha\nbeta\ngamma". Select "ha\nbe".
+        set_selection_italic(&mut document, DocumentSelection::range(3, 8), true);
+        assert!(document.blocks[0].runs.iter().any(|run| run.start == 3 && run.end == 5 && run.style.italic));
+        assert!(document.blocks[1].runs.iter().any(|run| run.start == 0 && run.end == 2 && run.style.italic));
+        assert!(document.blocks[2].runs.is_empty());
+    }
+
+    #[test]
+    fn paragraph_formatting_uses_caret_or_selected_block_range() {
+        let mut document = document();
+        let second_start = document.blocks[0].text.as_str().len() + 1;
+
+        set_selection_heading(&mut document, DocumentSelection::caret(second_start + 2), 2);
+        set_selection_alignment(&mut document, DocumentSelection::caret(second_start + 2), 1);
+        assert_eq!(document.blocks[0].kind, "paragraph");
+        assert_eq!(document.blocks[1].kind, "heading2");
+        assert_eq!(document.blocks[1].style.alignment, Alignment::Center);
+    }
+
+    #[test]
+    fn collapsed_selection_does_not_retroactively_style_characters() {
+        let mut document = document();
+        set_selection_underline(&mut document, DocumentSelection::caret(3), true);
+        assert!(document.blocks.iter().all(|block| block.runs.is_empty()));
+    }
+
+    #[test]
     fn document_wide_character_formatting_is_persisted() {
         let mut document = document();
         set_document_bold(&mut document, true);
@@ -236,11 +549,10 @@ mod tests {
     }
 
     #[test]
-    fn paragraph_formatting_changes_authoritative_blocks() {
+    fn document_wide_paragraph_formatting_changes_authoritative_blocks() {
         let mut document = document();
         set_document_heading(&mut document, 2);
         set_document_alignment(&mut document, 1);
-
         assert!(document
             .blocks
             .iter()
@@ -250,24 +562,14 @@ mod tests {
     }
 
     #[test]
-    fn existing_style_boundaries_are_preserved() {
+    fn existing_style_boundaries_are_preserved_by_document_operation() {
         let mut document = document();
         let first_block_len = document.blocks[0].text.as_str().len();
         document.blocks[0].runs = vec![
-            StyleRun {
-                start: 0,
-                end: 5,
-                style: CharacterStyle::default(),
-            },
-            StyleRun {
-                start: 5,
-                end: first_block_len,
-                style: CharacterStyle::default(),
-            },
+            StyleRun { start: 0, end: 5, style: CharacterStyle::default() },
+            StyleRun { start: 5, end: first_block_len, style: CharacterStyle::default() },
         ];
-
         set_document_bold(&mut document, true);
-
         assert_eq!(document.blocks[0].runs.len(), 2);
         assert!(document.blocks[0]
             .runs
