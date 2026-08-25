@@ -16,14 +16,15 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **92/100**, proving persistence failure tolerance alongside semantic Office Open XML import across the suite
+approximately **93/100**, adding DOCX export round-trip capability alongside persistence failure proofs and Office Open XML import across the suite
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
 a bounded deterministic fuzz suite proving `PackageArchive::from_bytes` never panics on arbitrary input plus an exhaustive
 truncation property test proving every prefix of a saved archive either fails or parses identically (`truncated_archives_never_parse_as_half_valid`),
 and an end-to-end Writer durability proof that every truncation of a saved `.loomdoc` fails to load or reloads with an identical content digest,
 never a half-document (`truncated_saves_never_load_as_half_documents`).
 The suite also adds semantic Office Open XML import:
-DOCX paragraph extraction with heading-style mapping into navigable blocks (`extract_docx_blocks`) in Writer;
+DOCX paragraph extraction with heading-style mapping into navigable blocks (`extract_docx_blocks`) and a minimal
+valid DOCX writer that round-trips kinds/texts through the importer (`export_document_as_docx`, `xml_escape_text`) in Writer;
 XLSX cell-grid extraction resolving shared strings, inline strings, numerics, and booleans (`extract_xlsx_grid`) in Sheets; and
 PPTX title extraction in numeric slide order with outline-import deck skeletons (`extract_pptx_titles`, `slides_from_pptx`) in Present.
 The suite also ships durability and integrity verification:
@@ -36,7 +37,7 @@ deck slides/elements/notes (`PresentationDocument::integrity_digest`), raster pi
 (`CompositionDocument::integrity_digest`), timeline tracks/clips/markers (`VideoProject::timeline_digest`),
 session tracks/regions (`StudioSession::session_digest`), and queue jobs/states (`EncodeQueue::queue_digest`). All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 653 passing automated tests.
+gates with 654 passing automated tests.
 a shared Vision transfer vocabulary of provenance-carrying OCR text blocks and a run-length segmentation mask codec
 (`OcrTextBlock`, `MaskSpan`, `mask_to_spans`, `spans_to_mask`) in the loom-vision-core platform crate;
 OCR-to-editable paragraph conversion preserving block-index provenance (`OcrTextBlock`, `paragraphs_from_ocr_blocks`) in Writer;
@@ -115,7 +116,8 @@ parity or product completion.
   (`numbered_outline`), OCR-to-editable paragraph conversion preserving block-index provenance
   (`paragraphs_from_ocr_blocks`), FNV-1a content digests for save/reload verification
   (`fnv1a64`, `writer_document_digest`), DOCX paragraph extraction with heading-style mapping into navigable
-  blocks (`extract_docx_blocks`), document outline extraction with indented heading navigation entries
+  blocks (`extract_docx_blocks`), a minimal valid DOCX writer round-tripping through the importer
+  (`export_document_as_docx`), document outline extraction with indented heading navigation entries
   (`OutlineEntry`, `extract_outline`), bounded/coalesced history, recovery, search/pagination metrics, word boundary expansion
   (`find_word_boundaries`), query occurrence counting (`count_matches`), options-aware search and
   replace with case sensitivity and whole-word matching (`SearchOptions`, `find_matches_with_options`,

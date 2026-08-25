@@ -1451,6 +1451,54 @@ impl Clone for ContentParser {
     }
 }
 
+/// Escapes text for XML element content: &, <, > become entities.
+fn xml_escape_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Exports a document to a minimal valid `.docx` archive: each block becomes one `<w:p>`
+/// paragraph; heading blocks carry `<w:pStyle w:val="HeadingN"/>`. Round-trips through
+/// [`extract_docx_blocks`] preserving kinds and texts.
+pub fn export_document_as_docx(
+    doc: &WriterDocument,
+) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
+    let mut body = String::new();
+    for block in &doc.blocks {
+        if block.text.as_str().trim().is_empty() {
+            continue;
+        }
+        // "heading3" -> "Heading3"; anything else exports as a plain paragraph.
+        let style = if let Some(digits) = block.kind.strip_prefix("heading") {
+            if digits.chars().all(|c| c.is_ascii_digit()) {
+                let mut styled = String::from("Heading");
+                styled.push_str(digits);
+                format!("<w:pPr><w:pStyle w:val=\"{styled}\"/></w:pPr>")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        body.push_str(&format!(
+            "<w:p>{style}<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+            xml_escape_text(block.text.as_str())
+        ));
+    }
+    let document_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+         <w:body>{body}</w:body></w:document>"
+    );
+    let mut arch = PackageArchive::new();
+    arch.add("[Content_Types].xml", br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#.to_vec())?;
+    arch.add("_rels/.rels", br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#.to_vec())?;
+    arch.add("word/document.xml", document_xml.into_bytes())?;
+    arch.to_bytes()
+}
+
 /// Save a document to a `.loomdoc` byte buffer (ZIP + manifest).
 pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
     let mut arch = PackageArchive::new();
@@ -4841,5 +4889,52 @@ mod tests {
         // The intact save still round-trips.
         let reloaded = load_document(&saved).unwrap();
         assert_eq!(writer_document_digest(&reloaded.blocks), baseline_digest);
+    }
+
+    #[test]
+    fn docx_export_round_trips_through_import() {
+        let mut doc = WriterDocument::new("export-doc", "Export");
+        doc.blocks
+            .push(RichBlock::new(1, "paragraph", "Intro text"));
+        doc.blocks
+            .push(RichBlock::new(2, "heading1", "Chapter One"));
+        doc.blocks.push(RichBlock::new(3, "paragraph", "A & B <C>"));
+        doc.blocks.push(RichBlock::new(4, "paragraph", "   "));
+        doc.blocks
+            .push(RichBlock::new(5, "heading3", "Deep & <Nested>"));
+
+        let docx = export_document_as_docx(&doc).expect("export succeeds");
+
+        // The export is a structurally valid archive with the standard parts.
+        let archive = PackageArchive::from_bytes(&docx).unwrap();
+        assert!(archive.get("[Content_Types].xml").is_some());
+        assert!(archive.get("_rels/.rels").is_some());
+        assert!(archive.get("word/document.xml").is_some());
+
+        // Round-trip through our importer preserves kinds and texts; the whitespace-only
+        // block is intentionally dropped by both directions (documented semantic).
+        let reimported = extract_docx_blocks(&docx).unwrap();
+        let expected: Vec<(String, String)> = doc
+            .blocks
+            .iter()
+            .filter(|b| !b.text.as_str().trim().is_empty())
+            .map(|b| (b.kind.clone(), b.text.as_str().to_string()))
+            .collect();
+        let actual: Vec<(String, String)> = reimported
+            .iter()
+            .map(|b| (b.kind.clone(), b.text.as_str().to_string()))
+            .collect();
+        assert_eq!(actual, expected);
+
+        // Entities survive exactly one unescape in each direction.
+        assert_eq!(actual[2].1, "A & B <C>");
+        assert_eq!(actual[3].1, "Deep & <Nested>");
+
+        // Headings remain navigable after round-trip.
+        let outline = extract_outline(&reimported);
+        assert_eq!(
+            outline.iter().map(|e| e.level).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
     }
 }
