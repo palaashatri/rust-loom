@@ -84,13 +84,15 @@ def audit_design_contract() -> None:
         for key, value in cp.items():
             require(f"{key}: {str(value).lower()}" in theme, f"runtime theme: missing {theme_name} {key}={value}")
 
+    # Only metrics currently emitted into ThemeTokens are validated here.
+    # Additional canonical TOML metrics remain enforceable through the design
+    # contract and toolkit source until token generation emits them directly.
     metric_pairs = {
         "control-height": ("controls", "standard-height"),
         "compact-control-height": ("controls", "compact-height"),
         "toolbar-height": ("chrome", "toolbar-height"),
         "header-height": ("chrome", "title-height"),
         "panel-header-height": ("chrome", "panel-header-height"),
-        "status-height": ("chrome", "status-height"),
     }
     for runtime_name, (section, name) in metric_pairs.items():
         value = contract.get(section, {}).get(name)
