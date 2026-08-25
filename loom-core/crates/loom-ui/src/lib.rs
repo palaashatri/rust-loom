@@ -175,8 +175,9 @@ mod visual_tests {
         for &(width, height) in VIEWPORTS {
             let first = loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
                 .expect("capture reference surface");
-            let second = loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
-                .expect("repeat reference surface");
+            let second =
+                loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
+                    .expect("repeat reference surface");
             assert_eq!(
                 (first.width(), first.height()),
                 (width as u32, height as u32),
