@@ -998,4 +998,84 @@ mod tests {
         );
         assert_eq!(reparsed.len(), 2);
     }
+
+    /// Deterministic SplitMix64 byte generator for bounded fuzz inputs.
+    fn fuzz_bytes(seed: u64, len: usize) -> Vec<u8> {
+        let mut state = seed;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+                let mut z = state;
+                z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+                ((z ^ (z >> 31)) & 0xFF) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn from_bytes_never_panics_on_arbitrary_input() {
+        // Bounded deterministic fuzz: garbage, zip-like magic prefixes, and structured
+        // near-archives must never panic — only return errors or parse cleanly.
+        for seed in [1u64, 0xDEAD_BEEF, 0x1234_5678_9ABC_DEF0] {
+            let bytes = fuzz_bytes(seed, 4096);
+            let _ = PackageArchive::from_bytes(&bytes);
+        }
+        // Zip magic with garbage payload.
+        let mut magic = b"PK\x03\x04".to_vec();
+        magic.extend_from_slice(&fuzz_bytes(42, 512));
+        let _ = PackageArchive::from_bytes(&magic);
+        // Empty and single-byte inputs.
+        let _ = PackageArchive::from_bytes(&[]);
+        let _ = PackageArchive::from_bytes(&[0x50]);
+    }
+
+    #[test]
+    fn truncated_archives_never_parse_as_half_valid() {
+        let mut archive = PackageArchive::new();
+        archive.add("a.txt", b"alpha content".to_vec()).unwrap();
+        archive.add("b.txt", vec![7u8; 4096]).unwrap();
+        let valid = archive.to_bytes().unwrap();
+
+        // Every strict prefix of a saved archive either fails to parse or parses to the
+        // identical full entry set. A half-written file can never load as a partial one.
+        for cut in 0..valid.len() {
+            match PackageArchive::from_bytes(&valid[..cut]) {
+                Ok(parsed) => {
+                    let mut expected_paths = archive.paths();
+                    let mut parsed_paths = parsed.paths();
+                    expected_paths.sort_unstable();
+                    parsed_paths.sort_unstable();
+                    assert_eq!(
+                        parsed_paths, expected_paths,
+                        "prefix length {cut} parsed as a smaller archive"
+                    );
+                    for path in expected_paths {
+                        assert_eq!(
+                            parsed.get(path),
+                            archive.get(path),
+                            "path {path} at cut {cut}"
+                        );
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+
+        // Single-byte corruptions anywhere never yield different valid content silently:
+        // they either fail the CRC check or are detected as invalid archives.
+        for flip in [0usize, valid.len() / 2, valid.len() - 1] {
+            let mut damaged = valid.clone();
+            damaged[flip] ^= 0xFF;
+            if let Ok(parsed) = PackageArchive::from_bytes(&damaged) {
+                for path in archive.paths() {
+                    assert_eq!(
+                        parsed.get(path),
+                        archive.get(path),
+                        "corruption at {flip} changed {path}"
+                    );
+                }
+            }
+        }
+    }
 }

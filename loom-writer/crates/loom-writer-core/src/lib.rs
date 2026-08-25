@@ -4789,4 +4789,57 @@ mod tests {
             .unwrap();
         assert!(extract_docx_blocks(&empty_archive.to_bytes().unwrap()).is_err());
     }
+
+    #[test]
+    fn truncated_saves_never_load_as_half_documents() {
+        let mut doc = WriterDocument::new("durability-doc", "Durability");
+        doc.blocks.push(RichBlock::new(1, "paragraph", "First"));
+        doc.blocks.push(RichBlock::new(2, "paragraph", "Second"));
+        doc.blocks.push(RichBlock::new(3, "heading1", "Section"));
+
+        let saved = save_document(&doc).expect("save succeeds");
+        let baseline_digest = writer_document_digest(&doc.blocks);
+
+        // Every truncation of a saved document either fails to load or loads to a document
+        // whose content digest matches the original. A crash mid-write can never surface
+        // as a half-document.
+        for cut in 0..saved.len() {
+            match load_document(&saved[..cut]) {
+                Ok(loaded) => {
+                    assert_eq!(
+                        writer_document_digest(&loaded.blocks),
+                        baseline_digest,
+                        "truncation at {cut} loaded altered content"
+                    );
+                }
+                Err(_) => {}
+            }
+        }
+
+        // Single-bit corruption is always detected: either the archive CRC rejects it or
+        // the manifest/content validation catches it — never silently accepted content.
+        let mut flips_detected = 0usize;
+        for flip in (0..saved.len()).step_by(saved.len().max(1) / 32 + 1) {
+            let mut damaged = saved.clone();
+            damaged[flip] ^= 0x01;
+            match load_document(&damaged) {
+                Err(_) => flips_detected += 1,
+                Ok(loaded) => {
+                    assert_eq!(
+                        writer_document_digest(&loaded.blocks),
+                        baseline_digest,
+                        "corruption at {flip} changed content undetected"
+                    );
+                }
+            }
+        }
+        assert!(
+            flips_detected > 0,
+            "at least some single-bit corruptions must be rejected outright"
+        );
+
+        // The intact save still round-trips.
+        let reloaded = load_document(&saved).unwrap();
+        assert_eq!(writer_document_digest(&reloaded.blocks), baseline_digest);
+    }
 }

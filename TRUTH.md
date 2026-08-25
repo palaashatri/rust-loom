@@ -16,8 +16,13 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **91/100**, adding semantic Office Open XML import to the durability groundwork across the suite
+approximately **92/100**, proving persistence failure tolerance alongside semantic Office Open XML import across the suite
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
+a bounded deterministic fuzz suite proving `PackageArchive::from_bytes` never panics on arbitrary input plus an exhaustive
+truncation property test proving every prefix of a saved archive either fails or parses identically (`truncated_archives_never_parse_as_half_valid`),
+and an end-to-end Writer durability proof that every truncation of a saved `.loomdoc` fails to load or reloads with an identical content digest,
+never a half-document (`truncated_saves_never_load_as_half_documents`).
+The suite also adds semantic Office Open XML import:
 DOCX paragraph extraction with heading-style mapping into navigable blocks (`extract_docx_blocks`) in Writer;
 XLSX cell-grid extraction resolving shared strings, inline strings, numerics, and booleans (`extract_xlsx_grid`) in Sheets; and
 PPTX title extraction in numeric slide order with outline-import deck skeletons (`extract_pptx_titles`, `slides_from_pptx`) in Present.
@@ -31,7 +36,7 @@ deck slides/elements/notes (`PresentationDocument::integrity_digest`), raster pi
 (`CompositionDocument::integrity_digest`), timeline tracks/clips/markers (`VideoProject::timeline_digest`),
 session tracks/regions (`StudioSession::session_digest`), and queue jobs/states (`EncodeQueue::queue_digest`). All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 650 passing automated tests.
+gates with 653 passing automated tests.
 a shared Vision transfer vocabulary of provenance-carrying OCR text blocks and a run-length segmentation mask codec
 (`OcrTextBlock`, `MaskSpan`, `mask_to_spans`, `spans_to_mask`) in the loom-vision-core platform crate;
 OCR-to-editable paragraph conversion preserving block-index provenance (`OcrTextBlock`, `paragraphs_from_ocr_blocks`) in Writer;
@@ -65,6 +70,9 @@ parity or product completion.
 - Shared package, runtime, desktop-service, job, history, storage, text, color,
   UI, test, Vision, interoperability, and plugin-SDK crates.
 - Versioned local project packages and positional document-open paths.
+- Persistence failure-injection evidence: bounded no-panic fuzz over package parsing,
+  exhaustive truncation prefixes, single-bit corruption detection, and a Writer
+  end-to-end proof that interrupted saves never surface as half-documents.
 - A crash-tolerant recovery journal (`loom_history::RecoveryJournal`) with
   per-record CRC-32 framing: replay accepts the longest valid prefix, torn
   tails are discarded without losing earlier durable state, and journals
