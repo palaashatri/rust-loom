@@ -1,116 +1,70 @@
-# Typography
+# Loom Typography
 
-Typography is a defining capability of Loom, not a decoration. This document
-defines the font stack, type scale, line lengths, heading hierarchy, tabular
-figures, language and RTL behavior, and text scaling.
+Exact type roles and values live in [`tokens/loom.toml`](tokens/loom.toml) and [`contracts/desktop-ui.toml`](contracts/desktop-ui.toml). This file defines usage.
 
-## 1. Font stack
+## Desktop UI hierarchy
 
-Default sans-serif: **Noto Sans**, with the following fallback chain for UI
-and body text:
+Loom is a dense pointer/keyboard creative suite. Routine UI uses compact desktop typography rather than mobile-sized labels or oversized dashboard headings.
 
-1. `"Noto Sans"` — preferred, shipped or system-installed, all languages.
-2. `"Noto Sans CJK SC"`, `"Noto Sans CJK JP"`, `"Noto Sans KR"`, `"Noto Sans
-   Arabic"`, `"Noto Sans Devanagari"` — Noto family coverage for complex
-   scripts when the primary face lacks them.
-3. Generic: `"DejaVu Sans"`, then `sans-serif`.
+Roles:
 
-Serif/monospace families are not part of the UI; document applications may
-offer serif (Noto Serif) and monospace (Noto Sans Mono) for content text, with
-the same fallback policy.
+- **UI label:** 13 logical px, medium 500. Buttons, toolbar labels, fields, tabs, inspector values.
+- **Section label:** 13 logical px, semibold 600. Inspector/panel sections.
+- **Caption/status:** 11 logical px. Status bar, timestamps, tertiary readouts.
+- **Small metadata:** 12 logical px.
+- **Body/help prose:** 14 logical px.
+- **Subtitle:** 16 logical px.
+- **Content heading:** 20 or 24 logical px only when the content hierarchy actually requires it.
+
+Routine chrome does not use 20–40 px display typography. The work itself, not application branding, owns visual hierarchy.
+
+Bold 700 is not the default chrome weight. Use regular/medium for routine controls and semibold for section/title emphasis. Excessive bold weight is treated as hierarchy noise.
+
+## Font stack
+
+Default UI family is `Noto Sans` with the fallback chain defined in `tokens/loom.toml`. Document applications may use `Noto Serif`, `Noto Sans Mono`, embedded/document fonts, and language-specific shaping for user content.
 
 Rules:
 
-* Fonts are a build-time and runtime resource; missing fonts are handled by
-  fallback, never by failure. Missing-font warnings are non-blocking and
-  logged in the diagnostics channel.
-* All UI text is vector-rendered text in Slint; no bitmap fonts, ever.
-* The stack is tokenized (`font-family-ui`, `font-family-serif`,
-  `font-family-mono` in `loom.toml`'s type section) so a later variable-font
-  migration (`[future]`) is a token change, not a code change.
+- fonts are vector text, never bitmap UI labels;
+- fallback is per glyph where shaping infrastructure supports it;
+- missing UI fonts fall back rather than preventing launch;
+- UI family choice is a token/system decision, not an application choice;
+- document typography is domain content and remains independent of chrome typography.
 
-## 2. Type scale
+## Numeric text
 
-| Token | Size px | Leading ratio | Weight range | Role |
-|---|---|---|---|---|
-| `type-size-11` | 11 | 1.5 (`relaxed`) | 400/500/600 | Captions, timestamps, status text |
-| `type-size-12` | 12 | 1.5 | 400/500/600 | Small labels, dense inspector values |
-| `type-size-13` | 13 | 1.45 (`body`) | 400/500/600 | UI labels, toolbar labels |
-| `type-size-14` | 14 | 1.45 | 400/500/600/700 | **Default body** |
-| `type-size-16` | 16 | 1.45 | 400/500/600/700 | Body-large, dialogs |
-| `type-size-20` | 20 | 1.4 (`compact`) | 500/600/700 | Subtitles, section titles |
-| `type-size-24` | 24 | 1.4 | 500/600/700 | Headings, panel titles |
-| `type-size-32` | 32 | 1.4 | 500/600/700 | Display-1: feature headings |
-| `type-size-40` | 40 | 1.4 | 500/600/700 | Display-2: rare, hero surfaces |
+Coordinates, timecode, durations, spreadsheet values, percentages, progress, media timestamps, mixer values, and inspector numeric readouts use tabular figures when the renderer/font path supports them. Scrubbing a value must not cause surrounding UI to jitter horizontally.
 
-Weight tokens: `type-weight-regular` 400, `type-weight-medium` 500,
-`type-weight-semibold` 600, `type-weight-bold` 700. Defaults: body 400,
-headings 600, labels 500. Bold (700) is reserved for emphasis inside prose
-and for numbers that must stand out; it is not the default for headings.
+## Truncation
 
-## 3. Line length
+Text falls into two categories.
 
-* Body text target: **45–75 characters per line** (about 55–90 mm at 14 px in
-  most fonts). Prefer 60–72 in document applications.
-* UI labels, inspector values, and captions may use shorter lines; they must
-  never exceed 75 ch.
-* Text containers must reflow rather than truncate unless the field is
-  explicitly single-line (labels, table cells) — in which case truncation uses
-  ellipsis, and the full text is available via tooltip or accessible name.
+**User content may ellipsize:** document/project title, file name, layer name, track name, media name, user-created style/name. Full value must remain available through tooltip/accessibility text.
 
-## 4. Heading hierarchy
+**Interface language may not ellipsize:** action labels, button labels, inspector property labels, section headings, severity labels, command names, menu items.
 
-Heading levels are visual roles, not tag semantics; every heading still maps
-to a semantic role for screen readers:
+If interface language does not fit, the layout must recompose: overflow toolbar commands, widen/stack inspector rows within bounds, or collapse optional panels. Do not hide a design failure behind `…`.
 
-1. Window/document title — `type-size-20`, weight 600.
-2. Section heading — `type-size-24`, weight 600 (documents), or `type-size-20`
-   (panels).
-3. Subsection — `type-size-16`, weight 600.
-4. Sub-subsection — `type-size-14`, weight 600.
+## Localization
 
-Hierarchy is conveyed by size and weight only (calm rule); color is not used
-for hierarchy. Headings must scale with the text scale factor (§8).
+All UI strings must survive pseudolocalization and bidirectional text. Logical leading/trailing layout is preferred over left/right assumptions.
 
-## 5. Tabular figures
+- UI labels do not hyphenate.
+- Long translated control labels trigger responsive composition, not clipping.
+- Dates, numbers, currency, and units use locale-aware formatting where implemented.
+- Text shaping and IME behavior are part of editor correctness, not visual polish only.
 
-* Use tabular (monospaced-digit) figures for all data: spreadsheet cells,
-  numeric inspector values, timestamps, durations, coordinates, money.
-* Times, durations, and coordinates in UI are always in tabular figures so
-  columns align and scrubbing values do not jitter horizontally.
-* Use proportional figures for running prose and display text.
+## Text scaling
 
-## 6. Language, RTL, and internationalization
+Release tests require 1.0, 1.25, and 1.5 text-scale behavior; 2.0 is the accessibility stress target.
 
-* All text layout goes through the shaping engine; no pre-shaped text.
-* Bidirectional text is supported wherever text is editable or shown
-  (see `loom-spec`'s localization contract; the Bible adds the visual rules).
-* RTL UI mirroring is required for the four built-in themes; logical layout
-  (not visual mirroring) for progression — see `THEMING.md` and the layout
-  stress screens in the gallery milestone.
-* Language-aware line breaking and hyphenation: UI labels never hyphenate;
-  document text uses the locale's hyphenation dictionary when available.
-* Date/time/number formatting uses the locale; all layouts must survive
-  long-formatted strings (pseudolocale test requirement).
+Scaling text does not blindly scale every panel and toolbar dimension. The responsive system keeps controls usable by moving lower-priority actions into overflow, stacking property rows where allowed, and collapsing optional panels before content is harmed.
 
-## 7. Font fallback behavior
+No action/control label may clip at any required scale. User content may ellipsize only under the explicit truncation policy.
 
-* Fallback is per-glyph, not per-word: a missing glyph resolves to the next
-  face that has it.
-* Fallback chains are tested with an installed-font audit in CI (missing
-  glyph detection for the supported language matrix).
-* Documents embedding fonts do so through the package format's asset rules;
-  the UI itself never embeds fonts in documents.
+Content zoom is independent of UI text scale. A Writer page, Photo image, Present stage, or Video viewer can change zoom without making chrome text larger.
 
-## 8. Text scaling
+## Contrast
 
-The UI supports a text scale factor applied globally: **1.0 (default),
-1.25, 1.5**.
-
-* Scaling multiplies all `type-size-*` tokens; leading ratios stay constant.
-* Chrome (toolbar 40 px, sidebar 240 px, inspector 280 px) may grow up to
-  1.5× at scale 1.5 to fit text; content surfaces flex.
-* No control may clip its label at 1.5×; no layout may become unusable at
-  1.5×. This is a visual-QA gate (`VISUAL_QA.md`).
-* Scaling is independent of window zoom (which scales the whole canvas
-  including pixels).
+Routine UI/body text must meet the contrast floor defined in `tokens/loom.toml`. Focus and non-text control boundaries must meet their UI contrast floor. High-contrast mode is a semantic palette swap, not application-specific restyling.
