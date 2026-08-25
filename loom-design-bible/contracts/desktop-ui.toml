@@ -1,0 +1,464 @@
+# Loom Desktop UI Contract — normative, machine-readable specification
+#
+# This file is the geometry/interaction authority for shared Loom UI.
+# It deliberately contains values a non-visual coding agent can obey and CI can
+# validate. Human-approved screenshots remain evidence, never the source of
+# geometry truth. Application code may not silently redefine these values.
+
+format-version = "1.0.0"
+
+[meta]
+name = "loom-desktop-ui-contract"
+owner = "loom-ui"
+platform-model = "desktop-pointer-keyboard"
+reference-principles = [
+  "content-first",
+  "clear-hierarchy",
+  "direct-manipulation",
+  "progressive-disclosure",
+  "predictable-placement",
+  "accessible-by-default",
+  "no-decorative-chrome"
+]
+
+# ---------------------------------------------------------------------------
+# Validation viewport matrix. All sizes are logical pixels.
+# ---------------------------------------------------------------------------
+[validation]
+reference-viewport = [1280, 800]
+required-viewports = [[1024, 720], [1280, 800], [1440, 900], [1920, 1200]]
+required-text-scales = [1.0, 1.25, 1.5]
+accessibility-text-scale = 2.0
+required-themes = ["light", "dark", "high-contrast"]
+max-unintentional-overlap-px = 0
+max-control-label-clipping-px = 0
+max-action-label-truncation = 0
+max-toolbar-lines = 1
+max-toolbar-groups = 3
+baseline-diff-mean = 0.012
+baseline-diff-pixel-ratio = 0.035
+
+# ---------------------------------------------------------------------------
+# Spacing and dimensions.
+# ---------------------------------------------------------------------------
+[grid]
+spacing = [2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+hairline = 1
+
+[type]
+ui = 13
+caption = 11
+small = 12
+body = 14
+title = 13
+section = 13
+subtitle = 16
+heading = 20
+large-heading = 24
+weight-regular = 400
+weight-medium = 500
+weight-semibold = 600
+weight-bold = 700
+line-height-ui = 18
+line-height-caption = 15
+line-height-body = 20
+line-height-title = 18
+numeric-figures = "tabular"
+
+[controls]
+standard-height = 28
+compact-height = 24
+prominent-height = 32
+minimum-pointer-target = 28
+minimum-exception-target = 20
+icon-standard = 16
+icon-small = 14
+icon-large = 20
+button-horizontal-padding = 10
+field-horizontal-padding = 8
+control-gap = 6
+label-gap = 6
+focus-ring = 2
+focus-offset = 2
+border = 1
+radius = 6
+small-radius = 4
+popover-radius = 10
+
+[chrome]
+title-height = 40
+toolbar-height = 40
+context-toolbar-height = 40
+status-height = 28
+panel-header-height = 32
+sheet-tab-height = 30
+formula-bar-height = 32
+left-tool-rail-width = 40
+separator = 1
+
+[panels]
+sidebar-default = 240
+sidebar-min = 200
+sidebar-max = 360
+inspector-default = 280
+inspector-min = 240
+inspector-max = 360
+panel-padding = 12
+section-gap = 16
+property-row-min-height = 28
+property-label-width-min = 84
+property-label-width-max = 112
+resize-hit-target = 6
+
+[canvas]
+minimum-visible-width = 480
+minimum-visible-height = 320
+fit-margin = 24
+object-handle-visible = 8
+object-handle-hit-target = 20
+selection-outline = 1
+snap-distance = 6
+guide-width = 1
+
+[timeline]
+minimum-height = 220
+track-header-width = 180
+ruler-height = 24
+track-height-default = 44
+track-height-compact = 32
+playhead-width = 1
+clip-radius = 4
+trim-handle-visible = 4
+trim-handle-hit-target = 12
+
+[motion]
+hover-ms = 0
+press-ms = 0
+micro-ms = 120
+standard-ms = 180
+panel-ms = 220
+maximum-routine-ms = 250
+reduced-motion-ms = 0
+
+# ---------------------------------------------------------------------------
+# Semantic palette. These values are intentionally neutral so content carries
+# visual weight; the warm accent is Loom identity, not general decoration.
+# Every state must consume a semantic role, never an application-local color.
+# ---------------------------------------------------------------------------
+[palette.light]
+canvas = "#F2F2F4"
+canvas-alt = "#EAEAEC"
+surface = "#F7F7F8"
+surface-raised = "#FFFFFF"
+surface-sunken = "#EDEDEF"
+chrome = "#F6F6F7"
+panel = "#F4F4F5"
+overlay = "#FFFFFFF2"
+ink = "#1D1D1F"
+ink-secondary = "#6E6E73"
+ink-disabled = "#A1A1A6"
+accent = "#B4552D"
+accent-hover = "#C9643A"
+accent-pressed = "#994724"
+accent-ink = "#FFFFFF"
+success = "#347A50"
+warning = "#966019"
+danger = "#A43424"
+info = "#356D9A"
+border = "#D1D1D6"
+border-strong = "#B8B8BD"
+focus = "#B4552D"
+selection = "#B4552D"
+selection-soft = "#F1DDD4"
+danger-surface = "#F6DEDA"
+shadow = "#0000001F"
+scrim = "#00000066"
+grid-major = "#C7C7CC"
+grid-minor = "#E1E1E4"
+paper = "#FFFFFF"
+paper-ink = "#1D1D1F"
+paper-muted = "#6E6E73"
+paper-line = "#D1D1D6"
+media-stage = "#0B0B0C"
+content-accent = "#B4552D"
+content-accent-soft = "#F1DDD4"
+content-cool = "#3E6680"
+content-cool-soft = "#E5EDF2"
+meter-good = "#4FA96D"
+meter-warn = "#D49A3F"
+
+[palette.dark]
+canvas = "#1C1C1E"
+canvas-alt = "#18181A"
+surface = "#242426"
+surface-raised = "#2C2C2E"
+surface-sunken = "#151517"
+chrome = "#242426"
+panel = "#202022"
+overlay = "#2C2C2EF2"
+ink = "#F5F5F7"
+ink-secondary = "#AEAEB2"
+ink-disabled = "#6C6C70"
+accent = "#D97A4A"
+accent-hover = "#E88B5E"
+accent-pressed = "#BE653B"
+accent-ink = "#1C1C1E"
+success = "#66BB84"
+warning = "#DFA553"
+danger = "#E27065"
+info = "#78A9D2"
+border = "#3A3A3C"
+border-strong = "#545458"
+focus = "#E88B5E"
+selection = "#D97A4A"
+selection-soft = "#3D2B22"
+danger-surface = "#3D2322"
+shadow = "#00000080"
+scrim = "#00000099"
+grid-major = "#48484A"
+grid-minor = "#303033"
+paper = "#F8F8FA"
+paper-ink = "#1D1D1F"
+paper-muted = "#6E6E73"
+paper-line = "#D1D1D6"
+media-stage = "#070708"
+content-accent = "#D97A4A"
+content-accent-soft = "#3D2B22"
+content-cool = "#6F9AB4"
+content-cool-soft = "#22313A"
+meter-good = "#58B478"
+meter-warn = "#E0A24B"
+
+[palette.high-contrast]
+canvas = "#000000"
+canvas-alt = "#000000"
+surface = "#000000"
+surface-raised = "#161616"
+surface-sunken = "#000000"
+chrome = "#000000"
+panel = "#000000"
+overlay = "#000000F2"
+ink = "#FFFFFF"
+ink-secondary = "#FFFFFF"
+ink-disabled = "#C8C8C8"
+accent = "#FFD84D"
+accent-hover = "#FFE681"
+accent-pressed = "#E7BD25"
+accent-ink = "#000000"
+success = "#80FF80"
+warning = "#FFBD52"
+danger = "#FF7164"
+info = "#80CCFF"
+border = "#FFFFFF"
+border-strong = "#FFFFFF"
+focus = "#FFD84D"
+selection = "#FFD84D"
+selection-soft = "#3A3200"
+danger-surface = "#3D0D09"
+shadow = "#000000"
+scrim = "#000000CC"
+grid-major = "#FFFFFF"
+grid-minor = "#777777"
+paper = "#FFFFFF"
+paper-ink = "#000000"
+paper-muted = "#222222"
+paper-line = "#000000"
+media-stage = "#000000"
+content-accent = "#FFD84D"
+content-accent-soft = "#FFFFFF"
+content-cool = "#003CFF"
+content-cool-soft = "#FFFFFF"
+meter-good = "#00FF66"
+meter-warn = "#FFD84D"
+
+# ---------------------------------------------------------------------------
+# Component contracts. Apps compose these roles; they do not restyle them.
+# ---------------------------------------------------------------------------
+[component.button]
+height = 28
+min-width = 28
+radius = 6
+icon = 16
+label-size = 13
+label-weight = 500
+padding-x = 10
+never-truncate-label = true
+
+[component.icon-button]
+width = 28
+height = 28
+icon = 16
+radius = 6
+tooltip-required = true
+
+[component.segmented]
+height = 28
+radius = 6
+max-segments = 6
+label-size = 13
+
+[component.text-field]
+height = 28
+radius = 6
+label-size = 13
+padding-x = 8
+
+[component.list-row]
+dense-height = 28
+default-height = 32
+radius = 4
+label-size = 13
+
+[component.inspector-section]
+header-height = 32
+body-padding = 12
+label-size = 13
+label-weight = 600
+
+[component.menu]
+row-height = 28
+icon = 16
+radius = 10
+label-size = 13
+shortcut-size = 11
+
+[component.tooltip]
+label-size = 11
+radius = 4
+delay-ms = 400
+
+# ---------------------------------------------------------------------------
+# Toolbar policy. Priority 0 survives all supported widths; priority 1 may
+# become icon-only; priority 2 moves to overflow. Controls never shrink below
+# intrinsic label width and action labels never ellipsize.
+# ---------------------------------------------------------------------------
+[toolbar]
+max-groups = 3
+group-gap = 12
+item-gap = 4
+padding-x = 8
+priority-1-icon-only-below = 1180
+priority-2-overflow-below = 1320
+never-scroll = true
+never-wrap = true
+never-truncate-actions = true
+all-items-have-menu-command = true
+show-app-name = false
+show-neutral-local-state = false
+
+# ---------------------------------------------------------------------------
+# Text truncation policy.
+# ---------------------------------------------------------------------------
+[truncation]
+allow-user-content = true
+allow-document-title = true
+allow-file-name = true
+allow-track-name = true
+allow-layer-name = true
+allow-action-label = false
+allow-control-label = false
+allow-section-title = false
+allow-status-severity = false
+tooltip-required-when-ellipsized = true
+
+# ---------------------------------------------------------------------------
+# Shell contracts per application. `primary-share-min` means the central work
+# surface receives at least this fraction of available width after mandatory
+# chrome at the reference viewport.
+# ---------------------------------------------------------------------------
+[app.writer]
+min-window = [900, 680]
+primary-share-min = 0.68
+left-sidebar-default = 0
+right-inspector-default = 0
+persistent-chrome = ["title", "context-toolbar", "status"]
+forbidden-persistent-overlays = ["mode-chip", "local-state-pill"]
+
+[app.sheets]
+min-window = [900, 680]
+primary-share-min = 0.78
+left-sidebar-default = 0
+right-inspector-default = 0
+persistent-chrome = ["title", "formula-bar", "sheet-tabs", "status"]
+grid-must-fill-viewport = true
+
+[app.present]
+min-window = [1024, 720]
+primary-share-min = 0.50
+left-sidebar-default = 220
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "status"]
+
+[app.photo]
+min-window = [1024, 720]
+primary-share-min = 0.52
+left-sidebar-default = 240
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "status"]
+
+[app.motion]
+min-window = [1100, 720]
+primary-share-min = 0.46
+left-sidebar-default = 240
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "timeline", "status"]
+
+[app.video]
+min-window = [1100, 720]
+primary-share-min = 0.46
+left-sidebar-default = 240
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "timeline", "status"]
+
+[app.studio]
+min-window = [1100, 720]
+primary-share-min = 0.60
+left-sidebar-default = 180
+right-inspector-default = 0
+persistent-chrome = ["title", "transport", "timeline", "status"]
+
+[app.encode]
+min-window = [960, 680]
+primary-share-min = 0.55
+left-sidebar-default = 280
+right-inspector-default = 300
+persistent-chrome = ["title", "queue-toolbar", "status"]
+
+# ---------------------------------------------------------------------------
+# Forbidden visual/interaction patterns. The source audit treats these as
+# release failures once an app is migrated to the toolkit contract.
+# ---------------------------------------------------------------------------
+[forbidden]
+app-local-hardcoded-colors = true
+app-local-control-radii = true
+app-local-control-heights = true
+app-local-toolbar-shells = true
+persistent-canvas-status-overlays = true
+button-label-ellipsis = true
+control-label-ellipsis = true
+nested-panel-scrollbars = true
+scrolling-toolbar = true
+wrapped-toolbar = true
+rounded-card-for-every-section = true
+app-logo-tile-in-document-chrome = true
+neutral-status-pill-in-titlebar = true
+fake-page-shadow-rectangle = true
+emoji-as-icon = true
+color-only-state = true
+
+# ---------------------------------------------------------------------------
+# Acceptance rule: a component or shell is not 'done' until every required
+# state exists, can be driven by keyboard, and has a deterministic approved
+# capture. Approval is external metadata, not 'whatever image is current'.
+# ---------------------------------------------------------------------------
+[acceptance]
+interactive-states = ["default", "hover", "pressed", "keyboard-focus", "disabled"]
+selection-states = ["unselected", "selected"]
+error-states = ["valid", "invalid"]
+require-keyboard-path = true
+require-accessible-name = true
+require-approved-baseline = true
+require-zero-known-layout-defects = true
+require-realistic-content-fixture = true
+require-empty-state-fixture = true
+require-error-state-fixture = true
