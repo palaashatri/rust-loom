@@ -2767,6 +2767,57 @@ impl OutlineEntry {
     }
 }
 
+/// Walks an outline slice producing hierarchical dotted numbering ("1.", "1.1.", "1.1.1.")
+/// followed by each entry's title. A level jump deeper than +1 nests as a single +1 step;
+/// counters at deeper levels reset whenever an outer level increments. Level 0 entries are
+/// skipped. Returns one "<prefix> <title>" string per entry, in order.
+pub fn numbered_outline(entries: &[OutlineEntry]) -> Vec<String> {
+    // Active ancestor chain: (effective level, occurrence count at that depth).
+    let mut active: Vec<(u8, u32)> = Vec::new();
+    let mut rendered = Vec::with_capacity(entries.len());
+
+    for entry in entries {
+        if entry.level == 0 {
+            continue;
+        }
+        let level = entry.level;
+
+        // Close out branches at the same level or deeper.
+        while let Some(last) = active.last() {
+            if last.0 > level {
+                active.pop();
+            } else {
+                break;
+            }
+        }
+
+        match active.last() {
+            // Sibling of an existing entry at this level.
+            Some(last) if last.0 == level => {
+                let count = last.1 + 1;
+                *active.last_mut().expect("last checked above") = (level, count);
+            }
+            // Child entry; deep jumps clamp to one level past the parent.
+            parent => {
+                let effective = match parent {
+                    Some((parent_level, _)) => level.min(parent_level + 1),
+                    None => level,
+                };
+                active.push((effective, 1));
+            }
+        }
+
+        let prefix = active
+            .iter()
+            .map(|(_, count)| count.to_string())
+            .collect::<Vec<_>>()
+            .join(".");
+        rendered.push(format!("{prefix}. {}", entry.title));
+    }
+
+    rendered
+}
+
 /// Extracts a navigable outline from document blocks, keeping only heading
 /// blocks (level derived from the block kind). Skips empty titles.
 pub fn extract_outline(blocks: &[RichBlock]) -> Vec<OutlineEntry> {
@@ -4347,5 +4398,44 @@ mod tests {
             broken.source_range = "A1:A1".into();
             assert_eq!(broken.validate(), Ok(()));
         }
+    }
+
+    #[test]
+    fn outline_numbering_hierarchies() {
+        let entry = |level: u8, title: &str, index: usize| OutlineEntry {
+            level,
+            title: title.to_string(),
+            block_index: index,
+        };
+
+        let entries = vec![
+            entry(1, "Intro", 0),
+            entry(2, "Background", 2),
+            entry(2, "Prior Work", 4),
+            entry(3, "Survey", 5),
+            entry(1, "Method", 8),
+            entry(2, "Setup", 10),
+        ];
+        assert_eq!(
+            numbered_outline(&entries),
+            vec![
+                "1. Intro",
+                "1.1. Background",
+                "1.2. Prior Work",
+                "1.2.1. Survey",
+                "2. Method",
+                "2.1. Setup",
+            ]
+        );
+
+        // A deep jump nests as a single +1 step
+        let jumped = vec![entry(1, "One", 0), entry(5, "Deep", 1)];
+        assert_eq!(numbered_outline(&jumped), vec!["1. One", "1.1. Deep"]);
+
+        // Level resets clear deeper counters
+        let reset = vec![entry(2, "A", 0), entry(3, "B", 1), entry(2, "C", 2)];
+        assert_eq!(numbered_outline(&reset), vec!["1. A", "1.1. B", "2. C"]);
+
+        assert!(numbered_outline(&[]).is_empty());
     }
 }

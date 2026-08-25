@@ -458,6 +458,48 @@ pub fn generate_hardware_encoder_args(hw: HardwareEncoder) -> Vec<String> {
     }
 }
 
+/// Parses `ffmpeg -encoders` output lines into available encoder names. The listing shows
+/// lines like " A.... libx264              (codec h264)". Extract the encoder name field
+/// (second whitespace-delimited token after the flag column); ignore header/blank lines.
+pub fn parse_available_encoders(ffmpeg_encoders_output: &str) -> Vec<String> {
+    ffmpeg_encoders_output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let flags = fields.next()?;
+            // Flag columns such as "V....D" mix uppercase capability letters with dots;
+            // anything else is a title, separator, or legend line.
+            if flags.len() < 2 || !flags.chars().all(|c| c.is_ascii_uppercase() || c == '.') {
+                return None;
+            }
+            let name = fields.next()?;
+            // Legend lines such as " V..... = Video" put "=" in the name position.
+            if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+                return None;
+            }
+            Some(name.to_string())
+        })
+        .collect()
+}
+
+/// Produces the probe argument vector ["-hide_banner", "-encoders"] prefixed with "ffmpeg".
+pub fn generate_encoder_probe_args() -> Vec<String> {
+    vec!["ffmpeg".into(), "-hide_banner".into(), "-encoders".into()]
+}
+
+/// Chooses a hardware encoder from availability: returns the first preferred candidate that
+/// appears in `available` (case-insensitive match against ffmpeg names like "h264_nvenc",
+/// "hevc_videotoolbox", "h264_vaapi"); None when no preference is available. Empty
+/// preferences => None.
+pub fn select_hardware_encoder(preferred: &[String], available: &[String]) -> Option<String> {
+    preferred.iter().find_map(|candidate| {
+        available
+            .iter()
+            .find(|encoder| encoder.eq_ignore_ascii_case(candidate))
+            .cloned()
+    })
+}
+
 /// Stream mapping configuration for selecting specific media tracks from an input file.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StreamMapping {
@@ -2208,6 +2250,45 @@ mod tests {
             args,
             vec!["-map", "0:v:0", "-map", "0:a:1", "-map", "0:s:0"]
         );
+    }
+
+    #[test]
+    fn encoder_probe_parsing_and_selection() {
+        let sample = "\
+Encoders:
+ V..... = Video
+ A..... = Audio
+ -------
+ V....D libx264              (codec h264)
+ V..... h264_nvenc           NVIDIA NVENC H.264 encoder
+ A....D aac                  AAC (Advanced Audio Coding)
+
+";
+        let parsed = parse_available_encoders(sample);
+        assert_eq!(parsed.len(), 3);
+        assert!(parsed.iter().any(|name| name == "libx264"));
+        assert!(parsed.iter().any(|name| name == "h264_nvenc"));
+        assert!(parsed.iter().any(|name| name == "aac"));
+
+        assert_eq!(
+            generate_encoder_probe_args(),
+            vec!["ffmpeg", "-hide_banner", "-encoders"]
+        );
+
+        let available = vec![
+            "h264_videotoolbox".to_string(),
+            "hevc_videotoolbox".to_string(),
+        ];
+        let preferences = vec!["h264_nvenc".to_string(), "H264_VIDEOTOOLBOX".to_string()];
+        assert_eq!(
+            select_hardware_encoder(&preferences, &available),
+            Some("h264_videotoolbox".to_string())
+        );
+        assert_eq!(
+            select_hardware_encoder(&["h264_vaapi".to_string()], &available),
+            None
+        );
+        assert_eq!(select_hardware_encoder(&[], &available), None);
     }
 
     #[test]

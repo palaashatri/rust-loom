@@ -2288,6 +2288,85 @@ impl MotionTemplateBinding {
     }
 }
 
+/// One CMX3600 edit record derived from a timeline clip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EdlRecord {
+    /// 1-based event number.
+    pub event_number: u32,
+    /// Reel identifier derived from the clip source name.
+    pub reel: String,
+    pub source_in: String,
+    pub source_out: String,
+    pub record_in: String,
+    pub record_out: String,
+    pub clip_name: String,
+}
+
+/// Derives an EDL reel name from a clip name: uppercased, truncated to 8 characters, with
+/// non-alphanumeric characters replaced by '_'.
+fn edl_reel_name(clip_name: &str) -> String {
+    let upper = clip_name.to_uppercase();
+    let mut reel: String = upper
+        .chars()
+        .take(8)
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if reel.is_empty() {
+        reel.push('_');
+    }
+    reel
+}
+
+/// Builds CMX3600-style records from ordered timeline clips. Each tuple is
+/// (clip_name, source_offset_seconds, start_seconds, duration_seconds). Source in equals the
+/// clip's source offset; source out adds the duration; record positions come from the
+/// timeline. fps must be positive and finite else Err.
+pub fn build_edl_records(
+    clips: &[(String, f64, f64, f64)],
+    fps: f64,
+) -> Result<Vec<EdlRecord>, String> {
+    if !fps.is_finite() || fps <= 0.0 {
+        return Err("frame rate must be positive and finite".into());
+    }
+    let mut records = Vec::with_capacity(clips.len());
+    for (index, (clip_name, source_offset, start, duration)) in clips.iter().enumerate() {
+        let source_in = Timecode::from_seconds(*source_offset, fps).format_smpte();
+        let source_out =
+            Timecode::from_seconds(source_offset + duration.max(0.0), fps).format_smpte();
+        let record_in = Timecode::from_seconds(*start, fps).format_smpte();
+        let record_out = Timecode::from_seconds(start + duration.max(0.0), fps).format_smpte();
+        records.push(EdlRecord {
+            event_number: index as u32 + 1,
+            reel: edl_reel_name(clip_name),
+            source_in,
+            source_out,
+            record_in,
+            record_out,
+            clip_name: clip_name.clone(),
+        });
+    }
+    Ok(records)
+}
+
+/// Serializes records into CMX3600 text: one event line with fixed-width columns followed by
+/// a `* FROM CLIP NAME:` comment per record, each line ending with \r\n.
+pub fn write_edl(records: &[EdlRecord]) -> String {
+    let mut output = String::new();
+    for record in records {
+        output.push_str(&format!(
+            "{:03}  {:<8}  V  C        {:<11} {:<11} {:<11} {:<11}\r\n",
+            record.event_number,
+            record.reel,
+            record.source_in,
+            record.source_out,
+            record.record_in,
+            record.record_out
+        ));
+        output.push_str(&format!("* FROM CLIP NAME: {}\r\n\r\n", record.clip_name));
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3196,5 +3275,54 @@ mod tests {
         };
         let err = duplicated.validate().unwrap_err();
         assert!(err.contains("duplicate"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn edl_export_record_structure() {
+        // Three clips at 25 fps. Timecode arithmetic: 1 s = 25 frames.
+        // Clip A: source offset 10 s, timeline 0..5 s
+        //   src in 00:00:10:00, src out 00:00:15:00, rec in 00:00:00:00, rec out 00:00:05:00
+        // Clip B ("interview b-roll!"): source offset 60 s, timeline 5..8 s
+        //   reel truncates to 8 chars uppercased with '_' -> "INTERVIE"
+        //   src in 00:01:00:00, src out 00:01:03:00, rec in 00:00:05:00, rec out 00:00:08:00
+        let clips = vec![
+            ("Clip A".to_string(), 10.0, 0.0, 5.0),
+            ("interview b-roll!".to_string(), 60.0, 5.0, 3.0),
+        ];
+
+        let records = build_edl_records(&clips, 25.0).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].event_number, 1);
+        assert_eq!(records[0].reel, "CLIP_A");
+        assert_eq!(records[0].source_in, "00:00:10:00");
+        assert_eq!(records[0].source_out, "00:00:15:00");
+        assert_eq!(records[0].record_in, "00:00:00:00");
+        assert_eq!(records[0].record_out, "00:00:05:00");
+
+        assert_eq!(records[1].event_number, 2);
+        assert_eq!(records[1].reel, "INTERVIE");
+        assert_eq!(records[1].source_in, "00:01:00:00");
+        assert_eq!(records[1].source_out, "00:01:03:00");
+        assert_eq!(records[1].record_in, "00:00:05:00");
+        assert_eq!(records[1].record_out, "00:00:08:00");
+
+        // Serialization carries event lines and clip-name comments in order
+        let text = write_edl(&records);
+        assert!(text.contains("001  CLIP_A"), "event line missing: {text}");
+        assert!(text.contains("* FROM CLIP NAME: interview b-roll!\r\n"));
+        assert!(text.ends_with("\r\n"));
+
+        // Empty input serializes to an empty string
+        assert_eq!(write_edl(&[]), "");
+
+        // Invalid frame rates are rejected
+        assert!(build_edl_records(&clips, 0.0).is_err());
+        assert!(build_edl_records(&clips, -25.0).is_err());
+        assert!(build_edl_records(&clips, f64::NAN).is_err());
+
+        // Zero-length clips still produce valid ordered ranges
+        let zero = build_edl_records(&[("z".to_string(), 4.0, 2.0, 0.0)], 25.0).unwrap();
+        assert_eq!(zero[0].source_in, "00:00:04:00");
+        assert_eq!(zero[0].source_out, "00:00:04:00");
     }
 }

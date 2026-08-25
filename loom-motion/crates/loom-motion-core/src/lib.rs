@@ -1648,6 +1648,118 @@ impl MotionTemplate {
     }
 }
 
+/// Output container kinds supported by the reference render queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderOutputKind {
+    #[default]
+    PngSequence,
+    SvgFrame,
+}
+
+/// One queued render spanning a frame range.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderQueueEntry {
+    pub entry_id: String,
+    /// Inclusive first frame index.
+    pub first_frame: u32,
+    /// Inclusive last frame index.
+    pub last_frame: u32,
+    /// Output file pattern containing one '{frame}' placeholder, e.g. "out/frame_{frame}.png".
+    pub output_pattern: String,
+    pub output_kind: RenderOutputKind,
+    pub completed_frames: u32,
+}
+
+impl RenderQueueEntry {
+    /// Total frames spanned (inclusive range). `last_frame >= first_frame` is enforced
+    /// by [`Self::new`].
+    pub fn frame_count(&self) -> u32 {
+        self.last_frame - self.first_frame + 1
+    }
+
+    pub fn new(
+        entry_id: impl Into<String>,
+        first_frame: u32,
+        last_frame: u32,
+        output_pattern: impl Into<String>,
+        kind: RenderOutputKind,
+    ) -> Result<Self, String> {
+        let entry = Self {
+            entry_id: entry_id.into(),
+            first_frame,
+            last_frame,
+            output_pattern: output_pattern.into(),
+            output_kind: kind,
+            completed_frames: 0,
+        };
+        entry.validate()?;
+        Ok(entry)
+    }
+
+    /// Validates that the identifier and output pattern are non-empty, the pattern contains a
+    /// `{frame}` placeholder, and the frame range is ordered.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.entry_id.is_empty() {
+            return Err("render queue entry id must not be empty".into());
+        }
+        if self.output_pattern.is_empty() {
+            return Err("render queue output pattern must not be empty".into());
+        }
+        if !self.output_pattern.contains("{frame}") {
+            return Err("render queue output pattern must contain a '{frame}' placeholder".into());
+        }
+        if self.last_frame < self.first_frame {
+            return Err("render queue frame range must be ordered".into());
+        }
+        Ok(())
+    }
+
+    /// Frames remaining = total minus completed, clamped at zero.
+    pub fn remaining_frames(&self) -> u32 {
+        self.frame_count().saturating_sub(self.completed_frames)
+    }
+
+    /// Splits the un-completed remainder into deterministic contiguous chunks of at most
+    /// `chunk_size` frames; returns `(start_frame, end_frame)` pairs inclusive. A `chunk_size`
+    /// of zero is rejected.
+    pub fn pending_chunks(&self, chunk_size: u32) -> Result<Vec<(u32, u32)>, String> {
+        if chunk_size == 0 {
+            return Err("render queue chunk size must be greater than zero".into());
+        }
+        let total = self.frame_count();
+        let mut chunks = Vec::new();
+        let mut start = self
+            .first_frame
+            .saturating_add(self.completed_frames.min(total));
+        while start <= self.last_frame {
+            let end = start.saturating_add(chunk_size - 1).min(self.last_frame);
+            chunks.push((start, end));
+            start = end + 1;
+        }
+        Ok(chunks)
+    }
+
+    /// Renders the output path for one frame index within range by substituting `{frame}`;
+    /// out-of-range frames are rejected.
+    pub fn path_for_frame(&self, frame: u32) -> Result<String, String> {
+        if frame < self.first_frame || frame > self.last_frame {
+            return Err(format!(
+                "frame {frame} is outside the entry range {}..={}",
+                self.first_frame, self.last_frame
+            ));
+        }
+        Ok(self.output_pattern.replace("{frame}", &frame.to_string()))
+    }
+
+    /// Marks `additional` more frames complete; never exceeds the total frame count.
+    pub fn mark_completed(&mut self, additional: u32) {
+        self.completed_frames = self
+            .completed_frames
+            .saturating_add(additional)
+            .min(self.frame_count());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2495,5 +2607,68 @@ mod tests {
         assert!(!invalid_template.defaults_are_valid());
 
         assert!(TemplateParameter::new("", TemplateValue::Number(0.0)).is_err());
+    }
+
+    #[test]
+    fn render_queue_chunking_and_paths() {
+        let mut entry = RenderQueueEntry::new(
+            "seq-1",
+            0,
+            99,
+            "out/frame_{frame}.png",
+            RenderOutputKind::PngSequence,
+        )
+        .expect("valid render queue entry");
+        assert_eq!(entry.frame_count(), 100);
+        assert_eq!(entry.remaining_frames(), 100);
+
+        entry.mark_completed(40);
+        assert_eq!(entry.completed_frames, 40);
+        assert_eq!(entry.remaining_frames(), 60);
+
+        assert_eq!(
+            entry.pending_chunks(25).expect("pending chunks"),
+            vec![(40, 64), (65, 89), (90, 99)]
+        );
+
+        assert_eq!(
+            entry.path_for_frame(42).expect("frame within range"),
+            "out/frame_42.png"
+        );
+        assert_eq!(
+            entry.path_for_frame(99).expect("last frame within range"),
+            "out/frame_99.png"
+        );
+        assert!(entry.path_for_frame(100).is_err());
+
+        // Completion saturates at the total frame count.
+        entry.mark_completed(u32::MAX);
+        assert_eq!(entry.completed_frames, 100);
+        assert_eq!(entry.remaining_frames(), 0);
+        assert!(entry.pending_chunks(10).expect("drained chunks").is_empty());
+        assert!(entry.pending_chunks(0).is_err());
+
+        let missing_placeholder =
+            RenderQueueEntry::new("bad", 0, 5, "out/frame.png", RenderOutputKind::SvgFrame)
+                .err()
+                .expect("missing placeholder rejected");
+        assert!(missing_placeholder.contains("placeholder"));
+
+        let reversed = RenderQueueEntry::new(
+            "bad",
+            9,
+            0,
+            "out/frame_{frame}.png",
+            RenderOutputKind::PngSequence,
+        );
+        assert!(reversed.is_err());
+
+        let mut direct = entry.clone();
+        direct.output_pattern = "out/frame.png".into();
+        assert!(direct.validate().is_err());
+        direct.output_pattern = "out/frame_{frame}.png".into();
+        direct.first_frame = 9;
+        direct.last_frame = 3;
+        assert!(direct.validate().is_err());
     }
 }

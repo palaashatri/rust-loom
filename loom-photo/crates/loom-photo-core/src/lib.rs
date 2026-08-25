@@ -2477,6 +2477,51 @@ impl AssetRegistry {
     }
 }
 
+impl PhotoDocument {
+    /// Emits an OpenRaster-style `stack.xml` manifest describing the document geometry and
+    /// layer order. Layers serialize bottom-up in document order; opacity is written with
+    /// two decimals in [0,1] and visibility as "visible"/"hidden". The manifest is
+    /// deterministic for a given document.
+    pub fn to_openraster_stack_xml(&self) -> String {
+        let mut xml = format!(
+            "<image w=\"{}\" h=\"{}\" xres=\"{}\" yres=\"{}\">\n  <stack>\n",
+            self.width, self.height, self.dpi, self.dpi
+        );
+        for layer in &self.layers {
+            let visibility = if layer.visible { "visible" } else { "hidden" };
+            let src = match layer.kind {
+                LayerKind::Adjustment => String::new(),
+                _ => format!(" src=\"layers/{}.png\"", layer.id),
+            };
+            let adjustment = layer
+                .adjustment_type
+                .as_ref()
+                .map(|kind| format!(" adjustment=\"{}\"", kind))
+                .unwrap_or_default();
+            xml.push_str(&format!(
+                "    <layer name=\"{}\"{} opacity=\"{:.2}\" visibility=\"{}\"{}\n",
+                xml_escape_attr(&layer.name),
+                src,
+                layer.opacity.clamp(0.0, 1.0),
+                visibility,
+                adjustment
+            ));
+        }
+        xml.push_str("  </stack>\n</image>\n");
+        xml
+    }
+}
+
+/// Escapes XML attribute text: &, <, >, ", and ' become entities.
+fn xml_escape_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3497,5 +3542,35 @@ mod tests {
         assert!(registry.remove("lut-link"));
         assert!(!registry.remove("lut-link"));
         assert_eq!(registry.references.len(), 1);
+    }
+
+    #[test]
+    fn openraster_stack_manifest_emission() {
+        let mut doc = PhotoDocument::new("doc-1", "Poster", 800, 600);
+        let mut text_layer = Layer::new_pixel("layer-title", "Title & <Sub>");
+        text_layer.opacity = 0.5;
+        doc.add_layer(text_layer);
+        let mut hidden = Layer::new_pixel("layer-notes", "Notes");
+        hidden.visible = false;
+        doc.add_layer(hidden);
+
+        let xml = doc.to_openraster_stack_xml();
+        let expected = "<image w=\"800\" h=\"600\" xres=\"300\" yres=\"300\">\n\
+                        \x20 <stack>\n\
+                        \x20   <layer name=\"Background\" src=\"layers/layer-bg.png\" opacity=\"1.00\" visibility=\"visible\"\n\
+                        \x20   <layer name=\"Title &amp; &lt;Sub&gt;\" src=\"layers/layer-title.png\" opacity=\"0.50\" visibility=\"visible\"\n\
+                        \x20   <layer name=\"Notes\" src=\"layers/layer-notes.png\" opacity=\"1.00\" visibility=\"hidden\"\n\
+                        \x20 </stack>\n\
+                        </image>\n";
+        assert_eq!(xml, expected, "manifest mismatch:\n{xml}");
+
+        // Deterministic across calls
+        assert_eq!(xml, doc.to_openraster_stack_xml());
+
+        // Opacities clamp into [0,1]
+        let mut over = Layer::new_pixel("over", "Over");
+        over.opacity = 4.0;
+        doc.add_layer(over);
+        assert!(doc.to_openraster_stack_xml().contains("opacity=\"1.00\""));
     }
 }

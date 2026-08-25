@@ -705,6 +705,98 @@ fn sha256_hex(bytes: &[u8]) -> String {
     output
 }
 
+/// Declared support level for one external format, per the interoperability programme's
+/// required vocabulary. Detection alone never counts as support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum FormatSupportLevel {
+    /// The format is recognized by content or extension only.
+    DetectOnly,
+    /// Some structures import; losses are expected and reported.
+    ReadPartial,
+    /// Import completes with semantic comparison coverage.
+    ReadSupported,
+    /// Export produces valid files without full fidelity guarantees.
+    WritePartial,
+    /// Import and export pass semantic round-trip corpora.
+    RoundTripSupported,
+    /// Round-trip plus conformance validation against generated fixtures.
+    ConformanceValidated,
+}
+
+/// Returns the currently declared support level for a format. This matrix states what the
+/// engines actually implement today; it must be updated only alongside real behavior.
+pub fn format_support_level(format: Format) -> FormatSupportLevel {
+    match format {
+        // Content-based detection exists for all fixture formats; text round-trips fully.
+        Format::Text => FormatSupportLevel::RoundTripSupported,
+        Format::Markdown | Format::Csv => FormatSupportLevel::ReadSupported,
+
+        // Office and presentation containers are detected and partially read today.
+        Format::Docx | Format::Xlsx | Format::Pptx | Format::Odt | Format::Ods | Format::Odp => {
+            FormatSupportLevel::DetectOnly
+        }
+
+        // Layered image interchange is detection-only pending semantic comparisons.
+        Format::Psd => FormatSupportLevel::DetectOnly,
+
+        // Raster exports exist (PNG/JPEG writers); imports are decode-level.
+        Format::Png | Format::Jpeg => FormatSupportLevel::WritePartial,
+        Format::Tiff | Format::Webp | Format::Exr | Format::Pdf | Format::Svg => {
+            FormatSupportLevel::DetectOnly
+        }
+
+        // Media containers are probed/decoded through local backends only.
+        Format::Mp4
+        | Format::Mov
+        | Format::Mkv
+        | Format::Webm
+        | Format::Wav
+        | Format::Flac
+        | Format::Mp3
+        | Format::Ogg => FormatSupportLevel::ReadPartial,
+
+        Format::Unknown => FormatSupportLevel::DetectOnly,
+    }
+}
+
+/// The full declared support matrix sorted by format.
+pub fn format_support_matrix() -> Vec<(Format, FormatSupportLevel)> {
+    let mut levels = [
+        Format::Docx,
+        Format::Xlsx,
+        Format::Pptx,
+        Format::Odt,
+        Format::Ods,
+        Format::Odp,
+        Format::Psd,
+        Format::Pdf,
+        Format::Svg,
+        Format::Png,
+        Format::Jpeg,
+        Format::Tiff,
+        Format::Webp,
+        Format::Exr,
+        Format::Mp4,
+        Format::Mov,
+        Format::Mkv,
+        Format::Webm,
+        Format::Wav,
+        Format::Flac,
+        Format::Mp3,
+        Format::Ogg,
+        Format::Csv,
+        Format::Markdown,
+        Format::Text,
+    ]
+    .map(|format| {
+        let level = format_support_level(format);
+        (format, level)
+    })
+    .to_vec();
+    levels.sort();
+    levels
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,5 +927,44 @@ mod tests {
             checked += 1;
         }
         assert_eq!(checked, expected.len());
+    }
+
+    #[test]
+    fn format_support_matrix_levels() {
+        let matrix = format_support_matrix();
+        // Every non-unknown format appears exactly once.
+        assert_eq!(matrix.len(), 25);
+        assert!(matrix.windows(2).all(|pair| pair[0].0 < pair[1].0));
+
+        let level_of = |format: Format| {
+            matrix
+                .iter()
+                .find(|entry| entry.0 == format)
+                .map(|entry| entry.1)
+                .unwrap()
+        };
+
+        // Detection-only formats must never be reported as supported.
+        for format in [Format::Docx, Format::Psd, Format::Odp] {
+            assert_eq!(
+                level_of(format),
+                FormatSupportLevel::DetectOnly,
+                "{format:?} is detection-only today"
+            );
+        }
+
+        // Text round-trips; CSV and Markdown are semantically read.
+        assert_eq!(
+            level_of(Format::Text),
+            FormatSupportLevel::RoundTripSupported
+        );
+        assert_eq!(level_of(Format::Csv), FormatSupportLevel::ReadSupported);
+
+        // Raster writers exist without full fidelity guarantees.
+        assert_eq!(level_of(Format::Png), FormatSupportLevel::WritePartial);
+
+        // Media containers decode locally but are not interchange round-tripped.
+        assert_eq!(level_of(Format::Mp4), FormatSupportLevel::ReadPartial);
+        assert_eq!(level_of(Format::Wav), FormatSupportLevel::ReadPartial);
     }
 }

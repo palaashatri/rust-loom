@@ -1274,6 +1274,36 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
     Ok(slides)
 }
 
+/// Serializes slides into an indented text outline, inverting [`deck_from_outline`]: each
+/// slide's title element content becomes one top-level line and each body-text element
+/// becomes a two-space-indented child line. Returns Err when the deck has no slides. Output
+/// lines end with \n including the final line.
+pub fn deck_to_text_outline(slides: &[Slide]) -> Result<String, String> {
+    if slides.is_empty() {
+        return Err("deck contains no slides".to_string());
+    }
+    let mut outline = String::new();
+    for slide in slides {
+        // Title: prefer the dedicated title element; fall back to the slide title field.
+        let title = slide
+            .elements
+            .iter()
+            .find(|e| e.element_type == ElementType::Title)
+            .map(|e| e.content.clone())
+            .unwrap_or_else(|| slide.title.clone());
+        outline.push_str(title.trim_end());
+        outline.push('\n');
+        for element in &slide.elements {
+            if element.element_type == ElementType::BodyText {
+                outline.push_str("  ");
+                outline.push_str(element.content.trim_end());
+                outline.push('\n');
+            }
+        }
+    }
+    Ok(outline)
+}
+
 /// Built-in transition between two slides.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub enum TransitionKind {
@@ -2827,5 +2857,43 @@ Hiring Plan
             LinkedAsset::hash_bytes(b""),
             LinkedAsset::hash_bytes(b"\x00")
         );
+    }
+
+    #[test]
+    fn deck_outline_round_trip() {
+        let source = "\nTitle One\n  First point\n  Second point\n\nTitle Two\n";
+        let deck = deck_from_outline(source).unwrap();
+        assert_eq!(deck.len(), 2);
+
+        // Export reproduces the outline structure
+        let exported = deck_to_text_outline(&deck).unwrap();
+        let lines: Vec<&str> = exported.lines().collect();
+        assert_eq!(
+            lines,
+            vec!["Title One", "  First point", "  Second point", "Title Two"]
+        );
+
+        // Re-importing the export yields identical titles and bullet contents
+        let reimported = deck_from_outline(&exported).unwrap();
+        assert_eq!(reimported.len(), deck.len());
+        for (original, round) in deck.iter().zip(reimported.iter()) {
+            assert_eq!(original.title, round.title);
+            let original_bullets: Vec<&str> = original
+                .elements
+                .iter()
+                .filter(|e| e.element_type == ElementType::BodyText)
+                .map(|e| e.content.as_str())
+                .collect();
+            let round_bullets: Vec<&str> = round
+                .elements
+                .iter()
+                .filter(|e| e.element_type == ElementType::BodyText)
+                .map(|e| e.content.as_str())
+                .collect();
+            assert_eq!(original_bullets, round_bullets);
+        }
+
+        // Empty input is rejected
+        assert!(deck_to_text_outline(&[]).is_err());
     }
 }

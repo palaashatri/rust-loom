@@ -5,7 +5,7 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WorkspaceMode {
@@ -2484,6 +2484,113 @@ pub fn parse_midi_file(bytes: &[u8]) -> Result<(SmfHeader, Vec<ParsedMidiNote>),
     ))
 }
 
+/// One stem to render during a stems bounce.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StemEntry {
+    pub stem_name: String,
+    /// Track ids included in this stem bus.
+    pub track_ids: Vec<String>,
+    /// Output file pattern containing one '{stem}' placeholder.
+    pub output_pattern: String,
+}
+
+impl StemEntry {
+    /// Validates: non-empty name/pattern, '{stem}' present, no duplicate track ids.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.stem_name.trim().is_empty() {
+            return Err("stem name must not be empty".into());
+        }
+        if self.output_pattern.trim().is_empty() {
+            return Err("output pattern must not be empty".into());
+        }
+        if !self.output_pattern.contains("{stem}") {
+            return Err(format!(
+                "output pattern '{}' must contain a '{{stem}}' placeholder",
+                self.output_pattern
+            ));
+        }
+        let mut seen = HashSet::new();
+        for track_id in &self.track_ids {
+            if !seen.insert(track_id.as_str()) {
+                return Err(format!(
+                    "stem '{}' lists track '{track_id}' more than once",
+                    self.stem_name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolves the output path for one stem name (substitutes {stem}).
+    pub fn path_for(&self, stem_id: &str) -> Result<String, String> {
+        self.validate()?;
+        Ok(self.output_pattern.replace("{stem}", stem_id))
+    }
+}
+
+/// Plans a full stems bounce across a project's tracks.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StemsExportPlan {
+    pub stems: Vec<StemEntry>,
+}
+
+impl StemsExportPlan {
+    /// Validates every entry; duplicate stem names or overlapping track membership across
+    /// entries are errors (a track belongs to at most one stem). Err names the conflict.
+    pub fn validate(&self) -> Result<(), String> {
+        let mut seen_names = HashSet::new();
+        let mut owner_of_track: HashMap<&str, &str> = HashMap::new();
+        for stem in &self.stems {
+            stem.validate()?;
+            if !seen_names.insert(stem.stem_name.as_str()) {
+                return Err(format!(
+                    "stems export plan contains duplicate stem name '{}'",
+                    stem.stem_name
+                ));
+            }
+            for track_id in &stem.track_ids {
+                match owner_of_track.get(track_id.as_str()) {
+                    Some(existing) => {
+                        return Err(format!(
+                            "track '{track_id}' is assigned to both stem '{existing}' and stem '{}'",
+                            stem.stem_name
+                        ));
+                    }
+                    None => {
+                        owner_of_track.insert(track_id.as_str(), stem.stem_name.as_str());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds a stem after validation against existing entries.
+    pub fn add_stem(&mut self, entry: StemEntry) -> Result<(), String> {
+        entry.validate()?;
+        if self.stems.iter().any(|s| s.stem_name == entry.stem_name) {
+            return Err(format!(
+                "stems export plan already contains a stem named '{}'",
+                entry.stem_name
+            ));
+        }
+        for track_id in &entry.track_ids {
+            if let Some(existing) = self
+                .stems
+                .iter()
+                .find(|s| s.track_ids.iter().any(|t| t == track_id))
+            {
+                return Err(format!(
+                    "track '{track_id}' is already assigned to stem '{}'",
+                    existing.stem_name
+                ));
+            }
+        }
+        self.stems.push(entry);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3394,5 +3501,78 @@ mod studio_runtime_tests {
         let len_pos = 14 + 4; // after MThd + "MTrk"
         lying[len_pos..len_pos + 4].copy_from_slice(&9999u32.to_be_bytes());
         assert!(parse_midi_file(&lying).is_err());
+    }
+
+    #[test]
+    fn stems_export_plan_rules() {
+        let mut plan = StemsExportPlan::default();
+        assert!(plan.validate().is_ok());
+
+        let drums = StemEntry {
+            stem_name: "drums".to_string(),
+            track_ids: vec!["t1".to_string(), "t2".to_string()],
+            output_pattern: "bounce/{stem}.wav".to_string(),
+        };
+        let bass = StemEntry {
+            stem_name: "bass".to_string(),
+            track_ids: vec!["t3".to_string()],
+            output_pattern: "bounce/{stem}.flac".to_string(),
+        };
+
+        plan.add_stem(drums.clone()).expect("drums stem accepted");
+        plan.add_stem(bass.clone()).expect("bass stem accepted");
+        plan.validate().expect("disjoint stems should validate");
+
+        // Paths resolve with the {stem} placeholder substituted.
+        assert_eq!(drums.path_for("drums").unwrap(), "bounce/drums.wav");
+        assert_eq!(bass.path_for("bass").unwrap(), "bounce/bass.flac");
+
+        // Overlapping track membership across entries is rejected.
+        let overlap = StemEntry {
+            stem_name: "overhead".to_string(),
+            track_ids: vec!["t2".to_string()],
+            output_pattern: "out/{stem}.wav".to_string(),
+        };
+        let err = plan.add_stem(overlap).unwrap_err();
+        assert!(err.contains("t2") && err.contains("drums"), "{err}");
+        assert_eq!(plan.stems.len(), 2, "failed add must not mutate");
+
+        // Duplicate stem names are rejected.
+        let dup_name = StemEntry {
+            stem_name: "drums".to_string(),
+            track_ids: vec!["t9".to_string()],
+            output_pattern: "out/{stem}.wav".to_string(),
+        };
+        let err = plan.add_stem(dup_name).unwrap_err();
+        assert!(err.contains("drums"), "{err}");
+
+        // A hand-built plan with duplicate names fails validation too.
+        let bad_names = StemsExportPlan {
+            stems: vec![drums.clone(), drums],
+        };
+        let err = bad_names.validate().unwrap_err();
+        assert!(err.contains("duplicate stem name 'drums'"), "{err}");
+
+        // Missing {stem} placeholder is rejected.
+        let no_placeholder = StemEntry {
+            stem_name: "vocals".to_string(),
+            track_ids: vec!["t4".to_string()],
+            output_pattern: "bounce/vocals.wav".to_string(),
+        };
+        let err = no_placeholder.validate().unwrap_err();
+        assert!(err.contains("{stem}"), "{err}");
+        assert!(no_placeholder.path_for("vocals").is_err());
+
+        // Duplicate track ids inside one stem are rejected.
+        let dup_track = StemEntry {
+            stem_name: "keys".to_string(),
+            track_ids: vec!["t5".to_string(), "t5".to_string()],
+            output_pattern: "out/{stem}.wav".to_string(),
+        };
+        let err = dup_track.validate().unwrap_err();
+        assert!(
+            err.contains("t5") && err.contains("more than once"),
+            "{err}"
+        );
     }
 }
