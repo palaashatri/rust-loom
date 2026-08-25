@@ -2644,6 +2644,47 @@ impl StemsExportPlan {
     }
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+impl StudioSession {
+    /// Stable integrity digest of the session's musical state: hashes tempo/BPM, track
+    /// layout (names, gain/mute/solo states), and every region's identity/timing in
+    /// order. Two sessions with identical projects produce equal digests regardless of
+    /// undo history. Uses [`fnv1a64`].
+    pub fn session_digest(&self) -> u64 {
+        let mut input = format!(
+            "session:bpm:{}\ntracks:{}\n",
+            self.project.bpm.to_bits(),
+            self.project.tracks.len()
+        );
+        for track in &self.project.tracks {
+            input.push_str(&format!(
+                "track:{}:gain:{}:mute:{}:solo:{}:regions:{}\n",
+                track.name,
+                track.volume_db.to_bits(),
+                u8::from(track.mute),
+                u8::from(track.solo),
+                track.regions.len()
+            ));
+            for region in &track.regions {
+                input.push_str(&format!(
+                    "region:{}:{}:{}:{}\n",
+                    region.id, region.name, region.start_sample, region.length_samples
+                ));
+            }
+        }
+        fnv1a64(input.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2654,6 +2695,53 @@ mod tests {
         assert_eq!(proj.bpm, 120.0);
         assert_eq!(proj.sample_rate, 48000);
         assert_eq!(proj.tracks.len(), 2);
+    }
+
+    #[test]
+    fn studio_session_digest_stability() {
+        let build = || {
+            let mut proj = StudioProject::new("proj-1", "Digest Song");
+            proj.tracks[1].add_region(AudioRegion {
+                id: "r2".to_string(),
+                name: "Guitar_Rhythm.wav".to_string(),
+                start_sample: 96_000,
+                length_samples: 48_000 * 4,
+            });
+            StudioSession::new(proj)
+        };
+        let session = build();
+        let baseline = session.session_digest();
+
+        // Stable across repeated calls and identical rebuilds.
+        assert_eq!(baseline, session.session_digest());
+        assert_eq!(baseline, build().session_digest());
+
+        // Toggling mute changes the digest.
+        let mut muted = session.clone();
+        muted.project.tracks[0].mute = true;
+        assert_ne!(
+            baseline,
+            muted.session_digest(),
+            "toggling track mute must change the session digest"
+        );
+
+        // Moving a region changes the digest.
+        let mut moved = session.clone();
+        moved.project.tracks[0].regions[0].start_sample += 48_000;
+        assert_ne!(
+            baseline,
+            moved.session_digest(),
+            "moving a region must change the session digest"
+        );
+
+        // Empty vs populated differ.
+        let mut emptied = build().project;
+        emptied.tracks.clear();
+        assert_ne!(
+            baseline,
+            StudioSession::new(emptied).session_digest(),
+            "empty project must not share the populated session's digest"
+        );
     }
 
     #[test]

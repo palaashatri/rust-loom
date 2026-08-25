@@ -1811,9 +1811,103 @@ impl RenderQueueEntry {
     }
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+impl CompositionDocument {
+    /// Stable digest over composition geometry/duration/frame rate and each layer's
+    /// identity/timing plus every keyframe channel's `(time, value, easing)` tuples in
+    /// order. Uses [`fnv1a64`].
+    ///
+    /// Feeds `"comp:<width>:<height>:<fps>:<duration>"`, then per layer
+    /// `"layer:<id>:<name>:<start>:<dur>"` followed by one
+    /// `"k:<channel>:<time>:<value>:<easing>"` line per keyframe across the `x`, `y`,
+    /// `opacity`, `scale`, and `rotation` channels in order. Document, layer, and
+    /// keyframe order participate; `active_layer_index` deliberately does not so
+    /// selection changes do not invalidate comparisons.
+    pub fn integrity_digest(&self) -> u64 {
+        let mut feed = format!(
+            "comp:{w}:{h}:{fps}:{dur}\n",
+            w = self.width,
+            h = self.height,
+            fps = self.frame_rate,
+            dur = self.duration_secs
+        );
+        for layer in &self.layers {
+            feed.push_str(&format!(
+                "layer:{l_id}:{l_name}:{l_start}:{l_dur}\n",
+                l_id = layer.id,
+                l_name = layer.name,
+                l_start = layer.start_time,
+                l_dur = layer.duration
+            ));
+            for (channel, keys) in [
+                ("x", &layer.position_x_keys),
+                ("y", &layer.position_y_keys),
+                ("opacity", &layer.opacity_keys),
+                ("scale", &layer.scale_keys),
+                ("rotation", &layer.rotation_keys),
+            ] {
+                for key in keys {
+                    feed.push_str(&format!(
+                        "k:{channel}:{t}:{v}:{e}\n",
+                        t = key.time_secs,
+                        v = key.value,
+                        e = key.easing
+                    ));
+                }
+            }
+        }
+        fnv1a64(feed.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn motion_integrity_digest_stability() {
+        let mut doc = CompositionDocument::new("comp-digest", "Digest Composition");
+        let mut background = MotionLayer::new("l1", "Background", "VectorShape");
+        background.duration = 5.0;
+        background.add_keyframe("opacity", 0.0, 0.0);
+        background.add_keyframe("opacity", 2.0, 1.0);
+        let mut title = MotionLayer::new("l2", "Title", "Text");
+        title.start_time = 1.0;
+        title.duration = 4.0;
+        title.add_keyframe("x", 1.0, 100.0);
+        title.add_keyframe("y", 1.5, 200.0);
+        title.add_keyframe("scale", 2.0, 1.5);
+        doc.add_layer(background);
+        doc.add_layer(title);
+
+        // Stable across repeated calls.
+        let baseline = doc.integrity_digest();
+        assert_eq!(baseline, doc.integrity_digest());
+
+        // Adding a keyframe changes the digest.
+        let mut with_key = doc.clone();
+        with_key.layers[1].add_keyframe("rotation", 2.5, 15.0);
+        assert_ne!(with_key.integrity_digest(), baseline);
+
+        // Moving a layer start changes the digest.
+        let mut moved = doc.clone();
+        moved.layers[0].start_time = 0.5;
+        assert_ne!(moved.integrity_digest(), baseline);
+
+        // Renaming a layer changes the digest.
+        let mut renamed = doc.clone();
+        renamed.layers[1].name = "Lower Third".into();
+        assert_ne!(renamed.integrity_digest(), baseline);
+    }
 
     #[test]
     fn test_motion_creation() {

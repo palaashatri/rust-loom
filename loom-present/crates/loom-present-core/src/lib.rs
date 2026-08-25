@@ -2025,6 +2025,71 @@ pub fn summarize_findings(
     }
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Fixed string marker for an [`ElementType`] variant so variant identity can feed a digest
+/// (`std::mem::discriminant` values are not directly hashable).
+fn element_type_marker(element_type: &ElementType) -> &'static str {
+    match element_type {
+        ElementType::Title => "title",
+        ElementType::Subtitle => "subtitle",
+        ElementType::BodyText => "body-text",
+        ElementType::ShapeRectangle => "shape-rectangle",
+        ElementType::ShapeCircle => "shape-circle",
+        ElementType::StatCard => "stat-card",
+    }
+}
+
+impl PresentationDocument {
+    /// Stable integrity digest over deck content, for save/reload verification.
+    ///
+    /// Feeds `"slides:<count>"`, then per slide its id/title/layout and speaker notes, then
+    /// every element's id/type/content/geometry in document order. Speaker notes participate
+    /// by choice: they are user-authored content that must survive save/reload intact.
+    /// Background colour, action triggers, author/theme metadata, and `active_index`
+    /// deliberately do not participate so view-state edits do not invalidate comparisons.
+    pub fn integrity_digest(&self) -> u64 {
+        let mut feed = format!("slides:{}\n", self.slides.len());
+        for slide in &self.slides {
+            let Slide {
+                id,
+                title,
+                layout,
+                elements,
+                speaker_notes,
+                ..
+            } = slide;
+            feed.push_str(&format!("slide:{id}:{title}:{layout}\n"));
+            feed.push_str(&format!("notes:{speaker_notes}\n"));
+            for elem in elements {
+                let SlideElement {
+                    id,
+                    element_type,
+                    content,
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } = elem;
+                let marker = element_type_marker(element_type);
+                feed.push_str(&format!(
+                    "el:{id}:{marker}:{content}:{x},{y},{width},{height}\n"
+                ));
+            }
+        }
+        fnv1a64(feed.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3038,5 +3103,66 @@ Hiring Plan
         assert!(audit_accessibility(&[]).is_empty());
         assert_eq!(summarize_findings(0, &[]), AccessibilitySummary::default());
         assert_eq!(summarize_findings(0, &[]).clean_fraction(), 1.0);
+    }
+
+    #[test]
+    fn deck_integrity_digest_stability() {
+        let mut doc = PresentationDocument::new("deck-digest", "Digest Deck");
+        doc.add_slide("Market Overview", "content");
+        doc.slides[0].add_element(SlideElement {
+            id: "elem-title".into(),
+            element_type: ElementType::Title,
+            content: "Quarterly Results".into(),
+            x: 40.0,
+            y: 60.0,
+            width: 320.0,
+            height: 80.0,
+            action: None,
+        });
+        doc.slides[1].add_element(SlideElement {
+            id: "elem-body".into(),
+            element_type: ElementType::BodyText,
+            content: "Revenue grew 12%.".into(),
+            x: 10.0,
+            y: 20.0,
+            width: 300.0,
+            height: 120.0,
+            action: None,
+        });
+        doc.slides[1].add_element(SlideElement {
+            id: "elem-stat".into(),
+            element_type: ElementType::StatCard,
+            content: "+12% YoY".into(),
+            x: 340.0,
+            y: 20.0,
+            width: 120.0,
+            height: 90.0,
+            action: None,
+        });
+        doc.slides[1].speaker_notes = "Walk through the chart slowly.".into();
+
+        // Digest is stable across repeated evaluation.
+        let baseline = doc.integrity_digest();
+        assert_eq!(baseline, doc.integrity_digest());
+
+        // Moving an element changes the digest.
+        let mut moved = doc.clone();
+        moved.slides[1].elements[0].x += 15.0;
+        assert_ne!(moved.integrity_digest(), baseline);
+
+        // Adding a slide changes the digest.
+        let mut added = doc.clone();
+        added.add_slide("Closing Remarks", "blank");
+        assert_ne!(added.integrity_digest(), baseline);
+
+        // Editing speaker notes changes the digest (notes participate by design).
+        let mut noted = doc.clone();
+        noted.slides[1].speaker_notes = "Different delivery notes.".into();
+        assert_ne!(noted.integrity_digest(), baseline);
+
+        // Reordering elements changes the digest.
+        let mut reordered = doc.clone();
+        assert!(reordered.slides[1].bring_to_front("elem-body"));
+        assert_ne!(reordered.integrity_digest(), baseline);
     }
 }

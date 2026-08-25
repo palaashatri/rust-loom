@@ -2613,6 +2613,91 @@ fn xml_escape_attr(value: &str) -> String {
         .replace("'", "&apos;")
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+impl RgbaImage {
+    /// Integrity digest over the raw pixel bytes plus the dimensions.
+    ///
+    /// Width and height feed the digest as big-endian `u32`s before the row-major RGBA
+    /// buffer, so images with equal byte counts but different geometry produce different
+    /// digests.
+    pub fn pixel_digest(&self) -> u64 {
+        let mut feed = Vec::with_capacity(8 + self.pixels.len());
+        feed.extend_from_slice(&self.width.to_be_bytes());
+        feed.extend_from_slice(&self.height.to_be_bytes());
+        feed.extend_from_slice(&self.pixels);
+        fnv1a64(&feed)
+    }
+}
+
+/// Fixed string marker for a [`LayerKind`] variant so variant identity can feed a digest
+/// (`std::mem::discriminant` values are not directly hashable).
+fn layer_kind_marker(kind: &LayerKind) -> &'static str {
+    match kind {
+        LayerKind::Pixel => "pixel",
+        LayerKind::Adjustment => "adjustment",
+        LayerKind::Text => "text",
+        LayerKind::Vector => "vector",
+    }
+}
+
+/// Fixed string marker for a [`BlendMode`] variant.
+fn blend_mode_marker(mode: &BlendMode) -> &'static str {
+    match mode {
+        BlendMode::Normal => "normal",
+        BlendMode::Multiply => "multiply",
+        BlendMode::Screen => "screen",
+        BlendMode::Overlay => "overlay",
+        BlendMode::Darken => "darken",
+        BlendMode::Lighten => "lighten",
+        BlendMode::Difference => "difference",
+        BlendMode::HardLight => "hard-light",
+    }
+}
+
+impl PhotoDocument {
+    /// Integrity digest over document metadata only: geometry (width, height, dpi, colour
+    /// space), layer metadata (id, name, kind, visibility, opacity, blend mode, adjustment
+    /// type and value) in document order, and the active layer index.
+    ///
+    /// Pixels are deliberately NOT hashed here — they live in [`RgbaImage::pixel_digest`] —
+    /// so this digest stays constant while raster content changes underneath a document.
+    pub fn metadata_digest(&self) -> u64 {
+        let mut feed = format!(
+            "doc:{width}x{height}:dpi:{dpi}:cs:{color_space}:layers:{layer_count}\n",
+            width = self.width,
+            height = self.height,
+            dpi = self.dpi,
+            color_space = self.color_space,
+            layer_count = self.layers.len(),
+        );
+        for layer in &self.layers {
+            let id = &layer.id;
+            let name = &layer.name;
+            let kind = layer_kind_marker(&layer.kind);
+            let blend = blend_mode_marker(&layer.blend_mode);
+            let visible = if layer.visible { "visible" } else { "hidden" };
+            let adjustment = layer.adjustment_type.as_deref().unwrap_or("-");
+            let opacity = layer.opacity;
+            let adjustment_value = layer.adjustment_value;
+            feed.push_str(&format!(
+                "layer:{id}:{name}:{kind}:{visible}:opacity:{opacity}:blend:{blend}:adj:{adjustment}:{adjustment_value}\n"
+            ));
+        }
+        let active = self.active_layer_index;
+        feed.push_str(&format!("active:{active}\n"));
+        fnv1a64(feed.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2662,6 +2747,53 @@ mod tests {
         let loaded = load_photo(&bytes).expect("load failed");
         assert_eq!(loaded.name, "Landscape Composite");
         assert_eq!(loaded.len(), 2);
+    }
+
+    #[test]
+    fn photo_integrity_digests() {
+        // Pixel digest: stable across calls, sensitive to pixel edits, dimension-aware.
+        let image = RgbaImage::solid(4, 2, [10, 20, 30, 255]).expect("solid image");
+        let baseline_pixels = image.pixel_digest();
+        assert_eq!(baseline_pixels, image.pixel_digest());
+
+        // Changing one pixel changes the digest.
+        let mut edited = image.clone();
+        assert!(edited.set_pixel(3, 1, [10, 20, 31, 255]));
+        assert_ne!(edited.pixel_digest(), baseline_pixels);
+
+        // Same byte count but different dimensions produces a different digest.
+        let transposed = RgbaImage::solid(2, 4, [10, 20, 30, 255]).expect("solid image");
+        assert_eq!(transposed.pixels.len(), image.pixels.len());
+        assert_ne!(transposed.pixel_digest(), baseline_pixels);
+
+        // Metadata digest: stable across calls and independent of raster content.
+        let doc = PhotoDocument::new("photo-digest", "Digest Photo", 32, 32);
+        let baseline_meta = doc.metadata_digest();
+        assert_eq!(baseline_meta, doc.metadata_digest());
+
+        // Pixel edits elsewhere affect only the pixel digest, never the metadata digest.
+        assert_ne!(edited.pixel_digest(), image.pixel_digest());
+        assert_eq!(doc.metadata_digest(), baseline_meta);
+
+        // Changing layer opacity changes the metadata digest.
+        let mut faded = doc.clone();
+        faded.layers[0].opacity = 0.5;
+        assert_ne!(faded.metadata_digest(), baseline_meta);
+
+        // Adding a layer changes the metadata digest.
+        let mut layered = doc.clone();
+        layered.add_layer(Layer::new_adjustment(
+            "adj-brightness",
+            "Brightness",
+            "brightness",
+            0.2,
+        ));
+        assert_ne!(layered.metadata_digest(), baseline_meta);
+
+        // Geometry participates too.
+        let mut regeoed = doc.clone();
+        regeoed.dpi = 144;
+        assert_ne!(regeoed.metadata_digest(), baseline_meta);
     }
 
     #[test]

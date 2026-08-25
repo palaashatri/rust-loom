@@ -1992,6 +1992,46 @@ pub fn migrate_queue_batch_v1_to_v2(
     Ok(migrated)
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+impl EncodeQueue {
+    /// Stable integrity digest of the queue's state: hashes queue identity and each
+    /// job's id/state/preset/paths in order, so reordering, state transitions, and
+    /// cleanup all change the digest. Uses [`fnv1a64`].
+    pub fn queue_digest(&self) -> u64 {
+        let mut input = format!("queue:{}\njobs:{}\n", self.id, self.jobs.len());
+        for (index, job) in self.jobs.iter().enumerate() {
+            let state = match &job.status {
+                JobStatus::Queued => "queued".to_string(),
+                JobStatus::Encoding { progress } => format!("encoding:{}", progress.to_bits()),
+                JobStatus::Complete => "complete".to_string(),
+                JobStatus::Failed(reason) => format!("failed:{reason}"),
+            };
+            input.push_str(&format!(
+                "job:{index}:{}:{}:preset:{}:{}:{}:{}:{}kbps:src:{}:out:{}\n",
+                job.id,
+                state,
+                job.preset.name,
+                job.preset.container,
+                job.preset.video_codec,
+                job.preset.audio_codec,
+                job.preset.bitrate_kbps,
+                job.source_file,
+                job.output_file
+            ));
+        }
+        fnv1a64(input.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2001,6 +2041,63 @@ mod tests {
         let q = EncodeQueue::new("q-1", "Broadcast Delivery");
         assert_eq!(q.jobs.len(), 1);
         assert_eq!(q.pending_count(), 1);
+    }
+
+    #[test]
+    fn queue_digest_stability() {
+        let build = || {
+            let mut queue = EncodeQueue::new("q-1", "Broadcast Delivery");
+            queue.add_job(EncodeJob::new(
+                "job-2",
+                "Episode_01.mov",
+                "Episode_01_Web.mp4",
+                EncodePreset::hevc_4k(),
+            ));
+            queue.add_job(EncodeJob::new(
+                "job-3",
+                "Episode_02.mov",
+                "Episode_02_Web.mp4",
+                EncodePreset::vp9_web(),
+            ));
+            queue
+        };
+        let queue = build();
+        let baseline = queue.queue_digest();
+
+        // Stable across repeated calls and identical rebuilds.
+        assert_eq!(baseline, queue.queue_digest());
+        assert_eq!(baseline, build().queue_digest());
+
+        // Job reorder changes the digest.
+        let mut reordered = queue.clone();
+        assert!(reordered.move_job(0, 2));
+        assert_ne!(
+            baseline,
+            reordered.queue_digest(),
+            "reordering jobs must change the queue digest"
+        );
+
+        // State transition changes the digest.
+        let mut progressed = queue.clone();
+        progressed.jobs[0].status = JobStatus::Encoding { progress: 0.5 };
+        assert_ne!(
+            baseline,
+            progressed.queue_digest(),
+            "a job state transition must change the queue digest"
+        );
+
+        // Completed-job cleanup changes the digest.
+        let mut finished = queue;
+        finished.jobs[1].status = JobStatus::Complete;
+        let with_complete = finished.queue_digest();
+        assert_ne!(baseline, with_complete);
+        let removed = finished.clear_completed_jobs();
+        assert_eq!(removed, 1);
+        assert_ne!(
+            with_complete,
+            finished.queue_digest(),
+            "clearing completed jobs must change the queue digest"
+        );
     }
 
     #[test]

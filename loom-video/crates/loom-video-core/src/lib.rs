@@ -2434,9 +2434,109 @@ pub fn write_edl(records: &[EdlRecord]) -> String {
     output
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+impl VideoProject {
+    /// Stable digest over project frame rate and every track/clip's identity, timing,
+    /// speed, and source offset in order. Uses [`fnv1a64`].
+    ///
+    /// Feeds `"proj:<frame_rate>"`, then per track `"track:<id>:<name>"`, then per clip
+    /// `"clip:<id>:<name>:<start>:<dur>:<rate>:<in>:<out>"` in stored order, plus one
+    /// `"marker:<id>:<time>:<label>"` line per timeline marker. Markers participate by
+    /// choice: they are user-authored annotations added through [`VideoProject::add_marker`],
+    /// so adding, moving, or removing one must change the digest. Derived caches such as
+    /// clip `proxy_path` and presentation-only metadata (`color_tag`, effect parameters,
+    /// caption cues) deliberately do not participate.
+    pub fn timeline_digest(&self) -> u64 {
+        let mut feed = format!("proj:{fps}\n", fps = self.frame_rate);
+        for track in &self.tracks {
+            feed.push_str(&format!(
+                "track:{t_id}:{t_name}\n",
+                t_id = track.id,
+                t_name = track.name
+            ));
+            for clip in &track.clips {
+                feed.push_str(&format!(
+                    "clip:{c_id}:{c_name}:{start}:{dur}:{rate}:{inp}:{outp}\n",
+                    c_id = clip.id,
+                    c_name = clip.name,
+                    start = clip.start_time,
+                    dur = clip.duration,
+                    rate = clip.playback_rate,
+                    inp = clip.in_point,
+                    outp = clip.out_point
+                ));
+            }
+        }
+        for marker in &self.markers {
+            feed.push_str(&format!(
+                "marker:{m_id}:{m_time}:{m_label}\n",
+                m_id = marker.id,
+                m_time = marker.time,
+                m_label = marker.label
+            ));
+        }
+        fnv1a64(feed.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_timeline_digest_stability() {
+        let mut project = VideoProject::new("proj-digest", "Digest Edit");
+        let mut intro = Clip::new("c1", "Intro.mov", 6.0);
+        intro.source_path = "intro.mov".into();
+        intro.set_playback_rate(2.0).unwrap();
+        let mut broll = Clip::new("c2", "B-Roll.mov", 4.0);
+        broll.in_point = 1.0;
+        broll.out_point = 5.0;
+        broll.sync_duration().unwrap();
+        project.tracks[0].insert_clip(intro).unwrap();
+        project.tracks[0].insert_clip(broll).unwrap();
+
+        // Stable across repeated calls.
+        let baseline = project.timeline_digest();
+        assert_eq!(baseline, project.timeline_digest());
+
+        // Trimming a clip changes the digest.
+        let mut trimmed = project.clone();
+        trimmed.tracks[0].clips[0].trim_out(4.0).unwrap();
+        assert_ne!(trimmed.timeline_digest(), baseline);
+
+        // Splitting a clip changes the digest.
+        let mut split = project.clone();
+        split.split_clip(0, "c2", 2.0).unwrap();
+        assert_ne!(split.timeline_digest(), baseline);
+
+        // Adding a marker changes the digest: markers are user-authored annotations
+        // (added through VideoProject::add_marker), a choice documented on
+        // timeline_digest itself.
+        let mut marked = project.clone();
+        marked
+            .add_marker(TimelineMarker {
+                id: "m1".into(),
+                time: 1.0,
+                label: "Cut Here".into(),
+                color: "#ef4444".into(),
+            })
+            .unwrap();
+        assert_ne!(marked.timeline_digest(), baseline);
+
+        // An empty project digests differently from a populated one.
+        let empty = VideoProject::new("proj-empty", "Empty");
+        assert_ne!(empty.timeline_digest(), baseline);
+    }
 
     #[test]
     fn test_video_creation() {

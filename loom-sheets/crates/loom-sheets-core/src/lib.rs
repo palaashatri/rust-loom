@@ -3357,9 +3357,92 @@ pub fn grid_from_ocr_table(
     Ok((text, confidence))
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+impl Workbook {
+    /// Stable integrity digest over every sheet's populated cells: iterates sheets
+    /// in order, hashing each sheet's name, then every cell coordinate and raw value.
+    /// Cells come from a [`BTreeMap`] keyed by [`CellRef`] (`Ord` on row then column),
+    /// so iteration is already deterministic without sorting. Uses [`fnv1a64`].
+    pub fn integrity_digest(&self) -> u64 {
+        let mut input = format!("sheets:{}\n", self.sheets.len());
+        for sheet in &self.sheets {
+            input.push_str(&format!("sheet:{}\n", sheet.name));
+            for (cell_ref, cell) in &sheet.cells {
+                input.push_str(&format!(
+                    "cell:{},{}:{}\n",
+                    cell_ref.row, cell_ref.col, cell.raw
+                ));
+            }
+        }
+        fnv1a64(input.as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workbook_integrity_digest_stability() {
+        let make_workbook = || {
+            let mut wb = Workbook::with_sheet("Data");
+            wb.add_sheet("Summary");
+            wb.sheet_mut(0)
+                .expect("sheet 0 exists")
+                .set_str("A1", "Revenue");
+            wb.sheet_mut(0).expect("sheet 0 exists").set_str("B2", "42");
+            wb.sheet_mut(1)
+                .expect("sheet 1 exists")
+                .set_str("A1", "Total");
+            wb
+        };
+        let mut workbook = make_workbook();
+        let digest = workbook.integrity_digest();
+        assert_eq!(
+            digest,
+            workbook.integrity_digest(),
+            "repeated calls must agree"
+        );
+        assert_eq!(
+            digest,
+            make_workbook().integrity_digest(),
+            "identical workbooks must produce equal digests"
+        );
+
+        workbook
+            .sheet_mut(0)
+            .expect("sheet 0 exists")
+            .set_str("B2", "43");
+        let changed_value = workbook.integrity_digest();
+        assert_ne!(
+            digest, changed_value,
+            "changing one cell's raw value must change the digest"
+        );
+
+        workbook
+            .rename_sheet(1, "Overview")
+            .expect("rename succeeds");
+        assert_ne!(
+            changed_value,
+            workbook.integrity_digest(),
+            "renaming a sheet must change the digest"
+        );
+
+        assert_ne!(
+            Workbook::with_sheet("Data").integrity_digest(),
+            digest,
+            "an empty workbook must not share a digest with a populated one"
+        );
+    }
 
     #[test]
     fn ocr_table_to_editable_grid() {

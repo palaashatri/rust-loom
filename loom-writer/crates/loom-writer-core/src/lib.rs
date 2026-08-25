@@ -3327,9 +3327,66 @@ pub fn paragraphs_from_ocr_blocks(
     Ok(paragraphs)
 }
 
+/// FNV-1a 64-bit hash over bytes.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Stable integrity digest of a document's user-visible content: hashes each block's kind
+/// and text content in order, prefixed by the block count. Two documents that would render
+/// identically produce equal digests. Uses [`fnv1a64`].
+pub fn writer_document_digest(blocks: &[RichBlock]) -> u64 {
+    let mut input = format!("blocks:{}\n", blocks.len());
+    for block in blocks {
+        input.push_str(&format!("{}:{}\n", block.kind, block.text.as_str()));
+    }
+    fnv1a64(input.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writer_document_integrity_digest() {
+        let make_blocks = || {
+            vec![
+                RichBlock::new(1, "heading1", "Report"),
+                RichBlock::new(2, "paragraph", "Hello world"),
+                RichBlock::new(3, "paragraph", "Second paragraph"),
+            ]
+        };
+        let blocks = make_blocks();
+        let digest = writer_document_digest(&blocks);
+        assert_eq!(digest, writer_document_digest(&make_blocks()));
+
+        let mut changed_text = make_blocks();
+        changed_text[1].text = Text::from_str("Hello brave world");
+        assert_ne!(
+            digest,
+            writer_document_digest(&changed_text),
+            "changing a block's text must change the digest"
+        );
+
+        let mut reordered = make_blocks();
+        reordered.reverse();
+        assert_ne!(
+            digest,
+            writer_document_digest(&reordered),
+            "reordering blocks must change the digest"
+        );
+
+        assert_eq!(
+            writer_document_digest(&[]),
+            fnv1a64(b"blocks:0\n"),
+            "empty document digest must equal the digest of the bare prefix"
+        );
+    }
 
     #[test]
     fn ocr_blocks_to_editable_paragraphs() {

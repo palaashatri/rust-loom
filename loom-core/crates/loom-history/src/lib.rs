@@ -427,6 +427,173 @@ impl Replay {
     }
 }
 
+/// One durable recovery journal record: a kind tag, payload bytes, and a CRC-32 over both
+/// so torn or corrupted tails are detectable on replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JournalRecord {
+    /// Tag identifying the operation family (e.g. `"checkpoint"`, `"op.text_delta"`).
+    pub kind: String,
+    /// Serialized record body.
+    pub payload: Vec<u8>,
+    /// CRC-32 (IEEE, reflected, polynomial 0xEDB88320) over kind bytes + 0x00 + payload.
+    pub crc32: u32,
+}
+
+impl JournalRecord {
+    /// Creates a record and computes its checksum.
+    pub fn new(kind: impl Into<String>, payload: Vec<u8>) -> Self {
+        let kind = kind.into();
+        let crc32 = crc32_ieee_record(&kind, &payload);
+        Self {
+            kind,
+            payload,
+            crc32,
+        }
+    }
+
+    /// Recomputes and verifies the stored checksum.
+    pub fn verify(&self) -> bool {
+        crc32_ieee_record(&self.kind, &self.payload) == self.crc32
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        // Frame: [u32 kind_len][kind][u32 payload_len][payload][u32 crc]
+        let mut out = Vec::with_capacity(12 + self.kind.len() + self.payload.len());
+        out.extend_from_slice(&(self.kind.len() as u32).to_be_bytes());
+        out.extend_from_slice(self.kind.as_bytes());
+        out.extend_from_slice(&(self.payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(&self.payload);
+        out.extend_from_slice(&self.crc32.to_be_bytes());
+        out
+    }
+
+    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
+        if bytes.len() < 4 {
+            return None;
+        }
+        let kind_len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        let mut cursor = 4;
+        if bytes.len() < cursor + kind_len + 4 {
+            return None;
+        }
+        let kind = String::from_utf8(bytes[cursor..cursor + kind_len].to_vec()).ok()?;
+        cursor += kind_len;
+        let payload_len = u32::from_be_bytes([
+            bytes[cursor],
+            bytes[cursor + 1],
+            bytes[cursor + 2],
+            bytes[cursor + 3],
+        ]) as usize;
+        cursor += 4;
+        if bytes.len() < cursor + payload_len + 4 {
+            return None;
+        }
+        let payload = bytes[cursor..cursor + payload_len].to_vec();
+        cursor += payload_len;
+        let crc32 = u32::from_be_bytes([
+            bytes[cursor],
+            bytes[cursor + 1],
+            bytes[cursor + 2],
+            bytes[cursor + 3],
+        ]);
+        cursor += 4;
+        let record = Self {
+            kind,
+            payload,
+            crc32,
+        };
+        if !record.verify() {
+            return None;
+        }
+        Some((record, cursor))
+    }
+}
+
+fn crc32_ieee_record(kind: &str, payload: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    fn feed_byte(crc: &mut u32, byte: u8) {
+        *crc ^= byte as u32;
+        for _ in 0..8 {
+            // Reflected CRC-32 (IEEE 802.3): branchless LSB polynomial step.
+            let mask = (*crc & 1).wrapping_neg();
+            *crc = (*crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    for byte in kind.as_bytes() {
+        feed_byte(&mut crc, *byte);
+    }
+    feed_byte(&mut crc, 0x00);
+    for byte in payload {
+        feed_byte(&mut crc, *byte);
+    }
+    !crc
+}
+
+/// An append-only crash-recovery journal. Entries are individually checksummed; replay
+/// accepts the longest valid prefix so a process killed mid-append loses only the torn
+/// final record, never earlier durable state.
+#[derive(Debug, Clone, Default)]
+pub struct RecoveryJournal {
+    encoded: Vec<u8>,
+    record_count: usize,
+}
+
+impl RecoveryJournal {
+    /// Creates an empty journal.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Appends one record durably (in memory; hosts persist `encoded_bytes` after each call).
+    pub fn append(&mut self, record: &JournalRecord) {
+        self.encoded.extend_from_slice(&record.encode());
+        self.record_count += 1;
+    }
+
+    /// Replays the longest valid prefix of records. A corrupted or torn entry stops replay
+    /// and everything from that point is discarded; earlier records survive.
+    pub fn replay(&self) -> Vec<JournalRecord> {
+        let mut records = Vec::new();
+        let mut cursor = 0usize;
+        while let Some((record, consumed)) = JournalRecord::decode(&self.encoded[cursor..]) {
+            records.push(record);
+            cursor += consumed;
+        }
+        records
+    }
+
+    /// Number of records that survive [`RecoveryJournal::replay`] — i.e. the valid prefix
+    /// length, which may be shorter than what was appended when the tail is damaged.
+    pub fn recoverable_count(&self) -> usize {
+        self.replay().len()
+    }
+
+    /// Records appended since creation, including any unrecoverable tail entries.
+    pub fn appended_count(&self) -> usize {
+        self.record_count
+    }
+
+    /// The serialized journal bytes for host persistence.
+    pub fn encoded_bytes(&self) -> &[u8] {
+        &self.encoded
+    }
+
+    /// Rebuilds a journal from previously persisted bytes, discarding any invalid tail.
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut journal = Self::new();
+        journal.encoded = bytes.to_vec();
+        // Count only the recoverable prefix as authoritative history.
+        journal.record_count = journal.recoverable_count();
+        // Truncate the buffer to the valid prefix so future appends stay decodable.
+        let mut cursor = 0usize;
+        while let Some((_record, consumed)) = JournalRecord::decode(&journal.encoded[cursor..]) {
+            cursor += consumed;
+        }
+        journal.encoded.truncate(cursor);
+        journal
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,5 +806,49 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].name(), "Second");
         assert_eq!(list[1].name(), "First");
+    }
+
+    #[test]
+    fn recovery_journal_survives_torn_tail() {
+        let mut journal = RecoveryJournal::new();
+        journal.append(&JournalRecord::new("checkpoint", b"state-a".to_vec()));
+        journal.append(&JournalRecord::new("op.text_delta", b"delta-1".to_vec()));
+        journal.append(&JournalRecord::new("checkpoint", b"state-b".to_vec()));
+
+        assert_eq!(journal.appended_count(), 3);
+        assert_eq!(journal.recoverable_count(), 3);
+        let records = journal.replay();
+        assert_eq!(records[1].kind, "op.text_delta");
+        assert_eq!(records[2].payload, b"state-b");
+
+        // Simulate a crash mid-append: keep only the first bytes of the third record.
+        let full = journal.encoded_bytes().to_vec();
+        let mut torn = RecoveryJournal::from_bytes(&full[..full.len() - 6]);
+        // First two records survive; the torn tail is discarded.
+        assert_eq!(torn.recoverable_count(), 2);
+        assert_eq!(torn.appended_count(), 2);
+        assert_eq!(torn.replay()[1].payload, b"delta-1");
+
+        // The truncated journal remains appendable and decodable.
+        torn.append(&JournalRecord::new("checkpoint", b"state-c".to_vec()));
+        assert_eq!(torn.recoverable_count(), 3);
+        assert_eq!(torn.replay()[2].payload, b"state-c");
+
+        // A corrupted checksum inside the stream stops replay at that record.
+        let mut corrupted_bytes = full.clone();
+        let mid = full.len() - 10;
+        corrupted_bytes[mid] ^= 0xFF;
+        let damaged = RecoveryJournal::from_bytes(&corrupted_bytes);
+        assert!(damaged.recoverable_count() < 3);
+
+        // Checksums distinguish records: verify() passes for intact, fails when tampered.
+        let mut record = JournalRecord::new("k", vec![1, 2, 3]);
+        assert!(record.verify());
+        record.crc32 ^= 1;
+        assert!(!record.verify());
+
+        // Round-trip through bytes preserves everything valid.
+        let reloaded = RecoveryJournal::from_bytes(journal.encoded_bytes());
+        assert_eq!(reloaded.replay(), journal.replay());
     }
 }
