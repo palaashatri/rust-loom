@@ -1,20 +1,21 @@
 import {
-    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton, StatusBar,
-    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
-    SegmentedControl, Field, MetricChip, CanvasBackdrop, CommandPalette,
-    CommandPaletteItem
-} from "components.slint";
-import { Icon } from "icons.slint";
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, ToolkitStatusBar, SidebarSurface, InspectorSurface,
+    SectionHeader, TextField, SegmentedControl, RangeSlider, PropertyRow,
+    TabStrip, CanvasSurface
+} from "toolkit.slint";
+import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme } from "theme.slint";
 import { TextEdit } from "std-widgets.slint";
 export { Theme } from "theme.slint";
 
 export component PresentApp inherits Window {
     title: "Loom Present";
-    min-width: 900px;
-    min-height: 700px;
+    min-width: 1024px;
+    min-height: 720px;
     background: Theme.palette().canvas;
-    property <bool> compact-layout: root.width < 1180px;
+    property <bool> show-inspector: root.width >= 1180px;
+    property <bool> labeled-export: root.width >= 1320px;
 
     in property <string> deck-title: "Untitled Deck";
     in property <string> slide-title: "Slide Title";
@@ -111,241 +112,409 @@ export component PresentApp inherits Window {
         }
 
         VerticalLayout {
-        spacing: 0px;
-        AppHeader {
-            app-name: root.is-preview-mode ? "Loom Present · Play" : "Loom Present";
-            document-title: root.deck-title;
-            icon: "slide";
-            context: root.slide-count-text;
-            state-text: root.is-preview-mode ? "Presenter mode" : "Saved locally";
-            state-tone: root.is-preview-mode ? 1 : 0;
-        }
+            spacing: 0px;
+            padding: 0px;
 
-        if !root.is-preview-mode : WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New"; clicked => { root.new-deck(); } }
-            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-deck(); } }
-            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-deck(); } }
-            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-deck(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { icon: "plus"; text: "Slide"; clicked => { root.add-slide(); } }
-            ToolButton { icon: "text"; text: "Text"; clicked => { root.add-text(); } }
-            ToolButton { icon: "plus-circle"; text: "Shape"; clicked => { root.add-shape(); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
-            ToolButton { icon: "play"; text: "Present"; clicked => { root.toggle-preview-mode(); } }
-            PrimaryButton { text: "Export PDF"; clicked => { root.export-pdf(); } }
-        }
+            DocumentChrome {
+                title: root.deck-title;
+                trailing-text: root.is-preview-mode ? "Presenting" : root.slide-count-text;
+            }
 
-        if root.is-preview-mode : Rectangle {
-            vertical-stretch: 1;
-            background: Theme.palette().media-stage;
-            VerticalLayout {
-                alignment: center;
-                spacing: 18px;
-                Rectangle {
-                    width: min(960px, parent.width - (root.compact-layout ? 28px : 64px));
-                    height: min(540px, parent.height - (root.compact-layout ? 94px : 128px));
-                    background: Theme.palette().paper;
-                    border-radius: 4px;
-                    VerticalLayout {
-                        padding: root.compact-layout ? 36px : 64px;
-                        spacing: 22px;
-                        Text { text: root.slide-title; font-size: 38px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
-                        Text { text: root.slide-body; font-size: 20px; color: Theme.palette().paper-muted; wrap: word-wrap; vertical-stretch: 1; }
+            if !root.is-preview-mode : Toolbar {
+                ToolbarGroup {
+                    ToolbarIconButton { icon: "new"; label: "New deck"; clicked => { root.new-deck(); } }
+                    ToolbarIconButton { icon: "open"; label: "Open deck"; clicked => { root.open-deck(); } }
+                    ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-deck(); } }
+                    ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+                    ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
+                }
+
+                ToolbarGroup {
+                    leading-separation: true;
+                    ToolbarButton { icon: "plus"; label: "Slide"; clicked => { root.add-slide(); } }
+                    ToolbarIconButton { icon: "text"; label: "Insert text"; clicked => { root.add-text(); } }
+                    ToolbarIconButton { icon: "plus-circle"; label: "Insert shape"; clicked => { root.add-shape(); } }
+                }
+
+                ToolbarSpacer { }
+
+                ToolbarGroup {
+                    ToolbarIconButton {
+                        icon: "minus";
+                        label: "Zoom out";
+                        clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); }
+                    }
+                    Text {
+                        text: Math.round(root.zoom-value) + "%";
+                        min-width: 44px;
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 500;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    ToolbarIconButton {
+                        icon: "plus";
+                        label: "Zoom in";
+                        clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); }
+                    }
+                    ToolbarButton { icon: "play"; label: "Present"; clicked => { root.toggle-preview-mode(); } }
+                    if root.labeled-export : ToolbarButton {
+                        icon: "export";
+                        label: "Export PDF";
+                        primary: true;
+                        clicked => { root.export-pdf(); }
+                    }
+                    if !root.labeled-export : ToolbarIconButton {
+                        icon: "export";
+                        label: "Export PDF";
+                        clicked => { root.export-pdf(); }
                     }
                 }
-                HorizontalLayout {
+            }
+
+            if root.is-preview-mode : Rectangle {
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+                background: Theme.palette().media-stage;
+
+                VerticalLayout {
+                    spacing: 16px;
+                    padding: 24px;
                     alignment: center;
-                    spacing: 14px;
-                    ToolButton { icon: "chevron-left"; text: "Previous"; clicked => { root.prev-slide(); } }
-                    Text { text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length; color: Theme.palette().ink; font-size: 13px; }
-                    ToolButton { icon: "chevron-right"; text: "Next"; clicked => { root.next-slide(); } }
-                    ToolButton { icon: "close"; text: "Exit"; clicked => { root.toggle-preview-mode(); } }
+
+                    Rectangle {
+                        width: min(960px, parent.width - 48px);
+                        height: min(540px, parent.height - 96px);
+                        background: Theme.palette().paper;
+                        border-radius: Theme.tokens.metrics.radius-small;
+                        border-width: 1px;
+                        border-color: Theme.palette().border-strong;
+
+                        VerticalLayout {
+                            padding: 48px;
+                            spacing: 20px;
+                            Text {
+                                text: root.slide-title;
+                                font-size: 38px;
+                                font-weight: 700;
+                                color: Theme.palette().paper-ink;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: root.slide-body;
+                                font-size: 20px;
+                                color: Theme.palette().paper-muted;
+                                wrap: word-wrap;
+                                vertical-stretch: 1;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        ToolbarButton { icon: "chevron-left"; label: "Previous"; clicked => { root.prev-slide(); } }
+                        Text {
+                            text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length;
+                            min-width: 112px;
+                            font-size: Theme.tokens.typography.body;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        ToolbarButton { icon: "chevron-right"; label: "Next"; clicked => { root.next-slide(); } }
+                        ToolbarButton { icon: "close"; label: "Exit"; clicked => { root.toggle-preview-mode(); } }
+                    }
                 }
             }
-        }
 
-        if !root.is-preview-mode : HorizontalLayout {
-            spacing: 0px;
-            vertical-stretch: 1;
-            SidebarSurface {
-                width: root.compact-layout ? 184px : 238px;
-                title: "Slides";
-                detail: root.slide-count-text;
-                VerticalLayout {
-                    spacing: 8px;
-                    padding: 10px;
-                    for title[index] in root.slide-titles : WorkspaceRow {
-                        height: 112px;
-                        selected: index == root.active-slide-index;
-                        clicked => { root.select-slide(index); }
+            if !root.is-preview-mode : HorizontalLayout {
+                spacing: 0px;
+                vertical-stretch: 1;
+
+                SidebarSurface {
+                    width: 220px;
+                    title: "Slides";
+
+                    VerticalLayout {
+                        spacing: 8px;
+                        padding: 12px;
+
+                        for title[index] in root.slide-titles : Rectangle {
+                            height: 108px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            border-width: index == root.active-slide-index ? 2px : 1px;
+                            border-color: index == root.active-slide-index ? Theme.palette().accent : Theme.palette().border;
+                            background: index == root.active-slide-index ? Theme.palette().selection-soft : thumbnail-touch.has-hover ? Theme.palette().surface-raised : Theme.palette().panel;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                padding: 8px;
+                                Text {
+                                    text: (index + 1);
+                                    width: 20px;
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: top;
+                                    horizontal-alignment: center;
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 90px;
+                                    background: Theme.palette().paper;
+                                    border-width: 1px;
+                                    border-color: Theme.palette().paper-line;
+                                    border-radius: Theme.tokens.metrics.radius-small;
+                                    clip: true;
+                                    VerticalLayout {
+                                        spacing: 6px;
+                                        padding: 10px;
+                                        Text {
+                                            text: title;
+                                            font-size: Theme.tokens.typography.caption;
+                                            font-weight: 600;
+                                            color: Theme.palette().paper-ink;
+                                            overflow: elide;
+                                        }
+                                        Rectangle { height: 4px; width: 72%; border-radius: 2px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 4px; width: 52%; border-radius: 2px; background: Theme.palette().paper-line; }
+                                        Rectangle { vertical-stretch: 1; background: transparent; }
+                                        Rectangle { height: 3px; width: 24%; border-radius: 2px; background: Theme.palette().content-accent; }
+                                    }
+                                }
+                            }
+
+                            thumbnail-touch := TouchArea { clicked => { root.select-slide(index); } }
+                            accessible-role: button;
+                            accessible-label: "Slide " + (index + 1) + ": " + title;
+                            accessible-action-default => { root.select-slide(index); }
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+
                         HorizontalLayout {
-                            spacing: 8px;
-                            padding: 7px;
-                            Text { text: (index + 1); width: 18px; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; vertical-alignment: top; }
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                height: 94px;
-                                border-radius: 5px;
-                                border-width: 1px;
-                                border-color: Theme.palette().border-strong;
-                                background: Theme.palette().paper;
-                                VerticalLayout {
-                                    padding: 9px;
-                                    spacing: 5px;
-                                    Text { text: title; font-size: 12px; font-weight: 700; color: Theme.palette().paper-ink; overflow: elide; }
-                                    Rectangle { height: 4px; width: 72%; border-radius: 2px; background: Theme.palette().paper-line; }
-                                    Rectangle { height: 4px; width: 52%; border-radius: 2px; background: Theme.palette().paper-line; }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                    Rectangle { height: 3px; width: 24%; border-radius: 2px; background: Theme.palette().content-accent; }
+                            spacing: 4px;
+                            ToolbarIconButton { icon: "plus"; label: "Add slide"; clicked => { root.add-slide(); } }
+                            ToolbarIconButton { icon: "plus-circle"; label: "Duplicate slide"; clicked => { root.duplicate-slide(); } }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            ToolbarIconButton {
+                                icon: "trash";
+                                label: "Delete slide";
+                                enabled: root.slide-titles.length > 1;
+                                clicked => { root.delete-slide(); }
+                            }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 0px;
+                    horizontal-stretch: 1;
+
+                    CanvasSurface {
+                        stage := Rectangle {
+                            x: 24px;
+                            y: 24px;
+                            width: parent.width - 48px;
+                            height: parent.height - 48px;
+                            background: Theme.palette().paper;
+                            border-width: 1px;
+                            border-color: Theme.palette().border-strong;
+                            border-radius: Theme.tokens.metrics.radius-small;
+                            clip: true;
+
+                            VerticalLayout {
+                                padding: 40px;
+                                spacing: 16px;
+
+                                Rectangle {
+                                    height: 84px;
+                                    border-radius: Theme.tokens.metrics.radius-small;
+                                    border-width: root.active-element-index == 0 ? 2px : 0px;
+                                    border-color: Theme.palette().accent;
+                                    Text {
+                                        text: root.slide-title;
+                                        font-size: 34px;
+                                        font-weight: 700;
+                                        color: Theme.palette().paper-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    TouchArea { clicked => { root.select-element(0); } }
+                                }
+
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    border-radius: Theme.tokens.metrics.radius-small;
+                                    border-width: root.active-element-index == 1 ? 2px : 0px;
+                                    border-color: Theme.palette().accent;
+                                    Text {
+                                        text: root.slide-body;
+                                        font-size: 18px;
+                                        color: Theme.palette().paper-muted;
+                                        wrap: word-wrap;
+                                    }
+                                    TouchArea { clicked => { root.select-element(1); } }
                                 }
                             }
                         }
                     }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                    HorizontalLayout {
-                        spacing: 5px;
-                        IconButton { icon: "plus"; label: "Add slide"; clicked => { root.add-slide(); } }
-                        IconButton { icon: "plus-circle"; label: "Duplicate slide"; clicked => { root.duplicate-slide(); } }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        IconButton { icon: "trash"; label: "Delete slide"; enabled: root.slide-titles.length > 1; clicked => { root.delete-slide(); } }
-                    }
-                }
-            }
-            Rectangle { width: 1px; background: Theme.palette().border; }
 
-            VerticalLayout {
-                spacing: 0px;
-                horizontal-stretch: 1;
-                CanvasBackdrop {
-                    vertical-stretch: 1;
-                    Rectangle {
-                        x: root.compact-layout ? 14px : 34px;
-                        y: root.compact-layout ? 14px : 28px;
-                        width: parent.width - (root.compact-layout ? 28px : 68px);
-                        height: parent.height - (root.compact-layout ? 28px : 56px);
-                        border-radius: 5px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border-strong;
-                        background: Theme.palette().paper;
-                        clip: true;
+                    if root.show-notes-drawer : Rectangle {
+                        min-height: 104px;
+                        max-height: 104px;
+                        background: Theme.palette().surface;
+
+                        Rectangle { width: parent.width; height: 1px; background: Theme.palette().border; }
+
                         VerticalLayout {
-                            padding: root.compact-layout ? 24px : 48px;
-                            spacing: 16px;
-                            Rectangle {
-                                height: 84px;
-                                border-radius: 5px;
-                                border-width: root.active-element-index == 0 ? 2px : 0px;
-                                border-color: Theme.palette().accent;
-                                Text { text: root.slide-title; font-size: 34px; font-weight: 700; color: Theme.palette().paper-ink; wrap: word-wrap; }
+                            spacing: 6px;
+                            padding: 8px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Speaker Notes";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                ToolbarIconButton {
+                                    icon: "close";
+                                    label: "Hide speaker notes";
+                                    clicked => { root.show-notes-drawer = false; }
+                                }
                             }
-                            Rectangle {
-                                vertical-stretch: 1;
-                                border-radius: 5px;
-                                border-width: root.active-element-index == 1 ? 2px : 0px;
-                                border-color: Theme.palette().accent;
-                                Text { text: root.slide-body; font-size: 18px; color: Theme.palette().paper-muted; wrap: word-wrap; }
+                            TextEdit {
+                                text <=> root.slide-notes;
+                                placeholder-text: "Add presenter notes…";
+                                edited(value) => { root.notes-edited(value); }
                             }
                         }
                     }
                 }
-                if root.show-notes-drawer : Rectangle {
-                    height: root.compact-layout ? 96px : 122px;
-                    background: Theme.palette().surface;
-                    border-width: 0px;
+
+                if root.show-inspector : InspectorSurface {
+                    width: 280px;
+                    title: "Inspector";
+
                     VerticalLayout {
-                        spacing: 5px;
-                        padding: 8px;
-                        HorizontalLayout {
-                            Text { text: "SPEAKER NOTES"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                            Rectangle { horizontal-stretch: 1; background: transparent; }
-                            IconButton { icon: "close"; label: "Hide speaker notes"; clicked => { root.show-notes-drawer = false; } }
+                        spacing: 12px;
+                        padding: 12px;
+
+                        TabStrip {
+                            tabs: ["Format", "Arrange", "Animate"];
+                            current <=> root.inspector-tab;
                         }
-                        TextEdit { text <=> root.slide-notes; placeholder-text: "Add presenter notes…"; edited(value) => { root.notes-edited(value); } }
+
+                        if root.inspector-tab == 0 : VerticalLayout {
+                            spacing: 12px;
+                            SectionHeader { title: "Element"; }
+                            for label[index] in root.element-labels : Rectangle {
+                                height: Theme.tokens.metrics.control-height;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: index == root.active-element-index ? Theme.palette().selection-soft : element-touch.has-hover ? Theme.palette().surface-raised : transparent;
+                                Text {
+                                    x: 8px;
+                                    width: parent.width - 16px;
+                                    text: label;
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: index == root.active-element-index ? 600 : 400;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                element-touch := TouchArea { clicked => { root.select-element(index); } }
+                                accessible-role: button;
+                                accessible-label: label;
+                                accessible-action-default => { root.select-element(index); }
+                            }
+                            TextField {
+                                label: "Element content";
+                                placeholder: "Text";
+                                value: root.active-element-content;
+                                edited(value) => { root.update-element-content(value); }
+                            }
+                            SectionHeader { title: "Layout"; }
+                            SegmentedControl {
+                                label: "Slide layout";
+                                items: ["Title", "Content", "2 Column", "Image"];
+                                current <=> root.active-template-index;
+                                selected(index) => { root.apply-template(index); }
+                            }
+                        }
+
+                        if root.inspector-tab == 1 : VerticalLayout {
+                            spacing: 12px;
+                            SectionHeader { title: "Position & Size"; }
+                            PropertyRow {
+                                label: "X";
+                                RangeSlider { label: "Horizontal position"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
+                            }
+                            PropertyRow {
+                                label: "Y";
+                                RangeSlider { label: "Vertical position"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
+                            }
+                            PropertyRow {
+                                label: "Width";
+                                RangeSlider { label: "Element width"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
+                            }
+                            PropertyRow {
+                                label: "Height";
+                                RangeSlider { label: "Element height"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
+                            }
+                        }
+
+                        if root.inspector-tab == 2 : VerticalLayout {
+                            spacing: 12px;
+                            SectionHeader { title: "Transition"; }
+                            SegmentedControl {
+                                label: "Slide transition";
+                                items: ["None", "Dissolve", "Push", "Morph"];
+                                current <=> root.transition-index;
+                                selected(index) => { root.set-transition(index); }
+                            }
+                            Text {
+                                text: "Transitions are stored in the deck and used by presenter/export renderers.";
+                                wrap: word-wrap;
+                                font-size: Theme.tokens.typography.caption;
+                                color: Theme.palette().ink-secondary;
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
                     }
                 }
             }
 
-            Rectangle { width: 1px; background: Theme.palette().border; }
-            InspectorSurface {
-                width: root.compact-layout ? 236px : 300px;
-                title: "Inspector";
-                detail: root.element-labels.length + " elements";
-                PaneTabs { items: ["Format", "Arrange", "Animate"]; current <=> root.inspector-tab; }
-                Rectangle { height: 1px; background: Theme.palette().border; }
-                VerticalLayout {
-                    spacing: 12px;
-                    padding: 14px;
-                    if root.inspector-tab == 0 : VerticalLayout {
-                        spacing: 10px;
-                        Text { text: "ELEMENTS"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        for label[index] in root.element-labels : WorkspaceRow {
-                            height: 36px;
-                            selected: index == root.active-element-index;
-                            clicked => { root.select-element(index); }
-                            Text { text: label; x: 9px; width: parent.width - 18px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; vertical-alignment: center; overflow: elide; }
-                        }
-                        Field { label: "Element content"; placeholder: "Text"; value: root.active-element-content; edited(value) => { root.update-element-content(value); } }
-                        Text { text: "Layout"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        SegmentedControl { items: ["Title", "Content", "2 Column", "Image"]; current <=> root.active-template-index; selected(index) => { root.apply-template(index); } }
-                    }
-                    if root.inspector-tab == 1 : VerticalLayout {
-                        spacing: 9px;
-                        Text { text: "POSITION & SIZE"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        Text { text: "X   " + Math.round(root.element-x); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Horizontal position"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
-                        Text { text: "Y   " + Math.round(root.element-y); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Vertical position"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
-                        Text { text: "Width   " + Math.round(root.element-width); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Element width"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
-                        Text { text: "Height   " + Math.round(root.element-height); font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        Slider { label: "Element height"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
-                    }
-                    if root.inspector-tab == 2 : VerticalLayout {
-                        spacing: 10px;
-                        Text { text: "SLIDE TRANSITION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        SegmentedControl { items: ["None", "Dissolve", "Push", "Morph"]; current <=> root.transition-index; selected(index) => { root.set-transition(index); } }
-                        Text { text: "Transitions are stored in the deck and used by presenter/export renderers."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                    }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                }
+            ToolkitStatusBar {
+                leading: root.status-left;
+                trailing: root.status-right + "  •  " + Math.round(root.zoom-value) + "%";
             }
         }
-        StatusBar { status-left: root.status-left; status-right: root.status-right; }
-    }
 
-    palette := CommandPalette {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        open: root.palette-open;
-        commands: root.palette-commands;
-        query: root.palette-query;
-        selected: root.palette-selected;
-        command-invoked(idx) => {
-            root.palette-invoked(idx);
+        palette := CommandPalette {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            open: root.palette-open;
+            commands: root.palette-commands;
+            query: root.palette-query;
+            selected: root.palette-selected;
+            command-invoked(idx) => { root.palette-invoked(idx); }
+            query-changed(q) => {
+                root.palette-query = q;
+                root.palette-query-changed(q);
+            }
+            move-selection(delta) => { root.palette-move(delta); }
+            key-text(text) => { root.palette-key-text(text); }
+            backspace => { root.palette-backspace(); }
+            close-requested => {
+                root.palette-open = false;
+                app-focus.focus();
+            }
         }
-        query-changed(q) => {
-            root.palette-query = q;
-            root.palette-query-changed(q);
-        }
-        move-selection(delta) => {
-            root.palette-move(delta);
-        }
-        key-text(text) => {
-            root.palette-key-text(text);
-        }
-        backspace => {
-            root.palette-backspace();
-        }
-        close-requested => {
-            root.palette-open = false;
-            app-focus.focus();
-        }
-    }
     }
 }
