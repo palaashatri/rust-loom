@@ -1,78 +1,97 @@
-# Toolbars
+# Loom Toolbar Contract
 
-The context toolbar is a single row that reflects the current tool and
-selection. It is the second layer of progressive disclosure — after direct
-manipulation, before the inspector.
+Toolbars are single-line, contextual command surfaces. Exact dimensions and breakpoints are defined in [`contracts/desktop-ui.toml`](contracts/desktop-ui.toml).
 
-## 1. Model
+## Structure
 
-* One toolbar per main window: height 40 px, horizontally below the title
-  bar (`LAYOUT.md`).
-* The toolbar is **contextual**: its contents are driven by the active tool
-  and the current selection. Select a text box → text tools; select a clip →
-  trim/color tools; no selection → document-level tools (insert, mode
-  switches).
-* The toolbar never stacks to a second row and never scrolls. Items that do
-  not fit move to an overflow popover at the row's end (`overflow-ellipsis`).
-* Tool changes (context swaps) animate in-out 200 ms per group (fade +
-  cross-slide 4 px); reduced motion: fade 120 ms.
+A toolbar contains at most three logical groups:
 
-## 2. Grouping
+1. **Leading** — navigation/document structure or the primary tool family.
+2. **Center** — commands for the active content, tool, or selection.
+3. **Trailing** — view/search/export and the overflow menu.
 
-Order of groups, left to right (per app context):
+More than three visible groups is a design failure. Do not solve command abundance with more separators or another toolbar row.
 
-1. **Primary tools** — the tool set for the current surface (Writer: text
-   tools; Photo: tool row; Video: edit tools). Tool-type buttons use
-   `ToolButton` (checked state = active tool).
-2. **Selection actions** — actions that apply to the current selection
-   (group, align, format-paint, trim). These are enabled/disabled with the
-   selection; they disappear when nothing is selected (they are not just
-   grayed out) — except primary actions that must remain discoverable.
-3. **Surface controls** — view toggles that are always visible (zoom readout,
-   ruler toggle, snapping, guides).
-4. **Primary action** — the single most-likely action (Save, Export, Render),
-   rendered as a primary Button on the right end, before the overflow.
+Items within a group use the contract item gap; groups use the contract group gap. Toolbars never scroll and never wrap.
 
-Grouping rules:
+## Priority algorithm
 
-* Groups are separated by `space-16`; never vertical rules.
-* No group exceeds 6 controls; a group that would exceed 6 splits or moves
-  to the inspector/overflow.
-* Ordering is fixed per app and documented in `FEATURE_MATRIX.md`-level
-  app docs; users never customize toolbar order in v1 (`[future]` for
-  customization).
-* Toolbar controls are `IconButton` (20 px icons) with tooltips; text labels
-  only for primary actions and mode switches with non-obvious icons
-  (e.g. "Present", "Render").
+Every toolbar item declares one priority:
 
-## 3. Overflow policy
+- `P0`: visible at all supported widths.
+- `P1`: may collapse from labeled form to icon-only below the contract breakpoint, but only if the symbol is unambiguous and a tooltip/accessibility label exists.
+- `P2`: moves to overflow below the contract breakpoint.
 
-* Overflow detection: at window width, items are dropped to overflow in
-  reverse order of priority (surface controls first, then selection actions,
-  then primary tools).
-* The overflow popover (Menu component) shows the same controls with labels
-  and shortcut hints; it does not reorder or hide them silently — a chevron
-  badge on the overflow button communicates dropped items (non-color: the
-  button shows a dot badge when items are hidden).
-* Every control in the toolbar also exists in a menu or the command palette;
-  overflow never makes a command unreachable.
+The implementation applies this order whenever width decreases:
 
-## 4. States and feedback
+1. move P2 actions to overflow;
+2. convert eligible P1 actions to icon-only;
+3. remove redundant toolbar exposure while retaining menu/palette access;
+4. never clip, ellipsize, overlap, wrap, scroll, or shrink below control minimums.
 
-* Tool buttons reflect the active tool with checked state (accent-tinted,
-  `COMPONENTS.md` §3).
-* Actions apply to selection show enable/disable truthfully; disabled buttons
-  carry a reason tooltip where the cause is not obvious (e.g. "Select a clip
-  to enable trimming").
-* Pressed feedback is instant; hover is instant; no toolbar-wide motion on
-  interaction beyond the 120 ms icon-state change.
+If P0 still does not fit, the toolbar contains too many P0 actions and must be redesigned.
 
-## 5. Accessibility
+## Command placement
 
-* Every toolbar control: focusable, focus ring visible, tooltip with name +
-  shortcut, `accessible-description`.
-* Toolbar is a single logical focus group: Tab enters/exits the toolbar,
-  arrow keys move within it (toolbar row pattern), matching the
-  application's overall focus-order contract (`ACCESSIBILITY.md`).
-* At 1.5× text scale the toolbar height may grow to 56 px and icons keep
-  their 20 px size with labels becoming visible; controls must not clip.
+A toolbar is not the command inventory. Every toolbar command exists in the shared command registry and therefore has a menu/command-palette/keyboard representation where applicable.
+
+Permanent toolbar placement is reserved for frequently used or context-critical actions. Secondary commands such as Save As, uncommon import variants, detailed export settings, or one-off maintenance commands normally live in menus/palette.
+
+A text-labeled action must not visually merge with an adjacent icon action. Keep labeled actions in their own group or give them the group spacing required by the contract.
+
+## Visual treatment
+
+Routine Mac-class desktop toolbar controls are visually quiet. An unchecked toolbar icon normally has no permanent heavy bezel. Hover, pressed, selected, disabled, and keyboard-focus states provide affordance.
+
+Rules:
+
+- action labels never truncate;
+- toolbar controls use shared `loom-ui` components only;
+- no app-local rounded rectangles pretending to be buttons;
+- no decorative vertical rule after every small group;
+- no application logo tile in the toolbar;
+- no neutral "Local"/"Editing" badge occupying permanent toolbar width;
+- export/render may be visually emphasized only when it is genuinely the primary current action;
+- destructive commands are not promoted merely for symmetry.
+
+## Context behavior
+
+Toolbars reflect the active selection/tool while preserving stable command locations where possible. Context changes must not cause unrelated controls to jump between arbitrary positions.
+
+Examples:
+
+- Writer text selection → character/paragraph commands.
+- Photo selected layer → transform/mask/adjustment commands.
+- Present selected object → arrange/style commands.
+- Video selected clip → trim/clip commands.
+
+No selection exposes document/surface commands rather than a set of inexplicably disabled object controls.
+
+## Accessibility
+
+Every toolbar item has:
+
+- accessible name;
+- keyboard focus path;
+- command registry identity;
+- tooltip for icon-only representation;
+- shortcut hint where one exists;
+- disabled reason when the cause is not obvious.
+
+Tab enters/leaves the toolbar as a logical region; arrow-key movement within a toolbar group is preferred when the shared component provides roving focus.
+
+## Acceptance
+
+A toolbar is accepted only when all required viewports and text scales satisfy:
+
+- one line exactly;
+- zero action-label clipping;
+- zero overlap;
+- no control below minimum size;
+- at most three visible groups;
+- deterministic overflow membership;
+- every overflowed action remains reachable;
+- keyboard focus order matches visual order;
+- realistic localized/pseudolocalized labels do not break the layout.
+
+Replacing a screenshot baseline to hide a toolbar collision is a release-process defect.
