@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# NOTE: app binaries must be built with `--features visual-qa` for this matrix;
+# shipping builds exclude the --screenshot/--smoke surface by default.
+
 """Render and validate every Loom application on the current native OS.
 
 The matrix tests native rendering at compact, reference, and large desktop

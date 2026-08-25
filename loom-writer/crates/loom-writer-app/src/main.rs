@@ -39,7 +39,9 @@ const HISTORY_MAX_BYTES: usize = 8 * 1024 * 1024;
 const TYPING_COALESCE_WINDOW_MS: u64 = 750;
 
 struct Args {
+    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     screenshot: Option<String>,
+    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     smoke: bool,
     palette: bool,
     journey: Option<String>,
@@ -62,9 +64,25 @@ fn parse_args() -> Result<Args, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--screenshot" => {
-                args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
+                #[cfg(feature = "visual-qa")]
+                {
+                    args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
+                }
+                #[cfg(not(feature = "visual-qa"))]
+                {
+                    return Err("--screenshot requires a visual-qa build".into());
+                }
             }
-            "--smoke" => args.smoke = true,
+            "--smoke" => {
+                #[cfg(feature = "visual-qa")]
+                {
+                    args.smoke = true;
+                }
+                #[cfg(not(feature = "visual-qa"))]
+                {
+                    return Err("--smoke requires a visual-qa build".into());
+                }
+            }
             "--palette" => args.palette = true,
             "--journey" => {
                 args.journey = Some(it.next().ok_or("--journey needs an output directory")?);
@@ -895,9 +913,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
 fn main() -> Result<(), String> {
     let args = parse_args()?;
+    #[cfg(feature = "visual-qa")]
     if let Some(out) = &args.screenshot {
         return render_headless(&args, out);
     }
+    #[cfg(feature = "visual-qa")]
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-writer-smoke-{}.png", std::process::id()));

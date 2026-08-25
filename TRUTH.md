@@ -106,6 +106,8 @@ parity or product completion.
 - Unified application selection vocabulary and document lifecycle state machine.
 - Light, dark, and high-contrast design tokens and adaptive desktop layouts.
 - Headless screenshot, smoke, CLI-functional, package, and native matrix tooling.
+Screenshot and smoke entry points are gated behind the `visual-qa` cargo feature:
+shipping builds reject those flags; CI/QA builds enable them explicitly.
 - No mandatory account, cloud service, telemetry, or hidden network dependency.
 
 ## Current application boundaries
