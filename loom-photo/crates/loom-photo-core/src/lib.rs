@@ -1239,6 +1239,97 @@ fn image_byte_len(width: u32, height: u32) -> Result<usize, String> {
         .ok_or_else(|| "image byte length overflow".to_string())
 }
 
+/// Converts a row-major byte mask ([0,255] per pixel) into an RGBA image usable as a layer
+/// mask: white where mask >= threshold, black below; alpha channel mirrors the value so soft
+/// masks keep their gradient.
+pub fn mask_bytes_to_rgba(
+    mask: &[u8],
+    width: u32,
+    height: u32,
+    threshold: u8,
+) -> Result<RgbaImage, String> {
+    if width == 0 || height == 0 {
+        return Err(format!(
+            "invalid mask dimensions {width}x{height}; both must be non-zero"
+        ));
+    }
+    let expected = width as usize * height as usize;
+    if mask.len() != expected {
+        return Err(format!(
+            "mask length {} does not match {width}x{height} pixel count {expected}",
+            mask.len()
+        ));
+    }
+    let mut image = RgbaImage::transparent(width, height)?;
+    for (index, &value) in mask.iter().enumerate() {
+        let rgb = if value >= threshold { 255 } else { 0 };
+        let offset = index * 4;
+        image.pixels[offset..offset + 4].copy_from_slice(&[rgb, rgb, rgb, value]);
+    }
+    Ok(image)
+}
+
+/// Counts connected foreground regions (4-connectivity) above `threshold`, keeping only
+/// regions whose pixel area is at least `min_area`. Uses an iterative flood fill.
+pub fn count_mask_regions(
+    mask: &[u8],
+    width: u32,
+    height: u32,
+    threshold: u8,
+    min_area: u32,
+) -> Result<u32, String> {
+    if width == 0 || height == 0 {
+        return Err(format!(
+            "invalid mask dimensions {width}x{height}; both must be non-zero"
+        ));
+    }
+    let expected = width as usize * height as usize;
+    if mask.len() != expected {
+        return Err(format!(
+            "mask length {} does not match {width}x{height} pixel count {expected}",
+            mask.len()
+        ));
+    }
+    let mut visited = vec![false; expected];
+    let mut stack: Vec<usize> = Vec::new();
+    let mut regions = 0u32;
+    for start in 0..expected {
+        if visited[start] || mask[start] < threshold {
+            continue;
+        }
+        visited[start] = true;
+        stack.push(start);
+        let mut area = 0u32;
+        while let Some(index) = stack.pop() {
+            area += 1;
+            let x = index as u32 % width;
+            let y = index as u32 / width;
+            let mut visit = |neighbor: usize| {
+                if !visited[neighbor] && mask[neighbor] >= threshold {
+                    visited[neighbor] = true;
+                    stack.push(neighbor);
+                }
+            };
+            if x > 0 {
+                visit(index - 1);
+            }
+            if x + 1 < width {
+                visit(index + 1);
+            }
+            if y > 0 {
+                visit(index - width as usize);
+            }
+            if y + 1 < height {
+                visit(index + width as usize);
+            }
+        }
+        if area >= min_area {
+            regions += 1;
+        }
+    }
+    Ok(regions)
+}
+
 /// Pixel and mask content associated with a metadata-only [`PhotoDocument`].
 #[derive(Debug, Clone)]
 pub struct PhotoCanvas {
@@ -2875,6 +2966,46 @@ mod tests {
         // Threshold at 100 -> [255, 255, 0, 0]
         canvas.apply_mask_threshold(&layer_id, 100).unwrap();
         assert_eq!(canvas.layer_mask(&layer_id).unwrap(), &[255, 255, 0, 0]);
+    }
+
+    #[test]
+    fn segmentation_mask_conversion_and_regions() {
+        let mask: [u8; 8] = [
+            255, 255, 0, 0, //
+            0, 0, 180, 180,
+        ];
+        let regions = count_mask_regions(&mask, 4, 2, 128, 1).unwrap();
+        assert_eq!(regions, 2);
+
+        let bridge: [u8; 4] = [255, 90, 255, 255];
+        assert_eq!(count_mask_regions(&bridge, 4, 1, 128, 1).unwrap(), 2);
+        assert_eq!(count_mask_regions(&bridge, 4, 1, 64, 1).unwrap(), 1);
+        assert_eq!(count_mask_regions(&mask, 4, 2, 128, 3).unwrap(), 0);
+
+        let mismatch = count_mask_regions(&[0u8; 7], 4, 2, 128, 1).unwrap_err();
+        assert!(
+            mismatch.contains("4x2"),
+            "error must name both sizes: {mismatch}"
+        );
+        assert!(
+            mismatch.contains("7"),
+            "error must name both sizes: {mismatch}"
+        );
+        assert!(count_mask_regions(&[], 0, 5, 128, 1).is_err());
+        assert!(count_mask_regions(&[], 5, 0, 128, 1).is_err());
+
+        let converted = mask_bytes_to_rgba(&[255, 200, 30], 3, 1, 128).unwrap();
+        assert_eq!(converted.pixel(0, 0).unwrap(), [255, 255, 255, 255]);
+        assert_eq!(converted.pixel(1, 0).unwrap(), [255, 255, 255, 200]);
+        assert_eq!(converted.pixel(2, 0).unwrap(), [0, 0, 0, 30]);
+
+        let conversion_mismatch = mask_bytes_to_rgba(&[0u8; 7], 4, 2, 128).unwrap_err();
+        assert!(
+            conversion_mismatch.contains("4x2"),
+            "error must name both sizes: {conversion_mismatch}"
+        );
+        assert!(conversion_mismatch.contains("7"));
+        assert!(mask_bytes_to_rgba(&[0u8; 4], 0, 2, 128).is_err());
     }
 
     #[test]

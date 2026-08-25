@@ -1648,6 +1648,57 @@ impl MotionTemplate {
     }
 }
 
+/// One external dependency of a composition/template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateDependency {
+    /// Font family name required by text layers.
+    Font { family: String },
+    /// Path or URI of an imported media asset.
+    Media { reference: String },
+    /// Nested composition id.
+    Composition { id: String },
+}
+
+impl TemplateDependency {
+    /// Stable machine key for deduplication: "font:<family>", "media:<reference>",
+    /// or "composition:<id>".
+    pub fn key(&self) -> String {
+        match self {
+            Self::Font { family } => format!("font:{family}"),
+            Self::Media { reference } => format!("media:{reference}"),
+            Self::Composition { id } => format!("composition:{id}"),
+        }
+    }
+
+    /// Rejects dependencies whose payload is empty or whitespace-only.
+    pub fn validate(&self) -> Result<(), String> {
+        let (kind, payload) = match self {
+            Self::Font { family } => ("font", family),
+            Self::Media { reference } => ("media", reference),
+            Self::Composition { id } => ("composition", id),
+        };
+        if payload.trim().is_empty() {
+            return Err(format!(
+                "template dependency kind '{kind}' must not be empty"
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Collects the dependency set of a template: entries are validated, deduplicated by
+/// key, and returned sorted by key.
+pub fn collect_template_dependencies(
+    dependencies: &[TemplateDependency],
+) -> Result<Vec<TemplateDependency>, String> {
+    let mut unique = std::collections::BTreeMap::new();
+    for dependency in dependencies {
+        dependency.validate()?;
+        unique.insert(dependency.key(), dependency.clone());
+    }
+    Ok(unique.into_values().collect())
+}
+
 /// Output container kinds supported by the reference render queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RenderOutputKind {
@@ -2670,5 +2721,95 @@ mod tests {
         direct.first_frame = 9;
         direct.last_frame = 3;
         assert!(direct.validate().is_err());
+    }
+
+    #[test]
+    fn template_dependency_manifest_dedup() {
+        // Empty input yields an empty manifest.
+        assert!(collect_template_dependencies(&[])
+            .expect("empty dependency list is valid")
+            .is_empty());
+
+        // Duplicates of the same font collapse into one entry.
+        let duplicated = vec![
+            TemplateDependency::Font {
+                family: "Inter".into(),
+            },
+            TemplateDependency::Composition {
+                id: "nested-1".into(),
+            },
+            TemplateDependency::Media {
+                reference: "assets/bg.png".into(),
+            },
+            TemplateDependency::Font {
+                family: "Inter".into(),
+            },
+        ];
+        let manifest = collect_template_dependencies(&duplicated).expect("valid dependencies");
+        assert_eq!(
+            manifest,
+            vec![
+                TemplateDependency::Composition {
+                    id: "nested-1".into()
+                },
+                TemplateDependency::Font {
+                    family: "Inter".into(),
+                },
+                TemplateDependency::Media {
+                    reference: "assets/bg.png".into(),
+                },
+            ]
+        );
+        // Pin the exact key ordering across kinds.
+        let keys: Vec<String> = manifest.iter().map(|dep| dep.key()).collect();
+        assert_eq!(
+            keys,
+            vec!["composition:nested-1", "font:Inter", "media:assets/bg.png"]
+        );
+        assert!("composition:x" < "font:y");
+        assert!("font:y" < "media:z");
+
+        // Different media references are distinct and sort among themselves.
+        let media = vec![
+            TemplateDependency::Media {
+                reference: "clip_b.mp4".into(),
+            },
+            TemplateDependency::Media {
+                reference: "clip_a.mp4".into(),
+            },
+        ];
+        let media_manifest =
+            collect_template_dependencies(&media).expect("valid media dependencies");
+        assert_eq!(
+            media_manifest,
+            vec![
+                TemplateDependency::Media {
+                    reference: "clip_a.mp4".into(),
+                },
+                TemplateDependency::Media {
+                    reference: "clip_b.mp4".into(),
+                },
+            ]
+        );
+
+        // Invalid empty payloads err through validate and through collect.
+        let invalid_font = TemplateDependency::Font {
+            family: "  ".into(),
+        };
+        assert!(invalid_font.validate().is_err());
+        assert!(invalid_font.key() == "font:  ");
+        let invalid_media = TemplateDependency::Media {
+            reference: String::new(),
+        };
+        assert!(invalid_media.validate().is_err());
+        let invalid_composition = TemplateDependency::Composition { id: "".into() };
+        assert!(invalid_composition.validate().is_err());
+        let invalid_batch = vec![
+            TemplateDependency::Font {
+                family: "Inter".into(),
+            },
+            invalid_composition,
+        ];
+        assert!(collect_template_dependencies(&invalid_batch).is_err());
     }
 }

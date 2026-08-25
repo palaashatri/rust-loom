@@ -2224,6 +2224,73 @@ pub fn write_srt(cues: &[SubtitleCue]) -> String {
     out
 }
 
+/// One caption placed on the caption lane.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaptionEntry {
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    /// Caption text; multi-line cue text collapses to single spaces.
+    pub text: String,
+}
+
+/// Converts cues into sorted, non-overlapping caption entries. Overlapping cues are rejected
+/// with Err naming the conflict; zero/negative durations err; text is whitespace-collapsed.
+pub fn captions_from_cues(cues: &[SubtitleCue]) -> Result<Vec<CaptionEntry>, String> {
+    let mut ordered: Vec<&SubtitleCue> = cues.iter().collect();
+    ordered.sort_by(|a, b| {
+        a.start_seconds
+            .partial_cmp(&b.start_seconds)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                a.end_seconds
+                    .partial_cmp(&b.end_seconds)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| a.index.cmp(&b.index))
+    });
+
+    let mut entries = Vec::with_capacity(ordered.len());
+    let mut previous: Option<&SubtitleCue> = None;
+    for cue in ordered {
+        if !cue.start_seconds.is_finite()
+            || !cue.end_seconds.is_finite()
+            || cue.end_seconds <= cue.start_seconds
+        {
+            return Err(format!(
+                "caption cue {}: invalid range [{:.3}s .. {:.3}s]; end must be after start",
+                cue.index, cue.start_seconds, cue.end_seconds
+            ));
+        }
+        if let Some(previous_cue) = previous {
+            if cue.start_seconds < previous_cue.end_seconds {
+                return Err(format!(
+                    "caption cue {} [{:.3}s .. {:.3}s] overlaps cue {} [{:.3}s .. {:.3}s]",
+                    cue.index,
+                    cue.start_seconds,
+                    cue.end_seconds,
+                    previous_cue.index,
+                    previous_cue.start_seconds,
+                    previous_cue.end_seconds
+                ));
+            }
+        }
+        entries.push(CaptionEntry {
+            start_seconds: cue.start_seconds,
+            end_seconds: cue.end_seconds,
+            text: cue.text.split_whitespace().collect::<Vec<_>>().join(" "),
+        });
+        previous = Some(cue);
+    }
+    Ok(entries)
+}
+
+/// Finds the active caption at a playhead time (binary search); None between captions.
+pub fn active_caption_at(captions: &[CaptionEntry], time_seconds: f64) -> Option<&CaptionEntry> {
+    let up_to = captions.partition_point(|entry| entry.start_seconds <= time_seconds);
+    let candidate = captions.get(up_to.checked_sub(1)?)?;
+    (candidate.end_seconds > time_seconds).then_some(candidate)
+}
+
 /// Host-side reference to an installed motion template with resolved parameter values.
 ///
 /// This is the Video-side consumption shape for Motion templates (M9): the timeline stores
@@ -3206,6 +3273,105 @@ mod tests {
         // End not after start is rejected.
         assert!(parse_srt("1\r\n00:00:02,000 --> 00:00:01,000\r\nBackwards.\r\n").is_err());
         assert!(parse_srt("1\r\n00:00:01,000 --> 00:00:01,000\r\nZero length.\r\n").is_err());
+    }
+
+    #[test]
+    fn caption_lane_entries_and_lookup() {
+        // Input intentionally out of chronological order; cue 2 is multi-line.
+        let cues = vec![
+            SubtitleCue {
+                index: 2,
+                start_seconds: 4.0,
+                end_seconds: 6.0,
+                text: "Second\tcue,\n keeps   interior \r newlines.".into(),
+            },
+            SubtitleCue {
+                index: 1,
+                start_seconds: 1.0,
+                end_seconds: 2.5,
+                text: "Hello there.".into(),
+            },
+            SubtitleCue {
+                index: 3,
+                start_seconds: 7.0,
+                end_seconds: 8.0,
+                text: " Final. ".into(),
+            },
+        ];
+        let entries = captions_from_cues(&cues).expect("valid cues convert");
+        assert_eq!(
+            entries,
+            vec![
+                CaptionEntry {
+                    start_seconds: 1.0,
+                    end_seconds: 2.5,
+                    text: "Hello there.".into(),
+                },
+                CaptionEntry {
+                    start_seconds: 4.0,
+                    end_seconds: 6.0,
+                    text: "Second cue, keeps interior newlines.".into(),
+                },
+                CaptionEntry {
+                    start_seconds: 7.0,
+                    end_seconds: 8.0,
+                    text: "Final.".into(),
+                },
+            ]
+        );
+
+        // Hits inside every caption, including the inclusive start boundary.
+        assert_eq!(active_caption_at(&entries, 1.5), Some(&entries[0]));
+        assert_eq!(active_caption_at(&entries, 4.0), Some(&entries[1]));
+        assert_eq!(active_caption_at(&entries, 7.25), Some(&entries[2]));
+
+        // Misses before all, exclusive ends, gaps, and after all.
+        assert_eq!(active_caption_at(&entries, 0.5), None);
+        assert_eq!(active_caption_at(&entries, 2.5), None);
+        assert_eq!(active_caption_at(&entries, 3.0), None);
+        assert_eq!(active_caption_at(&entries, 6.5), None);
+        assert_eq!(active_caption_at(&entries, 9.0), None);
+
+        // Empty lane has no active caption at any time.
+        assert_eq!(active_caption_at(&[], 1.0), None);
+
+        // Overlapping cues are rejected with an error naming the conflict.
+        let overlapping = vec![
+            SubtitleCue {
+                index: 1,
+                start_seconds: 1.0,
+                end_seconds: 3.0,
+                text: "A".into(),
+            },
+            SubtitleCue {
+                index: 2,
+                start_seconds: 2.5,
+                end_seconds: 4.0,
+                text: "B".into(),
+            },
+        ];
+        let err = captions_from_cues(&overlapping).unwrap_err();
+        assert!(
+            err.contains("overlap") && err.contains("cue 2") && err.contains("cue 1"),
+            "error must name the conflict: {err}"
+        );
+
+        // Zero and negative durations are rejected.
+        let zero = vec![SubtitleCue {
+            index: 1,
+            start_seconds: 1.0,
+            end_seconds: 1.0,
+            text: "Zero".into(),
+        }];
+        let err = captions_from_cues(&zero).unwrap_err();
+        assert!(err.contains("end must be after start"), "unexpected: {err}");
+        let backwards = vec![SubtitleCue {
+            index: 1,
+            start_seconds: 2.0,
+            end_seconds: 1.0,
+            text: "Backwards".into(),
+        }];
+        assert!(captions_from_cues(&backwards).is_err());
     }
 
     #[test]

@@ -16,19 +16,28 @@ motion, video, audio, or delivery products. No application currently satisfies
 all requirements assigned to it in `AGENTS.MD`.
 
 The current source supports a provisional complete-suite parity estimate of
-approximately **86/100**, deepening Stage E interoperability and delivery breadth across the suite
+approximately **88/100**, completing Stage E Vision-to-application bridges and reliability groundwork across the suite
 (Writer, Sheets, Present, Photo, Motion, Video, Studio, and Encode):
-a declared format support matrix using the mandated vocabulary from `DetectOnly` through `ConformanceValidated`
-(`FormatSupportLevel`, `format_support_level`, `format_support_matrix`) in the loom-interop platform crate;
-hierarchical dotted outline numbering with deep-jump clamping (`numbered_outline`) in Writer;
-an OpenRaster-style stack manifest emitter with XML attribute escaping (`PhotoDocument::to_openraster_stack_xml`) in Photo;
-a resumable image-sequence render queue with deterministic chunking (`RenderQueueEntry`, `RenderOutputKind`) in Motion;
-CMX3600 EDL record generation and serialization from timeline clips (`EdlRecord`, `build_edl_records`, `write_edl`) in Video;
-stems bounce planning with disjoint track-bus membership rules (`StemEntry`, `StemsExportPlan`) in Studio; and
-hardware encoder probing against `ffmpeg -encoders` listings with preference selection
-(`parse_available_encoders`, `select_hardware_encoder`) in Encode. All 11 monorepo
+a shared Vision transfer vocabulary of provenance-carrying OCR text blocks and a run-length segmentation mask codec
+(`OcrTextBlock`, `MaskSpan`, `mask_to_spans`, `spans_to_mask`) in the loom-vision-core platform crate;
+OCR-to-editable paragraph conversion preserving block-index provenance (`OcrTextBlock`, `paragraphs_from_ocr_blocks`) in Writer;
+Vision table extraction into dense editable grids with per-cell confidence (`OcrTableCell`, `grid_from_ocr_table`) in Sheets;
+accessibility alt-text coverage auditing with clean-fraction summaries (`AccessibilityFinding`, `audit_accessibility`) in Present;
+segmentation-mask conversion to layer masks with iterative region counting (`mask_bytes_to_rgba`, `count_mask_regions`) in Photo;
+template dependency manifests with deduplicated font/media/composition keys (`TemplateDependency`, `collect_template_dependencies`) in Motion;
+caption-lane entries derived from SRT cues with overlap rejection and playhead lookup (`CaptionEntry`, `captions_from_cues`) in Video;
+RMS/peak loudness summaries with make-up gain suggestions (`LoudnessSummary`, `analyze_loudness`) in Studio; and
+persisted-queue schema migration from single-destination V1 payloads to multi-destination V2
+(`migrate_queue_payload_v1_to_v2`, `migrate_queue_batch_v1_to_v2`) in Encode. All 11 monorepo
 workspaces pass unit, integration, formatting, Clippy, UI audit, contract audit, and offline test
-gates with 625 passing automated tests.
+gates with 635 passing automated tests.
+
+## Vision-to-application bridges
+
+The shared `loom_vision_core::transfer` vocabulary (`OcrTextBlock`, `MaskSpan`) is
+consumed by Writer (editable paragraphs with block-index provenance), Sheets (dense
+grids with per-cell confidence), and Photo (layer masks with region counting), so
+Vision results become ordinary editable data rather than flat overlays.
 
 A repository-readiness score produced by
 `loom-bootstrap/scripts/audit-product-readiness.py` measures source, build,
@@ -75,7 +84,8 @@ parity or product completion.
   equal/deleted/inserted runs (`WordDiffOp`, `word_diff`), plain-text import with paragraph detection and soft
   line-break preservation (`import_text_paragraphs`), linked-table paste regions tracking Sheets provenance with
   refreshable snapshots (`LinkedTableRegion`), hierarchical dotted outline numbering with deep-jump clamping
-  (`numbered_outline`), document outline extraction with indented heading navigation entries
+  (`numbered_outline`), OCR-to-editable paragraph conversion preserving block-index provenance
+  (`paragraphs_from_ocr_blocks`), document outline extraction with indented heading navigation entries
   (`OutlineEntry`, `extract_outline`), bounded/coalesced history, recovery, search/pagination metrics, word boundary expansion
   (`find_word_boundaries`), query occurrence counting (`count_matches`), options-aware search and
   replace with case sensitivity and whole-word matching (`SearchOptions`, `find_matches_with_options`,
@@ -108,7 +118,8 @@ parity or product completion.
   functions via deterministic bisection (`goal_seek_bisection`), proleptic Gregorian date arithmetic via civil-day
   conversion (`is_leap_year`, `days_in_month`, `add_days`, `days_between`), CSV dialect sniffing across comma, semicolon,
   tab, and pipe delimiters with quote detection (`CsvDialect`, `sniff_csv_dialect`), chart-placement export descriptors
-  binding ranges to host documents under update policies (`ChartPlacement`, `ChartUpdatePolicy`), TEXTJOIN-style joining, delimiter splitting,
+  binding ranges to host documents under update policies (`ChartPlacement`, `ChartUpdatePolicy`), Vision table
+  extraction into dense editable grids with per-cell confidence (`OcrTableCell`, `grid_from_ocr_table`), TEXTJOIN-style joining, delimiter splitting,
   repetition, and nth-instance substitution (`text_join`, `split_text_to_columns`, `text_repeat`, `text_substitute`),
   chart data-series specifications with validation,
   value ranges, and normalized plotting points (`ChartKind`, `ChartSeries`, `ChartSpec`), statistical analysis formulas for mode,
@@ -141,7 +152,8 @@ parity or product completion.
   (`Slide::distribute_horizontally`, `Slide::distribute_vertically`), row-major auto grid arrangement of slide elements
   into gutter-spaced cells (`Slide::arrange_grid`), text-outline deck import building titled slides with bullet elements
   from indented hierarchies (`deck_from_outline`), externally linked slide assets with Missing/Modified/Relinked
-  lifecycle states (`LinkedAsset`, `LinkedAssetState`), text-outline deck export round-tripping
+  lifecycle states (`LinkedAsset`, `LinkedAssetState`), accessibility alt-text coverage auditing with clean-fraction summaries
+  (`AccessibilityFinding`, `audit_accessibility`), text-outline deck export round-tripping
   `deck_from_outline` (`deck_to_text_outline`), aspect-ratio-preserving fit of elements into target
   boxes with centered letterboxing (`fit_rect_into_box`, `fit_element_to_box`), accessibility reading-order assignment with element resequencing and
   validity checks (`ReadingOrder`), live presenter annotation
@@ -171,7 +183,8 @@ parity or product completion.
   brush falloff without feedback (`clone_stamp`), a PNG chunk inspector with signature validation and CRC-32 integrity
   checking plus IHDR decoding (`PngChunk`, `parse_png_chunks`, `parse_png_ihdr`), an external asset registry with disk audit
   classification and relink actions (`AssetReference`, `AssetRegistry`), an OpenRaster-style stack manifest emitter with
-  XML attribute escaping (`PhotoDocument::to_openraster_stack_xml`), a round paint-brush engine with hardness falloff and spaced dab
+  XML attribute escaping (`PhotoDocument::to_openraster_stack_xml`), segmentation-mask conversion to layer masks with
+  iterative region counting (`mask_bytes_to_rgba`, `count_mask_regions`), a round paint-brush engine with hardness falloff and spaced dab
   stroke rendering (`BrushConfig`, `brush_dab_alpha`, `paint_stroke`), analog photographic film grain simulation with
   luminance-dependent density and monochrome/color modes (`FilmGrainConfig`, `RgbaImage::apply_film_grain`),
   split toning and color balance dual-tone adjustment model for shadows
@@ -200,7 +213,8 @@ parity or product completion.
   versioned motion-template parameter exposure with typed clamping and default resolution
   (`MotionTemplate`, `TemplateParameter`, `TemplateValue`),
   a resumable image-sequence render queue with deterministic chunking
-  (`RenderQueueEntry`, `RenderOutputKind`),
+  (`RenderQueueEntry`, `RenderOutputKind`), template dependency manifests with deduplicated font/media/composition keys
+  (`TemplateDependency`, `collect_template_dependencies`),
   loop/pingpong time remapping for retimed source playback
   (`TimeRemapMode`, `remap_source_time`, `frames_required`), motion-blur shutter sample offsets and multi-sample position
   accumulation (`shutter_sample_offsets`, `accumulate_motion_samples`), deterministic particle emitter simulation with cone emission
@@ -226,7 +240,8 @@ parity or product completion.
   (`suggest_normalize_gain`, `clamp_gain_db`), SRT subtitle parsing and serialization with CRLF tolerance and round-trip
   fidelity (`SubtitleCue`, `parse_srt`, `write_srt`), host-side motion-template bindings with schema-migration detection
   (`MotionTemplateBinding`), CMX3600 EDL record generation and serialization from timeline clips
-  (`EdlRecord`, `build_edl_records`, `write_edl`), proxy media linkage registry with staleness detection for relink workflows
+  (`EdlRecord`, `build_edl_records`, `write_edl`), caption-lane entries derived from SRT cues with overlap rejection and playhead lookup
+  (`CaptionEntry`, `captions_from_cues`), proxy media linkage registry with staleness detection for relink workflows
   (`ProxyLink`, `ProxyRegistry`), dialogue ducking automation envelope generation with attack/release ramps
   (`DuckingConfig`, `generate_ducking_envelope`), multicam camera-angle switching with cut points and active-angle resolution
   (`MulticamAngle`, `MulticamCut`, `active_angle_at`), musical beat-grid clip alignment with snap targets
@@ -248,7 +263,8 @@ parity or product completion.
 - **Studio:** track/region models, metronome click-track generation with accented downbeats and decaying bursts
   (`generate_click_track`), Standard MIDI File parsing extracting note events from MTrk chunks with VLQ decoding
   (`SmfHeader`, `ParsedMidiNote`, `parse_midi_file`), stems bounce planning with disjoint track-bus membership rules
-  (`StemEntry`, `StemsExportPlan`), pitch-class chord detection across seven qualities with confidence scoring
+  (`StemEntry`, `StemsExportPlan`), RMS/peak loudness summaries with make-up gain suggestions
+  (`LoudnessSummary`, `analyze_loudness`), pitch-class chord detection across seven qualities with confidence scoring
   (`ChordQuality`, `DetectedChord`, `detect_chord`), piecewise tempo maps with linear ramp interpolation and closed-form beat/second
   inversion (`TempoMap`, `TempoNode`), take-folder comping with best-take selection and overlap-safe composite sections
   (`TakeFolder`, `Take`, `CompSection`), MIDI note quantization to beat grids with adjustable snap strength
@@ -277,6 +293,8 @@ parity or product completion.
   submission into the queue from suite applications with intake auditing (`SourceApp`, `InboundJobRequest`, `IntakeRecord`),
   hardware encoder probing against `ffmpeg -encoders` listings with preference selection
   (`parse_available_encoders`, `select_hardware_encoder`),
+  persisted-queue schema migration from single-destination V1 payloads to multi-destination V2
+  (`migrate_queue_payload_v1_to_v2`, `migrate_queue_batch_v1_to_v2`),
   output size estimation with disk-space feasibility margins
   (`estimate_output_size_bytes`, `has_room_for_output`),
   watch-folder ingestion rules with extension matching and file-stability
@@ -336,7 +354,7 @@ still lacks complete semantic round-trip and independent PDF evidence. Photo sti
 has non-atomic persistence/export and status-only tool modes. Motion's repaired
 native workflow passed its focused strict gate, while its professional playback,
 compositing, and rendering engine remains incomplete. The complete-suite truth
-score is approximately **86/100**.
+score is approximately **88/100**.
 
 ### Keyboard journeys
 

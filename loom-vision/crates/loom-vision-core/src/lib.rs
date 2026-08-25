@@ -27,6 +27,7 @@ pub mod production;
 pub mod provider;
 pub mod reference;
 pub mod registry;
+pub mod transfer;
 
 pub use error::VisionError;
 pub use model_pack::{
@@ -47,6 +48,7 @@ pub use reference::{
     QrCodeProvider, ThresholdSegmentationProvider, NO_QR_CODE_MESSAGE,
 };
 pub use registry::{CapabilityRegistry, ProviderRegistry};
+pub use transfer::{mask_to_spans, spans_to_mask, MaskSpan, OcrTextBlock};
 
 /// Current model-pack manifest format version.
 ///

@@ -1964,6 +1964,67 @@ impl LinkedAsset {
     }
 }
 
+/// One accessibility finding for a slide element.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccessibilityFinding {
+    pub slide_index: usize,
+    pub element_id: String,
+    /// "empty-content" when a visual element carries no textual content.
+    pub issue: String,
+}
+
+/// Audits a deck for accessibility basics: visual elements ([`ElementType::ShapeRectangle`],
+/// [`ElementType::ShapeCircle`]) whose content carries no textual content produce
+/// "empty-content" findings; slides whose reading order was never assigned are not flagged
+/// here. Deterministic order: slide order then element order.
+pub fn audit_accessibility(slides: &[Slide]) -> Vec<AccessibilityFinding> {
+    let mut findings = Vec::new();
+    for (slide_index, slide) in slides.iter().enumerate() {
+        for element in &slide.elements {
+            let is_visual = matches!(
+                element.element_type,
+                ElementType::ShapeRectangle | ElementType::ShapeCircle
+            );
+            if is_visual && element.content.trim().is_empty() {
+                findings.push(AccessibilityFinding {
+                    slide_index,
+                    element_id: element.id.clone(),
+                    issue: "empty-content".to_string(),
+                });
+            }
+        }
+    }
+    findings
+}
+
+/// Coverage summary over an audit result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AccessibilitySummary {
+    pub total_elements: usize,
+    pub flagged_elements: usize,
+}
+
+impl AccessibilitySummary {
+    /// Fraction of clean elements in [0,1]; empty decks yield 1.0.
+    pub fn clean_fraction(&self) -> f64 {
+        if self.total_elements == 0 {
+            return 1.0;
+        }
+        (self.total_elements - self.flagged_elements) as f64 / self.total_elements as f64
+    }
+}
+
+/// Builds a coverage summary from a deck's total element count and its audit findings.
+pub fn summarize_findings(
+    total_elements: usize,
+    findings: &[AccessibilityFinding],
+) -> AccessibilitySummary {
+    AccessibilitySummary {
+        total_elements,
+        flagged_elements: findings.len(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2895,5 +2956,87 @@ Hiring Plan
 
         // Empty input is rejected
         assert!(deck_to_text_outline(&[]).is_err());
+    }
+
+    #[test]
+    fn accessibility_audit_flags_empty_visuals() {
+        let text_elem = |id: &str, content: &str| SlideElement {
+            id: id.into(),
+            element_type: ElementType::BodyText,
+            content: content.into(),
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 40.0,
+            action: None,
+        };
+        let shape = |id: &str, ty: ElementType, content: &str| SlideElement {
+            id: id.into(),
+            element_type: ty,
+            content: content.into(),
+            x: 10.0,
+            y: 10.0,
+            width: 100.0,
+            height: 100.0,
+            action: None,
+        };
+
+        let mut deck = Vec::new();
+
+        // Text-only slide: never flagged.
+        let mut slide = Slide::new("slide-intro", "Overview", "title_body");
+        slide.add_element(text_elem("intro-body", "Welcome to the deck"));
+        deck.push(slide);
+
+        // Mixed slide: empty rectangle flagged, filled circle and empty StatCard clean.
+        let mut slide = Slide::new("slide-mixed", "Results", "blank");
+        slide.add_element(shape("rect-blank", ElementType::ShapeRectangle, ""));
+        slide.add_element(shape("circle-ok", ElementType::ShapeCircle, "42%"));
+        slide.add_element(SlideElement {
+            element_type: ElementType::StatCard,
+            content: String::new(),
+            ..shape("stat-blank", ElementType::ShapeRectangle, "")
+        });
+        deck.push(slide);
+
+        // Second offending slide: whitespace-only circle counts as empty.
+        let mut slide = Slide::new("slide-final", "Closing", "blank");
+        slide.add_element(shape("circle-blank", ElementType::ShapeCircle, "   "));
+        slide.add_element(shape(
+            "rect-ok",
+            ElementType::ShapeRectangle,
+            "Diagram of flow",
+        ));
+        deck.push(slide);
+
+        let findings = audit_accessibility(&deck);
+        assert_eq!(
+            findings,
+            vec![
+                AccessibilityFinding {
+                    slide_index: 1,
+                    element_id: "rect-blank".to_string(),
+                    issue: "empty-content".to_string(),
+                },
+                AccessibilityFinding {
+                    slide_index: 2,
+                    element_id: "circle-blank".to_string(),
+                    issue: "empty-content".to_string(),
+                },
+            ]
+        );
+
+        // Summary math over all 6 elements across the deck.
+        let total: usize = deck.iter().map(|s| s.elements.len()).sum();
+        assert_eq!(total, 6);
+        let summary = summarize_findings(total, &findings);
+        assert_eq!(summary.total_elements, 6);
+        assert_eq!(summary.flagged_elements, 2);
+        assert!((summary.clean_fraction() - 4.0 / 6.0).abs() < f64::EPSILON);
+
+        // Empty deck audits clean.
+        assert!(audit_accessibility(&[]).is_empty());
+        assert_eq!(summarize_findings(0, &[]), AccessibilitySummary::default());
+        assert_eq!(summarize_findings(0, &[]).clean_fraction(), 1.0);
     }
 }

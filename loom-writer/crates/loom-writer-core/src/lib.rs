@@ -3261,9 +3261,121 @@ impl LinkedTableRegion {
     }
 }
 
+/// One OCR-derived text block with source-region provenance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OcrTextBlock {
+    pub text: String,
+    /// Source region in pixels of the scanned page.
+    pub region: (u32, u32, u32, u32), // x, y, w, h
+    pub confidence: f32,
+}
+
+/// Converts OCR blocks into editable paragraphs with provenance: blocks are ordered
+/// top-to-bottom by region y (then x); consecutive blocks whose vertical gap is less than
+/// 1.5x the smaller block height merge into one paragraph joined by a space. Whitespace is
+/// collapsed. Returns Err when any block has empty text or confidence outside [0,1].
+pub fn paragraphs_from_ocr_blocks(
+    blocks: &[OcrTextBlock],
+) -> Result<Vec<(String, Vec<usize>)>, String> {
+    for (i, block) in blocks.iter().enumerate() {
+        if block.text.trim().is_empty() {
+            return Err(format!("OCR block {i} has empty text"));
+        }
+        if !(0.0..=1.0).contains(&block.confidence) {
+            return Err(format!(
+                "OCR block {i} has confidence {} outside [0,1]",
+                block.confidence
+            ));
+        }
+    }
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    order.sort_by(|&a, &b| {
+        blocks[a]
+            .region
+            .1
+            .cmp(&blocks[b].region.1)
+            .then_with(|| blocks[a].region.0.cmp(&blocks[b].region.0))
+    });
+    let mut paragraphs: Vec<(String, Vec<usize>)> = Vec::new();
+    for &idx in &order {
+        let block = &blocks[idx];
+        let (_, y, _, h) = block.region;
+        let prev = paragraphs
+            .last()
+            .and_then(|(_, group)| group.last())
+            .map(|&prev_idx| &blocks[prev_idx]);
+        let merges = match prev {
+            Some(prev) => {
+                let gap = i64::from(y) - i64::from(prev.region.1) - i64::from(prev.region.3);
+                2 * gap < 3 * i64::from(h.min(prev.region.3))
+            }
+            None => false,
+        };
+        if merges {
+            let paragraph = paragraphs.last_mut().expect("merge requires a paragraph");
+            let collapsed = block.text.split_whitespace().collect::<Vec<_>>().join(" ");
+            paragraph.0.push(' ');
+            paragraph.0.push_str(&collapsed);
+            paragraph.1.push(idx);
+        } else {
+            paragraphs.push((
+                block.text.split_whitespace().collect::<Vec<_>>().join(" "),
+                vec![idx],
+            ));
+        }
+    }
+    Ok(paragraphs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ocr_blocks_to_editable_paragraphs() {
+        let blocks = vec![
+            OcrTextBlock {
+                text: "Second paragraph".to_string(),
+                region: (0, 200, 300, 20),
+                confidence: 0.7,
+            },
+            OcrTextBlock {
+                text: "Hello   world ".to_string(),
+                region: (0, 10, 300, 20),
+                confidence: 0.9,
+            },
+            OcrTextBlock {
+                text: "\tmore  text".to_string(),
+                region: (4, 35, 290, 20),
+                confidence: 0.8,
+            },
+        ];
+        let paragraphs = paragraphs_from_ocr_blocks(&blocks).unwrap();
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(
+            paragraphs[0],
+            ("Hello world more text".to_string(), vec![1, 2])
+        );
+        assert_eq!(paragraphs[1], ("Second paragraph".to_string(), vec![0]));
+
+        let empty = vec![OcrTextBlock {
+            text: "   ".to_string(),
+            region: (0, 0, 10, 10),
+            confidence: 0.5,
+        }];
+        assert!(paragraphs_from_ocr_blocks(&empty)
+            .unwrap_err()
+            .contains("empty text"));
+
+        let overconfident = vec![OcrTextBlock {
+            text: "ok".to_string(),
+            region: (0, 0, 10, 10),
+            confidence: 1.5,
+        }];
+        assert!(paragraphs_from_ocr_blocks(&overconfident)
+            .unwrap_err()
+            .contains("[0,1]"));
+    }
 
     fn demo_doc() -> WriterDocument {
         let mut d = WriterDocument::new("doc-1", "My Report");

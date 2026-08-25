@@ -3296,9 +3296,146 @@ pub fn days_between(y1: i32, m1: u32, d1: u32, y2: i32, m2: u32, d2: u32) -> Res
     Ok(days_from_civil(y2, m2, d2) - days_from_civil(y1, m1, d1))
 }
 
+/// One recognized table cell from a Vision extraction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OcrTableCell {
+    pub row: usize,
+    pub column: usize,
+    pub text: String,
+    pub confidence: f32,
+}
+
+/// Converts recognized cells into a dense editable grid plus confidence grid. Row/column
+/// indices must start at zero with no gaps (dense requirement) else Err naming the missing
+/// coordinate. Duplicate coordinates err. Empty input errs.
+#[allow(clippy::type_complexity)]
+pub fn grid_from_ocr_table(
+    cells: &[OcrTableCell],
+) -> Result<(Vec<Vec<String>>, Vec<Vec<f32>>), String> {
+    use std::collections::HashSet;
+    if cells.is_empty() {
+        return Err("table extraction produced no cells".to_string());
+    }
+    let mut coords: HashSet<(usize, usize)> = HashSet::new();
+    let mut rows_seen: HashSet<usize> = HashSet::new();
+    let mut cols_seen: HashSet<usize> = HashSet::new();
+    let mut max_row = 0usize;
+    let mut max_col = 0usize;
+    for cell in cells {
+        if !coords.insert((cell.row, cell.column)) {
+            return Err(format!(
+                "duplicate table cell at row {}, column {}",
+                cell.row, cell.column
+            ));
+        }
+        rows_seen.insert(cell.row);
+        cols_seen.insert(cell.column);
+        max_row = max_row.max(cell.row);
+        max_col = max_col.max(cell.column);
+    }
+    for r in 0..=max_row {
+        if !rows_seen.contains(&r) {
+            return Err(format!(
+                "dense grid requires every row in 0..={max_row} but row {r} is missing"
+            ));
+        }
+    }
+    for c in 0..=max_col {
+        if !cols_seen.contains(&c) {
+            return Err(format!(
+                "dense grid requires every column in 0..={max_col} but column {c} is missing"
+            ));
+        }
+    }
+    let (n_rows, n_cols) = (max_row + 1, max_col + 1);
+    let mut text = vec![vec![String::new(); n_cols]; n_rows];
+    let mut confidence = vec![vec![0.0_f32; n_cols]; n_rows];
+    for cell in cells {
+        text[cell.row][cell.column] = cell.text.clone();
+        confidence[cell.row][cell.column] = cell.confidence;
+    }
+    Ok((text, confidence))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ocr_table_to_editable_grid() {
+        let cells = vec![
+            OcrTableCell {
+                row: 0,
+                column: 0,
+                text: "Item".to_string(),
+                confidence: 0.95,
+            },
+            OcrTableCell {
+                row: 0,
+                column: 1,
+                text: "Qty".to_string(),
+                confidence: 0.91,
+            },
+            OcrTableCell {
+                row: 1,
+                column: 0,
+                text: "Widget".to_string(),
+                confidence: 0.42,
+            },
+            OcrTableCell {
+                row: 1,
+                column: 1,
+                text: "7".to_string(),
+                confidence: 0.03,
+            },
+        ];
+        let (text, confidence) = grid_from_ocr_table(&cells).unwrap();
+        assert_eq!(
+            text,
+            vec![
+                vec!["Item".to_string(), "Qty".to_string()],
+                vec!["Widget".to_string(), "7".to_string()],
+            ]
+        );
+        assert_eq!(confidence, vec![vec![0.95, 0.91], vec![0.42, 0.03]]);
+
+        let row_gap = vec![
+            OcrTableCell {
+                row: 0,
+                column: 0,
+                text: "a".to_string(),
+                confidence: 0.5,
+            },
+            OcrTableCell {
+                row: 2,
+                column: 0,
+                text: "b".to_string(),
+                confidence: 0.5,
+            },
+        ];
+        let err = grid_from_ocr_table(&row_gap).unwrap_err();
+        assert!(err.contains("row 1"), "unexpected error: {err}");
+
+        let duplicated = vec![
+            OcrTableCell {
+                row: 0,
+                column: 0,
+                text: "a".to_string(),
+                confidence: 0.5,
+            },
+            OcrTableCell {
+                row: 0,
+                column: 0,
+                text: "b".to_string(),
+                confidence: 0.5,
+            },
+        ];
+        assert!(grid_from_ocr_table(&duplicated)
+            .unwrap_err()
+            .contains("duplicate"));
+
+        assert!(grid_from_ocr_table(&[]).is_err());
+    }
 
     #[test]
     fn cell_ref_parse_render() {

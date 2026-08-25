@@ -2233,6 +2233,59 @@ pub fn detect_chord(pitches: &[u8]) -> Option<DetectedChord> {
     })
 }
 
+/// Analyzes a rendered mix and returns a loudness summary in decibels: RMS-based
+/// perceived level, true peak level, and the gain needed to reach a target integrated
+/// loudness. Silent input reports -100 dB levels with zero suggested gain.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoudnessSummary {
+    /// RMS level in dBFS.
+    pub rms_db: f32,
+    /// Peak level in dBFS.
+    pub peak_db: f32,
+    /// Suggested make-up gain to reach `target_lufs` style targets, in dB (positive boosts).
+    pub gain_to_target_db: f32,
+}
+
+/// Computes [`LoudnessSummary`] for a mono/stereo-interleaved sample slice against a target
+/// level in dBFS. Non-finite samples are ignored. Empty or fully silent input yields
+/// (-100, -100, 0).
+pub fn analyze_loudness(samples: &[f32], target_dbfs: f32) -> LoudnessSummary {
+    let finite: Vec<f32> = samples.iter().copied().filter(|s| s.is_finite()).collect();
+    if finite.is_empty() {
+        return LoudnessSummary {
+            rms_db: -100.0,
+            peak_db: -100.0,
+            gain_to_target_db: 0.0,
+        };
+    }
+    let peak_raw = finite.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    if peak_raw <= 1e-5 {
+        // Digital silence: report floor levels; boosting silence is never useful.
+        return LoudnessSummary {
+            rms_db: -100.0,
+            peak_db: -100.0,
+            gain_to_target_db: 0.0,
+        };
+    }
+    let sum_squares: f64 = finite
+        .iter()
+        .map(|s| {
+            let s = f64::from(*s);
+            s * s
+        })
+        .sum();
+    let rms = (sum_squares / finite.len() as f64).sqrt().max(1e-5) as f32;
+    let peak = peak_raw.min(1.0);
+    let rms_db = linear_to_db(rms);
+    let peak_db = linear_to_db(peak);
+    let gain_to_target_db = (target_dbfs - rms_db).max(0.0);
+    LoudnessSummary {
+        rms_db,
+        peak_db,
+        gain_to_target_db,
+    }
+}
+
 /// Generates a metronome click track: an accent (higher pitch) on the downbeat of each bar
 /// and a normal click on every other beat. Clicks are short sine bursts with a 5 ms
 /// exponential decay, placed at exact beat boundaries in a mono buffer.
@@ -3574,5 +3627,38 @@ mod studio_runtime_tests {
             err.contains("t5") && err.contains("more than once"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn loudness_summary_analysis() {
+        // Full-scale square-ish signal: RMS of alternating +/-1.0 is 1.0 => 0 dBFS.
+        // Already louder than the -14 target, so no automatic boost (never attenuate).
+        let loud = analyze_loudness(&[1.0, -1.0, 1.0, -1.0], -14.0);
+        assert!((loud.rms_db - 0.0).abs() < 0.01, "rms {}", loud.rms_db);
+        assert!((loud.peak_db - 0.0).abs() < 0.01);
+        assert_eq!(loud.gain_to_target_db, 0.0);
+
+        // A very quiet signal (~-26 dBFS RMS) needs about +12 dB to reach -14
+        let quiet = analyze_loudness(&[0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05], -14.0);
+        assert!(
+            (quiet.gain_to_target_db - 12.04).abs() < 0.05,
+            "gain {}",
+            quiet.gain_to_target_db
+        );
+
+        // Peaks clamp into [0 dBFS] for reporting purposes
+        let clipped = analyze_loudness(&[2.5, -2.5], -6.0);
+        assert!(clipped.peak_db <= 0.0 + 1e-4);
+
+        // Silence and empty input report floor levels with no gain suggestion
+        let silent = analyze_loudness(&[0.0; 16].repeat(1), -14.0);
+        assert_eq!(silent.rms_db, -100.0);
+        assert_eq!(silent.gain_to_target_db, 0.0);
+        let empty = analyze_loudness(&[], -14.0);
+        assert_eq!(empty.peak_db, -100.0);
+
+        // Non-finite samples are ignored rather than poisoning statistics
+        let with_nan = analyze_loudness(&[0.5, f32::NAN, -0.5], -6.0);
+        assert!(with_nan.rms_db.is_finite());
     }
 }

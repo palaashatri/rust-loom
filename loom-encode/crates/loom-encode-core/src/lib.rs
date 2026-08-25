@@ -1935,6 +1935,63 @@ impl IntakeRecord {
     }
 }
 
+/// A version-tagged queue payload captured from disk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueuedJobPayloadV1 {
+    pub job_id: String,
+    /// Legacy single destination path.
+    pub output_path: String,
+    pub preset_id: String,
+}
+
+/// Current-generation payload: destinations became a list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueuedJobPayloadV2 {
+    pub job_id: String,
+    pub output_paths: Vec<String>,
+    pub preset_id: String,
+    /// Set during migration from V1 payloads that predate the field.
+    pub migrated_from_v1: bool,
+}
+
+/// Migrates a V1 payload to V2. Empty job_id/preset_id err; empty output_path becomes a V2
+/// payload with zero destinations (documented, allowed).
+pub fn migrate_queue_payload_v1_to_v2(
+    payload: &QueuedJobPayloadV1,
+) -> Result<QueuedJobPayloadV2, String> {
+    if payload.job_id.trim().is_empty() {
+        return Err("job id must not be empty".into());
+    }
+    if payload.preset_id.trim().is_empty() {
+        return Err("preset id must not be empty".into());
+    }
+    let output_paths = if payload.output_path.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![payload.output_path.clone()]
+    };
+    Ok(QueuedJobPayloadV2 {
+        job_id: payload.job_id.clone(),
+        output_paths,
+        preset_id: payload.preset_id.clone(),
+        migrated_from_v1: true,
+    })
+}
+
+/// Migrates a whole batch, reporting per-item failures as Err naming the offending index.
+pub fn migrate_queue_batch_v1_to_v2(
+    payloads: &[QueuedJobPayloadV1],
+) -> Result<Vec<QueuedJobPayloadV2>, String> {
+    let mut migrated = Vec::with_capacity(payloads.len());
+    for (index, payload) in payloads.iter().enumerate() {
+        match migrate_queue_payload_v1_to_v2(payload) {
+            Ok(item) => migrated.push(item),
+            Err(error) => return Err(format!("payload at index {index}: {error}")),
+        }
+    }
+    Ok(migrated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2747,5 +2804,80 @@ Encoders:
         // Re-evaluating the same inputs yields an identical record
         let replay = IntakeRecord::new(1_700_000_000_000, valid, |request| request.validate());
         assert_eq!(replay, accepted);
+    }
+
+    #[test]
+    fn queue_schema_migration_v1_to_v2() {
+        // A single migration sets the flag and wraps the legacy path as a list
+        let single = migrate_queue_payload_v1_to_v2(&QueuedJobPayloadV1 {
+            job_id: "j-1".into(),
+            output_path: "/exports/a.mp4".into(),
+            preset_id: "h264-web".into(),
+        })
+        .expect("single migration failed");
+        assert!(single.migrated_from_v1);
+        assert_eq!(single.output_paths, vec!["/exports/a.mp4"]);
+        assert_eq!(single.job_id, "j-1");
+        assert_eq!(single.preset_id, "h264-web");
+
+        // A batch migrates every item in order
+        let batch = migrate_queue_batch_v1_to_v2(&[
+            QueuedJobPayloadV1 {
+                job_id: "j-1".into(),
+                output_path: "/exports/a.mp4".into(),
+                preset_id: "h264-web".into(),
+            },
+            QueuedJobPayloadV1 {
+                job_id: "j-2".into(),
+                output_path: "/exports/b.webm".into(),
+                preset_id: "vp9-web".into(),
+            },
+        ])
+        .expect("batch migration failed");
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].job_id, "j-1");
+        assert_eq!(batch[0].output_paths, vec!["/exports/a.mp4"]);
+        assert_eq!(batch[1].job_id, "j-2");
+        assert_eq!(batch[1].output_paths, vec!["/exports/b.webm"]);
+
+        // A bad item fails the batch naming the offending index
+        let bad_batch = migrate_queue_batch_v1_to_v2(&[
+            QueuedJobPayloadV1 {
+                job_id: "j-ok".into(),
+                output_path: "/exports/a.mp4".into(),
+                preset_id: "h264-web".into(),
+            },
+            QueuedJobPayloadV1 {
+                job_id: String::new(),
+                output_path: "/exports/broken.webm".into(),
+                preset_id: "vp9-web".into(),
+            },
+        ])
+        .expect_err("batch with an empty job id must fail");
+        assert!(bad_batch.contains("index 1"), "error was: {bad_batch}");
+
+        // Empty legacy paths are allowed and become zero destinations
+        let no_destinations = migrate_queue_payload_v1_to_v2(&QueuedJobPayloadV1 {
+            job_id: "j-3".into(),
+            output_path: String::new(),
+            preset_id: "prores-master".into(),
+        })
+        .expect("empty path migration failed");
+        assert!(no_destinations.migrated_from_v1);
+        assert!(no_destinations.output_paths.is_empty());
+
+        // Empty job ids err, and so do empty preset ids
+        assert!(migrate_queue_payload_v1_to_v2(&QueuedJobPayloadV1 {
+            job_id: String::new(),
+            output_path: "/exports/c.mov".into(),
+            preset_id: "prores-master".into(),
+        })
+        .is_err());
+        assert!(migrate_queue_payload_v1_to_v2(&QueuedJobPayloadV1 {
+            job_id: "j-4".into(),
+            output_path: "/exports/c.mov".into(),
+            preset_id: String::new(),
+        })
+        .is_err());
     }
 }
