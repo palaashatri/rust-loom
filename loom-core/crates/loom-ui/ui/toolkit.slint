@@ -115,9 +115,9 @@ export component ToolbarIconButton inherits Rectangle {
     accessible-action-default => { if (enabled) { clicked(); } }
 
     Icon {
-        x: (root.width - Theme.tokens.metrics.icon-size) / 2;
-        y: (root.height - Theme.tokens.metrics.icon-size) / 2;
-        size: Theme.tokens.metrics.icon-size;
+        x: (root.width - 16px) / 2;
+        y: (root.height - 16px) / 2;
+        size: 16px;
         icon: root.icon;
         tint: !root.enabled ? Theme.palette().ink-disabled
             : root.checked ? Theme.palette().accent
@@ -179,7 +179,7 @@ export component ToolbarButton inherits Rectangle {
         cross-axis-alignment: center;
 
         if root.icon != "" : Icon {
-            size: Theme.tokens.metrics.icon-size;
+            size: 16px;
             icon: root.icon;
             tint: !root.enabled ? Theme.palette().ink-disabled
                 : root.primary ? Theme.palette().accent-ink
@@ -315,8 +315,8 @@ export component ToolkitStatusBar inherits Rectangle {
     in property <string> leading: "";
     in property <string> trailing: "";
 
-    min-height: Theme.tokens.metrics.status-height;
-    max-height: Theme.tokens.metrics.status-height;
+    min-height: Theme.tokens.metrics.control-height;
+    max-height: Theme.tokens.metrics.control-height;
     background: Theme.palette().chrome;
 
     Rectangle {
