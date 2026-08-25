@@ -1,0 +1,369 @@
+// Loom Desktop Toolkit v2
+//
+// This module is the migration target for standard application chrome and
+// controls. It obeys loom-design-bible/contracts/desktop-ui.toml. Application
+// code supplies state/commands/content; it does not restyle these primitives.
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+export component DocumentChrome inherits Rectangle {
+    in property <string> title: "Untitled";
+    in property <bool> modified: false;
+    in property <string> trailing-text: "";
+
+    height: Theme.tokens.metrics.header-height;
+    min-height: Theme.tokens.metrics.header-height;
+    max-height: Theme.tokens.metrics.header-height;
+    background: Theme.palette().chrome;
+
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 12px;
+        padding-right: 12px;
+        cross-axis-alignment: center;
+
+        Text {
+            text: root.title + (root.modified ? " — Edited" : "");
+            font-size: Theme.tokens.typography.title;
+            font-weight: 600;
+            color: Theme.palette().ink;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        if root.trailing-text != "" : Text {
+            text: root.trailing-text;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: root.height - 1px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+
+export component Toolbar inherits Rectangle {
+    min-height: Theme.tokens.metrics.toolbar-height;
+    max-height: Theme.tokens.metrics.toolbar-height;
+    background: Theme.palette().chrome;
+
+    HorizontalLayout {
+        spacing: 4px;
+        padding-left: 8px;
+        padding-right: 8px;
+        cross-axis-alignment: center;
+        @children
+    }
+
+    Rectangle {
+        x: 0px;
+        y: root.height - 1px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+
+export component ToolbarGroup inherits Rectangle {
+    in property <bool> leading-separation: false;
+
+    min-height: 28px;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: 4px;
+        padding-left: root.leading-separation ? 12px : 0px;
+        cross-axis-alignment: center;
+        @children
+    }
+}
+
+export component ToolbarSpacer inherits Rectangle {
+    horizontal-stretch: 1;
+    background: transparent;
+}
+
+export component ToolbarIconButton inherits Rectangle {
+    in property <string> icon: "generic";
+    in property <string> label: "";
+    in property <bool> enabled: true;
+    in property <bool> checked: false;
+    callback clicked;
+
+    width: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
+    min-width: Theme.tokens.metrics.control-height;
+    max-width: Theme.tokens.metrics.control-height;
+    min-height: Theme.tokens.metrics.control-height;
+    max-height: Theme.tokens.metrics.control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : checked ? 1px : 0px;
+    border-color: focus.has-focus ? Theme.palette().focus : checked ? Theme.palette().border-strong : transparent;
+    background: !enabled ? transparent
+        : touch.pressed ? Theme.palette().surface-sunken
+        : checked ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+
+    accessible-role: button;
+    accessible-label: label != "" ? label : icon;
+    accessible-action-default => { if (enabled) { clicked(); } }
+
+    Icon {
+        x: (root.width - 16px) / 2;
+        y: (root.height - 16px) / 2;
+        size: 16px;
+        icon: root.icon;
+        tint: !root.enabled ? Theme.palette().ink-disabled
+            : root.checked ? Theme.palette().accent
+            : Theme.palette().ink-secondary;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            focus.focus();
+            root.clicked();
+        }
+    }
+}
+
+export component ToolbarButton inherits Rectangle {
+    in property <string> icon: "";
+    in property <string> label: "Action";
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> checked: false;
+    callback clicked;
+
+    height: Theme.tokens.metrics.control-height;
+    min-height: Theme.tokens.metrics.control-height;
+    max-height: Theme.tokens.metrics.control-height;
+    min-width: 28px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : root.primary || root.checked ? 1px : 0px;
+    border-color: focus.has-focus ? Theme.palette().focus
+        : root.primary ? Theme.palette().accent-hover
+        : root.checked ? Theme.palette().border-strong
+        : transparent;
+    background: !root.enabled ? transparent
+        : root.primary ? (touch.pressed ? Theme.palette().accent-pressed : touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
+        : touch.pressed ? Theme.palette().surface-sunken
+        : root.checked ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    HorizontalLayout {
+        spacing: 6px;
+        padding-left: 10px;
+        padding-right: 10px;
+        alignment: center;
+        cross-axis-alignment: center;
+
+        if root.icon != "" : Icon {
+            size: 16px;
+            icon: root.icon;
+            tint: !root.enabled ? Theme.palette().ink-disabled
+                : root.primary ? Theme.palette().accent-ink
+                : root.checked ? Theme.palette().accent
+                : Theme.palette().ink-secondary;
+        }
+
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: 500;
+            color: !root.enabled ? Theme.palette().ink-disabled
+                : root.primary ? Theme.palette().accent-ink
+                : Theme.palette().ink;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            focus.focus();
+            root.clicked();
+        }
+    }
+}
+
+export component PanelHeader inherits Rectangle {
+    in property <string> title: "Panel";
+
+    min-height: Theme.tokens.metrics.panel-header-height;
+    max-height: Theme.tokens.metrics.panel-header-height;
+    background: Theme.palette().panel;
+
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 12px;
+        padding-right: 12px;
+        cross-axis-alignment: center;
+
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.title;
+            font-weight: 600;
+            color: Theme.palette().ink;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        @children
+    }
+}
+
+export component SidebarSurface inherits Rectangle {
+    in property <string> title: "";
+    min-width: 200px;
+    max-width: 360px;
+    background: Theme.palette().panel;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        if root.title != "" : PanelHeader { title: root.title; }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().panel;
+            @children
+        }
+    }
+
+    Rectangle {
+        x: root.width - 1px;
+        width: 1px;
+        height: root.height;
+        background: Theme.palette().border;
+    }
+}
+
+export component InspectorSurface inherits Rectangle {
+    in property <string> title: "Inspector";
+    min-width: 240px;
+    max-width: 360px;
+    background: Theme.palette().panel;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        PanelHeader { title: root.title; }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().panel;
+            @children
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        width: 1px;
+        height: root.height;
+        background: Theme.palette().border;
+    }
+}
+
+export component SectionHeader inherits Rectangle {
+    in property <string> title: "Section";
+    min-height: Theme.tokens.metrics.control-height;
+    max-height: Theme.tokens.metrics.control-height;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: root.title;
+        font-size: Theme.tokens.typography.title;
+        font-weight: 600;
+        color: Theme.palette().ink;
+        vertical-alignment: center;
+    }
+}
+
+export component ToolkitStatusBar inherits Rectangle {
+    in property <string> leading: "";
+    in property <string> trailing: "";
+
+    min-height: 28px;
+    max-height: 28px;
+    background: Theme.palette().chrome;
+
+    Rectangle {
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+
+    HorizontalLayout {
+        spacing: 12px;
+        padding-left: 12px;
+        padding-right: 12px;
+        cross-axis-alignment: center;
+
+        Text {
+            text: root.leading;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 400;
+            color: Theme.palette().ink-secondary;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.trailing;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component CanvasSurface inherits Rectangle {
+    background: Theme.palette().canvas;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+}
+
+export component ContentSurface inherits Rectangle {
+    background: Theme.palette().surface-raised;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    border-radius: Theme.tokens.metrics.radius-medium;
+}
