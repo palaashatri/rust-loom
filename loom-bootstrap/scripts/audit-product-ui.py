@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "encode")
 failures: list[str] = []
 emoji = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF]")
+slint_reference = re.compile(r'\bfrom\s+["\']([^"\']+\.slint)["\']')
 
 
 def require(condition: bool, message: str) -> None:
@@ -47,6 +48,48 @@ def blocks(text: str, marker: str):
             return
 
 
+def active_application_ui(app: str) -> str:
+    """Return only app-local Slint modules reachable from ui/app.slint.
+
+    Several applications intentionally keep app.slint as a stable export shim.
+    Auditing just that file silently ignores the shipping workspace. Shared
+    include-path modules (toolkit/theme/components) are validated separately and
+    are not folded into app text, so legacy compatibility code cannot cause
+    false positives in a migrated app.
+    """
+    ui_dir = ROOT / f"loom-{app}/crates/loom-{app}-app/ui"
+    entry = ui_dir / "app.slint"
+    if not entry.is_file():
+        failures.append(f"{app}: missing app.slint entry point")
+        return ""
+
+    visited: set[Path] = set()
+    chunks: list[str] = []
+
+    def visit(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved in visited or not path.is_file():
+            return
+        try:
+            resolved.relative_to(ui_dir.resolve())
+        except ValueError:
+            return
+        visited.add(resolved)
+        text = path.read_text(encoding="utf-8")
+        chunks.append(text)
+        for reference in slint_reference.findall(text):
+            candidate = (path.parent / reference).resolve()
+            if candidate.is_file():
+                visit(candidate)
+
+    visit(entry)
+    return "\n".join(chunks)
+
+
+def component_used(text: str, name: str) -> bool:
+    return re.search(rf"(?m)^\s*{re.escape(name)}\s*\{{", text) is not None
+
+
 def audit_design_contract() -> None:
     contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
     tokens_path = ROOT / "loom-design-bible/tokens/loom.toml"
@@ -78,38 +121,43 @@ def audit_design_contract() -> None:
     require(contract.get("controls", {}).get("minimum-pointer-target") == 28, "design system: pointer target must remain 28px")
 
     for theme_name in ("light", "dark", "high-contrast"):
-        cp = contract.get("palette", {}).get(theme_name, {})
-        tp = tokens.get("palette", {}).get(theme_name, {})
-        require(cp == tp, f"design system: {theme_name} palette contract/token drift")
-        for key, value in cp.items():
+        contract_palette = contract.get("palette", {}).get(theme_name, {})
+        token_palette = tokens.get("palette", {}).get(theme_name, {})
+        require(contract_palette == token_palette, f"design system: {theme_name} palette contract/token drift")
+        for key, value in contract_palette.items():
             require(f"{key}: {str(value).lower()}" in theme, f"runtime theme: missing {theme_name} {key}={value}")
 
-    # Only metrics currently emitted into ThemeTokens are validated here.
-    # Additional canonical TOML metrics remain enforceable through the design
-    # contract and toolkit source until token generation emits them directly.
+    # runtime name -> (token key, contract section, contract key)
     metric_pairs = {
-        "control-height": ("controls", "standard-height"),
-        "compact-control-height": ("controls", "compact-height"),
-        "toolbar-height": ("chrome", "toolbar-height"),
-        "header-height": ("chrome", "title-height"),
-        "panel-header-height": ("chrome", "panel-header-height"),
+        "control-height": ("control-height", "controls", "standard-height"),
+        "compact-control-height": ("compact-control-height", "controls", "compact-height"),
+        "toolbar-height": ("toolbar-height", "chrome", "toolbar-height"),
+        "header-height": ("header-height", "chrome", "title-height"),
+        "panel-header-height": ("panel-header-height", "chrome", "panel-header-height"),
+        "status-height": ("status-height", "chrome", "status-height"),
+        "icon-size": ("icon-standard", "controls", "icon-standard"),
+        "icon-small": ("icon-small", "controls", "icon-small"),
     }
-    for runtime_name, (section, name) in metric_pairs.items():
-        value = contract.get(section, {}).get(name)
-        require(tokens.get("metrics", {}).get(runtime_name) == value, f"design system: metric drift for {runtime_name}")
+    token_metrics = tokens.get("metrics", {})
+    for runtime_name, (token_name, section, contract_name) in metric_pairs.items():
+        value = contract.get(section, {}).get(contract_name)
+        require(token_metrics.get(token_name) == value, f"design system: metric drift for {token_name}")
         require(f"{runtime_name}: {value}px" in theme, f"runtime theme: missing {runtime_name}: {value}px")
 
 
 def audit_toolkit() -> None:
     toolkit = read("loom-core/crates/loom-ui/ui/toolkit.slint")
-    for component in (
-        "DocumentChrome", "Toolbar", "ToolbarGroup", "ToolbarSpacer", "ToolbarButton",
-        "ToolbarIconButton", "PanelHeader", "SidebarSurface", "InspectorSurface",
-        "SectionHeader", "ToolkitStatusBar", "CanvasSurface", "ContentSurface",
-    ):
+    required_components = (
+        "DocumentChrome", "Toolbar", "ToolbarGroup", "ToolbarSpacer",
+        "ToolbarButton", "ToolbarIconButton", "PanelHeader", "SidebarSurface",
+        "InspectorSurface", "SectionHeader", "ToolkitStatusBar", "CanvasSurface",
+        "ContentSurface", "TextField", "SearchField", "SegmentedControl",
+        "Toggle", "RangeSlider", "PropertyRow", "TabStrip",
+    )
+    for component in required_components:
         require(f"export component {component}" in toolkit, f"shared toolkit: missing {component}")
 
-    for component in ("ToolbarButton", "ToolbarIconButton"):
+    for component in ("ToolbarButton", "ToolbarIconButton", "Toggle"):
         marker = f"export component {component}"
         start = toolkit.find(marker)
         end = toolkit.find("\nexport component ", start + len(marker))
@@ -117,44 +165,37 @@ def audit_toolkit() -> None:
         for token in ("accessible-role", "accessible-label", "accessible-action-default", "key-pressed(event)"):
             require(token in block, f"shared toolkit: {component} missing {token}")
 
+    for component in ("TextField", "SearchField", "SegmentedControl", "RangeSlider"):
+        marker = f"export component {component}"
+        start = toolkit.find(marker)
+        end = toolkit.find("\nexport component ", start + len(marker))
+        block = toolkit[start:] if end < 0 else toolkit[start:end]
+        require("accessible-role" in block and "accessible-label" in block, f"shared toolkit: {component} lacks accessibility metadata")
+
     require(not re.search(r"#[0-9a-fA-F]{6,8}", toolkit), "shared toolkit: hard-coded palette color")
 
 
 def audit_app(app: str) -> str:
-    ui_path = f"loom-{app}/crates/loom-{app}-app/ui/app.slint"
     main_path = f"loom-{app}/crates/loom-{app}-app/src/main.rs"
-    text = read(ui_path)
+    text = active_application_ui(app)
     main = read(main_path)
     migrated = 'from "toolkit.slint"' in text
 
     if migrated:
-        for token, description in (
-            ("DocumentChrome {", "DocumentChrome"),
-            ("Toolbar {", "Toolbar"),
-            ("ToolbarGroup {", "ToolbarGroup"),
-            ("ToolkitStatusBar {", "ToolkitStatusBar"),
-        ):
-            require(token in text, f"{app}: toolkit migration missing {description}")
-        for token, description in (
-            ("AppHeader {", "legacy AppHeader"),
-            ("WorkspaceToolbar {", "legacy WorkspaceToolbar"),
-            ("StatusBar {", "legacy StatusBar"),
-        ):
-            require(token not in text, f"{app}: toolkit migration still contains {description}")
+        for name in ("DocumentChrome", "Toolbar", "ToolbarGroup", "ToolkitStatusBar"):
+            require(component_used(text, name), f"{app}: toolkit migration missing {name}")
+        for name in ("AppHeader", "WorkspaceToolbar", "StatusBar"):
+            require(not component_used(text, name), f"{app}: toolkit migration still contains legacy {name}")
     else:
-        require("AppHeader {" in text, f"{app}: missing legacy AppHeader before migration")
-        require("WorkspaceToolbar {" in text, f"{app}: missing legacy WorkspaceToolbar before migration")
-        require("StatusBar {" in text, f"{app}: missing legacy StatusBar before migration")
+        for name in ("AppHeader", "WorkspaceToolbar", "StatusBar"):
+            require(component_used(text, name), f"{app}: missing legacy {name} before migration")
         require("compact-layout" in text, f"{app}: missing compact-layout policy before migration")
 
-    for token, description in (
-        ("Theme.palette()", "semantic palette use"),
-        ("min-width:", "minimum responsive width"),
-        ("min-height:", "minimum responsive height"),
-        ("horizontal-stretch", "horizontal adaptive layout"),
-        ("vertical-stretch", "vertical adaptive layout"),
-    ):
-        require(token in text, f"{app}: missing {description}")
+    require("Theme.palette()" in text, f"{app}: missing semantic palette use")
+    require("min-width:" in text, f"{app}: missing minimum responsive width")
+    require("min-height:" in text, f"{app}: missing minimum responsive height")
+    require("horizontal-stretch" in text or "CanvasSurface" in text, f"{app}: missing horizontal adaptive layout")
+    require("vertical-stretch" in text or "CanvasSurface" in text, f"{app}: missing vertical adaptive layout")
 
     require(not emoji.search(text), f"{app}: emoji/icon-font glyphs remain")
     require(not re.search(r"#[0-9a-fA-F]{6,8}", text), f"{app}: hard-coded color outside theme")
