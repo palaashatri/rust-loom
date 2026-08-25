@@ -7,12 +7,10 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer,
     ToolbarButton, ToolbarIconButton, SidebarSurface, InspectorSurface,
-    SectionHeader, ToolkitStatusBar
+    SectionHeader, ToolkitStatusBar, SearchField, TextField,
+    SegmentedControl, Toggle, RangeSlider, PropertyRow, TabStrip
 } from "toolkit.slint";
-import {
-    PrimaryButton, SearchField, SegmentedControl, Field, Slider, Switch,
-    TabControl, EmptyState, StatusPill, CommandPalette, CommandPaletteItem
-} from "components.slint";
+import { EmptyState, StatusPill, CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
@@ -33,10 +31,7 @@ export component SmokeWindow inherits Window {
         spacing: 0px;
         padding: 0px;
 
-        DocumentChrome {
-            title: "Component Reference";
-            trailing-text: "1280 × 800";
-        }
+        DocumentChrome { title: "Component Reference"; trailing-text: "1280 × 800"; }
 
         Toolbar {
             ToolbarGroup {
@@ -44,13 +39,14 @@ export component SmokeWindow inherits Window {
                 ToolbarButton { icon: "open"; label: "Open"; }
                 ToolbarIconButton { icon: "save"; label: "Save"; }
             }
-            ToolbarGroup { leading-separation: true;
+            ToolbarGroup {
+                leading-separation: true;
                 ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: false; }
                 ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: false; }
             }
             ToolbarSpacer { }
             ToolbarGroup {
-                SearchField { placeholder: "Search"; width: 180px; }
+                SearchField { label: "Search commands"; placeholder: "Search"; width: 180px; }
                 ToolbarButton { icon: "export"; label: "Export"; primary: true; }
             }
         }
@@ -63,13 +59,9 @@ export component SmokeWindow inherits Window {
             SidebarSurface {
                 width: 240px;
                 title: "Controls";
-
                 VerticalLayout {
                     spacing: 12px;
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    padding-top: 12px;
-                    padding-bottom: 12px;
+                    padding: 12px;
 
                     SectionHeader { title: "Buttons"; }
                     HorizontalLayout {
@@ -78,15 +70,15 @@ export component SmokeWindow inherits Window {
                         ToolbarIconButton { icon: "italic"; label: "Italic"; }
                         ToolbarIconButton { icon: "underline"; label: "Underline"; enabled: false; }
                     }
-                    PrimaryButton { text: "Primary Action"; }
+                    ToolbarButton { label: "Primary Action"; primary: true; }
 
                     SectionHeader { title: "Fields"; }
-                    Field { label: "Name"; placeholder: "Untitled"; value: "Project 01"; }
-                    SearchField { placeholder: "Filter items"; }
+                    TextField { label: "Name"; placeholder: "Untitled"; value: "Project 01"; }
+                    SearchField { label: "Filter items"; placeholder: "Filter items"; }
 
                     SectionHeader { title: "Choice"; }
                     SegmentedControl { label: "Alignment"; items: ["Left", "Center", "Right"]; current: 0; }
-                    Switch { text: "Snap to guides"; checked: true; }
+                    Toggle { label: "Snap to guides"; checked: true; }
                 }
             }
 
@@ -94,45 +86,33 @@ export component SmokeWindow inherits Window {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
                 background: Theme.palette().canvas;
-
                 VerticalLayout {
                     spacing: 12px;
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    padding-top: 16px;
-                    padding-bottom: 16px;
-
+                    padding: 16px;
                     Rectangle {
                         vertical-stretch: 1;
                         background: Theme.palette().surface-raised;
                         border-width: 1px;
                         border-color: Theme.palette().border;
                         border-radius: Theme.tokens.metrics.radius-medium;
-
                         EmptyState {
-                            width: 100%;
-                            height: 100%;
-                            icon: "document";
+                            width: 100%; height: 100%; icon: "document";
                             title: "Content owns the window";
                             description: "Chrome is compact and neutral. Actions remain readable, panels are subordinate, and the primary work surface expands first.";
                             action-text: "Create Document";
                         }
                     }
-
                     Rectangle {
-                        min-height: 112px;
-                        max-height: 112px;
+                        min-height: 104px;
+                        max-height: 104px;
                         background: Theme.palette().surface-raised;
                         border-width: 1px;
                         border-color: Theme.palette().border;
                         border-radius: Theme.tokens.metrics.radius-medium;
                         VerticalLayout {
                             spacing: 8px;
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            padding-top: 12px;
-                            padding-bottom: 12px;
-                            TabControl { tabs: ["Document", "Comments", "History"]; current-tab: 0; }
+                            padding: 12px;
+                            TabStrip { tabs: ["Document", "Comments", "History"]; current: 0; }
                             HorizontalLayout {
                                 spacing: 8px;
                                 StatusPill { text: "Selected"; tone: 1; }
@@ -148,33 +128,23 @@ export component SmokeWindow inherits Window {
             InspectorSurface {
                 width: 280px;
                 title: "Inspector";
-
                 VerticalLayout {
                     spacing: 12px;
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    padding-top: 12px;
-                    padding-bottom: 12px;
-
+                    padding: 12px;
                     SectionHeader { title: "Transform"; }
-                    Field { label: "X"; value: "120 px"; }
-                    Field { label: "Y"; value: "84 px"; }
-
+                    PropertyRow { label: "X"; TextField { label: "X position"; value: "120 px"; } }
+                    PropertyRow { label: "Y"; TextField { label: "Y position"; value: "84 px"; } }
                     SectionHeader { title: "Appearance"; }
-                    Slider { label: "Opacity"; value: 72; minimum: 0; maximum: 100; }
-                    SegmentedControl { label: "Blend mode"; items: ["Normal", "Multiply", "Screen"]; current: 0; }
-
+                    PropertyRow { label: "Opacity"; RangeSlider { label: "Opacity"; value: 72; minimum: 0; maximum: 100; } }
+                    PropertyRow { label: "Blend"; SegmentedControl { label: "Blend mode"; items: ["Normal", "Multiply", "Screen"]; current: 0; } }
                     SectionHeader { title: "Accessibility"; }
-                    Field { label: "Description"; placeholder: "Describe selection"; }
-                    Switch { text: "Include in reading order"; checked: true; }
+                    TextField { label: "Description"; placeholder: "Describe selection"; }
+                    Toggle { label: "Include in reading order"; checked: true; }
                 }
             }
         }
 
-        ToolkitStatusBar {
-            leading: "Reference fixture • deterministic software renderer";
-            trailing: "Ready";
-        }
+        ToolkitStatusBar { leading: "Reference fixture • deterministic software renderer"; trailing: "Ready"; }
     }
 
     CommandPalette {
