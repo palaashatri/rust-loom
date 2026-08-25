@@ -9,6 +9,9 @@ rust-version.workspace = true
 name = "loom-motion"
 path = "src/main.rs"
 
+[features]
+visual-qa = []
+
 [dependencies]
 loom-motion-core = { path = "../loom-motion-core" }
 loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }

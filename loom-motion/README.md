@@ -6,8 +6,8 @@ Keyframe composition editor: transform inspector, timeline, guides, SVG frame ex
 
 ## Visual QA (macOS, software renderer, 1280×800, 2026-08-25)
 
-- - DEFECT: sample composition opens with title layer at 0% opacity at t=0, so the canvas renders empty/black until scrubbed — reads as broken on first launch.
-- - Minor: PAUSED/timecode chip overlaps canvas top edge.
+- - Fixed: sample title layer now holds 100% opacity from t=0 (hold to 2.5s, ease to 35% by 4s), so the canvas shows content on first launch.
+- - Fixed: PAUSED/timecode transport chip moved into the toolbar transport row; canvas overlays no longer cover stage content.
 - - Status bar honest: layer count, selection, Offline.
 
 ## Development

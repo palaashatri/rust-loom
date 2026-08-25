@@ -22,7 +22,9 @@ const HISTORY_LIMIT: usize = 128;
 loom_production::define_snapshot_recovery!(MOTION_RECOVERY, "org.loom.motion", "loom.motion/1");
 
 struct Args {
+    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     screenshot: Option<String>,
+    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     smoke: bool,
     palette: bool,
     journey: Option<String>,
@@ -45,9 +47,25 @@ fn parse_args() -> Result<Args, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--screenshot" => {
-                args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
+                #[cfg(feature = "visual-qa")]
+                {
+                    args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
+                }
+                #[cfg(not(feature = "visual-qa"))]
+                {
+                    return Err("--screenshot requires a visual-qa build".into());
+                }
             }
-            "--smoke" => args.smoke = true,
+            "--smoke" => {
+                #[cfg(feature = "visual-qa")]
+                {
+                    args.smoke = true;
+                }
+                #[cfg(not(feature = "visual-qa"))]
+                {
+                    return Err("--smoke requires a visual-qa build".into());
+                }
+            }
             "--palette" => args.palette = true,
             "--journey" => {
                 args.journey = Some(it.next().ok_or("--journey needs an output directory")?);
@@ -79,8 +97,9 @@ fn parse_args() -> Result<Args, String> {
 fn sample_motion() -> CompositionDocument {
     let mut doc = CompositionDocument::new("comp-sample", "Kinetic Typography Intro");
     let mut title = MotionLayer::new("layer-title", "Animated Title", "Text");
-    title.add_keyframe("opacity", 0.0, 0.0);
-    title.add_keyframe("opacity", 1.0, 1.0);
+    title.add_keyframe("opacity", 0.0, 1.0);
+    title.add_keyframe("opacity", 2.5, 1.0);
+    title.add_keyframe("opacity", 4.0, 0.35);
     doc.add_layer(title);
     doc.add_layer(MotionLayer::new("l-sub", "Subtitle Motion", "Text"));
     for layer in &mut doc.layers {
@@ -601,9 +620,11 @@ fn save_current_motion(
 
 fn main() -> Result<(), String> {
     let args = parse_args()?;
+    #[cfg(feature = "visual-qa")]
     if let Some(out) = &args.screenshot {
         return render_headless(&args, out);
     }
+    #[cfg(feature = "visual-qa")]
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-motion-smoke-{}.png", std::process::id()));
