@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import sys
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ["writer", "sheets", "present", "photo", "motion", "video", "studio", "encode"]
@@ -63,11 +64,92 @@ def application_ui_text(app: str) -> str:
     return "\n".join(chunks)
 
 
+def audit_mechanical_design_contract() -> None:
+    """Enforce the source-of-truth chain before inspecting application UI.
+
+    This intentionally does not use image understanding. Geometry and palette
+    values are read from TOML and must agree with the runtime Slint theme.
+    """
+    contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
+    tokens_path = ROOT / "loom-design-bible/tokens/loom.toml"
+    standard_path = ROOT / "loom-design-bible/MECHANICAL_DESIGN_STANDARD.md"
+    theme_path = ROOT / "loom-core/crates/loom-ui/ui/theme.slint"
+
+    for path in (contract_path, tokens_path, standard_path, theme_path):
+        if not path.is_file():
+            failures.append(f"design system: missing {path.relative_to(ROOT)}")
+            return
+
+    with contract_path.open("rb") as handle:
+        contract = tomllib.load(handle)
+    with tokens_path.open("rb") as handle:
+        tokens = tomllib.load(handle)
+    theme = theme_path.read_text(encoding="utf-8").lower()
+
+    if contract.get("format-version") != "1.0.0":
+        failures.append("design system: unsupported desktop UI contract version")
+    if tokens.get("format-version") != "2.0.0":
+        failures.append("design system: unsupported design token version")
+
+    # Token and behavior contracts deliberately duplicate palette values so
+    # drift can be caught mechanically. The contract wins only after both are
+    # changed in the same reviewed migration.
+    for theme_name in ("light", "dark", "high-contrast"):
+        contract_palette = contract.get("palette", {}).get(theme_name, {})
+        token_palette = tokens.get("palette", {}).get(theme_name, {})
+        if contract_palette != token_palette:
+            failures.append(f"design system: {theme_name} palette contract/token drift")
+            continue
+        for key, value in contract_palette.items():
+            expected = f"{key}: {str(value).lower()}"
+            if expected not in theme:
+                failures.append(
+                    f"design system: runtime theme missing {theme_name} {key}={value}"
+                )
+
+    metric_pairs = {
+        "control-height": ("controls", "standard-height"),
+        "compact-control-height": ("controls", "compact-height"),
+        "toolbar-height": ("chrome", "toolbar-height"),
+        "header-height": ("chrome", "title-height"),
+        "panel-header-height": ("chrome", "panel-header-height"),
+    }
+    token_metrics = tokens.get("metrics", {})
+    for runtime_name, (section, contract_name) in metric_pairs.items():
+        contract_value = contract.get(section, {}).get(contract_name)
+        token_value = token_metrics.get(runtime_name)
+        if contract_value != token_value:
+            failures.append(
+                f"design system: metric drift {runtime_name}: contract={contract_value}, token={token_value}"
+            )
+        expected = f"{runtime_name}: {contract_value}px"
+        if expected not in theme:
+            failures.append(f"design system: runtime theme missing {expected}")
+
+    validation = contract.get("validation", {})
+    expected_viewports = [[1024, 720], [1280, 800], [1440, 900], [1920, 1200]]
+    if validation.get("required-viewports") != expected_viewports:
+        failures.append("design system: required viewport matrix was weakened or reordered")
+    if validation.get("max-unintentional-overlap-px") != 0:
+        failures.append("design system: overlap tolerance must remain zero")
+    if validation.get("max-control-label-clipping-px") != 0:
+        failures.append("design system: control-label clipping tolerance must remain zero")
+    if contract.get("toolbar", {}).get("max-groups") != 3:
+        failures.append("design system: toolbar group maximum must remain three")
+    if contract.get("controls", {}).get("minimum-pointer-target") != 28:
+        failures.append("design system: default desktop pointer target must remain 28px")
+
+
+audit_mechanical_design_contract()
+
 application_texts: dict[str, str] = {}
 for app in APPS:
     main = ROOT / f"loom-{app}/crates/loom-{app}-app/src/main.rs"
     text = application_ui_text(app)
     application_texts[app] = text
+    if not main.is_file():
+        failures.append(f"{app}: missing Rust application entry point")
+        continue
     main_text = main.read_text(encoding="utf-8")
     for token, message in (
         ("AppHeader {", "missing shared AppHeader"),
@@ -174,12 +256,25 @@ for token in (
         failures.append(f"native UI validation: missing {token}")
 
 native_matrix = (ROOT / "loom-bootstrap/scripts/native-ui-matrix.py").read_text(encoding="utf-8")
-for token in ("png_dimensions", "find_sample", "generated-samples", "sample_open", "one or more theme/size captures are byte-identical"):
+for token in (
+    "png_dimensions",
+    "find_sample",
+    "generated-samples",
+    "sample_open",
+    "one or more theme/size captures are byte-identical",
+):
     if token not in native_matrix:
         failures.append(f"native UI matrix: missing evidence check {token}")
 
 functional_matrix = (ROOT / "loom-bootstrap/scripts/native-functional-matrix.py").read_text(encoding="utf-8")
-for token in ("validate_package", "export-md", "render-demo", "sine", "recover", "native-functional-matrix.json"):
+for token in (
+    "validate_package",
+    "export-md",
+    "render-demo",
+    "sine",
+    "recover",
+    "native-functional-matrix.json",
+):
     if token not in functional_matrix:
         failures.append(f"native functional matrix: missing journey evidence {token}")
 
