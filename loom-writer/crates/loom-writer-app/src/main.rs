@@ -50,6 +50,8 @@ struct Args {
     theme: String,
     open: Option<String>,
     template: Option<TemplateId>,
+    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
+    template_chooser: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -70,6 +72,7 @@ where
         theme: "light".to_string(),
         open: None,
         template: None,
+        template_chooser: false,
     };
     let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
@@ -121,6 +124,9 @@ where
                 args.template = Some(parse_template_id(&value).ok_or_else(|| {
                     format!("unknown template: {value} (expected blank, report, letter, or cv)")
                 })?);
+            }
+            "--template-chooser" => {
+                args.template_chooser = true;
             }
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -772,6 +778,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
             .unwrap_or_else(sample_document),
     };
     apply_document(&app, &doc);
+    app.set_template_chooser_open(args.template_chooser);
     if args.palette {
         app.set_palette_query(SharedString::from("ex"));
         rebuild_palette(&app, "ex");
@@ -833,6 +840,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 // Opening New must not mutate the current document until the
                 // user confirms a real template seed in the chooser.
                 app.set_template_selected(0);
+                app.set_template_category(0);
                 app.set_template_chooser_open(true);
                 app.set_status_left("Choose a document template".into());
             }
@@ -1441,6 +1449,28 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "visual-qa")]
+    fn template_category_filters_visible_cards() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        apply_theme(&app, "light");
+        apply_layout_breakpoints(&app, 1440);
+        app.set_template_chooser_open(true);
+        app.set_template_category(0);
+        let all = snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render all templates");
+
+        app.set_template_category(2);
+        let letters =
+            snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render letter templates");
+        assert_eq!(app.get_template_category(), 2);
+        assert_ne!(
+            all.get_pixel(500, 220),
+            letters.get_pixel(500, 220),
+            "selecting Letters must remove the Report card from the chooser"
+        );
+    }
+
+    #[test]
     fn template_ids_are_stable_and_seed_real_documents() {
         let cases = [
             (TemplateId::Blank, "blank", "Untitled Document"),
@@ -1495,6 +1525,37 @@ mod tests {
         assert_eq!(args.screenshot.as_deref(), Some("/tmp/writer-template.png"));
         assert_eq!(args.theme, "dark");
         assert_eq!(args.size, (1440, 900));
+    }
+
+    #[test]
+    #[cfg(feature = "visual-qa")]
+    fn template_chooser_flag_parses_and_changes_headless_render() {
+        set_platform();
+        let chooser_args = parse_args_from(["--template-chooser", "--size", "1440x900"])
+            .expect("parse chooser screenshot arguments");
+        let regular_args =
+            parse_args_from(["--size", "1440x900"]).expect("parse regular screenshot arguments");
+
+        let dir = std::env::temp_dir().join(format!(
+            "loom-writer-template-chooser-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create screenshot directory");
+        let chooser_path = dir.join("chooser.png");
+        let regular_path = dir.join("regular.png");
+        render_headless(&chooser_args, chooser_path.to_str().expect("chooser path"))
+            .expect("render chooser screenshot");
+        render_headless(&regular_args, regular_path.to_str().expect("regular path"))
+            .expect("render regular screenshot");
+
+        let chooser = loom_test_support::png::load_png(&chooser_path).expect("load chooser");
+        let regular = loom_test_support::png::load_png(&regular_path).expect("load regular");
+        assert_ne!(
+            chooser.get_pixel(100, 200),
+            regular.get_pixel(100, 200),
+            "--template-chooser must render the chooser overlay, not the editor"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
