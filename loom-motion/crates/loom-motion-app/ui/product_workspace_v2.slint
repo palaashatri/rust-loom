@@ -13,6 +13,8 @@ export component MotionApp inherits Window {
     min-height: 720px;
     background: Theme.palette().canvas;
     in property <bool> compact-layout: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
     property <length> layer-column-width: root.compact-layout ? 188px : 246px;
 
     in property <string> comp-name: "Untitled Composition";
@@ -118,25 +120,41 @@ export component MotionApp inherits Window {
             ToolButton { icon: "new"; text: "New"; clicked => { root.new-comp(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
-            ToolButton { icon: "save"; text: "Save As"; clicked => { root.save-as-comp(); } }
+            if !root.compact-layout : ToolButton { icon: "save-as"; text: "Save As"; clicked => { root.save-as-comp(); } }
+            if root.compact-layout : IconButton { icon: "save-as"; label: "Save As"; clicked => { root.save-as-comp(); } }
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { icon: "cursor"; text: "Transform"; checked: true; }
-            ToolButton { icon: "plus"; text: "Layer"; clicked => { root.add-layer(); } }
-            ToolButton {
+            if !root.compact-layout : ToolButton { icon: "cursor"; text: "Transform"; checked: true; }
+            if root.compact-layout : IconButton { icon: "cursor"; label: "Transform"; checked: true; }
+            if !root.compact-layout : ToolButton { icon: "plus"; text: "Layer"; clicked => { root.add-layer(); } }
+            if root.compact-layout : IconButton { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+            if !root.compact-layout : ToolButton {
                 icon: "grid";
                 text: "Guides";
                 checked: root.show-guides;
                 clicked => { root.show-guides = !root.show-guides; }
             }
-            ToolButton {
+            if root.compact-layout : IconButton {
+                icon: "grid";
+                label: "Guides";
+                checked: root.show-guides;
+                clicked => { root.show-guides = !root.show-guides; }
+            }
+            if !root.compact-layout : ToolButton {
                 icon: "eye";
                 text: "Safe Area";
                 checked: root.show-safe-area;
                 clicked => { root.show-safe-area = !root.show-safe-area; }
             }
-            ToolButton { icon: "export"; text: "Export Frame"; clicked => { root.export-frame(); } }
+            if root.compact-layout : IconButton {
+                icon: "eye";
+                label: "Safe Area";
+                checked: root.show-safe-area;
+                clicked => { root.show-safe-area = !root.show-safe-area; }
+            }
+            if !root.compact-layout : ToolButton { icon: "export"; text: "Export Frame"; clicked => { root.export-frame(); } }
+            if root.compact-layout : IconButton { icon: "export"; label: "Export Frame"; clicked => { root.export-frame(); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             TransportButton { icon: "chevron-left"; label: "Step backward one frame"; clicked => { root.step-back(); } }
             TransportButton {
@@ -158,7 +176,7 @@ export component MotionApp inherits Window {
                     root.toggle-loop();
                 }
             }
-            Rectangle {
+            if !root.compact-layout : Rectangle {
                 height: 28px;
                 border-radius: 7px;
                 background: Theme.palette().surface-sunken;
@@ -172,10 +190,20 @@ export component MotionApp inherits Window {
                     Text { text: root.timecode-display; font-size: Theme.tokens.typography.caption; font-weight: 650; color: Theme.palette().ink; vertical-alignment: center; }
                 }
             }
-            MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
-            ToolButton {
+            if root.compact-layout : MetricChip { label: "TC"; value: root.timecode-display; }
+            if !root.compact-layout : MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
+            if !root.compact-layout : ToolButton {
                 icon: "timeline";
                 text: "Curves";
+                checked: root.curve-drawer-open;
+                clicked => {
+                    root.curve-drawer-open = !root.curve-drawer-open;
+                    root.toggle-curve-drawer();
+                }
+            }
+            if root.compact-layout : IconButton {
+                icon: "timeline";
+                label: "Curves";
                 checked: root.curve-drawer-open;
                 clicked => {
                     root.curve-drawer-open = !root.curve-drawer-open;
@@ -329,7 +357,11 @@ export component MotionApp inherits Window {
                                     padding: 18px;
                                     Text {
                                         text: root.comp-name;
-                                        color: Theme.palette().paper-ink;
+                                        // The selected-object card uses the content accent
+                                        // surface, not the paper surface. Keep the title
+                                        // readable in dark mode while retaining the dark
+                                        // high-contrast foreground on its white accent card.
+                                        color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink;
                                         font-size: Theme.tokens.typography.heading;
                                         font-weight: 700;
                                         horizontal-alignment: center;
@@ -347,7 +379,7 @@ export component MotionApp inherits Window {
                                         text: "X " + Math.round(root.pos-x) + "   Y " + Math.round(root.pos-y)
                                             + "   ·   " + Math.round(root.scale-val) + "%"
                                             + "   ·   " + Math.round(root.rotation-val) + "°";
-                                        color: Theme.palette().paper-muted;
+                                        color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-muted : Theme.palette().ink-secondary;
                                         font-size: Theme.tokens.typography.caption;
                                         horizontal-alignment: center;
                                     }
@@ -411,7 +443,7 @@ export component MotionApp inherits Window {
                             if drag.pressed : Rectangle { x: selected-object.x + selected-object.width / 2; width: 1px; height: parent.height; background: Theme.palette().focus; }
                             if drag.pressed : Rectangle { y: selected-object.y + selected-object.height / 2; width: parent.width; height: 1px; background: Theme.palette().focus; }
 
-                            Rectangle {
+                            if drag.pressed : Rectangle {
                                 x: 12px;
                                 y: 12px;
                                 height: 26px;

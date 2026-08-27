@@ -11,9 +11,20 @@ export component PhotoApp inherits Window {
     title: "Loom Photo";
     min-width: 1024px;
     min-height: 720px;
+    // Give the window a stable intrinsic size before optional inspector and
+    // export controls resolve. This keeps width-sensitive visibility bindings
+    // from feeding back into the window's own layout calculation.
+    preferred-width: 1280px;
+    preferred-height: 800px;
     background: Theme.palette().canvas;
-    property <bool> inspector-visible: root.show-inspector && root.width >= 1180px;
-    property <bool> labeled-export: root.width >= 1320px;
+    // The host supplies the responsive breakpoint after selecting the window
+    // size. Reading root.width from a conditional child makes the optional
+    // inspector/export controls feed back into the window's implicit size.
+    in property <bool> inspector-available: true;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    in property <bool> labeled-export: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
 
     in property <string> project-name: "Untitled Photo";
     in property <string> dimensions-text: "0 × 0";
@@ -104,6 +115,7 @@ export component PhotoApp inherits Window {
                     ToolbarIconButton { icon: "new"; label: "New project"; clicked => { root.new-project(); } }
                     ToolbarIconButton { icon: "open"; label: "Open project"; clicked => { root.open-project(); } }
                     ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-project(); } }
+                    ToolbarIconButton { icon: "save-as"; label: "Save project as"; clicked => { root.save-as-project(); } }
                     ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
                     ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
                 }
@@ -139,7 +151,8 @@ export component PhotoApp inherits Window {
                     }
                     ToolbarIconButton {
                         icon: "settings";
-                        label: "Toggle inspector";
+                        label: root.inspector-available ? "Toggle inspector" : "Inspector available when window is wider";
+                        enabled: root.inspector-available;
                         checked: root.inspector-visible;
                         clicked => { root.show-inspector = !root.show-inspector; }
                     }
@@ -163,46 +176,6 @@ export component PhotoApp inherits Window {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                Rectangle {
-                    width: 40px;
-                    background: Theme.palette().chrome;
-
-                    Rectangle {
-                        x: parent.width - 1px;
-                        width: 1px;
-                        height: parent.height;
-                        background: Theme.palette().border;
-                    }
-
-                    VerticalLayout {
-                        spacing: 4px;
-                        padding-left: 6px;
-                        padding-right: 6px;
-                        padding-top: 8px;
-                        padding-bottom: 8px;
-
-                        ToolbarIconButton {
-                            icon: "cursor";
-                            label: "Select tool";
-                            checked: root.active-tool == 0;
-                            clicked => { root.active-tool = 0; root.select-tool("Select"); }
-                        }
-                        ToolbarIconButton {
-                            icon: "cursor";
-                            label: "Pan tool";
-                            checked: root.active-tool == 1;
-                            clicked => { root.active-tool = 1; root.select-tool("Pan"); }
-                        }
-                        ToolbarIconButton {
-                            icon: "grid";
-                            label: "Toggle grid";
-                            checked: root.show-grid;
-                            clicked => { root.show-grid = !root.show-grid; }
-                        }
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-                    }
-                }
-
                 CanvasSurface {
                     stage := Rectangle {
                         x: 24px;
@@ -220,6 +193,60 @@ export component PhotoApp inherits Window {
                         if root.show-grid : Rectangle { x: parent.width * 3 / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
                         if root.show-grid : Rectangle { y: parent.height / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
                         if root.show-grid : Rectangle { y: parent.height * 3 / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+                        // Keep the canvas tools on the canvas edge so their
+                        // names and state remain discoverable at compact
+                        // widths. The same callbacks are used by the former
+                        // tool rail and remain keyboard/accessibility-aware.
+                        tool-overlay := Rectangle {
+                            x: 12px;
+                            y: 12px;
+                            width: min(360px, parent.width - 24px);
+                            height: 36px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+                            background: Theme.palette().overlay;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                padding-left: 4px;
+                                padding-right: 6px;
+                                cross-axis-alignment: center;
+                                Text {
+                                    text: root.active-tool == 1 ? "Pan" : "Select";
+                                    width: 48px;
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                                ToolbarIconButton {
+                                    icon: "cursor";
+                                    label: "Select tool";
+                                    checked: root.active-tool == 0;
+                                    clicked => { root.active-tool = 0; root.select-tool("Select"); }
+                                }
+                                ToolbarIconButton {
+                                    icon: "cursor";
+                                    label: "Pan tool";
+                                    checked: root.active-tool == 1;
+                                    clicked => { root.active-tool = 1; root.select-tool("Pan"); }
+                                }
+                                ToolbarIconButton {
+                                    icon: "grid";
+                                    label: "Toggle grid";
+                                    checked: root.show-grid;
+                                    clicked => { root.show-grid = !root.show-grid; }
+                                }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                Text {
+                                    text: root.show-grid ? "Grid on" : "Grid off";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
 
                         if root.has-preview : viewport := Rectangle {
                             property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
@@ -324,17 +351,35 @@ export component PhotoApp inherits Window {
 
                         if root.inspector-tab == 0 : VerticalLayout {
                             spacing: 12px;
-                            SectionHeader { title: "Color"; }
-                            PropertyRow {
-                                label: "Brightness";
+                            SectionHeader { title: "Color adjustments"; }
+                            VerticalLayout {
+                                height: 56px;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    height: 20px;
+                                    Text { text: "Brightness"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Text { text: Math.round(root.brightness-value); font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+                                }
                                 RangeSlider { label: "Brightness"; minimum: -100; maximum: 100; value <=> root.brightness-value; changed(value) => { root.brightness-changed(value); } }
                             }
-                            PropertyRow {
-                                label: "Contrast";
+                            VerticalLayout {
+                                height: 56px;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    height: 20px;
+                                    Text { text: "Contrast"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Text { text: Math.round(root.contrast-value); font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+                                }
                                 RangeSlider { label: "Contrast"; minimum: -100; maximum: 100; value <=> root.contrast-value; changed(value) => { root.contrast-changed(value); } }
                             }
-                            PropertyRow {
-                                label: "Saturation";
+                            VerticalLayout {
+                                height: 56px;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    height: 20px;
+                                    Text { text: "Saturation"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Text { text: Math.round(root.saturation-value); font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+                                }
                                 RangeSlider { label: "Saturation"; minimum: -100; maximum: 100; value <=> root.saturation-value; changed(value) => { root.saturation-changed(value); } }
                             }
                         }

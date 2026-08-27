@@ -109,7 +109,7 @@ mod tests {
         assert!(OcrTextBlock::new("text", (0, 0, 0, 5), 0.9).is_err());
 
         // Reading order sorts by y then x regardless of input order
-        let mut blocks = vec![
+        let mut blocks = [
             OcrTextBlock::new("right", (200, 50, 50, 20), 1.0).unwrap(),
             OcrTextBlock::new("left", (10, 50, 50, 20), 1.0).unwrap(),
             OcrTextBlock::new("above", (0, 10, 50, 20), 1.0).unwrap(),
@@ -117,7 +117,7 @@ mod tests {
         blocks.sort_by(OcrTextBlock::reading_order);
         assert_eq!(
             blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(),
-            vec!["above", "left", "right"]
+            &["above", "left", "right"]
         );
     }
 

@@ -2795,8 +2795,7 @@ mod tests {
 
         let missing_placeholder =
             RenderQueueEntry::new("bad", 0, 5, "out/frame.png", RenderOutputKind::SvgFrame)
-                .err()
-                .expect("missing placeholder rejected");
+                .expect_err("missing placeholder rejected");
         assert!(missing_placeholder.contains("placeholder"));
 
         let reversed = RenderQueueEntry::new(

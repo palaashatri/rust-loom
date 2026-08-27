@@ -6,16 +6,88 @@ import {
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Theme } from "theme.slint";
-import { TextEdit } from "std-widgets.slint";
 export { Theme } from "theme.slint";
+
+/// A notes editor that follows Loom's runtime palette instead of the
+/// platform widget palette used by the stock TextEdit. The TextInput remains
+/// the real editing/accessibility surface, while the surrounding rectangle
+/// supplies the themed field treatment.
+component SpeakerNotesEditor inherits Rectangle {
+    in-out property <string> text: "";
+    in property <string> placeholder-text: "";
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.tokens.typography.body;
+    callback edited(string);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+    callback key-released(event: KeyEvent) -> EventResult;
+
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: notes-input.has-focus ? 2px : 1px;
+    border-color: notes-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: root.enabled ? Theme.palette().surface-raised : Theme.palette().surface-sunken;
+    clip: true;
+
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: "Speaker Notes";
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder-text;
+    accessible-read-only: false;
+    accessible-action-default => { notes-input.focus(); }
+    forward-focus: notes-input;
+
+    if root.text == "" : Text {
+        x: 10px;
+        y: 8px;
+        width: max(1px, root.width - 20px);
+        height: max(1px, root.height - 16px);
+        text: root.placeholder-text;
+        font-size: root.font-size;
+        color: Theme.palette().ink-disabled;
+        vertical-alignment: top;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+
+    notes-input := TextInput {
+        x: 10px;
+        y: 8px;
+        width: max(1px, root.width - 20px);
+        height: max(1px, root.height - 16px);
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        font-size: root.font-size;
+        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+        selection-background-color: Theme.palette().selection;
+        selection-foreground-color: Theme.palette().accent-ink;
+        accessible-role: none;
+        edited => { root.edited(notes-input.text); }
+        key-pressed(event) => { root.key-pressed(event); }
+        key-released(event) => { root.key-released(event); }
+    }
+}
 
 export component PresentApp inherits Window {
     title: "Loom Present";
     min-width: 1024px;
     min-height: 720px;
+    // Keep the desktop window's intrinsic size independent from optional
+    // panels. Without an explicit preferred size, the width-sensitive
+    // inspector predicate participates in the window's own layout calculation
+    // and Slint reports a binding loop while resolving the initial geometry.
+    preferred-width: 1280px;
+    preferred-height: 800px;
     background: Theme.palette().canvas;
-    property <bool> show-inspector: root.width >= 1180px;
-    property <bool> labeled-export: root.width >= 1320px;
+    // These flags are supplied by the host after it chooses the window size.
+    // Keeping them out of the component's implicit layout calculation avoids
+    // a width -> optional panel -> width binding loop during startup/capture.
+    in property <bool> show-inspector: true;
+    in property <bool> labeled-export: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
 
     in property <string> deck-title: "Untitled Deck";
     in property <string> slide-title: "Slide Title";
@@ -125,6 +197,7 @@ export component PresentApp inherits Window {
                     ToolbarIconButton { icon: "new"; label: "New deck"; clicked => { root.new-deck(); } }
                     ToolbarIconButton { icon: "open"; label: "Open deck"; clicked => { root.open-deck(); } }
                     ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-deck(); } }
+                    ToolbarIconButton { icon: "save-as"; label: "Save deck as"; clicked => { root.save-as-deck(); } }
                     ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
                     ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
                 }
@@ -184,8 +257,10 @@ export component PresentApp inherits Window {
                     alignment: center;
 
                     Rectangle {
-                        width: min(960px, parent.width - 48px);
-                        height: min(540px, parent.height - 96px);
+                        horizontal-stretch: 1;
+                        max-width: 960px;
+                        vertical-stretch: 1;
+                        max-height: 540px;
                         background: Theme.palette().paper;
                         border-radius: Theme.tokens.metrics.radius-small;
                         border-width: 1px;
@@ -361,15 +436,14 @@ export component PresentApp inherits Window {
                     }
 
                     if root.show-notes-drawer : Rectangle {
-                        min-height: 104px;
-                        max-height: 104px;
+                        height: 128px;
                         background: Theme.palette().surface;
 
                         Rectangle { width: parent.width; height: 1px; background: Theme.palette().border; }
 
                         VerticalLayout {
-                            spacing: 6px;
-                            padding: 8px;
+                            spacing: 8px;
+                            padding: 10px;
                             HorizontalLayout {
                                 spacing: 8px;
                                 Text {
@@ -386,9 +460,10 @@ export component PresentApp inherits Window {
                                     clicked => { root.show-notes-drawer = false; }
                                 }
                             }
-                            TextEdit {
+                            SpeakerNotesEditor {
                                 text <=> root.slide-notes;
                                 placeholder-text: "Add presenter notes…";
+                                vertical-stretch: 1;
                                 edited(value) => { root.notes-edited(value); }
                             }
                         }

@@ -13,8 +13,13 @@ export component WriterApp inherits Window {
     min-width: 1024px;
     min-height: 720px;
     background: Theme.palette().canvas;
-    property <bool> wide-toolbar: root.width >= 1320px;
-    property <bool> labeled-export: root.width >= 1180px;
+    // Breakpoints are supplied by the host after it chooses the window size.
+    // Deriving them from root.width makes optional toolbar children feed back
+    // into the window's implicit width and creates a Slint binding loop.
+    in property <bool> wide-toolbar: false;
+    in property <bool> labeled-export: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
 
     in property <string> doc-title: "Untitled";
     in-out property <string> doc-content: "";
@@ -101,6 +106,7 @@ export component WriterApp inherits Window {
                     ToolbarIconButton { icon: "new"; label: "New document"; clicked => { root.new-doc(); } }
                     ToolbarIconButton { icon: "open"; label: "Open document"; clicked => { root.open-doc(); } }
                     ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-doc(); } }
+                    ToolbarIconButton { icon: "save-as"; label: "Save document as"; clicked => { root.save-as-doc(); } }
                     ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
                     ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
                 }
@@ -172,6 +178,11 @@ export component WriterApp inherits Window {
                         clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); }
                     }
                     if root.labeled-export : ToolbarButton {
+                        // Keep the primary action compact when the toolbar group
+                        // receives leftover width from the surrounding spacer.
+                        // Without an explicit width this button expands across
+                        // the whole right side of the toolbar at reference sizes.
+                        width: 132px;
                         icon: "export";
                         label: "Export PDF";
                         primary: true;
@@ -212,7 +223,10 @@ export component WriterApp inherits Window {
                                 Text {
                                     text: marker;
                                     font-size: Theme.tokens.typography.micro;
-                                    color: Theme.palette().paper-muted;
+                                    // The ruler lives on the chrome surface, not the paper.
+                                    // Use the chrome ink token so high-contrast mode keeps
+                                    // numerals readable against its black ruler strip.
+                                    color: Theme.palette().ink-secondary;
                                     vertical-alignment: center;
                                 }
                                 Rectangle {

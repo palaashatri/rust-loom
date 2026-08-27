@@ -283,10 +283,28 @@ fn apply_theme(app: &EncodeApp, theme: &str) {
     Theme::get(app).set_active_theme(theme.into());
 }
 
+fn configure_responsive_layout(app: &EncodeApp, size: (u32, u32)) {
+    configure_responsive_width(app, size.0);
+}
+
+fn configure_responsive_width(app: &EncodeApp, width: u32) {
+    app.set_compact_layout(width < 1220);
+}
+
+fn wire_responsive_layout(app: &EncodeApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            configure_responsive_width(&app, width.max(0.0) as u32);
+        }
+    });
+}
+
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    configure_responsive_layout(&app, args.size);
     let (queue, _) = initial_queue(args)?;
     let backend = discover_ffmpeg(&[]).ok();
     refresh(&app, &queue, backend.as_ref(), false);
@@ -307,6 +325,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    configure_responsive_layout(&app, args.size);
     let (queue, _) = initial_queue(args)?;
     let backend = discover_ffmpeg(&[]).ok();
     refresh(&app, &queue, backend.as_ref(), false);
@@ -998,6 +1017,8 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    configure_responsive_layout(&app, args.size);
+    wire_responsive_layout(&app);
     let backend = discover_ffmpeg(&[]).ok();
     let recovered = initialize_snapshot_recovery()?;
     let (mut initial, save_path) = if args.open.is_some() {
@@ -1366,5 +1387,17 @@ mod tests {
         assert!(file_v2.is_file());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn responsive_layout_switches_at_the_compact_breakpoint() {
+        set_platform();
+        let app = EncodeApp::new().expect("create EncodeApp");
+
+        configure_responsive_layout(&app, (1219, 800));
+        assert!(app.get_compact_layout());
+
+        configure_responsive_layout(&app, (1220, 800));
+        assert!(!app.get_compact_layout());
     }
 }

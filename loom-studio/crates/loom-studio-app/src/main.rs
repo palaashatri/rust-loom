@@ -25,6 +25,7 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
+const COMPACT_LAYOUT_MAX_WIDTH: u32 = 1220;
 
 loom_production::define_snapshot_recovery!(STUDIO_RECOVERY, "org.loom.studio", "loom.studio/1");
 
@@ -87,6 +88,23 @@ fn empty_session() -> (StudioSession, AudioAssetStore) {
         StudioSession::new(StudioProject::new("untitled-studio", "Untitled Session")),
         AudioAssetStore::default(),
     )
+}
+
+fn compact_layout_for_width(width: u32) -> bool {
+    width < COMPACT_LAYOUT_MAX_WIDTH
+}
+
+fn configure_responsive_layout(app: &StudioApp, width: u32) {
+    app.set_compact_layout(compact_layout_for_width(width));
+}
+
+fn wire_responsive_layout(app: &StudioApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            configure_responsive_layout(&app, width.max(0.0) as u32);
+        }
+    });
 }
 
 fn sample_session() -> Result<(StudioSession, AudioAssetStore), String> {
@@ -414,6 +432,7 @@ fn apply_theme(app: &StudioApp, theme: &str) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|error| error.to_string())?;
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let ((session, assets), save_path) = initial_session(args)?;
     let state = GuiState {
@@ -442,6 +461,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|error| error.to_string())?;
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let ((session, assets), save_path) = initial_session(args)?;
     let state = GuiState {
@@ -1106,9 +1126,11 @@ fn main() -> Result<(), String> {
     }
 
     let app = StudioApp::new().map_err(|error| error.to_string())?;
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    wire_responsive_layout(&app);
     let recovered = initialize_snapshot_recovery()?;
     let ((session, assets), save_path) = if args.open.is_some() {
         initial_session(&args)?
@@ -1552,5 +1574,13 @@ mod tests {
         assert!(file_v2.is_file());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_layout_boundary_keeps_reference_width_stable() {
+        assert!(compact_layout_for_width(1024));
+        assert!(compact_layout_for_width(1219));
+        assert!(!compact_layout_for_width(1220));
+        assert!(!compact_layout_for_width(1440));
     }
 }

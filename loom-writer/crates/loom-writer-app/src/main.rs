@@ -621,6 +621,25 @@ fn apply_theme(app: &WriterApp, theme: &str) {
         .set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
 }
 
+fn layout_breakpoints(width: u32) -> (bool, bool) {
+    (width >= 1320, width >= 1180)
+}
+
+fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
+    let (wide_toolbar, labeled_export) = layout_breakpoints(width);
+    app.set_wide_toolbar(wide_toolbar);
+    app.set_labeled_export(labeled_export);
+}
+
+fn wire_responsive_layout(app: &WriterApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            apply_layout_breakpoints(&app, width.max(0.0) as u32);
+        }
+    });
+}
+
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
@@ -637,6 +656,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         app.set_palette_open(true);
     }
     let (w, h) = args.size;
+    apply_layout_breakpoints(&app, w);
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
     loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
     Ok(())
@@ -651,6 +671,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    apply_layout_breakpoints(&app, args.size.0);
+    wire_responsive_layout(&app);
 
     let recovered = if args.open.is_none() {
         take_snapshot_recovery().and_then(|payload| loom_writer_core::load_document(&payload).ok())
@@ -944,6 +966,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     rebuild_palette(&app, "");
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    apply_layout_breakpoints(&app, args.size.0);
     let report = record_keyboard_palette_journey(&app, "writer", Path::new(out_dir), "ex")
         .map_err(|e| format!("journey failed: {e}"))?;
     println!(
@@ -1199,5 +1222,30 @@ mod tests {
 
         history.record(a, c, HistoryKind::DocumentAction, 1);
         assert_eq!(history.redo_len(), 0);
+    }
+
+    #[test]
+    fn layout_breakpoints_match_supported_width_boundaries() {
+        assert_eq!(layout_breakpoints(1024), (false, false));
+        assert_eq!(layout_breakpoints(1179), (false, false));
+        assert_eq!(layout_breakpoints(1180), (false, true));
+        assert_eq!(layout_breakpoints(1199), (false, true));
+        assert_eq!(layout_breakpoints(1319), (false, true));
+        assert_eq!(layout_breakpoints(1320), (true, true));
+        assert_eq!(layout_breakpoints(1440), (true, true));
+    }
+
+    #[test]
+    fn window_resize_updates_breakpoint_flags() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        apply_layout_breakpoints(&app, 1024);
+        wire_responsive_layout(&app);
+
+        app.window().set_size(PhysicalSize::new(1320, 800));
+        let _ = snapshot_component(&app, 1320.0, 800.0, 1.0).expect("render resized window");
+
+        assert!(app.get_wide_toolbar());
+        assert!(app.get_labeled_export());
     }
 }

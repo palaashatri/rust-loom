@@ -374,10 +374,27 @@ fn rebuild_palette(app: &MotionApp, query: &str) {
     }
 }
 
+fn compact_layout_for_width(width: u32) -> bool {
+    width < 1180
+}
+
+fn configure_responsive_layout(app: &MotionApp, width: u32) {
+    app.set_compact_layout(compact_layout_for_width(width));
+}
+
+fn wire_responsive_layout(app: &MotionApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            configure_responsive_layout(&app, width.max(0.0) as u32);
+        }
+    });
+}
+
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
-    app.set_compact_layout(args.size.0 < 1180);
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
     apply_motion(&app, &doc);
@@ -397,7 +414,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
-    app.set_compact_layout(args.size.0 < 1180);
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
     apply_motion(&app, &doc);
@@ -636,10 +653,11 @@ fn main() -> Result<(), String> {
     }
 
     let app = MotionApp::new().map_err(|e| e.to_string())?;
-    app.set_compact_layout(args.size.0 < 1180);
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    wire_responsive_layout(&app);
 
     let recovered = initialize_snapshot_recovery()?;
     let initial = if args.open.is_some() {

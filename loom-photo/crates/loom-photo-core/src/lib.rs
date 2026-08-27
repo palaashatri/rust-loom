@@ -2889,7 +2889,7 @@ mod tests {
             out.extend_from_slice(&(data.len() as u32).to_be_bytes());
             out.extend_from_slice(chunk_type.as_bytes());
             out.extend_from_slice(data);
-            let crc_input = [&chunk_type.as_bytes()[..], data].concat();
+            let crc_input = [chunk_type.as_bytes(), data].concat();
             out.extend_from_slice(&crc32_ieee(&crc_input).to_be_bytes());
             out
         }

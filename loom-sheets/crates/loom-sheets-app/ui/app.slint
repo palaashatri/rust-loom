@@ -11,8 +11,13 @@ export component SheetsApp inherits Window {
     min-width: 1024px;
     min-height: 720px;
     background: Theme.palette().canvas;
-    property <bool> show-quick-formulas: root.width >= 1320px;
-    property <bool> labeled-export: root.width >= 1180px;
+    // Breakpoints are supplied by the host after it chooses the window size.
+    // Deriving them from root.width makes optional toolbar children feed back
+    // into the window's implicit width and creates a Slint binding loop.
+    in property <bool> show-quick-formulas: false;
+    in property <bool> labeled-export: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
 
     in property <string> sheet-name: "Untitled";
     in property <string> status-left: "";
@@ -102,6 +107,7 @@ export component SheetsApp inherits Window {
                     ToolbarIconButton { icon: "new"; label: "New sheet"; clicked => { root.new-sheet(); } }
                     ToolbarIconButton { icon: "open"; label: "Open workbook"; clicked => { root.open-sheet(); } }
                     ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-sheet(); } }
+                    ToolbarIconButton { icon: "save-as"; label: "Save workbook as"; clicked => { root.save-as-sheet(); } }
                     ToolbarIconButton { icon: "undo"; label: "Undo"; clicked => { root.undo(); } }
                     ToolbarIconButton { icon: "redo"; label: "Redo"; clicked => { root.redo(); } }
                 }
@@ -128,6 +134,10 @@ export component SheetsApp inherits Window {
                         overflow: elide;
                     }
                     if root.labeled-export : ToolbarButton {
+                        // The final toolbar group can inherit all remaining
+                        // width; keep Export CSV sized to its content instead of
+                        // turning it into a full-width banner.
+                        width: 124px;
                         icon: "export";
                         label: "Export CSV";
                         primary: true;
@@ -308,6 +318,7 @@ export component SheetsApp inherits Window {
             }
 
             TabStrip {
+                horizontal-stretch: 1;
                 tabs: [root.sheet-name];
                 current: 0;
             }

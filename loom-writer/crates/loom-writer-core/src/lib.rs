@@ -4852,15 +4852,12 @@ mod tests {
         // whose content digest matches the original. A crash mid-write can never surface
         // as a half-document.
         for cut in 0..saved.len() {
-            match load_document(&saved[..cut]) {
-                Ok(loaded) => {
-                    assert_eq!(
-                        writer_document_digest(&loaded.blocks),
-                        baseline_digest,
-                        "truncation at {cut} loaded altered content"
-                    );
-                }
-                Err(_) => {}
+            if let Ok(loaded) = load_document(&saved[..cut]) {
+                assert_eq!(
+                    writer_document_digest(&loaded.blocks),
+                    baseline_digest,
+                    "truncation at {cut} loaded altered content"
+                );
             }
         }
 

@@ -1040,25 +1040,22 @@ mod tests {
         // Every strict prefix of a saved archive either fails to parse or parses to the
         // identical full entry set. A half-written file can never load as a partial one.
         for cut in 0..valid.len() {
-            match PackageArchive::from_bytes(&valid[..cut]) {
-                Ok(parsed) => {
-                    let mut expected_paths = archive.paths();
-                    let mut parsed_paths = parsed.paths();
-                    expected_paths.sort_unstable();
-                    parsed_paths.sort_unstable();
+            if let Ok(parsed) = PackageArchive::from_bytes(&valid[..cut]) {
+                let mut expected_paths = archive.paths();
+                let mut parsed_paths = parsed.paths();
+                expected_paths.sort_unstable();
+                parsed_paths.sort_unstable();
+                assert_eq!(
+                    parsed_paths, expected_paths,
+                    "prefix length {cut} parsed as a smaller archive"
+                );
+                for path in expected_paths {
                     assert_eq!(
-                        parsed_paths, expected_paths,
-                        "prefix length {cut} parsed as a smaller archive"
+                        parsed.get(path),
+                        archive.get(path),
+                        "path {path} at cut {cut}"
                     );
-                    for path in expected_paths {
-                        assert_eq!(
-                            parsed.get(path),
-                            archive.get(path),
-                            "path {path} at cut {cut}"
-                        );
-                    }
                 }
-                Err(_) => {}
             }
         }
 

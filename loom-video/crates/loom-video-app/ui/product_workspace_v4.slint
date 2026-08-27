@@ -12,8 +12,12 @@ export component VideoApp inherits Window {
     min-width: 920px;
     min-height: 700px;
     background: Theme.palette().canvas;
-    property <bool> compact-layout: root.width < 1200px;
-    property <length> track-header-width: root.compact-layout ? 94px : 124px;
+    // Responsive mode comes from the host so width-dependent panes cannot
+    // feed back into the breakpoint predicate and create a binding loop.
+    in property <bool> compact-layout: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
+    property <length> track-header-width: root.compact-layout ? 136px : 180px;
     property <float> frame-step: 1.0 / 30.0;
     property <bool> show-inspector: true;
 
@@ -107,25 +111,37 @@ export component VideoApp inherits Window {
             icon: "video";
             context: root.project-format;
             state-text: root.exporting ? "Exporting " + Math.round(root.export-progress) + "%" : root.is-playing ? "Previewing" : root.backend-available ? "Media engine ready" : "Media engine unavailable";
-            state-tone: root.exporting || root.is-playing ? 1 : root.backend-available ? 0 : 2;
+            // A ready local media engine is a success state; reserve warning
+            // and danger tones for degraded or unavailable playback instead
+            // of making the normal idle header look cautionary.
+            state-tone: root.exporting || root.is-playing ? 1 : root.backend-available ? 2 : 4;
         }
 
         WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New"; clicked => { root.new-project(); } }
-            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-project(); } }
-            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-project(); } }
+            if !root.compact-layout : ToolButton { icon: "new"; text: "New"; clicked => { root.new-project(); } }
+            if root.compact-layout : IconButton { icon: "new"; label: "New"; clicked => { root.new-project(); } }
+            if !root.compact-layout : ToolButton { icon: "open"; text: "Open"; clicked => { root.open-project(); } }
+            if root.compact-layout : IconButton { icon: "open"; label: "Open"; clicked => { root.open-project(); } }
+            if !root.compact-layout : ToolButton { icon: "save"; text: "Save"; clicked => { root.save-project(); } }
+            if root.compact-layout : IconButton { icon: "save"; label: "Save"; clicked => { root.save-project(); } }
+            IconButton { icon: "save-as"; label: "Save project as"; clicked => { root.save-as-project(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
             IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { icon: "cursor"; text: "Select"; checked: root.active-nle-tool == "Select"; clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); } }
-            ToolButton { icon: "scissors"; text: "Blade"; checked: root.active-nle-tool == "Blade"; clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); } }
-            ToolButton { icon: "link"; text: "Snap"; checked: root.snap-enabled; clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); } }
+            if !root.compact-layout : ToolButton { icon: "cursor"; text: "Select"; checked: root.active-nle-tool == "Select"; clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); } }
+            if root.compact-layout : IconButton { icon: "cursor"; label: "Select"; checked: root.active-nle-tool == "Select"; clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); } }
+            if !root.compact-layout : ToolButton { icon: "scissors"; text: "Blade"; checked: root.active-nle-tool == "Blade"; clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); } }
+            if root.compact-layout : IconButton { icon: "scissors"; label: "Blade"; checked: root.active-nle-tool == "Blade"; clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); } }
+            if !root.compact-layout : ToolButton { icon: "link"; text: "Snap"; checked: root.snap-enabled; clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); } }
+            if root.compact-layout : IconButton { icon: "link"; label: "Snap"; checked: root.snap-enabled; clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); } }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             MetricChip { label: "TC"; value: root.timecode-display; }
             MetricChip { label: "Duration"; value: Math.round(root.timeline-duration * 10) / 10 + " s"; }
-            ToolButton { icon: "settings"; text: "Inspector"; checked: root.show-inspector; clicked => { root.show-inspector = !root.show-inspector; } }
-            PrimaryButton { text: root.exporting ? "Exporting…" : "Export"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
+            if !root.compact-layout : ToolButton { icon: "settings"; text: "Inspector"; checked: root.show-inspector; clicked => { root.show-inspector = !root.show-inspector; } }
+            if root.compact-layout : IconButton { icon: "settings"; label: "Inspector"; checked: root.show-inspector; clicked => { root.show-inspector = !root.show-inspector; } }
+            if !root.compact-layout : PrimaryButton { text: root.exporting ? "Exporting…" : "Export"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
+            if root.compact-layout : IconButton { icon: "export"; label: root.exporting ? "Exporting" : "Export"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
         }
 
         HorizontalLayout {
@@ -135,11 +151,11 @@ export component VideoApp inherits Window {
             SidebarSurface {
                 width: root.compact-layout ? 190px : 258px;
                 title: "Media";
-                detail: root.media-bin-items.length + " sources";
+                detail: root.media-bin-items.length + " imported · " + root.clip-labels.length + " clips";
                 VerticalLayout {
                     spacing: 8px;
                     padding: 10px;
-                    Field { label: "Media path"; placeholder: "/path/to/clip.mov"; value <=> root.import-path; }
+                    Field { label: "Media path"; placeholder: "Choose a media file…"; value <=> root.import-path; }
                     ToolButton { icon: "import"; text: "Import Local Media"; enabled: root.backend-available; clicked => { root.import-media(root.import-path); } }
                     Rectangle { height: 1px; background: Theme.palette().border; }
                     for item[index] in root.media-bin-items : WorkspaceRow {
@@ -174,7 +190,17 @@ export component VideoApp inherits Window {
                         VerticalLayout {
                             padding: 9px;
                             spacing: 4px;
-                            Text { text: root.backend-available ? "FFmpeg / FFprobe / FFplay" : "Install FFmpeg tools"; font-size: Theme.tokens.typography.body; font-weight: 650; color: Theme.palette().ink; }
+                            Text {
+                                text: root.backend-available ? "FFmpeg / FFprobe / FFplay" : "Install FFmpeg tools";
+                                font-size: Theme.tokens.typography.body;
+                                font-weight: 650;
+                                color: Theme.palette().ink;
+                                // Constrain the heading to the card's inner width so the
+                                // compact sidebar wraps the tool names instead of clipping
+                                // the final executable name at the right edge.
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                            }
                             Text { text: root.backend-version; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; overflow: elide; }
                         }
                     }
@@ -206,23 +232,6 @@ export component VideoApp inherits Window {
                             Icon { icon: "video"; size: 44px; tint: Theme.palette().ink-disabled; }
                             Text { text: "Import media to decode a real preview frame"; color: Theme.palette().ink; font-size: Theme.tokens.typography.body-large; horizontal-alignment: center; }
                         }
-                        Rectangle {
-                            x: 12px;
-                            y: 12px;
-                            height: 28px;
-                            min-width: 174px;
-                            border-radius: 8px;
-                            background: Theme.palette().scrim;
-                            border-width: 1px;
-                            border-color: Theme.palette().border-strong;
-                            HorizontalLayout {
-                                spacing: 7px;
-                                padding-left: 9px;
-                                padding-right: 9px;
-                                StatusPill { text: root.is-playing ? "PLAY" : "PAUSED"; tone: root.is-playing ? 1 : 0; }
-                                Text { text: root.timecode-display; color: Theme.palette().paper; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                            }
-                        }
                     }
                 }
 
@@ -249,6 +258,7 @@ export component VideoApp inherits Window {
                             clicked => { root.playhead-seconds = min(root.timeline-duration, root.playhead-seconds + root.frame-step); root.seek(root.playhead-seconds); }
                         }
                         Text { text: root.timecode-display; width: 88px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; font-weight: 650; vertical-alignment: center; }
+                        if !root.compact-layout : Text { text: "Drag ruler to scrub"; width: 132px; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; vertical-alignment: center; }
                         Slider { label: "Playhead"; horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.timeline-duration); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
                         IconButton { icon: "plus-circle"; label: "Add marker"; clicked => { root.add-marker(); } }
                     }
@@ -391,23 +401,6 @@ export component VideoApp inherits Window {
                         }
                     }
 
-                    Rectangle {
-                        x: root.track-header-width + 10px;
-                        y: 34px;
-                        min-width: 228px;
-                        height: 28px;
-                        border-radius: 8px;
-                        background: Theme.palette().overlay;
-                        border-width: 1px;
-                        border-color: timeline-focus.has-focus ? Theme.palette().focus : Theme.palette().border;
-                        HorizontalLayout {
-                            spacing: 7px;
-                            padding-left: 8px;
-                            padding-right: 8px;
-                            StatusPill { text: root.active-nle-tool; tone: timeline-focus.has-focus ? 1 : 0; }
-                            Text { text: "Drag ruler to scrub · arrows step one frame"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
-                        }
-                    }
                 }
             }
 
@@ -438,7 +431,7 @@ export component VideoApp inherits Window {
                     if root.inspector-tab == 2 : VerticalLayout {
                         spacing: 10px;
                         Text { text: "LOCAL TIMELINE EXPORT"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        Field { label: "Export path"; placeholder: "output.mp4"; value <=> root.export-path; }
+                        Field { label: "Export path"; placeholder: "Choose an output file…"; value <=> root.export-path; }
                         PrimaryButton { text: root.exporting ? "Exporting " + Math.round(root.export-progress) + "%" : "Export H.264"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
                         Text { text: "The current renderer concatenates enabled video clips through FFmpeg. Audio mixing remains a separate integration milestone."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
                     }

@@ -12,7 +12,12 @@ export component EncodeApp inherits Window {
     min-width: 900px;
     min-height: 680px;
     background: Theme.palette().canvas;
-    property <bool> compact-layout: root.width < 1220px;
+    // The host supplies this breakpoint after choosing the window size. A
+    // width-derived conditional pane can feed back into the window's implicit
+    // layout calculation during startup and produce unstable geometry.
+    in property <bool> compact-layout: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
 
     in property <string> queue-name: "Delivery Queue";
     in property <[string]> job-labels: [];
@@ -88,14 +93,18 @@ export component EncodeApp inherits Window {
             app-name: "Loom Encode";
             document-title: root.queue-name;
             icon: "package";
-            context: root.job-labels.length + " jobs";
+            context: root.job-labels.length == 1 ? "1 job" : root.job-labels.length + " jobs";
             state-text: root.running ? "Encoding" : root.backend-available ? "Encoder ready" : "Encoder unavailable";
-            state-tone: root.running ? 1 : root.backend-available ? 0 : 2;
+            // Distinguish a healthy local encoder from an unavailable one in
+            // the header; the idle ready state should not read as neutral or
+            // warning.
+            state-tone: root.running ? 1 : root.backend-available ? 2 : 4;
         }
         WorkspaceToolbar {
             ToolButton { icon: "new"; text: "New Queue"; clicked => { root.new-queue(); } }
             ToolButton { icon: "open"; text: "Open"; clicked => { root.open-queue(); } }
             ToolButton { icon: "save"; text: "Save"; clicked => { root.save-queue(); } }
+            ToolButton { icon: "save-as"; text: "Save As"; clicked => { root.save-as-queue(); } }
             IconButton { icon: "undo"; label: "Undo queue edit"; enabled: root.can-undo && !root.running; clicked => { root.undo(); } }
             IconButton { icon: "redo"; label: "Redo queue edit"; enabled: root.can-redo && !root.running; clicked => { root.redo(); } }
             Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
@@ -111,7 +120,10 @@ export component EncodeApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
             SidebarSurface {
-                width: root.compact-layout ? 296px : 420px;
+                // Keep the queue pane within SidebarSurface's shared 360px
+                // maximum; the previous 420px wide pane left the central
+                // job view needlessly compressed on large windows.
+                width: root.compact-layout ? 296px : 360px;
                 title: "Delivery Queue";
                 detail: Math.round(root.batch-progress) + "% complete";
                 VerticalLayout {
@@ -177,8 +189,8 @@ export component EncodeApp inherits Window {
                         }
                         VerticalLayout {
                             spacing: 6px;
-                            Text { text: root.selected-job-text; font-size: Theme.tokens.typography.heading; font-weight: 700; color: Theme.palette().ink; }
-                            Text { text: root.selected-job-details; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; }
+                            Text { text: root.selected-job-text; font-size: Theme.tokens.typography.heading; font-weight: 700; color: Theme.palette().ink; overflow: elide; }
+                            Text { text: root.selected-job-details; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; overflow: elide; }
                             Text { text: root.selected-output; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; overflow: elide; }
                         }
                     }
@@ -208,7 +220,9 @@ export component EncodeApp inherits Window {
 
             Rectangle { width: 1px; background: Theme.palette().border; }
             InspectorSurface {
-                width: root.compact-layout ? 238px : 330px;
+                // InspectorSurface has a 240px minimum; matching it avoids a
+                // compact-width constraint conflict and keeps fields usable.
+                width: root.compact-layout ? 240px : 330px;
                 title: "Job Inspector";
                 detail: root.running ? "Queue locked" : "Editable";
                 PaneTabs { items: ["Source", "Preset", "Activity"]; current <=> root.inspector-tab; }
@@ -220,9 +234,9 @@ export component EncodeApp inherits Window {
                         spacing: 10px;
                         Text { text: "SOURCE & DESTINATION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                         Text { text: "Input path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        Field { label: "Input path"; placeholder: "/path/to/source.mov"; value <=> root.selected-source; edited(value) => { root.source-changed(value); } }
+                        Field { label: "Input path"; placeholder: "Choose a source file…"; value <=> root.selected-source; edited(value) => { root.source-changed(value); } }
                         Text { text: "Output path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        Field { label: "Output path"; placeholder: "/path/to/output.mp4"; value <=> root.selected-output; edited(value) => { root.output-changed(value); } }
+                        Field { label: "Output path"; placeholder: "Choose an output file…"; value <=> root.selected-output; edited(value) => { root.output-changed(value); } }
                     }
                     if root.inspector-tab == 1 : VerticalLayout {
                         spacing: 10px;

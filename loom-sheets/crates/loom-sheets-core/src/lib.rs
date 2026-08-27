@@ -4389,12 +4389,12 @@ mod tests {
         // Comma detected with comma.
         let dialect = sniff_csv_dialect("a,b,c\n1,2,3").unwrap();
         assert_eq!(dialect.delimiter, ',');
-        assert_eq!(dialect.quoted, false);
+        assert!(!dialect.quoted);
 
         // Semicolon-separated input.
         let dialect = sniff_csv_dialect("a;b\nc;d").unwrap();
         assert_eq!(dialect.delimiter, ';');
-        assert_eq!(dialect.quoted, false);
+        assert!(!dialect.quoted);
 
         // Tab delimiter.
         let dialect = sniff_csv_dialect("a\tb\n1\t2").unwrap();
@@ -4407,7 +4407,7 @@ mod tests {
         // Quoted fields are detected; the comma inside quotes is not counted.
         let dialect = sniff_csv_dialect("\"x,y\",z").unwrap();
         assert_eq!(dialect.delimiter, ',');
-        assert_eq!(dialect.quoted, true);
+        assert!(dialect.quoted);
 
         // Empty input errors.
         assert!(sniff_csv_dialect("").is_err());
@@ -4416,7 +4416,7 @@ mod tests {
         // All candidates at zero occurrences: documented default to ','.
         let dialect = sniff_csv_dialect("abc\ndef").unwrap();
         assert_eq!(dialect.delimiter, ',');
-        assert_eq!(dialect.quoted, false);
+        assert!(!dialect.quoted);
     }
 
     #[test]

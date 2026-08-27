@@ -67,6 +67,7 @@ pub const ICON_NAMES: &[&str] = &[
     "record",
     "redo",
     "save",
+    "save-as",
     "scale",
     "scissors",
     "search",
@@ -139,7 +140,9 @@ mod tests {
 
 #[cfg(test)]
 mod visual_tests {
-    use super::smoke_window::*;
+    use super::smoke_window::{SmokeWindow, Theme};
+    use crate::{CommandPalette, CommandPaletteItem};
+    use slint::Global;
 
     const VIEWPORTS: &[(f32, f32)] = &[
         (1024.0, 720.0),
@@ -220,6 +223,49 @@ mod visual_tests {
         assert!(
             diff_ratio(&dark, &high_contrast) > 0.08,
             "dark and high-contrast themes are not visually distinct"
+        );
+    }
+
+    #[test]
+    fn command_palette_clips_long_lists_to_modal_surface() {
+        use std::rc::Rc;
+
+        loom_test_support::capture::set_platform();
+
+        let empty = CommandPalette::new().expect("create empty command palette");
+        empty.set_open(true);
+        let empty_image =
+            loom_test_support::capture::snapshot_component(&empty, 1280.0, 800.0, 1.0)
+                .expect("capture empty command palette");
+
+        let many = CommandPalette::new().expect("create long command palette");
+        many.set_open(true);
+        many.set_commands(
+            Rc::new(slint::VecModel::from(
+                (0..24)
+                    .map(|index| CommandPaletteItem {
+                        id: format!("command-{index}").into(),
+                        label: format!("Command {index}").into(),
+                        shortcut: "Ctrl+K".into(),
+                        enabled: true,
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+        let many_image = loom_test_support::capture::snapshot_component(&many, 1280.0, 800.0, 1.0)
+            .expect("capture long command palette");
+
+        // At 1280x800 the palette surface is y=160..590. Rows must never
+        // alter the overlay/workspace pixels below that fixed bottom edge.
+        let outside_bottom = 592;
+        let leaked_pixels = (outside_bottom..800)
+            .flat_map(|y| (0..1280).map(move |x| (x, y)))
+            .filter(|&(x, y)| empty_image.get_pixel(x, y) != many_image.get_pixel(x, y))
+            .count();
+        assert_eq!(
+            leaked_pixels, 0,
+            "long command rows must be clipped inside the palette surface"
         );
     }
 }

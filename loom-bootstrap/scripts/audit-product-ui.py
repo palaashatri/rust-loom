@@ -87,7 +87,16 @@ def active_application_ui(app: str) -> str:
 
 
 def component_used(text: str, name: str) -> bool:
-    return re.search(rf"(?m)^\s*{re.escape(name)}\s*\{{", text) is not None
+    # Components may be conditionally instantiated in Slint (`if expr :
+    # Component { ... }`). Treat that as a real use while keeping the match
+    # anchored to a component declaration line so prose/comments do not count.
+    return (
+        re.search(
+            rf"(?m)^\s*(?:if\s+[^\n{{}}]+:\s*)?{re.escape(name)}\s*\{{",
+            text,
+        )
+        is not None
+    )
 
 
 def audit_design_contract() -> None:

@@ -3499,7 +3499,7 @@ mod studio_runtime_tests {
 
         // Bounded within [-1.0, 1.0]
         for &s in &buffer.samples {
-            assert!(s >= -1.0 - 1e-5 && s <= 1.0 + 1e-5);
+            assert!((-1.0 - 1e-5..=1.0 + 1e-5).contains(&s));
         }
     }
 
@@ -3739,7 +3739,7 @@ mod studio_runtime_tests {
         assert!(clipped.peak_db <= 0.0 + 1e-4);
 
         // Silence and empty input report floor levels with no gain suggestion
-        let silent = analyze_loudness(&[0.0; 16].repeat(1), -14.0);
+        let silent = analyze_loudness(&[0.0f32; 16], -14.0);
         assert_eq!(silent.rms_db, -100.0);
         assert_eq!(silent.gain_to_target_db, 0.0);
         let empty = analyze_loudness(&[], -14.0);

@@ -24,6 +24,7 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
+const COMPACT_LAYOUT_MAX_WIDTH: u32 = 1200;
 
 loom_production::define_snapshot_recovery!(VIDEO_RECOVERY, "org.loom.video", "loom.video/1");
 
@@ -83,6 +84,23 @@ fn parse_args() -> Result<Args, String> {
 
 fn empty_project() -> VideoProject {
     VideoProject::new("untitled-project", "Untitled Project")
+}
+
+fn compact_layout_for_width(width: u32) -> bool {
+    width < COMPACT_LAYOUT_MAX_WIDTH
+}
+
+fn configure_responsive_layout(app: &VideoApp, width: u32) {
+    app.set_compact_layout(compact_layout_for_width(width));
+}
+
+fn wire_responsive_layout(app: &VideoApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            configure_responsive_layout(&app, width.max(0.0) as u32);
+        }
+    });
 }
 
 fn sample_project() -> VideoProject {
@@ -352,6 +370,7 @@ fn apply_theme(app: &VideoApp, theme: &str) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|error| error.to_string())?;
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let (initial_proj, initial_path) = initial_session(args)?;
     let state = AppState {
@@ -380,6 +399,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|error| error.to_string())?;
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let (initial_proj, initial_path) = initial_session(args)?;
     let state = AppState {
@@ -1049,9 +1069,11 @@ fn main() -> Result<(), String> {
         return run_journey(&args, out_dir);
     }
     let app = VideoApp::new().map_err(|error| error.to_string())?;
+    configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    wire_responsive_layout(&app);
     let recovered = initialize_snapshot_recovery()?;
     let (initial_proj, initial_path) = if args.open.is_some() {
         initial_session(&args)?
@@ -1435,5 +1457,13 @@ mod tests {
         assert!(file_v2.is_file());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_layout_boundary_keeps_reference_width_stable() {
+        assert!(compact_layout_for_width(1024));
+        assert!(compact_layout_for_width(1199));
+        assert!(!compact_layout_for_width(1200));
+        assert!(!compact_layout_for_width(1440));
     }
 }

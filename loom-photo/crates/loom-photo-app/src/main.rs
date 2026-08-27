@@ -256,6 +256,24 @@ fn apply_theme(app: &PhotoApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
+fn configure_responsive_layout(app: &PhotoApp, size: (u32, u32)) {
+    configure_responsive_width(app, size.0);
+}
+
+fn configure_responsive_width(app: &PhotoApp, width: u32) {
+    app.set_inspector_available(width >= 1180);
+    app.set_labeled_export(width >= 1320);
+}
+
+fn wire_responsive_layout(app: &PhotoApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            configure_responsive_width(&app, width.max(0.0) as u32);
+        }
+    });
+}
+
 /// Commands exposed through the command palette. Each palette entry maps to
 /// one of the application callbacks, so palette invocation and toolbar clicks
 /// share a single dispatch path.
@@ -422,6 +440,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    configure_responsive_layout(&app, args.size);
     let session = PhotoSession::new(initial_canvas(args)?);
     refresh_photo(&app, &session)?;
     if args.palette {
@@ -624,6 +643,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    configure_responsive_layout(&app, args.size);
     let session = PhotoSession::new(initial_canvas(args)?);
     refresh_photo(&app, &session)?;
     wire_palette(&app);
@@ -717,6 +737,8 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    configure_responsive_layout(&app, args.size);
+    wire_responsive_layout(&app);
     let recovered = initialize_snapshot_recovery()?;
     let initial = if args.open.is_some() {
         initial_canvas(&args)?

@@ -25,6 +25,9 @@ export component DocumentChrome inherits Rectangle {
         if root.trailing-text != "" : Text {
             text: root.trailing-text; font-size: Theme.tokens.typography.caption;
             font-weight: 500; color: Theme.palette().ink-secondary; vertical-alignment: center;
+            // Context/file metadata may be longer than the title bar. Keep it
+            // inside its allocation so it never paints over the title.
+            max-width: 320px; overflow: elide;
         }
     }
     Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
@@ -89,7 +92,13 @@ export component ToolbarButton inherits Rectangle {
     in property <bool> checked: false;
     callback clicked;
     height: Theme.tokens.metrics.control-height;
-    min-width: Theme.tokens.metrics.control-height;
+    // Keep the label's intrinsic width as the lower bound. Without this, a
+    // crowded toolbar can shrink a labelled button to the 28px icon target
+    // while its text continues painting into neighbouring controls.
+    min-width: max(Theme.tokens.metrics.control-height,
+        label-content.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + 6px : 0px) + 20px);
+    preferred-width: max(Theme.tokens.metrics.control-height,
+        label-content.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + 6px : 0px) + 20px);
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.primary || root.checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus
@@ -110,7 +119,7 @@ export component ToolbarButton inherits Rectangle {
             tint: !root.enabled ? Theme.palette().ink-disabled : root.primary ? Theme.palette().accent-ink
                 : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
         }
-        Text {
+        label-content := Text {
             text: root.label; font-size: Theme.tokens.typography.body; font-weight: 500;
             color: !root.enabled ? Theme.palette().ink-disabled : root.primary ? Theme.palette().accent-ink : Theme.palette().ink;
             vertical-alignment: center;
@@ -133,9 +142,10 @@ export component PanelHeader inherits Rectangle {
     background: Theme.palette().panel;
     HorizontalLayout {
         spacing: 8px; padding-left: 12px; padding-right: 12px; cross-axis-alignment: center;
+        Rectangle { width: 3px; height: 14px; border-radius: 2px; background: Theme.palette().accent; }
         Text {
             text: root.title; font-size: Theme.tokens.typography.title; font-weight: 600;
-            color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1;
+            color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
         }
         @children
     }
@@ -171,16 +181,17 @@ export component SectionHeader inherits Rectangle {
     Text {
         x: 0px; width: parent.width; height: parent.height; text: root.title;
         font-size: Theme.tokens.typography.title; font-weight: 600; color: Theme.palette().ink; vertical-alignment: center;
+        overflow: elide;
     }
 }
 
 export component ToolkitStatusBar inherits Rectangle {
     in property <string> leading: "";
     in property <string> trailing: "";
-    min-height: Theme.tokens.metrics.control-height;
-    max-height: Theme.tokens.metrics.control-height;
+    min-height: Theme.tokens.metrics.status-height;
+    max-height: Theme.tokens.metrics.status-height;
     background: Theme.palette().chrome;
-    Rectangle { width: root.width; height: 1px; background: Theme.palette().border; }
+    Rectangle { x: 0px; y: 0px; width: root.width; height: 1px; background: Theme.palette().border; }
     HorizontalLayout {
         spacing: 12px; padding-left: 12px; padding-right: 12px; cross-axis-alignment: center;
         Text {
@@ -190,6 +201,7 @@ export component ToolkitStatusBar inherits Rectangle {
         Text {
             text: root.trailing; font-size: Theme.tokens.typography.caption; font-weight: 500;
             color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide;
+            max-width: 320px;
         }
     }
 }
@@ -424,7 +436,7 @@ export component PropertyRow inherits Rectangle {
         Text {
             text: root.label; min-width: 84px; max-width: 112px;
             font-size: Theme.tokens.typography.caption; font-weight: 500;
-            color: Theme.palette().ink-secondary; vertical-alignment: center;
+            color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide;
         }
         Rectangle { horizontal-stretch: 1; @children }
     }
@@ -440,11 +452,17 @@ export component TabStrip inherits Rectangle {
     HorizontalLayout {
         spacing: 2px; padding-left: 4px; padding-right: 4px; padding-top: 2px; padding-bottom: 2px;
         for tab[idx] in root.tabs : Rectangle {
-            min-width: 72px; height: 26px; border-radius: Theme.tokens.metrics.radius-small;
+            // Tabs are content-sized controls.  Without an explicit preferred
+            // width Slint may distribute the strip's spare width across the
+            // repeated rectangles, making one tab consume most of the window.
+            min-width: max(72px, tab-label.preferred-width + 16px);
+            preferred-width: max(72px, tab-label.preferred-width + 16px);
+            horizontal-stretch: 0;
+            height: 26px; border-radius: Theme.tokens.metrics.radius-small;
             background: idx == root.current ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-raised : transparent;
             border-width: idx == root.current ? 1px : 0px;
             border-color: idx == root.current ? Theme.palette().border-strong : transparent;
-            Text {
+            tab-label := Text {
                 text: tab; x: 8px; width: parent.width - 16px; font-size: Theme.tokens.typography.caption;
                 font-weight: idx == root.current ? 600 : 500; color: Theme.palette().ink;
                 vertical-alignment: center; horizontal-alignment: center; overflow: elide;

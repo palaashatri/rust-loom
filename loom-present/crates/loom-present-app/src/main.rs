@@ -274,10 +274,29 @@ fn apply_theme(app: &PresentApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
+fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) {
+    configure_responsive_width(app, size.0);
+}
+
+fn configure_responsive_width(app: &PresentApp, width: u32) {
+    app.set_show_inspector(width >= 1180);
+    app.set_labeled_export(width >= 1320);
+}
+
+fn wire_responsive_layout(app: &PresentApp) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            configure_responsive_width(&app, width.max(0.0) as u32);
+        }
+    });
+}
+
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    configure_responsive_layout(&app, args.size);
     let state = GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
@@ -396,6 +415,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     apply_theme(&app, &args.theme);
+    configure_responsive_layout(&app, args.size);
     let state = GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
@@ -466,6 +486,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    configure_responsive_layout(&app, args.size);
+    wire_responsive_layout(&app);
     let recovered = initialize_snapshot_recovery()?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
     let initial = if let Some(path) = initial_path.as_deref() {

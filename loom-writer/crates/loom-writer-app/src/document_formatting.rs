@@ -24,12 +24,19 @@ pub struct DocumentFormattingState {
 /// UTF-8 byte offsets in Writer's canonical `editor_text()` representation.
 /// Anchor/focus retain selection direction; formatting always uses the ordered
 /// range. Offsets are clamped down to valid character boundaries before use.
+//
+// The legacy TextEdit surface does not expose selection offsets yet, so this
+// range-aware API is intentionally ahead of its caller. Keep the lint
+// exception scoped to these domain helpers rather than hiding dead code in
+// the rest of the formatting module.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DocumentSelection {
     pub anchor: usize,
     pub focus: usize,
 }
 
+#[allow(dead_code)]
 impl DocumentSelection {
     pub fn caret(offset: usize) -> Self {
         Self {
@@ -55,6 +62,7 @@ impl DocumentSelection {
     }
 }
 
+#[allow(dead_code)]
 fn floor_char_boundary(text: &str, offset: usize) -> usize {
     let mut value = offset.min(text.len());
     while value > 0 && !text.is_char_boundary(value) {
@@ -63,6 +71,7 @@ fn floor_char_boundary(text: &str, offset: usize) -> usize {
     value
 }
 
+#[allow(dead_code)]
 fn normalized_selection(document: &WriterDocument, selection: DocumentSelection) -> (usize, usize) {
     let text = document.editor_text();
     let (start, end) = selection.ordered();
@@ -75,6 +84,7 @@ fn normalized_selection(document: &WriterDocument, selection: DocumentSelection)
 /// Return `(block_index, local_start, local_end)` for text actually covered by
 /// a non-collapsed selection. Newline separators are document structure, not
 /// styleable characters, and are intentionally omitted from spans.
+#[allow(dead_code)]
 pub fn selection_text_spans(
     document: &WriterDocument,
     selection: DocumentSelection,
@@ -92,7 +102,8 @@ pub fn selection_text_spans(
         let overlap_start = start.max(global_start);
         let overlap_end = end.min(global_end);
         if overlap_start < overlap_end {
-            let local_start = floor_char_boundary(block.text.as_str(), overlap_start - global_start);
+            let local_start =
+                floor_char_boundary(block.text.as_str(), overlap_start - global_start);
             let local_end = floor_char_boundary(block.text.as_str(), overlap_end - global_start);
             if local_start < local_end {
                 spans.push((index, local_start, local_end));
@@ -103,6 +114,7 @@ pub fn selection_text_spans(
     spans
 }
 
+#[allow(dead_code)]
 fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
     if document.blocks.is_empty() {
         return None;
@@ -123,6 +135,7 @@ fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
 /// Paragraph blocks affected by the selection. A collapsed caret affects one
 /// paragraph. A range crossing paragraph separators affects the paragraphs it
 /// enters, even when a paragraph itself is empty.
+#[allow(dead_code)]
 pub fn selected_block_indices(
     document: &WriterDocument,
     selection: DocumentSelection,
@@ -139,6 +152,7 @@ pub fn selected_block_indices(
     (first.min(last)..=first.max(last)).collect()
 }
 
+#[allow(dead_code)]
 fn style_at(block: &RichBlock, byte_offset: usize) -> CharacterStyle {
     block
         .runs
@@ -148,6 +162,7 @@ fn style_at(block: &RichBlock, byte_offset: usize) -> CharacterStyle {
         .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 fn coalesce_runs(runs: Vec<StyleRun>) -> Vec<StyleRun> {
     let mut result: Vec<StyleRun> = Vec::with_capacity(runs.len());
     for run in runs {
@@ -165,6 +180,7 @@ fn coalesce_runs(runs: Vec<StyleRun>) -> Vec<StyleRun> {
     result
 }
 
+#[allow(dead_code)]
 fn mutate_character_range(
     block: &mut RichBlock,
     start: usize,
@@ -204,6 +220,7 @@ fn mutate_character_range(
     block.runs = coalesce_runs(next);
 }
 
+#[allow(dead_code)]
 fn mutate_selection_character_styles(
     document: &mut WriterDocument,
     selection: DocumentSelection,
@@ -211,10 +228,16 @@ fn mutate_selection_character_styles(
 ) {
     let spans = selection_text_spans(document, selection);
     for (block_index, start, end) in spans {
-        mutate_character_range(&mut document.blocks[block_index], start, end, &mut operation);
+        mutate_character_range(
+            &mut document.blocks[block_index],
+            start,
+            end,
+            &mut operation,
+        );
     }
 }
 
+#[allow(dead_code)]
 pub fn set_selection_bold(
     document: &mut WriterDocument,
     selection: DocumentSelection,
@@ -229,6 +252,7 @@ pub fn set_selection_bold(
     });
 }
 
+#[allow(dead_code)]
 pub fn set_selection_italic(
     document: &mut WriterDocument,
     selection: DocumentSelection,
@@ -237,6 +261,7 @@ pub fn set_selection_italic(
     mutate_selection_character_styles(document, selection, |style| style.italic = enabled);
 }
 
+#[allow(dead_code)]
 pub fn set_selection_underline(
     document: &mut WriterDocument,
     selection: DocumentSelection,
@@ -245,6 +270,7 @@ pub fn set_selection_underline(
     mutate_selection_character_styles(document, selection, |style| style.underline = enabled);
 }
 
+#[allow(dead_code)]
 pub fn set_selection_heading(
     document: &mut WriterDocument,
     selection: DocumentSelection,
@@ -261,6 +287,7 @@ pub fn set_selection_heading(
     }
 }
 
+#[allow(dead_code)]
 pub fn set_selection_alignment(
     document: &mut WriterDocument,
     selection: DocumentSelection,
@@ -410,12 +437,15 @@ fn all_non_empty_blocks_match(
 }
 
 fn uniform_heading_level(document: &WriterDocument) -> i32 {
-    let mut levels = document.blocks.iter().map(|block| match block.kind.as_str() {
-        "heading1" => 1,
-        "heading2" => 2,
-        "heading3" => 3,
-        _ => 0,
-    });
+    let mut levels = document
+        .blocks
+        .iter()
+        .map(|block| match block.kind.as_str() {
+            "heading1" => 1,
+            "heading2" => 2,
+            "heading3" => 3,
+            _ => 0,
+        });
     let Some(first) = levels.next() else {
         return 0;
     };
@@ -427,12 +457,15 @@ fn uniform_heading_level(document: &WriterDocument) -> i32 {
 }
 
 fn uniform_alignment(document: &WriterDocument) -> i32 {
-    let mut alignments = document.blocks.iter().map(|block| match block.style.alignment {
-        Alignment::Center => 1,
-        Alignment::Right => 2,
-        Alignment::Justify => 3,
-        Alignment::Left => 0,
-    });
+    let mut alignments = document
+        .blocks
+        .iter()
+        .map(|block| match block.style.alignment {
+            Alignment::Center => 1,
+            Alignment::Right => 2,
+            Alignment::Justify => 3,
+            Alignment::Left => 0,
+        });
     let Some(first) = alignments.next() else {
         return 0;
     };
@@ -482,14 +515,38 @@ mod tests {
 
         set_selection_bold(&mut document, DocumentSelection::range(2, 5), true);
         assert_eq!(document.blocks[0].runs.len(), 3);
-        assert_eq!((document.blocks[0].runs[0].start, document.blocks[0].runs[0].end), (0, 2));
-        assert_eq!((document.blocks[0].runs[1].start, document.blocks[0].runs[1].end), (2, 5));
+        assert_eq!(
+            (
+                document.blocks[0].runs[0].start,
+                document.blocks[0].runs[0].end
+            ),
+            (0, 2)
+        );
+        assert_eq!(
+            (
+                document.blocks[0].runs[1].start,
+                document.blocks[0].runs[1].end
+            ),
+            (2, 5)
+        );
         assert_eq!(document.blocks[0].runs[1].style.weight, FontWeight::Bold);
-        assert_eq!((document.blocks[0].runs[2].start, document.blocks[0].runs[2].end), (5, 6));
+        assert_eq!(
+            (
+                document.blocks[0].runs[2].start,
+                document.blocks[0].runs[2].end
+            ),
+            (5, 6)
+        );
 
         set_selection_bold(&mut document, DocumentSelection::range(2, 5), false);
         assert_eq!(document.blocks[0].runs.len(), 1);
-        assert_eq!((document.blocks[0].runs[0].start, document.blocks[0].runs[0].end), (0, 6));
+        assert_eq!(
+            (
+                document.blocks[0].runs[0].start,
+                document.blocks[0].runs[0].end
+            ),
+            (0, 6)
+        );
         assert_eq!(document.blocks[0].runs[0].style.weight, FontWeight::Regular);
     }
 
@@ -502,8 +559,14 @@ mod tests {
 
         // editor_text: "alpha\nbeta\ngamma". Select "ha\nbe".
         set_selection_italic(&mut document, DocumentSelection::range(3, 8), true);
-        assert!(document.blocks[0].runs.iter().any(|run| run.start == 3 && run.end == 5 && run.style.italic));
-        assert!(document.blocks[1].runs.iter().any(|run| run.start == 0 && run.end == 2 && run.style.italic));
+        assert!(document.blocks[0]
+            .runs
+            .iter()
+            .any(|run| run.start == 3 && run.end == 5 && run.style.italic));
+        assert!(document.blocks[1]
+            .runs
+            .iter()
+            .any(|run| run.start == 0 && run.end == 2 && run.style.italic));
         assert!(document.blocks[2].runs.is_empty());
     }
 
@@ -566,8 +629,16 @@ mod tests {
         let mut document = document();
         let first_block_len = document.blocks[0].text.as_str().len();
         document.blocks[0].runs = vec![
-            StyleRun { start: 0, end: 5, style: CharacterStyle::default() },
-            StyleRun { start: 5, end: first_block_len, style: CharacterStyle::default() },
+            StyleRun {
+                start: 0,
+                end: 5,
+                style: CharacterStyle::default(),
+            },
+            StyleRun {
+                start: 5,
+                end: first_block_len,
+                style: CharacterStyle::default(),
+            },
         ];
         set_document_bold(&mut document, true);
         assert_eq!(document.blocks[0].runs.len(), 2);

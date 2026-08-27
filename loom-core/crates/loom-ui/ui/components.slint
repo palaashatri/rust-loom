@@ -12,8 +12,8 @@ import { Icon } from "icons.slint";
 export component StatusBar inherits Rectangle {
     in property <string> status-left: "";
     in property <string> status-right: "";
-    min-height: 30px;
-    max-height: 30px;
+    min-height: Theme.tokens.metrics.status-height;
+    max-height: Theme.tokens.metrics.status-height;
     background: Theme.palette().chrome;
     Rectangle { y: 0px; height: 1px; width: parent.width; background: Theme.palette().border; }
     HorizontalLayout {
@@ -22,8 +22,8 @@ export component StatusBar inherits Rectangle {
         padding-right: 14px;
         cross-axis-alignment: center;
         Rectangle { width: 5px; height: 5px; border-radius: 3px; background: Theme.palette().accent; }
-        Text { text: root.status-left; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-stretch: 1; vertical-alignment: center; }
-        Text { text: root.status-right; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-disabled; vertical-alignment: center; }
+        Text { text: root.status-left; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+        Text { text: root.status-right; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-disabled; vertical-alignment: center; max-width: 320px; overflow: elide; }
     }
 }
 
@@ -41,8 +41,8 @@ export component LoomWindow inherits Window {
         spacing: 0px;
         padding: 0px;
         Rectangle {
-            min-height: 41px;
-            max-height: 41px;
+            min-height: Theme.tokens.metrics.header-height;
+            max-height: Theme.tokens.metrics.header-height;
             background: Theme.palette().surface;
             VerticalLayout {
             spacing: 0px;
@@ -87,7 +87,12 @@ export component ToolButton inherits Rectangle {
     in property <bool> enabled: true;
     callback clicked;
     height: Theme.tokens.metrics.control-height;
-    min-width: Theme.tokens.metrics.control-height;
+    // Preserve the complete action label whenever a toolbar is constrained.
+    // The old 28px floor let the text paint into the next control.
+    min-width: max(Theme.tokens.metrics.control-height,
+        tool-label.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + 6px : 0px) + 20px);
+    preferred-width: max(Theme.tokens.metrics.control-height,
+        tool-label.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + 6px : 0px) + 20px);
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
     border-color: !root.enabled ? transparent : focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().border : transparent;
@@ -102,8 +107,8 @@ export component ToolButton inherits Rectangle {
         alignment: center;
         padding-left: root.icon != "" ? 8px : 11px;
         padding-right: root.text != "" ? 11px : 8px;
-        if root.icon != "" : Icon { icon: root.icon; size: 15px; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
-        if root.text != "" : Text { text: root.text; font-size: Theme.tokens.typography.body; font-weight: root.checked ? 650 : 500; color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled; }
+        if root.icon != "" : Icon { icon: root.icon; size: Theme.tokens.metrics.icon-size; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
+        tool-label := Text { text: root.text; font-size: Theme.tokens.typography.body; font-weight: root.checked ? 650 : 500; color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled; }
     }
     if root.checked : Rectangle { x: 8px; y: parent.height - 3px; width: parent.width - 16px; height: 2px; border-radius: 1px; background: Theme.palette().accent; }
     touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
@@ -303,16 +308,26 @@ export component SegmentedControl inherits Rectangle {
         spacing: 2px;
         padding: 2px;
         for item[idx] in root.items : Rectangle {
-            width: 0px;
-            horizontal-stretch: 1;
+            // Give every option a deterministic share of the control. A
+            // stretch-only child with no preferred width can collapse to zero
+            // in a toolbar layout, leaving later labels painted outside the
+            // segmented surface.
+            width: root.items.length > 0 ? max(0px, (root.width - 4px) / root.items.length) : 0px;
+            preferred-width: root.items.length > 0 ? max(0px, (root.width - 4px) / root.items.length) : 0px;
+            horizontal-stretch: 0;
             border-radius: 4px;
             background: touch.pressed || idx == root.current ? Theme.palette().surface : transparent;
             border-width: 1px;
             border-color: idx == root.current ? Theme.palette().accent : transparent;
             Text {
                 text: item;
+                x: 4px;
+                width: max(0px, parent.width - 8px);
                 font-size: Theme.tokens.typography.caption;
                 color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
             }
             touch := TouchArea {
                 enabled: root.enabled;
@@ -903,7 +918,14 @@ export component InspectorSection inherits Rectangle {
 export component StatusPill inherits Rectangle {
     in property <string> text: "Local";
     in property <int> tone: 0;
-    min-width: 48px;
+    in property <length> max-content-width: 320px;
+    // Intrinsic sizing keeps short status labels balanced, but long diagnostic
+    // text must never force a narrow sidebar wider than its parent.  Callers
+    // with a constrained panel pass its available content width; the label
+    // elides once the cap is reached.
+    min-width: max(48px, min(measure-label.preferred-width + 16px, root.max-content-width));
+    preferred-width: max(48px, min(measure-label.preferred-width + 16px, root.max-content-width));
+    max-width: root.max-content-width;
     height: 22px;
     border-radius: 11px;
     border-width: 1px;
@@ -916,8 +938,17 @@ export component StatusPill inherits Rectangle {
         : root.tone == 4 ? Theme.palette().danger-surface
         : Theme.palette().surface-sunken;
 
-    Text {
+    // Keep intrinsic measurement independent from the constrained visible
+    // label; otherwise `preferred-width` can feed back into `root.width`.
+    measure-label := Text {
         text: root.text;
+        visible: false;
+    }
+
+    pill-label := Text {
+        text: root.text;
+        x: 8px;
+        width: max(0px, root.width - 16px);
         font-size: Theme.tokens.typography.caption;
         font-weight: 600;
         color: root.tone == 1 ? Theme.palette().accent
@@ -927,6 +958,7 @@ export component StatusPill inherits Rectangle {
             : Theme.palette().ink-secondary;
         horizontal-alignment: center;
         vertical-alignment: center;
+        overflow: elide;
     }
 }
 
@@ -957,13 +989,13 @@ export component AppHeader inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 1px;
-                Text { text: root.document-title; font-size: Theme.tokens.typography.title; font-weight: 650; color: Theme.palette().ink; }
-                Text { text: root.app-name; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-secondary; }
+                Text { text: root.document-title; font-size: Theme.tokens.typography.title; font-weight: 650; color: Theme.palette().ink; overflow: elide; }
+                Text { text: root.app-name; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-secondary; overflow: elide; }
             }
             Rectangle { horizontal-stretch: 1; background: transparent; }
             if root.context != "" : Rectangle {
-                height: 28px; min-width: 96px; border-radius: 8px; background: Theme.palette().surface-sunken; border-width: 1px; border-color: Theme.palette().border;
-                Text { text: root.context; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                height: 28px; min-width: 96px; max-width: 280px; border-radius: 8px; background: Theme.palette().surface-sunken; border-width: 1px; border-color: Theme.palette().border;
+                Text { text: root.context; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
             }
             StatusPill { text: root.state-text; tone: root.state-tone; }
         }
@@ -982,9 +1014,9 @@ export component PanelHeader inherits Rectangle {
     HorizontalLayout {
         spacing: 8px; padding-left: 12px; padding-right: 10px; cross-axis-alignment: center;
         Rectangle { width: 3px; height: 14px; border-radius: 2px; background: Theme.palette().accent; }
-        Text { text: root.title; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink; }
+        Text { text: root.title; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink; overflow: elide; }
         Rectangle { horizontal-stretch: 1; background: transparent; }
-        if root.detail != "" : Text { text: root.detail; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().ink-disabled; }
+        if root.detail != "" : Text { text: root.detail; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().ink-disabled; max-width: 160px; overflow: elide; }
     }
     Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Theme.palette().border; }
 }
@@ -1034,7 +1066,7 @@ export component WorkspaceToolbar inherits Rectangle {
     background: Theme.palette().chrome;
     VerticalLayout {
         spacing: 0px;
-        HorizontalLayout { spacing: 5px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center; @children }
+        HorizontalLayout { spacing: 4px; padding-left: 8px; padding-right: 8px; cross-axis-alignment: center; @children }
         Rectangle { height: 1px; background: Theme.palette().border; }
     }
 }
@@ -1044,6 +1076,8 @@ export component WorkspaceToolbar inherits Rectangle {
 export component SidebarSurface inherits Rectangle {
     in property <string> title: "";
     in property <string> detail: "";
+    min-width: 200px;
+    max-width: 360px;
     background: Theme.palette().panel;
     border-width: 0px;
     VerticalLayout { spacing: 0px; PanelHeader { title: root.title; detail: root.detail; } @children }
@@ -1054,6 +1088,8 @@ export component SidebarSurface inherits Rectangle {
 export component InspectorSurface inherits Rectangle {
     in property <string> title: "Inspector";
     in property <string> detail: "";
+    min-width: 240px;
+    max-width: 360px;
     background: Theme.palette().panel;
     border-width: 0px;
     VerticalLayout { spacing: 0px; PanelHeader { title: root.title; detail: root.detail; } @children }
@@ -1139,7 +1175,9 @@ export component PaneTabs inherits Rectangle {
 export component MetricChip inherits Rectangle {
     in property <string> label: "";
     in property <string> value: "";
-    min-width: 76px;
+    // Keep timecode/format readouts legible when a toolbar is constrained.
+    min-width: max(76px, metric-label.preferred-width + metric-value.preferred-width + 21px);
+    preferred-width: max(76px, metric-label.preferred-width + metric-value.preferred-width + 21px);
     height: 28px;
     border-radius: 7px;
     border-width: 1px;
@@ -1149,8 +1187,8 @@ export component MetricChip inherits Rectangle {
         spacing: 5px;
         padding-left: 8px;
         padding-right: 8px;
-        Text { text: root.label; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; vertical-alignment: center; }
-        Text { text: root.value; font-size: Theme.tokens.typography.caption; font-weight: 650; color: Theme.palette().ink; vertical-alignment: center; }
+        metric-label := Text { text: root.label; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; vertical-alignment: center; }
+        metric-value := Text { text: root.value; font-size: Theme.tokens.typography.caption; font-weight: 650; color: Theme.palette().ink; vertical-alignment: center; }
     }
 }
 
@@ -1231,11 +1269,22 @@ export component CommandPalette inherits Rectangle {
         x: (parent.width - Math.min(560px, parent.width - 48px)) / 2;
         y: Math.max(64px, parent.height / 5);
         width: Math.min(560px, parent.width - 48px);
-        height: Math.min(430px, parent.height - 140px);
+        // Size the palette to its useful content while keeping a bounded
+        // viewport for large command sets. A fixed 430px body made a single
+        // result look lost in a large empty modal; the floor leaves room for
+        // the search row and one command, and the cap preserves scrolling.
+        height: Math.min(
+            430px,
+            Math.min(parent.height - 140px, Math.max(136px, 102px + root.commands.length * 34px))
+        );
         border-radius: 12px;
         border-width: 1px;
         border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
         background: Theme.palette().surface-raised;
+        // Keep a long command list inside the modal surface. The previous
+        // layout let repeated rows expand past this fixed-height panel and
+        // paint over the workspace below it.
+        clip: true;
         accessible-role: list;
         accessible-label: "Command palette";
 
@@ -1294,55 +1343,84 @@ export component CommandPalette inherits Rectangle {
                 background: Theme.palette().border;
             }
 
-            Rectangle {
+            list-viewport := Rectangle {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
+                min-height: 1px;
+                preferred-height: 100%;
                 clip: true;
                 border-radius: 6px;
 
-                VerticalLayout {
+                Flickable {
+                    // The list owns the viewport, while the repeated rows
+                    // remain a fixed-height content surface. Keyboard moves
+                    // update `selected`; this offset keeps that row visible.
                     width: parent.width;
-                    for item[idx] in root.commands : Rectangle {
-                        height: 34px;
-                        border-radius: 6px;
-                        background: idx == root.selected ? Theme.palette().selection-soft
-                            : row-touch.has-hover ? Theme.palette().surface-sunken : transparent;
-                        border-width: 1px;
-                        border-color: idx == root.selected ? Theme.palette().accent : transparent;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            Text {
-                                horizontal-stretch: 1;
-                                text: item.label;
-                                font-size: Theme.tokens.typography.body;
-                                color: item.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-                                vertical-alignment: center;
-                                overflow: clip;
+                    height: parent.height;
+                    preferred-height: 100%;
+                    viewport-width: parent.width;
+                    viewport-height: Math.max(parent.height, root.commands.length * 34px);
+                    viewport-y: -Math.min(
+                        Math.max(0px, Math.max(0, root.selected) * 34px - (parent.height - 34px)),
+                        Math.max(0px, root.commands.length * 34px - parent.height)
+                    );
+
+                    VerticalLayout {
+                        width: parent.width;
+                        height: root.commands.length * 34px;
+                        for item[idx] in root.commands : Rectangle {
+                            height: 34px;
+                            border-radius: 6px;
+                            background: idx == root.selected ? Theme.palette().selection-soft
+                                : row-touch.has-hover ? Theme.palette().surface-sunken : transparent;
+                            border-width: 1px;
+                            border-color: idx == root.selected ? Theme.palette().accent : transparent;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: item.label;
+                                    font-size: Theme.tokens.typography.body;
+                                    color: item.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: item.shortcut;
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
                             }
-                            Text {
-                                text: item.shortcut;
-                                font-size: Theme.tokens.typography.caption;
-                                color: Theme.palette().ink-secondary;
-                                vertical-alignment: center;
+                            row-touch := TouchArea {
+                                clicked => {
+                                    focus-scope.focus();
+                                    root.selected = idx;
+                                    if (item.enabled) { root.command-invoked(idx); }
+                                }
                             }
-                        }
-                        row-touch := TouchArea {
-                            clicked => {
+                            accessible-role: button;
+                            accessible-label: item.label;
+                            accessible-action-default => {
                                 focus-scope.focus();
                                 root.selected = idx;
                                 if (item.enabled) { root.command-invoked(idx); }
                             }
                         }
-                        accessible-role: button;
-                        accessible-label: item.label;
-                        accessible-action-default => {
-                            focus-scope.focus();
-                            root.selected = idx;
-                            if (item.enabled) { root.command-invoked(idx); }
-                        }
                     }
+                }
+
+                // A slim, non-interactive rail makes the clipped list's
+                // scrollable state discoverable without stealing row clicks.
+                if root.commands.length * 34px > parent.height : Rectangle {
+                    x: parent.width - 3px;
+                    y: 4px;
+                    width: 2px;
+                    height: parent.height - 8px;
+                    border-radius: 1px;
+                    background: Theme.palette().border;
                 }
             }
         }
