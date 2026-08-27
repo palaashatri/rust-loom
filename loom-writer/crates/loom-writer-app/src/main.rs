@@ -38,6 +38,7 @@ const HISTORY_MAX_ENTRIES: usize = 128;
 const HISTORY_MAX_BYTES: usize = 8 * 1024 * 1024;
 const TYPING_COALESCE_WINDOW_MS: u64 = 750;
 
+#[derive(Debug)]
 struct Args {
     #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     screenshot: Option<String>,
@@ -48,9 +49,18 @@ struct Args {
     size: (u32, u32),
     theme: String,
     open: Option<String>,
+    template: Option<TemplateId>,
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from<I, S>(raw_args: I) -> Result<Args, String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
     let mut args = Args {
         screenshot: None,
         smoke: false,
@@ -59,8 +69,9 @@ fn parse_args() -> Result<Args, String> {
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
         open: None,
+        template: None,
     };
-    let mut it = std::env::args().skip(1);
+    let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--screenshot" => {
@@ -105,6 +116,12 @@ fn parse_args() -> Result<Args, String> {
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
             }
+            "--template" => {
+                let value = it.next().ok_or("--template needs an id")?;
+                args.template = Some(parse_template_id(&value).ok_or_else(|| {
+                    format!("unknown template: {value} (expected blank, report, letter, or cv)")
+                })?);
+            }
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
             }
@@ -115,8 +132,111 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TemplateId {
+    Blank,
+    Report,
+    Letter,
+    Cv,
+}
+
+impl TemplateId {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Blank => "blank",
+            Self::Report => "report",
+            Self::Letter => "letter",
+            Self::Cv => "cv",
+        }
+    }
+}
+
+fn parse_template_id(value: &str) -> Option<TemplateId> {
+    match value {
+        "blank" => Some(TemplateId::Blank),
+        "report" => Some(TemplateId::Report),
+        "letter" => Some(TemplateId::Letter),
+        "cv" => Some(TemplateId::Cv),
+        _ => None,
+    }
+}
+
+fn template_document(template: TemplateId) -> WriterDocument {
+    let (id, title) = (
+        format!("template-{}", template.as_str()),
+        match template {
+            TemplateId::Blank => "Untitled Document",
+            TemplateId::Report => "Untitled Report",
+            TemplateId::Letter => "Untitled Letter",
+            TemplateId::Cv => "Untitled CV",
+        },
+    );
+    let mut document = WriterDocument::new(id, title);
+    match template {
+        TemplateId::Blank => {}
+        TemplateId::Report => {
+            document.push(RichBlock::new(
+                document.next_id(),
+                "heading1",
+                "Report Title",
+            ));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Executive summary",
+            ));
+            document.push(RichBlock::new(document.next_id(), "heading2", "Overview"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Start writing your report here.",
+            ));
+        }
+        TemplateId::Letter => {
+            document.push(RichBlock::new(document.next_id(), "paragraph", "Your Name"));
+            document.push(RichBlock::new(document.next_id(), "paragraph", "Date"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Dear Recipient,",
+            ));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Write your letter here.",
+            ));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Sincerely,",
+            ));
+        }
+        TemplateId::Cv => {
+            document.push(RichBlock::new(document.next_id(), "heading1", "Your Name"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Professional title · email@example.com",
+            ));
+            document.push(RichBlock::new(document.next_id(), "heading2", "Experience"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Role — Company · 2020–Present",
+            ));
+            document.push(RichBlock::new(document.next_id(), "heading2", "Education"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Degree — Institution",
+            ));
+        }
+    }
+    document
+}
+
 fn blank_document() -> WriterDocument {
-    WriterDocument::new("untitled", "Untitled Document")
+    template_document(TemplateId::Blank)
 }
 
 /// A sample document used by `--smoke`, screenshots, and first launch.
@@ -646,7 +766,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     apply_theme(&app, &args.theme);
     let doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
-        None => sample_document(),
+        None => args
+            .template
+            .map(template_document)
+            .unwrap_or_else(sample_document),
     };
     apply_document(&app, &doc);
     if args.palette {
@@ -688,7 +811,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         } else {
             match &args.open {
                 Some(p) => load_file(Path::new(p))?,
-                None => sample_document(),
+                None => args
+                    .template
+                    .map(template_document)
+                    .unwrap_or_else(sample_document),
             }
         }),
         save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
@@ -701,15 +827,64 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     });
 
     {
-        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_new_doc(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.current.borrow_mut() = blank_document();
+                // Opening New must not mutate the current document until the
+                // user confirms a real template seed in the chooser.
+                app.set_template_selected(0);
+                app.set_template_chooser_open(true);
+                app.set_status_left("Choose a document template".into());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_create_template(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let template = match index {
+                    1 => TemplateId::Report,
+                    2 => TemplateId::Letter,
+                    3 => TemplateId::Cv,
+                    _ => TemplateId::Blank,
+                };
+                *state.current.borrow_mut() = if template == TemplateId::Blank {
+                    blank_document()
+                } else {
+                    template_document(template)
+                };
                 *state.save_path.borrow_mut() = None;
                 *state.history.borrow_mut() = EditorHistory::new();
+                app.set_template_chooser_open(false);
                 apply_state(&app, &state);
-                app.set_status_left("Created unsaved document".into());
+                app.set_status_left(SharedString::from(format!(
+                    "Created {} document",
+                    match template {
+                        TemplateId::Blank => "blank",
+                        TemplateId::Report => "report",
+                        TemplateId::Letter => "letter",
+                        TemplateId::Cv => "CV",
+                    }
+                )));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_cancel_template(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_template_chooser_open(false);
+                app.set_status_left("New document cancelled".into());
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_inspector(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let visible = app.get_show_inspector();
+                app.set_show_inspector(!visible);
             }
         });
     }
@@ -959,7 +1134,10 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     apply_theme(&app, &args.theme);
     let doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
-        None => sample_document(),
+        None => args
+            .template
+            .map(template_document)
+            .unwrap_or_else(sample_document),
     };
     apply_document(&app, &doc);
     wire_palette(&app);
@@ -1247,5 +1425,81 @@ mod tests {
 
         assert!(app.get_wide_toolbar());
         assert!(app.get_labeled_export());
+    }
+
+    #[test]
+    fn template_chooser_renders_at_reference_width() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        apply_theme(&app, "dark");
+        apply_layout_breakpoints(&app, 1440);
+        app.set_template_selected(2);
+        app.set_template_chooser_open(true);
+        let image = snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render chooser");
+        assert_eq!(image.width(), 1440);
+        assert_eq!(image.height(), 900);
+    }
+
+    #[test]
+    fn template_ids_are_stable_and_seed_real_documents() {
+        let cases = [
+            (TemplateId::Blank, "blank", "Untitled Document"),
+            (TemplateId::Report, "report", "Untitled Report"),
+            (TemplateId::Letter, "letter", "Untitled Letter"),
+            (TemplateId::Cv, "cv", "Untitled CV"),
+        ];
+
+        for (template, id, title) in cases {
+            assert_eq!(template.as_str(), id);
+            let document = template_document(template);
+            assert_eq!(document.id, format!("template-{id}"));
+            assert_eq!(document.title, title);
+            if template == TemplateId::Blank {
+                assert!(document.blocks.is_empty());
+            } else {
+                assert!(!document.blocks.is_empty());
+                assert!(document
+                    .blocks
+                    .iter()
+                    .any(|block| !block.text.as_str().trim().is_empty()));
+            }
+        }
+    }
+
+    #[test]
+    fn template_id_parser_accepts_stable_names_only() {
+        assert_eq!(parse_template_id("blank"), Some(TemplateId::Blank));
+        assert_eq!(parse_template_id("report"), Some(TemplateId::Report));
+        assert_eq!(parse_template_id("letter"), Some(TemplateId::Letter));
+        assert_eq!(parse_template_id("cv"), Some(TemplateId::Cv));
+        assert_eq!(parse_template_id("CV"), None);
+        assert_eq!(parse_template_id("memo"), None);
+    }
+
+    #[test]
+    #[cfg(feature = "visual-qa")]
+    fn parse_args_accepts_template_without_changing_existing_flags() {
+        let args = parse_args_from([
+            "--template",
+            "report",
+            "--screenshot",
+            "/tmp/writer-template.png",
+            "--theme",
+            "dark",
+            "--size",
+            "1440x900",
+        ])
+        .expect("parse template screenshot arguments");
+
+        assert_eq!(args.template, Some(TemplateId::Report));
+        assert_eq!(args.screenshot.as_deref(), Some("/tmp/writer-template.png"));
+        assert_eq!(args.theme, "dark");
+        assert_eq!(args.size, (1440, 900));
+    }
+
+    #[test]
+    fn parse_args_rejects_unknown_template_id() {
+        let error = parse_args_from(["--template", "memo"]).expect_err("unknown template");
+        assert!(error.contains("unknown template"));
     }
 }
