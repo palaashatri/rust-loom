@@ -748,7 +748,10 @@ fn apply_theme(app: &WriterApp, theme: &str) {
 }
 
 fn layout_breakpoints(width: u32) -> (bool, bool) {
-    (width >= 1320, width >= 1180)
+    // Keep the named action rail clear of the centered title until there is
+    // enough room for both rails. The reference-sized 1317px workspace stays
+    // labeled, while medium 1180-1279px windows use the compact icon rail.
+    (width >= 1320, width >= 1280)
 }
 
 fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
@@ -1414,8 +1417,10 @@ mod tests {
     fn layout_breakpoints_match_supported_width_boundaries() {
         assert_eq!(layout_breakpoints(1024), (false, false));
         assert_eq!(layout_breakpoints(1179), (false, false));
-        assert_eq!(layout_breakpoints(1180), (false, true));
-        assert_eq!(layout_breakpoints(1199), (false, true));
+        assert_eq!(layout_breakpoints(1180), (false, false));
+        assert_eq!(layout_breakpoints(1240), (false, false));
+        assert_eq!(layout_breakpoints(1279), (false, false));
+        assert_eq!(layout_breakpoints(1280), (false, true));
         assert_eq!(layout_breakpoints(1319), (false, true));
         assert_eq!(layout_breakpoints(1320), (true, true));
         assert_eq!(layout_breakpoints(1440), (true, true));
