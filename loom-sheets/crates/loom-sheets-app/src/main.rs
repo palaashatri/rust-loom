@@ -688,7 +688,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_create_template(move |idx| {
             if let Some(app) = app_ref.upgrade() {
-                let mut sheet = match idx {
+                let sheet = match idx {
                     1 => {
                         let mut s = Sheet::new("Monthly Budget");
                         s.set_str("A1", "Category");

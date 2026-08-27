@@ -2,7 +2,7 @@
 
 mod audio_io;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
@@ -209,6 +209,7 @@ struct GuiState {
     dialogs: Rc<dyn FileDialogService>,
     audio: RefCell<Option<AudioIo>>,
     midi_status: RefCell<String>,
+    metronome_enabled: Cell<bool>,
 }
 
 fn studio_filter() -> FileFilter {
@@ -371,6 +372,7 @@ fn refresh(app: &StudioApp, state: &GuiState) {
     app.set_duration_seconds(project.duration_samples() as f32 / project.sample_rate.max(1) as f32);
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
+    app.set_metronome_on(state.metronome_enabled.get());
 
     let audio = state.audio.borrow();
     if let Some(audio) = audio.as_ref() {
@@ -444,6 +446,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         dialogs: Rc::new(NativeFileDialogs),
         audio: RefCell::new(None),
         midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
+        metronome_enabled: Cell::new(true),
     };
     refresh(&app, &state);
     if args.palette {
@@ -473,6 +476,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         dialogs: Rc::new(NativeFileDialogs),
         audio: RefCell::new(None),
         midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
+        metronome_enabled: Cell::new(true),
     };
     refresh(&app, &state);
     let menu_bar = build_standard_menu_bar(
@@ -914,7 +918,24 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
             }
         });
     }
-    app.on_toggle_metronome(|| {});
+    {
+        let state = state.clone();
+        let weak = app.as_weak();
+        app.on_toggle_metronome(move || {
+            if let Some(app) = weak.upgrade() {
+                let next = !state.metronome_enabled.get();
+                state.metronome_enabled.set(next);
+                app.set_metronome_on(next);
+                app.set_status_left(
+                    if next {
+                        "Metronome enabled".into()
+                    } else {
+                        "Metronome disabled".into()
+                    },
+                );
+            }
+        });
+    }
     {
         let state = state.clone();
         app.on_seek(move |seconds| {
@@ -1207,6 +1228,7 @@ fn main() -> Result<(), String> {
         } else {
             "MIDI input available".into()
         }),
+        metronome_enabled: Cell::new(true),
     });
 
     wire_application(&app, state.clone());
@@ -1567,10 +1589,27 @@ mod tests {
             dialogs: Rc::new(scripted),
             audio: RefCell::new(None),
             midi_status: RefCell::new("Test MIDI harness".into()),
+            metronome_enabled: Cell::new(true),
         });
         wire_application(&app, state.clone());
         refresh(&app, &state);
         (app, state)
+    }
+
+    #[test]
+    fn toggle_metronome_updates_state_and_ui() {
+        let scripted = ScriptedFileDialogs::default();
+        let (app, state) = test_app_and_state(scripted);
+        assert!(state.metronome_enabled.get());
+        assert!(app.get_metronome_on());
+
+        app.invoke_toggle_metronome();
+        assert!(!state.metronome_enabled.get());
+        assert!(!app.get_metronome_on());
+
+        app.invoke_toggle_metronome();
+        assert!(state.metronome_enabled.get());
+        assert!(app.get_metronome_on());
     }
 
     #[test]

@@ -293,7 +293,7 @@ export component SheetsApp inherits Window {
                     ToolbarIconButton {
                         icon: "plus";
                         label: "Add sheet";
-                        clicked => { }
+                        enabled: false;
                     }
 
                     ToolbarSpacer { }
@@ -319,20 +319,20 @@ export component SheetsApp inherits Window {
 
                 // Numbers-style center tools: Table, Pivot, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: "Table"; clicked => { } }
-                    AppleToolbarItem { icon: "grid"; label: "Pivot Table"; clicked => { } }
-                    AppleToolbarItem { icon: "chart"; label: "Chart"; clicked => { } }
-                    AppleToolbarItem { icon: "text"; label: "Text"; clicked => { } }
-                    AppleToolbarItem { icon: "shape"; label: "Shape"; clicked => { } }
-                    AppleToolbarItem { icon: "image"; label: "Media"; clicked => { } }
-                    AppleToolbarItem { icon: "comment"; label: "Comment"; clicked => { } }
+                    AppleToolbarItem { icon: "table"; label: "Table"; enabled: false; }
+                    AppleToolbarItem { icon: "grid"; label: "Pivot Table"; enabled: false; }
+                    AppleToolbarItem { icon: "chart"; label: "Chart"; enabled: false; }
+                    AppleToolbarItem { icon: "text"; label: "Text"; enabled: false; }
+                    AppleToolbarItem { icon: "shape"; label: "Shape"; enabled: false; }
+                    AppleToolbarItem { icon: "image"; label: "Media"; enabled: false; }
+                    AppleToolbarItem { icon: "comment"; label: "Comment"; enabled: false; }
                 }
 
                 ToolbarSpacer { }
 
                 // Right tools: Share, Format, Organize, Export
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "share"; label: "Share"; clicked => { } }
+                    AppleToolbarItem { icon: "share"; label: "Share"; enabled: false; }
                     AppleToolbarItem {
                         icon: "format";
                         label: "Format";
@@ -342,7 +342,7 @@ export component SheetsApp inherits Window {
                     AppleToolbarItem {
                         icon: "organize";
                         label: "Organize";
-                        clicked => { }
+                        enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "export";
@@ -711,9 +711,9 @@ export component SheetsApp inherits Window {
                                 label: "Style";
                                 HorizontalLayout {
                                     spacing: 4px;
-                                    ToolbarIconButton { icon: "bold"; label: "Bold"; clicked => { } }
-                                    ToolbarIconButton { icon: "italic"; label: "Italic"; clicked => { } }
-                                    ToolbarIconButton { icon: "underline"; label: "Underline"; clicked => { } }
+                                    ToolbarIconButton { icon: "bold"; label: "Bold"; enabled: false; }
+                                    ToolbarIconButton { icon: "italic"; label: "Italic"; enabled: false; }
+                                    ToolbarIconButton { icon: "underline"; label: "Underline"; enabled: false; }
                                 }
                             }
 
@@ -748,7 +748,7 @@ export component SheetsApp inherits Window {
                                 HorizontalLayout {
                                     spacing: 4px;
                                     TextField { label: "Row Height"; value: "28 pt"; enabled: false; }
-                                    ToolbarButton { label: "Fit"; clicked => { } }
+                                    ToolbarButton { label: "Fit"; enabled: false; }
                                 }
                             }
                             PropertyRow {
@@ -756,7 +756,7 @@ export component SheetsApp inherits Window {
                                 HorizontalLayout {
                                     spacing: 4px;
                                     TextField { label: "Column Width"; value: "96 pt"; enabled: false; }
-                                    ToolbarButton { label: "Fit"; clicked => { } }
+                                    ToolbarButton { label: "Fit"; enabled: false; }
                                 }
                             }
                         }

@@ -338,12 +338,12 @@ export component PresentApp inherits Window {
 
                 // Keynote-style center insert group: Table, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: "Table"; clicked => { } }
-                    AppleToolbarItem { icon: "chart"; label: "Chart"; clicked => { } }
+                    AppleToolbarItem { icon: "table"; label: "Table"; enabled: false; }
+                    AppleToolbarItem { icon: "chart"; label: "Chart"; enabled: false; }
                     AppleToolbarItem { icon: "text"; label: "Text"; clicked => { root.add-text(); } }
                     AppleToolbarItem { icon: "shape"; label: "Shape"; clicked => { root.add-shape(); } }
-                    AppleToolbarItem { icon: "image"; label: "Media"; clicked => { } }
-                    AppleToolbarItem { icon: "comment"; label: "Comment"; clicked => { } }
+                    AppleToolbarItem { icon: "image"; label: "Media"; enabled: false; }
+                    AppleToolbarItem { icon: "comment"; label: "Comment"; enabled: false; }
                 }
 
                 ToolbarSpacer { }
@@ -364,7 +364,7 @@ export component PresentApp inherits Window {
                     AppleToolbarItem {
                         icon: "share";
                         label: "Share";
-                        clicked => { }
+                        enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "export";

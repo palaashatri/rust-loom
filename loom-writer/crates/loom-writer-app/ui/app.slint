@@ -359,19 +359,19 @@ export component WriterApp inherits Window {
 
                 // Center group: Table, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: "Table"; clicked => { } }
-                    AppleToolbarItem { icon: "chart"; label: "Chart"; clicked => { } }
-                    AppleToolbarItem { icon: "text"; label: "Text"; clicked => { } }
-                    AppleToolbarItem { icon: "shape"; label: "Shape"; clicked => { } }
-                    AppleToolbarItem { icon: "image"; label: "Media"; clicked => { } }
-                    AppleToolbarItem { icon: "comment"; label: "Comment"; clicked => { } }
+                    AppleToolbarItem { icon: "table"; label: "Table"; enabled: false; }
+                    AppleToolbarItem { icon: "chart"; label: "Chart"; enabled: false; }
+                    AppleToolbarItem { icon: "text"; label: "Text"; enabled: false; }
+                    AppleToolbarItem { icon: "shape"; label: "Shape"; enabled: false; }
+                    AppleToolbarItem { icon: "image"; label: "Media"; enabled: false; }
+                    AppleToolbarItem { icon: "comment"; label: "Comment"; enabled: false; }
                 }
 
                 ToolbarSpacer { }
 
                 // Right group: Share, Format, Document / Export
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "share"; label: "Share"; clicked => { } }
+                    AppleToolbarItem { icon: "share"; label: "Share"; enabled: false; }
                     AppleToolbarItem {
                         icon: "format";
                         label: "Format";
@@ -515,7 +515,7 @@ export component WriterApp inherits Window {
                                     icon: "strikethrough";
                                     label: "Strikethrough";
                                     checked: false;
-                                    clicked => { }
+                                    enabled: false;
                                 }
                             }
                         }
@@ -537,12 +537,12 @@ export component WriterApp inherits Window {
                                 ToolbarIconButton {
                                     icon: "outdent";
                                     label: "Decrease indent";
-                                    clicked => { }
+                                    enabled: false;
                                 }
                                 ToolbarIconButton {
                                     icon: "indent";
                                     label: "Increase indent";
-                                    clicked => { }
+                                    enabled: false;
                                 }
                             }
                         }
