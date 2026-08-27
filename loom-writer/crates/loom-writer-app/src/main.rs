@@ -1450,6 +1450,24 @@ mod tests {
 
     #[test]
     #[cfg(feature = "visual-qa")]
+    fn writer_action_rail_is_one_row_before_the_canvas() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        apply_theme(&app, "dark");
+        apply_layout_breakpoints(&app, 1317);
+        let image = snapshot_component(&app, 1317.0, 1182.0, 1.0).expect("render action rail");
+
+        // The old title bar + toolbar occupied 80px. A single 64px action
+        // rail leaves the surrounding canvas visible at y=72.
+        assert_eq!(
+            image.get_pixel(24, 72),
+            image.get_pixel(24, 100),
+            "the canvas should begin directly below the single action rail"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "visual-qa")]
     fn template_category_filters_visible_cards() {
         set_platform();
         let app = WriterApp::new().expect("create WriterApp");

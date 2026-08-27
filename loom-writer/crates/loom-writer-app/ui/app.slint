@@ -178,6 +178,42 @@ component WriterTextInput inherits Rectangle {
     }
 }
 
+/// A Pages-inspired rail action that keeps the toolkit's real button
+/// semantics while collapsing to an icon-only target when the window is
+/// narrower than the comfortable label width. The narrow variant retains the
+/// full accessible label, so unsupported actions stay honest even when their
+/// visible label is hidden.
+component WriterRailAction inherits Rectangle {
+    in property <string> icon: "generic";
+    in property <string> label: "Action";
+    in property <bool> enabled: true;
+    in property <bool> checked: false;
+    in property <bool> show-label: false;
+    in property <length> labeled-width: 80px;
+    callback clicked;
+
+    width: root.show-label ? root.labeled-width : Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
+    background: transparent;
+
+    if root.show-label : ToolbarButton {
+        width: root.width;
+        icon: root.icon;
+        label: root.label;
+        enabled: root.enabled;
+        checked: root.checked;
+        clicked => { root.clicked(); }
+    }
+    if !root.show-label : ToolbarIconButton {
+        width: root.width;
+        icon: root.icon;
+        label: root.label;
+        enabled: root.enabled;
+        checked: root.checked;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component WriterApp inherits Window {
     title: "Loom Writer";
     min-width: 1024px;
@@ -321,51 +357,210 @@ export component WriterApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
-            // Graphite title bar with a genuinely centered document title.
-            // The side slots reserve only chrome actions, so the title remains
-            // centered at every supported window width.
+            // One 64px Pages-style action rail. Utility document actions stay
+            // compact on the left, while the named workspace actions are
+            // grouped around a title slot that is always mathematically
+            // centered. Labels collapse below 1180px; the icon variants keep
+            // their full accessible labels and truthful disabled state.
             Rectangle {
-                height: Theme.tokens.metrics.header-height;
+                height: 64px;
                 background: Theme.palette().chrome;
+
                 HorizontalLayout {
                     spacing: 8px;
-                    padding-left: 14px;
-                    padding-right: 14px;
+                    padding-left: 12px;
+                    padding-right: 12px;
                     cross-axis-alignment: center;
-                    Rectangle {
-                        width: 184px;
+
+                    left-rail := Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+
                         HorizontalLayout {
-                            spacing: 8px;
-                            Icon { icon: "document"; size: 18px; tint: Theme.palette().accent; }
-                            Text {
-                                text: "Writer";
-                                font-size: Theme.tokens.typography.title;
-                                font-weight: 650;
-                                color: Theme.palette().ink-secondary;
-                                vertical-alignment: center;
+                            spacing: 4px;
+                            cross-axis-alignment: center;
+
+                            ToolbarGroup {
+                                background: Theme.palette().surface;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+
+                                ToolbarIconButton { icon: "new"; label: "New document"; clicked => { root.new-doc(); } }
+                                ToolbarIconButton { icon: "open"; label: "Open document"; clicked => { root.open-doc(); } }
+                                ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-doc(); } }
+                                ToolbarIconButton { icon: "save-as"; label: "Save document as"; clicked => { root.save-as-doc(); } }
+                            }
+
+                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
+
+                            ToolbarGroup {
+                                background: Theme.palette().surface;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+
+                                WriterRailAction {
+                                    icon: root.show-inspector ? "eye" : "eye-off";
+                                    label: "View";
+                                    enabled: true;
+                                    checked: root.show-inspector;
+                                    show-label: root.labeled-export;
+                                    labeled-width: 76px;
+                                    clicked => { root.toggle-inspector(); }
+                                }
+
+                                if root.labeled-export : Text {
+                                    text: "Zoom";
+                                    width: 34px;
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink-secondary;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); } }
+                                Text {
+                                    text: Math.round(root.zoom-value) + "%";
+                                    min-width: 44px;
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 500;
+                                    color: Theme.palette().ink-secondary;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                ToolbarIconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); } }
+                            }
+
+                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
+
+                            WriterRailAction {
+                                icon: "plus";
+                                label: "Add Page (unavailable in this document)";
+                                enabled: false;
+                                show-label: false;
+                                clicked => { }
                             }
                         }
                     }
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                    Rectangle {
-                        width: 184px;
+
+                    title-slot := Rectangle {
+                        width: 200px;
+                        background: transparent;
+                    }
+
+                    right-rail := Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+
                         HorizontalLayout {
                             spacing: 4px;
                             alignment: end;
-                            Text {
-                                text: "Local · Offline";
-                                font-size: Theme.tokens.typography.caption;
-                                color: Theme.palette().ink-secondary;
-                                vertical-alignment: center;
+                            cross-axis-alignment: center;
+
+                            ToolbarGroup {
+                                background: Theme.palette().surface;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+
+                                WriterRailAction {
+                                    icon: "plus";
+                                    label: "Insert (unavailable in this document)";
+                                    enabled: false;
+                                    show-label: false;
+                                    clicked => { }
+                                }
+                                WriterRailAction {
+                                    icon: "table";
+                                    label: "Table insertion (unavailable)";
+                                    enabled: false;
+                                    show-label: false;
+                                    clicked => { }
+                                }
+                                WriterRailAction {
+                                    icon: "text";
+                                    label: "Text box insertion (unavailable)";
+                                    enabled: false;
+                                    show-label: false;
+                                    clicked => { }
+                                }
+                                WriterRailAction {
+                                    icon: "image";
+                                    label: "Media insertion (unavailable)";
+                                    enabled: false;
+                                    show-label: false;
+                                    clicked => { }
+                                }
+                            }
+
+                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
+
+                            ToolbarGroup {
+                                background: Theme.palette().surface;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+
+                                WriterRailAction {
+                                    icon: "link";
+                                    label: "Share (unavailable offline)";
+                                    enabled: false;
+                                    show-label: false;
+                                    clicked => { }
+                                }
+                                WriterRailAction {
+                                    icon: "settings";
+                                    label: "Format";
+                                    enabled: true;
+                                    checked: root.show-inspector && root.inspector-tab == 0;
+                                    show-label: root.labeled-export;
+                                    labeled-width: 76px;
+                                    clicked => {
+                                        root.inspector-tab = 0;
+                                        if (!root.show-inspector) { root.toggle-inspector(); }
+                                    }
+                                }
+                                WriterRailAction {
+                                    icon: "document";
+                                    label: "Document";
+                                    enabled: true;
+                                    checked: root.show-inspector && root.inspector-tab == 1;
+                                    show-label: root.labeled-export;
+                                    labeled-width: 92px;
+                                    clicked => {
+                                        root.inspector-tab = 1;
+                                        if (!root.show-inspector) { root.toggle-inspector(); }
+                                    }
+                                }
+                            }
+
+                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
+
+                            ToolbarGroup {
+                                background: Theme.palette().surface;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+
+                                ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
+                                ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
+                                if root.labeled-export : ToolbarButton {
+                                    width: 132px;
+                                    icon: "export";
+                                    label: "Export PDF";
+                                    primary: true;
+                                    clicked => { root.export-pdf(); }
+                                }
+                                if !root.labeled-export : ToolbarIconButton {
+                                    icon: "export";
+                                    label: "Export PDF";
+                                    clicked => { root.export-pdf(); }
+                                }
                             }
                         }
                     }
                 }
+
                 title-overlay := Text {
                     x: (parent.width - self.width) / 2;
                     y: 0px;
-                    width: 320px;
+                    width: 200px;
                     height: parent.height;
                     text: root.doc-title;
                     font-size: Theme.tokens.typography.title;
@@ -375,59 +570,8 @@ export component WriterApp inherits Window {
                     vertical-alignment: center;
                     overflow: elide;
                 }
+
                 Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
-            }
-
-            Toolbar {
-                ToolbarGroup {
-                    ToolbarIconButton { icon: "new"; label: "New document"; clicked => { root.new-doc(); } }
-                    ToolbarIconButton { icon: "open"; label: "Open document"; clicked => { root.open-doc(); } }
-                    ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-doc(); } }
-                    ToolbarIconButton { icon: "save-as"; label: "Save document as"; clicked => { root.save-as-doc(); } }
-                }
-                ToolbarGroup {
-                    leading-separation: true;
-                    ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-                    ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-                }
-
-                ToolbarGroup {
-                    leading-separation: true;
-                    if root.wide-toolbar : ToolbarButton { icon: "text"; label: "Body"; checked: root.heading-level == 0; clicked => { root.select-heading(0); } }
-                    if root.wide-toolbar : ToolbarButton { label: "H1"; checked: root.heading-level == 1; clicked => { root.select-heading(1); } }
-                    if root.wide-toolbar : ToolbarButton { label: "H2"; checked: root.heading-level == 2; clicked => { root.select-heading(2); } }
-                    if !root.wide-toolbar : ToolbarIconButton { icon: "text"; label: "Body text"; checked: root.heading-level == 0; clicked => { root.select-heading(0); } }
-                    ToolbarIconButton { icon: "bold"; label: "Bold (all paragraphs)"; checked: root.is-bold; clicked => { root.is-bold = !root.is-bold; root.toggle-bold(); } }
-                    ToolbarIconButton { icon: "italic"; label: "Italic (all paragraphs)"; checked: root.is-italic; clicked => { root.is-italic = !root.is-italic; root.toggle-italic(); } }
-                    ToolbarIconButton { icon: "underline"; label: "Underline (all paragraphs)"; checked: root.is-underline; clicked => { root.is-underline = !root.is-underline; root.toggle-underline(); } }
-                    if root.wide-toolbar : ToolbarIconButton { icon: "align-left"; label: "Align left (all paragraphs)"; checked: root.text-alignment == 0; clicked => { root.select-alignment(0); } }
-                    if root.wide-toolbar : ToolbarIconButton { icon: "align-center"; label: "Align center (all paragraphs)"; checked: root.text-alignment == 1; clicked => { root.select-alignment(1); } }
-                    if root.wide-toolbar : ToolbarIconButton { icon: "align-right"; label: "Align right (all paragraphs)"; checked: root.text-alignment == 2; clicked => { root.select-alignment(2); } }
-                }
-
-                ToolbarSpacer { }
-
-                ToolbarGroup {
-                    ToolbarIconButton {
-                        icon: root.show-inspector ? "eye" : "eye-off";
-                        label: root.show-inspector ? "Hide inspector" : "Show inspector";
-                        checked: root.show-inspector;
-                        clicked => { root.toggle-inspector(); }
-                    }
-                    ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); } }
-                    Text {
-                        text: Math.round(root.zoom-value) + "%";
-                        min-width: 44px;
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 500;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    ToolbarIconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); } }
-                    if root.labeled-export : ToolbarButton { width: 132px; icon: "export"; label: "Export PDF"; primary: true; clicked => { root.export-pdf(); } }
-                    if !root.labeled-export : ToolbarIconButton { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-                }
             }
 
             HorizontalLayout {
