@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
     export_pdf, load_presentation_session, save_presentation_session, ElementType,
@@ -31,6 +32,7 @@ struct Args {
     size: (u32, u32),
     theme: String,
     open: Option<String>,
+    theme_chooser: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -42,6 +44,7 @@ fn parse_args() -> Result<Args, String> {
         size: DEFAULT_SIZE,
         theme: "dark".into(),
         open: None,
+        theme_chooser: false,
     };
     let mut iterator = std::env::args().skip(1);
     while let Some(argument) = iterator.next() {
@@ -67,6 +70,7 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--theme-chooser" => args.theme_chooser = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -313,6 +317,9 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         app.set_palette_selected(1);
         app.set_palette_open(true);
     }
+    if args.theme_chooser {
+        app.set_theme_chooser_open(true);
+    }
     let image = snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
         .map_err(|error| error.to_string())?;
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
@@ -425,6 +432,35 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             .map_err(|error| error.to_string())?,
         pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
     };
+    let menu_bar = build_standard_menu_bar(
+        "Loom Present",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_pdf",
+            "Export to PDF...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Format Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Slide",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "slide.new",
+                    "New Slide",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("slide.duplicate", "Duplicate Slide"),
+                MenuItem::action("slide.delete", "Delete Slide"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     refresh(&app, &state);
     wire_palette(&app);
     rebuild_palette(&app, "");
@@ -915,6 +951,73 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_inspector(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_show_inspector(!app.get_show_inspector());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_create_theme(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = empty_session();
+                session.document.title = match idx {
+                    1 => "Black Minimal".into(),
+                    2 => "Editorial Presentation".into(),
+                    3 => "Dynamic Accent Deck".into(),
+                    _ => "Untitled Deck".into(),
+                };
+                *state.session.borrow_mut() = session;
+                *state.save_path.borrow_mut() = None;
+                state.selected_element.set(0);
+                refresh(&app, &state);
+                app.set_theme_chooser_open(false);
+                set_status(&app, "Created presentation from theme");
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_cancel_theme(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_theme_chooser_open(false);
+            }
+        });
+    }
+
+    let menu_bar = build_standard_menu_bar(
+        "Loom Present",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_pdf",
+            "Export to PDF...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Format Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Slide",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "slide.new",
+                    "New Slide",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("slide.duplicate", "Duplicate Slide"),
+                MenuItem::action("slide.delete", "Delete Slide"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
 
     refresh(&app, &state);
     wire_palette(&app);

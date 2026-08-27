@@ -1,6 +1,6 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    ToolbarIconButton, ToolkitStatusBar, InspectorSurface, SectionHeader,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, InspectorSurface, SectionHeader,
     SegmentedControl, RangeSlider, PropertyRow, TabStrip, CanvasSurface
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
@@ -111,62 +111,55 @@ export component PhotoApp inherits Window {
             }
 
             Toolbar {
+                // Tool selection group
                 ToolbarGroup {
-                    ToolbarIconButton { icon: "new"; label: "New project"; clicked => { root.new-project(); } }
-                    ToolbarIconButton { icon: "open"; label: "Open project"; clicked => { root.open-project(); } }
-                    ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-project(); } }
-                    ToolbarIconButton { icon: "save-as"; label: "Save project as"; clicked => { root.save-as-project(); } }
-                    ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-                    ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-                }
-
-                ToolbarGroup {
-                    leading-separation: true;
-                    ToolbarButton { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
-                    ToolbarIconButton { icon: "wand"; label: "Add adjustment"; clicked => { root.add-adjustment(); } }
-                    ToolbarIconButton { icon: "import"; label: "Import image"; clicked => { root.import-image(); } }
+                    AppleToolbarItem {
+                        icon: "cursor";
+                        label: "Select";
+                        checked: root.active-tool == 0;
+                        clicked => { root.active-tool = 0; root.select-tool("select"); }
+                    }
+                    AppleToolbarItem {
+                        icon: "brush";
+                        label: "Brush";
+                        checked: root.active-tool == 1;
+                        clicked => { root.active-tool = 1; root.select-tool("brush"); }
+                    }
+                    AppleToolbarItem {
+                        icon: "wand";
+                        label: "Wand";
+                        checked: root.active-tool == 2;
+                        clicked => { root.active-tool = 2; root.select-tool("wand"); }
+                    }
                 }
 
                 ToolbarSpacer { }
 
+                // Layer & adjustment operations
                 ToolbarGroup {
-                    ToolbarIconButton {
-                        icon: "minus";
-                        label: "Zoom out";
-                        clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); }
+                    AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+                    AppleToolbarItem { icon: "slider"; label: "Adjustment"; clicked => { root.add-adjustment(); } }
+                    AppleToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-image(); } }
+                }
+
+                ToolbarSpacer { }
+
+                // View, Inspector, Export
+                ToolbarGroup {
+                    AppleToolbarItem {
+                        icon: "zoom-in";
+                        label: Math.round(root.zoom-value) + "%";
+                        clicked => { root.zoom-value = (root.zoom-value >= 150 ? 100 : root.zoom-value + 25); }
                     }
-                    Text {
-                        text: Math.round(root.zoom-value) + "%";
-                        min-width: 44px;
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 500;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    ToolbarIconButton {
-                        icon: "plus";
-                        label: "Zoom in";
-                        clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); }
-                    }
-                    ToolbarIconButton {
-                        icon: "settings";
-                        label: root.inspector-available ? "Toggle inspector" : "Inspector available when window is wider";
-                        enabled: root.inspector-available;
+                    AppleToolbarItem {
+                        icon: "format";
+                        label: "Inspector";
                         checked: root.inspector-visible;
                         clicked => { root.show-inspector = !root.show-inspector; }
                     }
-                    if root.labeled-export : ToolbarButton {
+                    AppleToolbarItem {
                         icon: "export";
-                        label: "Export PNG";
-                        primary: true;
-                        enabled: root.has-preview;
-                        clicked => { root.export-png(); }
-                    }
-                    if !root.labeled-export : ToolbarIconButton {
-                        icon: "export";
-                        label: "Export PNG";
-                        enabled: root.has-preview;
+                        label: "Export";
                         clicked => { root.export-png(); }
                     }
                 }

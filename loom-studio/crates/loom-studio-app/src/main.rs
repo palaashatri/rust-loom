@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use audio_io::AudioIo;
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_studio_core::{
     decode_wav, load_studio_bundle, save_studio_bundle, synthesize_notes, AudioAssetStore,
@@ -474,6 +475,49 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
     };
     refresh(&app, &state);
+    let menu_bar = build_standard_menu_bar(
+        "Loom Studio",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_wav",
+            "Export Mix as WAV...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![
+            Menu::new(
+                "Track",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "track.new",
+                        "New Audio Track",
+                        MenuShortcut::primary_shift("N"),
+                    ),
+                    MenuItem::action("track.duplicate", "Duplicate Track"),
+                    MenuItem::action("track.delete", "Delete Track"),
+                ],
+            ),
+            Menu::new(
+                "Transport",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "transport.play_pause",
+                        "Play / Pause",
+                        MenuShortcut::primary("Space"),
+                    ),
+                    MenuItem::action("transport.record", "Record"),
+                    MenuItem::action("transport.metronome", "Toggle Metronome"),
+                ],
+            ),
+        ],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
@@ -1189,6 +1233,49 @@ fn main() -> Result<(), String> {
             }
         });
     }
+
+    let menu_bar = build_standard_menu_bar(
+        "Loom Studio",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_wav",
+            "Export Mix as WAV...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![
+            Menu::new(
+                "Track",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "track.new",
+                        "New Audio Track",
+                        MenuShortcut::primary_shift("N"),
+                    ),
+                    MenuItem::action("track.duplicate", "Duplicate Track"),
+                    MenuItem::action("track.delete", "Delete Track"),
+                ],
+            ),
+            Menu::new(
+                "Transport",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "transport.play_pause",
+                        "Play / Pause",
+                        MenuShortcut::primary("Space"),
+                    ),
+                    MenuItem::action("transport.record", "Record"),
+                    MenuItem::action("transport.metronome", "Toggle Metronome"),
+                ],
+            ),
+        ],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
 
     wire_palette(&app);
     refresh(&app, &state);

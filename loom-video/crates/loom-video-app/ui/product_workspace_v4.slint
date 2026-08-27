@@ -1,5 +1,9 @@
 import {
-    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton, StatusBar,
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
+} from "toolkit.slint";
+import {
+    ToolButton, IconButton, PrimaryButton,
     SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
     Field, MetricChip, CanvasBackdrop, TransportButton, StatusPill,
     CommandPalette, CommandPaletteItem
@@ -105,43 +109,51 @@ export component VideoApp inherits Window {
         VerticalLayout {
         spacing: 0px;
 
-        AppHeader {
-            app-name: "Loom Video";
-            document-title: root.project-name;
-            icon: "video";
-            context: root.project-format;
-            state-text: root.exporting ? "Exporting " + Math.round(root.export-progress) + "%" : root.is-playing ? "Previewing" : root.backend-available ? "Media engine ready" : "Media engine unavailable";
-            // A ready local media engine is a success state; reserve warning
-            // and danger tones for degraded or unavailable playback instead
-            // of making the normal idle header look cautionary.
-            state-tone: root.exporting || root.is-playing ? 1 : root.backend-available ? 2 : 4;
+        DocumentChrome {
+            title: root.project-name;
+            trailing-text: root.project-format;
         }
 
-        WorkspaceToolbar {
-            if !root.compact-layout : ToolButton { icon: "new"; text: "New"; clicked => { root.new-project(); } }
-            if root.compact-layout : IconButton { icon: "new"; label: "New"; clicked => { root.new-project(); } }
-            if !root.compact-layout : ToolButton { icon: "open"; text: "Open"; clicked => { root.open-project(); } }
-            if root.compact-layout : IconButton { icon: "open"; label: "Open"; clicked => { root.open-project(); } }
-            if !root.compact-layout : ToolButton { icon: "save"; text: "Save"; clicked => { root.save-project(); } }
-            if root.compact-layout : IconButton { icon: "save"; label: "Save"; clicked => { root.save-project(); } }
-            IconButton { icon: "save-as"; label: "Save project as"; clicked => { root.save-as-project(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            if !root.compact-layout : ToolButton { icon: "cursor"; text: "Select"; checked: root.active-nle-tool == "Select"; clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); } }
-            if root.compact-layout : IconButton { icon: "cursor"; label: "Select"; checked: root.active-nle-tool == "Select"; clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); } }
-            if !root.compact-layout : ToolButton { icon: "scissors"; text: "Blade"; checked: root.active-nle-tool == "Blade"; clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); } }
-            if root.compact-layout : IconButton { icon: "scissors"; label: "Blade"; checked: root.active-nle-tool == "Blade"; clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); } }
-            if !root.compact-layout : ToolButton { icon: "link"; text: "Snap"; checked: root.snap-enabled; clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); } }
-            if root.compact-layout : IconButton { icon: "link"; label: "Snap"; checked: root.snap-enabled; clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            MetricChip { label: "TC"; value: root.timecode-display; }
-            MetricChip { label: "Duration"; value: Math.round(root.timeline-duration * 10) / 10 + " s"; }
-            if !root.compact-layout : ToolButton { icon: "settings"; text: "Inspector"; checked: root.show-inspector; clicked => { root.show-inspector = !root.show-inspector; } }
-            if root.compact-layout : IconButton { icon: "settings"; label: "Inspector"; checked: root.show-inspector; clicked => { root.show-inspector = !root.show-inspector; } }
-            if !root.compact-layout : PrimaryButton { text: root.exporting ? "Exporting…" : "Export"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
-            if root.compact-layout : IconButton { icon: "export"; label: root.exporting ? "Exporting" : "Export"; enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting; clicked => { root.export-timeline(root.export-path); } }
+        Toolbar {
+            ToolbarGroup {
+                AppleToolbarItem {
+                    icon: "cursor";
+                    label: "Select";
+                    checked: root.active-nle-tool == "Select";
+                    clicked => { root.active-nle-tool = "Select"; root.select-nle-tool("Select"); }
+                }
+                AppleToolbarItem {
+                    icon: "scissors";
+                    label: "Blade";
+                    checked: root.active-nle-tool == "Blade";
+                    clicked => { root.active-nle-tool = "Blade"; root.select-nle-tool("Blade"); }
+                }
+                AppleToolbarItem {
+                    icon: "link";
+                    label: "Snap";
+                    checked: root.snap-enabled;
+                    clicked => { root.snap-enabled = !root.snap-enabled; root.toggle-snap(); }
+                }
+            }
+
+            ToolbarSpacer {}
+
+            ToolbarGroup {
+                AppleToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-media(root.import-path); } }
+                AppleToolbarItem {
+                    icon: "format";
+                    label: "Inspector";
+                    checked: root.show-inspector;
+                    clicked => { root.show-inspector = !root.show-inspector; }
+                }
+                AppleToolbarItem {
+                    icon: "export";
+                    label: root.exporting ? "Exporting" : "Export";
+                    enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting;
+                    clicked => { root.export-timeline(root.export-path); }
+                }
+            }
+        }
         }
 
         HorizontalLayout {
@@ -440,7 +452,7 @@ export component VideoApp inherits Window {
             }
         }
 
-        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+        ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }
     }
 
     palette := CommandPalette {
@@ -472,6 +484,5 @@ export component VideoApp inherits Window {
             root.palette-open = false;
             app-focus.focus();
         }
-    }
     }
 }

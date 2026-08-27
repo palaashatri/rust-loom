@@ -1,4 +1,12 @@
-import { AppHeader, WorkspaceToolbar, SidebarSurface, InspectorSurface, WorkspaceRow, ToolButton, IconButton, PrimaryButton, TransportButton, StatusBar, Slider, SegmentedControl, Field, StatusPill, MetricChip, CommandPalette, CommandPaletteItem } from "components.slint";
+import {
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
+} from "toolkit.slint";
+import {
+    SidebarSurface, InspectorSurface, WorkspaceRow, ToolButton, IconButton,
+    PrimaryButton, TransportButton, Slider, SegmentedControl, Field,
+    StatusPill, MetricChip, CommandPalette, CommandPaletteItem
+} from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
@@ -105,58 +113,53 @@ export component StudioApp inherits Window {
         VerticalLayout {
         spacing: 0px;
 
-        AppHeader {
-            app-name: "Loom Studio";
-            document-title: root.song-title;
-            icon: "audio";
-            context: root.tempo-text + " · " + root.workspace-mode;
-            state-text: root.audio-available ? "Audio online" : "Audio unavailable";
-            state-tone: root.audio-available ? 2 : 3;
+        DocumentChrome {
+            title: root.song-title;
+            trailing-text: root.tempo-text + " · " + root.workspace-mode;
         }
 
-        WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New"; clicked => { root.new-song(); } }
-            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-song(); } }
-            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-song(); } }
-            IconButton { icon: "save-as"; label: "Save song as"; clicked => { root.save-as-song(); } }
-            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            TransportButton {
-                icon: root.is-playing ? "pause" : "play";
-                label: root.is-playing ? "Pause" : "Play";
-                enabled: root.audio-available;
-                active: root.is-playing;
-                clicked => { root.play-pause(); }
+        Toolbar {
+            ToolbarGroup {
+                AppleToolbarItem {
+                    icon: root.is-playing ? "pause" : "play";
+                    label: root.is-playing ? "Pause" : "Play";
+                    enabled: root.audio-available;
+                    checked: root.is-playing;
+                    clicked => { root.play-pause(); }
+                }
+                AppleToolbarItem { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
+                AppleToolbarItem {
+                    icon: "record";
+                    label: root.is-recording ? "Recording" : "Record";
+                    enabled: root.input-available;
+                    checked: root.is-recording;
+                    clicked => { root.toggle-record(); }
+                }
+                AppleToolbarItem {
+                    icon: "link";
+                    label: "Loop";
+                    checked: root.is-looping;
+                    clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); }
+                }
+                AppleToolbarItem {
+                    icon: "clock";
+                    label: "Metronome";
+                    checked: root.metronome-on;
+                    clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); }
+                }
             }
-            TransportButton { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
-            TransportButton {
-                icon: "record";
-                label: root.is-recording ? "Stop recording" : "Record";
-                enabled: root.input-available;
-                active: root.is-recording;
-                clicked => { root.toggle-record(); }
+
+            ToolbarSpacer {}
+
+            ToolbarGroup {
+                AppleToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
+                AppleToolbarItem {
+                    icon: "export";
+                    label: "Bounce WAV";
+                    enabled: root.track-labels.length > 0;
+                    clicked => { root.export-mix(root.export-path); }
+                }
             }
-            TransportButton { icon: "link"; label: "Loop"; active: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
-            TransportButton { icon: "clock"; label: "Metronome"; active: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            if !root.compact-layout : MetricChip { label: "Tempo"; value: Math.round(root.bpm-val) + " BPM"; }
-            Slider { label: "Tempo in beats per minute"; width: root.compact-layout ? 96px : 130px; minimum: 40; maximum: 240; value <=> root.bpm-val; changed(value) => { root.bpm-changed(value); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            if !root.compact-layout : SegmentedControl {
-                // Reserve enough room for both mode labels so the control
-                // cannot collapse to a partial "Quick" beside Bounce.
-                width: 120px;
-                items: ["Quick", "Pro"];
-                current <=> root.workspace-mode-index;
-                selected(index) => { root.set-workspace-mode(index); }
-            }
-            if root.compact-layout : ToolButton {
-                icon: "settings";
-                text: root.workspace-mode;
-                clicked => { root.set-workspace-mode(root.workspace-mode-index == 0 ? 1 : 0); }
-            }
-            PrimaryButton { text: "Bounce"; clicked => { root.export-mix(root.export-path); } }
         }
 
         HorizontalLayout {
@@ -315,7 +318,7 @@ export component StudioApp inherits Window {
             }
         }
 
-        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+        ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }
     }
 
     palette := CommandPalette {

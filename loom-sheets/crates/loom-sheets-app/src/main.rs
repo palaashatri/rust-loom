@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
@@ -40,6 +41,7 @@ struct Args {
     size: (u32, u32),
     theme: String,
     open: Option<String>,
+    template_chooser: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -51,6 +53,7 @@ fn parse_args() -> Result<Args, String> {
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
         open: None,
+        template_chooser: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -78,6 +81,7 @@ fn parse_args() -> Result<Args, String> {
                 }
                 args.theme = t;
             }
+            "--template-chooser" => args.template_chooser = true,
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
             }
@@ -327,6 +331,9 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         rebuild_palette(&app, "ex");
         app.set_palette_selected(1);
         app.set_palette_open(true);
+    }
+    if args.template_chooser {
+        app.set_template_chooser_open(true);
     }
     let (w, h) = args.size;
     apply_layout_breakpoints(&app, w);
@@ -667,6 +674,93 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_inspector(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_show_inspector(!app.get_show_inspector());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_create_template(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut sheet = match idx {
+                    1 => {
+                        let mut s = Sheet::new("Monthly Budget");
+                        s.set_str("A1", "Category");
+                        s.set_str("B1", "Projected");
+                        s.set_str("C1", "Actual");
+                        s.set_str("A2", "Housing");
+                        s.set_str("B2", "1200");
+                        s.set_str("C2", "1200");
+                        s.set_str("A3", "Food");
+                        s.set_str("B3", "400");
+                        s.set_str("C3", "450");
+                        s.set_str("A4", "Total");
+                        s.set_str("B4", "=SUM(B2:B3)");
+                        s.set_str("C4", "=SUM(C2:C3)");
+                        s
+                    }
+                    2 => {
+                        let mut s = Sheet::new("Invoice");
+                        s.set_str("A1", "Description");
+                        s.set_str("B1", "Hours");
+                        s.set_str("C1", "Rate");
+                        s.set_str("D1", "Amount");
+                        s.set_str("A2", "Design Work");
+                        s.set_str("B2", "20");
+                        s.set_str("C2", "85");
+                        s.set_str("D2", "=B2*C2");
+                        s
+                    }
+                    _ => blank_sheet(),
+                };
+                *state.current.borrow_mut() = sheet;
+                *state.save_path.borrow_mut() = None;
+                state.undo_stack.borrow_mut().clear();
+                state.redo_stack.borrow_mut().clear();
+                apply_sheet(&app, &state.current.borrow());
+                app.set_template_chooser_open(false);
+                app.set_status_left("Created template workbook".into());
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_cancel_template(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_template_chooser_open(false);
+            }
+        });
+    }
+
+    let menu_bar = build_standard_menu_bar(
+        "Loom Sheets",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_csv",
+            "Export to CSV...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Format Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Table",
+            vec![
+                MenuItem::action("table.add_row", "Add Row"),
+                MenuItem::action("table.add_col", "Add Column"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
 
     apply_sheet(&app, &state.current.borrow());
     wire_palette(&app);

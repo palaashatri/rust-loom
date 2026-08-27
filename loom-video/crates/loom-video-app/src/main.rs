@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -413,6 +414,34 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         exporting: AtomicBool::new(false),
     };
     refresh(&app, &state);
+    let menu_bar = build_standard_menu_bar(
+        "Loom Video",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_video",
+            "Export Timeline...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Clip",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "clip.split",
+                    "Split Clip at Playhead",
+                    MenuShortcut::primary("B"),
+                ),
+                MenuItem::action("clip.delete", "Ripple Delete Selected Clip"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
@@ -1098,6 +1127,34 @@ fn main() -> Result<(), String> {
     });
 
     wire_application(&app, state.clone());
+    let menu_bar = build_standard_menu_bar(
+        "Loom Video",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_video",
+            "Export Timeline...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Clip",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "clip.split",
+                    "Split Clip at Playhead",
+                    MenuShortcut::primary("B"),
+                ),
+                MenuItem::action("clip.delete", "Ripple Delete Selected Clip"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     refresh(&app, &state);
     app.show().map_err(|error| error.to_string())?;

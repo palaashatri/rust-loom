@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_motion_core::{load_motion, save_motion, CompositionDocument, MotionLayer};
 use loom_test_support::capture::{set_platform, snapshot_component};
@@ -418,6 +419,35 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
     apply_motion(&app, &doc);
+    let menu_bar = build_standard_menu_bar(
+        "Loom Motion",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_frame",
+            "Export Frame as SVG...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Composition",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "comp.new_layer",
+                    "New Motion Layer",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("comp.duplicate_layer", "Duplicate Layer"),
+                MenuItem::action("comp.delete_layer", "Delete Layer"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
@@ -918,6 +948,35 @@ fn main() -> Result<(), String> {
             }
         });
     }
+
+    let menu_bar = build_standard_menu_bar(
+        "Loom Motion",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_frame",
+            "Export Frame as SVG...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Composition",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "comp.new_layer",
+                    "New Motion Layer",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("comp.duplicate_layer", "Duplicate Layer"),
+                MenuItem::action("comp.delete_layer", "Delete Layer"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
 
     wire_palette(&app);
 

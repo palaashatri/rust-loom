@@ -1,17 +1,102 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    ToolbarIconButton, ToolkitStatusBar, SidebarSurface, InspectorSurface,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, SidebarSurface, InspectorSurface,
     SectionHeader, TextField, SegmentedControl, RangeSlider, PropertyRow,
     TabStrip, CanvasSurface
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
+import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 
-/// A notes editor that follows Loom's runtime palette instead of the
-/// platform widget palette used by the stock TextEdit. The TextInput remains
-/// the real editing/accessibility surface, while the surrounding rectangle
-/// supplies the themed field treatment.
+/// Keynote-style slide theme preview card
+component ThemeCard inherits Rectangle {
+    in property <int> theme-index: 0;
+    in property <string> theme-name: "Basic White";
+    in property <string> description: "Standard white background";
+    in property <bool> is-wide: true;
+    in property <bool> selected: false;
+    callback clicked;
+
+    width: root.is-wide ? 220px : 180px;
+    height: 180px;
+    border-radius: Theme.tokens.metrics.radius-large;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
+    background: root.selected ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-raised : Theme.palette().surface;
+    accessible-role: button;
+    accessible-label: root.theme-name + " theme";
+    accessible-action-default => { root.clicked(); }
+
+    VerticalLayout {
+        spacing: 8px;
+        padding: 10px;
+        alignment: start;
+
+        // Slide Thumbnail Box
+        Rectangle {
+            height: 108px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: root.theme-index == 1 ? Theme.palette().surface-sunken
+                : root.theme-index == 3 ? Theme.palette().accent
+                : Theme.palette().paper;
+            clip: true;
+
+            VerticalLayout {
+                padding: 16px;
+                alignment: center;
+                spacing: 6px;
+
+                Text {
+                    text: root.theme-name;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: (root.theme-index == 3) ? Theme.palette().accent-ink : Theme.palette().paper-ink;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    width: 48px;
+                    height: 2px;
+                    background: Theme.palette().accent;
+                }
+                Text {
+                    text: "Presentation Title";
+                    font-size: 8px;
+                    color: (root.theme-index == 3) ? Theme.palette().accent-ink : Theme.palette().paper-muted;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: root.theme-name;
+                font-size: Theme.tokens.typography.body;
+                font-weight: 600;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                text: root.description;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+/// A notes editor following Loom palette
 component SpeakerNotesEditor inherits Rectangle {
     in-out property <string> text: "";
     in property <string> placeholder-text: "";
@@ -74,16 +159,10 @@ export component PresentApp inherits Window {
     title: "Loom Present";
     min-width: 1024px;
     min-height: 720px;
-    // Keep the desktop window's intrinsic size independent from optional
-    // panels. Without an explicit preferred size, the width-sensitive
-    // inspector predicate participates in the window's own layout calculation
-    // and Slint reports a binding loop while resolving the initial geometry.
     preferred-width: 1280px;
     preferred-height: 800px;
     background: Theme.palette().canvas;
-    // These flags are supplied by the host after it chooses the window size.
-    // Keeping them out of the component's implicit layout calculation avoids
-    // a width -> optional panel -> width binding loop during startup/capture.
+
     in property <bool> show-inspector: true;
     in property <bool> labeled-export: false;
     callback window-resized(length);
@@ -115,6 +194,11 @@ export component PresentApp inherits Window {
     in-out property <int> transition-index: 0;
     in-out property <float> zoom-value: 78;
 
+    in-out property <bool> theme-chooser-open: false;
+    in-out property <int> theme-selected: 0;
+    in-out property <int> theme-category: 0;
+    in-out property <bool> aspect-ratio-wide: true;
+
     callback new-deck;
     callback open-deck;
     callback save-deck;
@@ -137,6 +221,9 @@ export component PresentApp inherits Window {
     callback set-transition(int);
     callback prev-slide;
     callback next-slide;
+    callback toggle-inspector;
+    callback create-theme(int);
+    callback cancel-theme;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -155,9 +242,50 @@ export component PresentApp inherits Window {
         palette.grab-focus();
     }
 
+    function theme-visible(theme-index: int) -> bool {
+        return root.theme-category == 0
+            || (root.theme-category == 1 && theme-index <= 1)
+            || (root.theme-category == 2 && theme-index == 2)
+            || (root.theme-category == 3 && theme-index >= 3);
+    }
+
+    function choose-theme-category(category-index: int) {
+        root.theme-category = category-index;
+        if (category-index == 1 && root.theme-selected > 1) {
+            root.theme-selected = 0;
+        } else if (category-index == 2) {
+            root.theme-selected = 2;
+        } else if (category-index == 3) {
+            root.theme-selected = 3;
+        }
+    }
+
+    theme-chooser-focus := FocusScope {
+        enabled: root.theme-chooser-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel-theme();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.create-theme(root.theme-selected);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    changed theme-chooser-open => {
+        if (root.theme-chooser-open) {
+            theme-chooser-focus.focus();
+        } else {
+            app-focus.focus();
+        }
+    }
+
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open) { return reject; }
+            if (root.palette-open || root.theme-chooser-open) { return reject; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -187,374 +315,343 @@ export component PresentApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
+            // Document Chrome Titlebar
             DocumentChrome {
                 title: root.deck-title;
                 trailing-text: root.is-preview-mode ? "Presenting" : root.slide-count-text;
             }
 
+            // Keynote-Style Action Toolbar
             if !root.is-preview-mode : Toolbar {
+                // Left group: View, Zoom, Add Slide
                 ToolbarGroup {
-                    ToolbarIconButton { icon: "new"; label: "New deck"; clicked => { root.new-deck(); } }
-                    ToolbarIconButton { icon: "open"; label: "Open deck"; clicked => { root.open-deck(); } }
-                    ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-deck(); } }
-                    ToolbarIconButton { icon: "save-as"; label: "Save deck as"; clicked => { root.save-as-deck(); } }
-                    ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-                    ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-                }
-
-                ToolbarGroup {
-                    leading-separation: true;
-                    ToolbarButton { icon: "plus"; label: "Slide"; clicked => { root.add-slide(); } }
-                    ToolbarIconButton { icon: "text"; label: "Insert text"; clicked => { root.add-text(); } }
-                    ToolbarIconButton { icon: "plus-circle"; label: "Insert shape"; clicked => { root.add-shape(); } }
+                    AppleToolbarItem { icon: "eye"; label: "View"; }
+                    AppleToolbarItem { icon: "zoom-in"; label: "100%"; }
+                    AppleToolbarItem {
+                        icon: "plus";
+                        label: "Add Slide";
+                        clicked => { root.add-slide(); }
+                    }
                 }
 
                 ToolbarSpacer { }
 
+                // Keynote-style center insert group: Table, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    ToolbarIconButton {
-                        icon: "minus";
-                        label: "Zoom out";
-                        clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); }
+                    AppleToolbarItem { icon: "table"; label: "Table"; clicked => { } }
+                    AppleToolbarItem { icon: "chart"; label: "Chart"; clicked => { } }
+                    AppleToolbarItem { icon: "text"; label: "Text"; clicked => { root.add-text(); } }
+                    AppleToolbarItem { icon: "shape"; label: "Shape"; clicked => { root.add-shape(); } }
+                    AppleToolbarItem { icon: "image"; label: "Media"; clicked => { } }
+                    AppleToolbarItem { icon: "comment"; label: "Comment"; clicked => { } }
+                }
+
+                ToolbarSpacer { }
+
+                // Right tools: Present / Format / Share / Export
+                ToolbarGroup {
+                    AppleToolbarItem {
+                        icon: "play";
+                        label: "Play";
+                        clicked => { root.toggle-preview-mode(); }
                     }
-                    Text {
-                        text: Math.round(root.zoom-value) + "%";
-                        min-width: 44px;
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 500;
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    AppleToolbarItem {
+                        icon: "format";
+                        label: "Format";
+                        checked: root.show-inspector;
+                        clicked => { root.toggle-inspector(); }
                     }
-                    ToolbarIconButton {
-                        icon: "plus";
-                        label: "Zoom in";
-                        clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); }
+                    AppleToolbarItem {
+                        icon: "share";
+                        label: "Share";
+                        clicked => { }
                     }
-                    ToolbarButton { icon: "play"; label: "Present"; clicked => { root.toggle-preview-mode(); } }
-                    if root.labeled-export : ToolbarButton {
+                    AppleToolbarItem {
                         icon: "export";
-                        label: "Export PDF";
-                        primary: true;
-                        clicked => { root.export-pdf(); }
-                    }
-                    if !root.labeled-export : ToolbarIconButton {
-                        icon: "export";
-                        label: "Export PDF";
+                        label: "Export";
                         clicked => { root.export-pdf(); }
                     }
                 }
             }
 
-            if root.is-preview-mode : Rectangle {
-                vertical-stretch: 1;
-                horizontal-stretch: 1;
-                background: Theme.palette().media-stage;
-
-                VerticalLayout {
-                    spacing: 16px;
-                    padding: 24px;
-                    alignment: center;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        max-width: 960px;
-                        vertical-stretch: 1;
-                        max-height: 540px;
-                        background: Theme.palette().paper;
-                        border-radius: Theme.tokens.metrics.radius-small;
-                        border-width: 1px;
-                        border-color: Theme.palette().border-strong;
-
-                        VerticalLayout {
-                            padding: 48px;
-                            spacing: 20px;
-                            Text {
-                                text: root.slide-title;
-                                font-size: 38px;
-                                font-weight: 700;
-                                color: Theme.palette().paper-ink;
-                                wrap: word-wrap;
-                            }
-                            Text {
-                                text: root.slide-body;
-                                font-size: 20px;
-                                color: Theme.palette().paper-muted;
-                                wrap: word-wrap;
-                                vertical-stretch: 1;
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: center;
-                        ToolbarButton { icon: "chevron-left"; label: "Previous"; clicked => { root.prev-slide(); } }
-                        Text {
-                            text: "Slide " + (root.active-slide-index + 1) + " of " + root.slide-titles.length;
-                            min-width: 112px;
-                            font-size: Theme.tokens.typography.body;
-                            color: Theme.palette().ink-secondary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        ToolbarButton { icon: "chevron-right"; label: "Next"; clicked => { root.next-slide(); } }
-                        ToolbarButton { icon: "close"; label: "Exit"; clicked => { root.toggle-preview-mode(); } }
-                    }
-                }
-            }
-
-            if !root.is-preview-mode : HorizontalLayout {
+            // Main Slide Canvas Area
+            HorizontalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                SidebarSurface {
-                    width: 220px;
+                // Left Slide Miniature Strip
+                if !root.is-preview-mode : SidebarSurface {
                     title: "Slides";
+                    width: 180px;
 
                     VerticalLayout {
                         spacing: 8px;
-                        padding: 12px;
+                        padding-top: 10px;
+                        padding-bottom: 10px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        alignment: start;
 
-                        for title[index] in root.slide-titles : Rectangle {
-                            height: 108px;
+                        for title[idx] in root.slide-titles : Rectangle {
+                            height: 100px;
                             border-radius: Theme.tokens.metrics.radius-medium;
-                            border-width: index == root.active-slide-index ? 2px : 1px;
-                            border-color: index == root.active-slide-index ? Theme.palette().accent : Theme.palette().border;
-                            background: index == root.active-slide-index ? Theme.palette().selection-soft : thumbnail-touch.has-hover ? Theme.palette().surface-raised : Theme.palette().panel;
+                            border-width: idx == root.active-slide-index ? 2px : 1px;
+                            border-color: idx == root.active-slide-index ? Theme.palette().accent : Theme.palette().border;
+                            background: idx == root.active-slide-index ? Theme.palette().selection-soft : Theme.palette().surface;
 
                             HorizontalLayout {
-                                spacing: 8px;
-                                padding: 8px;
+                                spacing: 6px;
+                                padding: 6px;
+
+                                // Slide Number
                                 Text {
-                                    text: (index + 1);
-                                    width: 20px;
-                                    font-size: Theme.tokens.typography.caption;
+                                    text: (idx + 1) + "";
+                                    font-size: Theme.tokens.typography.micro;
+                                    font-weight: 700;
                                     color: Theme.palette().ink-secondary;
+                                    width: 12px;
                                     vertical-alignment: top;
-                                    horizontal-alignment: center;
                                 }
+
+                                // Mini Slide Layout Preview
                                 Rectangle {
                                     horizontal-stretch: 1;
-                                    height: 90px;
-                                    background: Theme.palette().paper;
+                                    border-radius: 2px;
                                     border-width: 1px;
                                     border-color: Theme.palette().paper-line;
-                                    border-radius: Theme.tokens.metrics.radius-small;
-                                    clip: true;
+                                    background: Theme.palette().paper;
+
                                     VerticalLayout {
-                                        spacing: 6px;
-                                        padding: 10px;
+                                        padding: 8px;
+                                        spacing: 4px;
+                                        alignment: center;
+
                                         Text {
                                             text: title;
-                                            font-size: Theme.tokens.typography.caption;
-                                            font-weight: 600;
+                                            font-size: 8px;
+                                            font-weight: 700;
                                             color: Theme.palette().paper-ink;
+                                            horizontal-alignment: center;
                                             overflow: elide;
                                         }
-                                        Rectangle { height: 4px; width: 72%; border-radius: 2px; background: Theme.palette().paper-line; }
-                                        Rectangle { height: 4px; width: 52%; border-radius: 2px; background: Theme.palette().paper-line; }
-                                        Rectangle { vertical-stretch: 1; background: transparent; }
-                                        Rectangle { height: 3px; width: 24%; border-radius: 2px; background: Theme.palette().content-accent; }
+                                        Rectangle { height: 1px; width: 60%; background: Theme.palette().accent; }
+                                        Rectangle { height: 2px; width: 80%; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 2px; width: 70%; background: Theme.palette().paper-line; }
                                     }
                                 }
                             }
 
-                            thumbnail-touch := TouchArea { clicked => { root.select-slide(index); } }
-                            accessible-role: button;
-                            accessible-label: "Slide " + (index + 1) + ": " + title;
-                            accessible-action-default => { root.select-slide(index); }
+                            TouchArea {
+                                clicked => { root.select-slide(idx); }
+                            }
                         }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
 
+                        // Slide Strip Action Bar
                         HorizontalLayout {
                             spacing: 4px;
-                            ToolbarIconButton { icon: "plus"; label: "Add slide"; clicked => { root.add-slide(); } }
-                            ToolbarIconButton { icon: "plus-circle"; label: "Duplicate slide"; clicked => { root.duplicate-slide(); } }
-                            Rectangle { horizontal-stretch: 1; background: transparent; }
-                            ToolbarIconButton {
-                                icon: "trash";
-                                label: "Delete slide";
-                                enabled: root.slide-titles.length > 1;
-                                clicked => { root.delete-slide(); }
-                            }
+                            ToolbarIconButton { icon: "plus"; label: "Add Slide"; clicked => { root.add-slide(); } }
+                            ToolbarIconButton { icon: "trash-2"; label: "Delete Slide"; clicked => { root.delete-slide(); } }
+                            ToolbarSpacer { }
                         }
                     }
                 }
 
+                // Center Canvas & Notes
                 VerticalLayout {
-                    spacing: 0px;
                     horizontal-stretch: 1;
+                    spacing: 0px;
 
                     CanvasSurface {
-                        stage := Rectangle {
-                            x: 24px;
-                            y: 24px;
-                            width: parent.width - 48px;
-                            height: parent.height - 48px;
-                            background: Theme.palette().paper;
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+
+                        // 16:9 Centered Slide Surface
+                        Rectangle {
+                            x: max(24px, (parent.width - self.width) / 2);
+                            y: max(24px, (parent.height - self.height) / 2);
+                            width: min(840px, parent.width - 48px);
+                            height: self.width * (root.aspect-ratio-wide ? 0.5625 : 0.75);
+                            border-radius: 4px;
                             border-width: 1px;
-                            border-color: Theme.palette().border-strong;
-                            border-radius: Theme.tokens.metrics.radius-small;
+                            border-color: Theme.palette().border;
+                            background: Theme.palette().paper;
+                            drop-shadow-blur: 16px;
+                            drop-shadow-offset-y: 6px;
+                            drop-shadow-color: Theme.palette().shadow;
                             clip: true;
 
                             VerticalLayout {
-                                padding: 40px;
+                                padding-top: 48px;
+                                padding-bottom: 48px;
+                                padding-left: 64px;
+                                padding-right: 64px;
                                 spacing: 16px;
+                                alignment: center;
 
+                                // Slide Title Box
                                 Rectangle {
-                                    height: 84px;
-                                    border-radius: Theme.tokens.metrics.radius-small;
+                                    border-radius: 4px;
                                     border-width: root.active-element-index == 0 ? 2px : 0px;
                                     border-color: Theme.palette().accent;
+                                    background: transparent;
+                                    padding: 8px;
+
                                     Text {
                                         text: root.slide-title;
-                                        font-size: 34px;
+                                        font-size: 28px;
                                         font-weight: 700;
                                         color: Theme.palette().paper-ink;
-                                        wrap: word-wrap;
+                                        horizontal-alignment: center;
                                     }
+
                                     TouchArea { clicked => { root.select-element(0); } }
                                 }
 
-                                Rectangle {
-                                    vertical-stretch: 1;
-                                    border-radius: Theme.tokens.metrics.radius-small;
+                                // Slide Body Box
+                                if root.slide-body != "" : Rectangle {
+                                    border-radius: 4px;
                                     border-width: root.active-element-index == 1 ? 2px : 0px;
                                     border-color: Theme.palette().accent;
+                                    background: transparent;
+                                    padding: 8px;
+
                                     Text {
                                         text: root.slide-body;
-                                        font-size: 18px;
+                                        font-size: 16px;
                                         color: Theme.palette().paper-muted;
-                                        wrap: word-wrap;
+                                        horizontal-alignment: center;
                                     }
+
                                     TouchArea { clicked => { root.select-element(1); } }
                                 }
                             }
                         }
                     }
 
-                    if root.show-notes-drawer : Rectangle {
-                        height: 128px;
-                        background: Theme.palette().surface;
+                    // Speaker Notes Collapsible Drawer
+                    if root.show-notes-drawer && !root.is-preview-mode : Rectangle {
+                        height: 110px;
+                        background: Theme.palette().chrome;
 
-                        Rectangle { width: parent.width; height: 1px; background: Theme.palette().border; }
+                        Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
 
                         VerticalLayout {
-                            spacing: 8px;
-                            padding: 10px;
+                            padding-top: 8px; padding-bottom: 8px; padding-left: 16px; padding-right: 16px;
+                            spacing: 4px;
+
                             HorizontalLayout {
-                                spacing: 8px;
                                 Text {
                                     text: "Speaker Notes";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.caption;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
-                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
                                 }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
                                 ToolbarIconButton {
                                     icon: "close";
-                                    label: "Hide speaker notes";
+                                    label: "Close notes drawer";
                                     clicked => { root.show-notes-drawer = false; }
                                 }
                             }
+
                             SpeakerNotesEditor {
                                 text <=> root.slide-notes;
-                                placeholder-text: "Add presenter notes…";
-                                vertical-stretch: 1;
-                                edited(value) => { root.notes-edited(value); }
+                                placeholder-text: "Add presenter notes for this slide...";
+                                edited(t) => { root.notes-edited(t); }
                             }
                         }
                     }
                 }
 
-                if root.show-inspector : InspectorSurface {
+                // Apple Keynote-Style Right Inspector
+                if root.show-inspector && !root.is-preview-mode : InspectorSurface {
+                    title: "Format";
                     width: 280px;
-                    title: "Inspector";
 
                     VerticalLayout {
                         spacing: 12px;
                         padding: 12px;
+                        alignment: start;
 
-                        TabStrip {
-                            tabs: ["Format", "Arrange", "Animate"];
+                        // Tabs: Format | Animate | Document
+                        SegmentedControl {
+                            items: ["Format", "Animate", "Document"];
                             current <=> root.inspector-tab;
+                            label: "Inspector Tabs";
                         }
 
+                        // Tab 0: Format
                         if root.inspector-tab == 0 : VerticalLayout {
-                            spacing: 12px;
-                            SectionHeader { title: "Element"; }
-                            for label[index] in root.element-labels : Rectangle {
-                                height: Theme.tokens.metrics.control-height;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: index == root.active-element-index ? Theme.palette().selection-soft : element-touch.has-hover ? Theme.palette().surface-raised : transparent;
-                                Text {
-                                    x: 8px;
-                                    width: parent.width - 16px;
-                                    text: label;
-                                    font-size: Theme.tokens.typography.body;
-                                    font-weight: index == root.active-element-index ? 600 : 400;
-                                    color: Theme.palette().ink;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
-                                element-touch := TouchArea { clicked => { root.select-element(index); } }
-                                accessible-role: button;
-                                accessible-label: label;
-                                accessible-action-default => { root.select-element(index); }
-                            }
-                            TextField {
-                                label: "Element content";
-                                placeholder: "Text";
-                                value: root.active-element-content;
-                                edited(value) => { root.update-element-content(value); }
-                            }
-                            SectionHeader { title: "Layout"; }
+                            spacing: 10px;
+
+                            SectionHeader { title: "Slide Layout"; }
+
                             SegmentedControl {
-                                label: "Slide layout";
-                                items: ["Title", "Content", "2 Column", "Image"];
+                                items: ["Title", "Content", "2 Col", "Image"];
                                 current <=> root.active-template-index;
-                                selected(index) => { root.apply-template(index); }
+                                label: "Layout Template";
+                                selected(idx) => { root.apply-template(idx); }
+                            }
+
+                            SectionHeader { title: "Background"; }
+
+                            PropertyRow {
+                                label: "Color Fill";
+                                Rectangle {
+                                    height: 24px; border-radius: 4px;
+                                    background: Theme.palette().paper;
+                                    border-width: 1px; border-color: Theme.palette().border;
+                                }
+                            }
+
+                            SectionHeader { title: "Selected Element"; }
+
+                            TextField {
+                                label: "Element text";
+                                value: root.active-element-content;
+                                edited(t) => { root.update-element-content(t); }
                             }
                         }
 
+                        // Tab 1: Animate
                         if root.inspector-tab == 1 : VerticalLayout {
-                            spacing: 12px;
-                            SectionHeader { title: "Position & Size"; }
-                            PropertyRow {
-                                label: "X";
-                                RangeSlider { label: "Horizontal position"; minimum: 0; maximum: 1000; value: root.element-x; changed(value) => { root.transform-element("x", value); } }
+                            spacing: 10px;
+
+                            SectionHeader { title: "Slide Transition"; }
+
+                            SegmentedControl {
+                                items: ["None", "Dissolve", "Push", "Wipe"];
+                                current <=> root.transition-index;
+                                label: "Transition Type";
+                                selected(idx) => { root.set-transition(idx); }
                             }
+
                             PropertyRow {
-                                label: "Y";
-                                RangeSlider { label: "Vertical position"; minimum: 0; maximum: 562; value: root.element-y; changed(value) => { root.transform-element("y", value); } }
-                            }
-                            PropertyRow {
-                                label: "Width";
-                                RangeSlider { label: "Element width"; minimum: 20; maximum: 1000; value: root.element-width; changed(value) => { root.transform-element("width", value); } }
-                            }
-                            PropertyRow {
-                                label: "Height";
-                                RangeSlider { label: "Element height"; minimum: 20; maximum: 562; value: root.element-height; changed(value) => { root.transform-element("height", value); } }
+                                label: "Duration";
+                                TextField { label: "Duration"; value: "1.00 s"; enabled: false; }
                             }
                         }
 
+                        // Tab 2: Document
                         if root.inspector-tab == 2 : VerticalLayout {
-                            spacing: 12px;
-                            SectionHeader { title: "Transition"; }
+                            spacing: 10px;
+
+                            SectionHeader { title: "Slide Size"; }
+
                             SegmentedControl {
-                                label: "Slide transition";
-                                items: ["None", "Dissolve", "Push", "Morph"];
-                                current <=> root.transition-index;
-                                selected(index) => { root.set-transition(index); }
+                                items: ["16:9 Wide", "4:3 Standard"];
+                                current: root.aspect-ratio-wide ? 0 : 1;
+                                label: "Slide Aspect Ratio";
+                                selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
                             }
-                            Text {
-                                text: "Transitions are stored in the deck and used by presenter/export renderers.";
-                                wrap: word-wrap;
-                                font-size: Theme.tokens.typography.caption;
-                                color: Theme.palette().ink-secondary;
+
+                            SectionHeader { title: "Deck Information"; }
+
+                            PropertyRow {
+                                label: "Slides";
+                                Text { text: root.slide-count-text; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; }
                             }
                         }
 
@@ -563,33 +660,284 @@ export component PresentApp inherits Window {
                 }
             }
 
+            // Standard Status Bar
             ToolkitStatusBar {
                 leading: root.status-left;
-                trailing: root.status-right + "  •  " + Math.round(root.zoom-value) + "%";
+                trailing: root.status-right;
             }
         }
+    }
 
-        palette := CommandPalette {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-            open: root.palette-open;
-            commands: root.palette-commands;
-            query: root.palette-query;
-            selected: root.palette-selected;
-            command-invoked(idx) => { root.palette-invoked(idx); }
-            query-changed(q) => {
-                root.palette-query = q;
-                root.palette-query-changed(q);
+    // Keynote-Style Theme Chooser Modal
+    if root.theme-chooser-open : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+
+        Rectangle {
+            x: (parent.width - 960px) / 2;
+            y: (parent.height - 620px) / 2;
+            width: 960px;
+            height: 620px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            clip: true;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+
+                HorizontalLayout {
+                    spacing: 0px;
+                    vertical-stretch: 1;
+
+                    // Sidebar
+                    Rectangle {
+                        width: 220px;
+                        background: Theme.palette().panel;
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            padding-top: 16px;
+                            padding-bottom: 16px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+
+                            Text {
+                                text: "THEMES";
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: Theme.palette().ink-secondary;
+                                padding-left: 8px;
+                                padding-bottom: 4px;
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.theme-category == 0 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "grid"; tint: root.theme-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "All Themes";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.theme-category == 0 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-theme-category(0); } }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.theme-category == 1 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "slide"; tint: root.theme-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "Basic";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.theme-category == 1 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-theme-category(1); } }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.theme-category == 2 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "wand"; tint: root.theme-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "Dynamic";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.theme-category == 2 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-theme-category(2); } }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.theme-category == 3 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "brush"; tint: root.theme-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "Minimal";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.theme-category == 3 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-theme-category(3); } }
+                            }
+
+                            Rectangle { vertical-stretch: 1; background: transparent; }
+
+                            HorizontalLayout {
+                                spacing: 6px; padding: 8px;
+                                Text {
+                                    text: "English (US)";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Icon { size: 12px; icon: "chevron-down"; tint: Theme.palette().ink-secondary; }
+                            }
+                        }
+
+                        Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().border; }
+                    }
+
+                    // Content Area
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        padding-top: 24px;
+                        padding-bottom: 20px;
+                        padding-left: 28px;
+                        padding-right: 28px;
+                        spacing: 16px;
+
+                        HorizontalLayout {
+                            Text {
+                                text: "Choose a Theme";
+                                font-size: 24px;
+                                font-weight: 700;
+                                color: Theme.palette().ink;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                            }
+
+                            // Aspect ratio picker
+                            SegmentedControl {
+                                items: ["Widescreen (16:9)", "Standard (4:3)"];
+                                current: root.aspect-ratio-wide ? 0 : 1;
+                                label: "Theme Aspect Ratio";
+                                selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 16px;
+                            alignment: start;
+
+                            if root.theme-visible(0) : ThemeCard {
+                                theme-index: 0;
+                                theme-name: "Basic White";
+                                description: "Clean white presentation";
+                                is-wide: root.aspect-ratio-wide;
+                                selected: root.theme-selected == 0;
+                                clicked => { root.theme-selected = 0; }
+                            }
+
+                            if root.theme-visible(1) : ThemeCard {
+                                theme-index: 1;
+                                theme-name: "Basic Black";
+                                description: "Sleek dark presentation";
+                                is-wide: root.aspect-ratio-wide;
+                                selected: root.theme-selected == 1;
+                                clicked => { root.theme-selected = 1; }
+                            }
+
+                            if root.theme-visible(2) : ThemeCard {
+                                theme-index: 2;
+                                theme-name: "Classic Editorial";
+                                description: "Refined typographic layout";
+                                is-wide: root.aspect-ratio-wide;
+                                selected: root.theme-selected == 2;
+                                clicked => { root.theme-selected = 2; }
+                            }
+
+                            if root.theme-visible(3) : ThemeCard {
+                                theme-index: 3;
+                                theme-name: "Dynamic Accent";
+                                description: "Bold gradient styling";
+                                is-wide: root.aspect-ratio-wide;
+                                selected: root.theme-selected == 3;
+                                clicked => { root.theme-selected = 3; }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+                    }
+                }
+
+                // Footer Bar
+                Rectangle {
+                    height: 56px;
+                    background: Theme.palette().chrome;
+
+                    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        cross-axis-alignment: center;
+
+                        Text {
+                            text: "Escape to cancel • Return to create";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+
+                        ToolbarButton {
+                            label: "Cancel";
+                            clicked => { root.cancel-theme(); }
+                        }
+
+                        ToolbarButton {
+                            label: "Create Presentation";
+                            primary: true;
+                            clicked => { root.create-theme(root.theme-selected); }
+                        }
+                    }
+                }
             }
-            move-selection(delta) => { root.palette-move(delta); }
-            key-text(text) => { root.palette-key-text(text); }
-            backspace => { root.palette-backspace(); }
-            close-requested => {
-                root.palette-open = false;
-                app-focus.focus();
-            }
+        }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => { root.palette-invoked(idx); }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => { root.palette-move(delta); }
+        key-text(text) => { root.palette-key-text(text); }
+        backspace => { root.palette-backspace(); }
+        close-requested => {
+            root.palette-open = false;
+            root.palette-close();
         }
     }
 }

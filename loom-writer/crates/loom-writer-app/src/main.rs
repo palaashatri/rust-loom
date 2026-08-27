@@ -17,7 +17,8 @@ use document_formatting::{
     set_document_italic, set_document_underline,
 };
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
@@ -1110,6 +1111,39 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+
+    let menu_bar = build_standard_menu_bar(
+        "Loom Writer",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_pdf",
+            "Export to PDF...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Format Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Format",
+            vec![
+                MenuItem::action_with_shortcut("format.bold", "Bold", MenuShortcut::primary("B")),
+                MenuItem::action_with_shortcut(
+                    "format.italic",
+                    "Italic",
+                    MenuShortcut::primary("I"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "format.underline",
+                    "Underline",
+                    MenuShortcut::primary("U"),
+                ),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
 
     wire_palette(&app);
 

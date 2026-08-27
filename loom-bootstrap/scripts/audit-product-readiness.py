@@ -144,6 +144,7 @@ def score(evidence_root: Path | None) -> dict[str, object]:
         1
         for text in uis.values()
         if contains_all(text, ("AppHeader {", "StatusBar {", "Theme.palette()"))
+        or contains_all(text, ("DocumentChrome {", "ToolkitStatusBar {", "Theme.palette()"))
     )
     ui_point(
         "shared design system",

@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_photo_core::{
     decode_raster, encode_jpeg, encode_png, load_photo, load_photo_canvas, save_photo_canvas,
@@ -646,6 +647,38 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     configure_responsive_layout(&app, args.size);
     let session = PhotoSession::new(initial_canvas(args)?);
     refresh_photo(&app, &session)?;
+    let menu_bar = build_standard_menu_bar(
+        "Loom Photo",
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_png",
+                "Export as PNG...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_jpeg", "Export as JPEG..."),
+        ],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Layer",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "layer.new",
+                    "New Layer",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("layer.duplicate", "Duplicate Layer"),
+                MenuItem::action("layer.delete", "Delete Layer"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
@@ -1061,6 +1094,38 @@ fn main() -> Result<(), String> {
             }
         });
     }
+
+    let menu_bar = build_standard_menu_bar(
+        "Loom Photo",
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_png",
+                "Export as PNG...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_jpeg", "Export as JPEG..."),
+        ],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![Menu::new(
+            "Layer",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "layer.new",
+                    "New Layer",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("layer.duplicate", "Duplicate Layer"),
+                MenuItem::action("layer.delete", "Delete Layer"),
+            ],
+        )],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
 
     wire_palette(&app);
 

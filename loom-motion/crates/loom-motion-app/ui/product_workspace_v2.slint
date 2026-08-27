@@ -1,8 +1,11 @@
 import {
-    AppHeader, WorkspaceToolbar, ToolButton, IconButton, StatusBar, Slider,
-    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, MetricChip,
-    CanvasBackdrop, TransportButton, EmptyState, PanelHeader, StatusPill,
-    CommandPalette, CommandPaletteItem
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
+} from "toolkit.slint";
+import {
+    IconButton, Slider, SidebarSurface, InspectorSurface, WorkspaceRow,
+    PaneTabs, MetricChip, CanvasBackdrop, TransportButton, EmptyState,
+    PanelHeader, StatusPill, CommandPalette, CommandPaletteItem
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
@@ -107,109 +110,75 @@ export component MotionApp inherits Window {
         VerticalLayout {
         spacing: 0px;
 
-        AppHeader {
-            app-name: "Loom Motion";
-            document-title: root.comp-name;
-            icon: "layers";
-            context: root.timecode-text;
-            state-text: root.is-playing ? "Previewing" : "Local composition";
-            state-tone: root.is-playing ? 1 : 0;
+        DocumentChrome {
+            title: root.comp-name;
+            trailing-text: root.timecode-text;
         }
 
-        WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New"; clicked => { root.new-comp(); } }
-            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-comp(); } }
-            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-comp(); } }
-            if !root.compact-layout : ToolButton { icon: "save-as"; text: "Save As"; clicked => { root.save-as-comp(); } }
-            if root.compact-layout : IconButton { icon: "save-as"; label: "Save As"; clicked => { root.save-as-comp(); } }
-            IconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            if !root.compact-layout : ToolButton { icon: "cursor"; text: "Transform"; checked: true; }
-            if root.compact-layout : IconButton { icon: "cursor"; label: "Transform"; checked: true; }
-            if !root.compact-layout : ToolButton { icon: "plus"; text: "Layer"; clicked => { root.add-layer(); } }
-            if root.compact-layout : IconButton { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
-            if !root.compact-layout : ToolButton {
-                icon: "grid";
-                text: "Guides";
-                checked: root.show-guides;
-                clicked => { root.show-guides = !root.show-guides; }
-            }
-            if root.compact-layout : IconButton {
-                icon: "grid";
-                label: "Guides";
-                checked: root.show-guides;
-                clicked => { root.show-guides = !root.show-guides; }
-            }
-            if !root.compact-layout : ToolButton {
-                icon: "eye";
-                text: "Safe Area";
-                checked: root.show-safe-area;
-                clicked => { root.show-safe-area = !root.show-safe-area; }
-            }
-            if root.compact-layout : IconButton {
-                icon: "eye";
-                label: "Safe Area";
-                checked: root.show-safe-area;
-                clicked => { root.show-safe-area = !root.show-safe-area; }
-            }
-            if !root.compact-layout : ToolButton { icon: "export"; text: "Export Frame"; clicked => { root.export-frame(); } }
-            if root.compact-layout : IconButton { icon: "export"; label: "Export Frame"; clicked => { root.export-frame(); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            TransportButton { icon: "chevron-left"; label: "Step backward one frame"; clicked => { root.step-back(); } }
-            TransportButton {
-                icon: root.is-playing ? "pause" : "play";
-                label: root.is-playing ? "Pause preview" : "Play preview";
-                active: root.is-playing;
-                clicked => {
-                    root.is-playing = !root.is-playing;
-                    root.play-pause();
+        Toolbar {
+            ToolbarGroup {
+                AppleToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
+                AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+                AppleToolbarItem {
+                    icon: "grid";
+                    label: "Guides";
+                    checked: root.show-guides;
+                    clicked => { root.show-guides = !root.show-guides; }
+                }
+                AppleToolbarItem {
+                    icon: "eye";
+                    label: "Safe Area";
+                    checked: root.show-safe-area;
+                    clicked => { root.show-safe-area = !root.show-safe-area; }
                 }
             }
-            TransportButton { icon: "chevron-right"; label: "Step forward one frame"; clicked => { root.step-forward(); } }
-            TransportButton {
-                icon: "redo";
-                label: "Loop preview";
-                active: root.is-looping;
-                clicked => {
-                    root.is-looping = !root.is-looping;
-                    root.toggle-loop();
+
+            ToolbarSpacer {}
+
+            // Center Transport group
+            ToolbarGroup {
+                AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
+                AppleToolbarItem {
+                    icon: root.is-playing ? "pause" : "play";
+                    label: root.is-playing ? "Pause" : "Play";
+                    checked: root.is-playing;
+                    clicked => {
+                        root.is-playing = !root.is-playing;
+                        root.play-pause();
+                    }
+                }
+                AppleToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
+                AppleToolbarItem {
+                    icon: "redo";
+                    label: "Loop";
+                    checked: root.is-looping;
+                    clicked => {
+                        root.is-looping = !root.is-looping;
+                        root.toggle-loop();
+                    }
                 }
             }
-            if !root.compact-layout : Rectangle {
-                height: 28px;
-                border-radius: 7px;
-                background: Theme.palette().surface-sunken;
-                border-width: 1px;
-                border-color: Theme.palette().border;
-                HorizontalLayout {
-                    spacing: 7px;
-                    padding-left: 9px;
-                    padding-right: 9px;
-                    StatusPill { text: root.is-playing ? "PLAY" : "PAUSED"; tone: root.is-playing ? 1 : 0; }
-                    Text { text: root.timecode-display; font-size: Theme.tokens.typography.caption; font-weight: 650; color: Theme.palette().ink; vertical-alignment: center; }
+
+            ToolbarSpacer {}
+
+            // Right Inspector & Export
+            ToolbarGroup {
+                AppleToolbarItem {
+                    icon: "timeline";
+                    label: "Curves";
+                    checked: root.curve-drawer-open;
+                    clicked => {
+                        root.curve-drawer-open = !root.curve-drawer-open;
+                        root.toggle-curve-drawer();
+                    }
+                }
+                AppleToolbarItem {
+                    icon: "export";
+                    label: "Export SVG";
+                    clicked => { root.export-frame(); }
                 }
             }
-            if root.compact-layout : MetricChip { label: "TC"; value: root.timecode-display; }
-            if !root.compact-layout : MetricChip { label: "Zoom"; value: Math.round(root.zoom-value) + "%"; }
-            if !root.compact-layout : ToolButton {
-                icon: "timeline";
-                text: "Curves";
-                checked: root.curve-drawer-open;
-                clicked => {
-                    root.curve-drawer-open = !root.curve-drawer-open;
-                    root.toggle-curve-drawer();
-                }
-            }
-            if root.compact-layout : IconButton {
-                icon: "timeline";
-                label: "Curves";
-                checked: root.curve-drawer-open;
-                clicked => {
-                    root.curve-drawer-open = !root.curve-drawer-open;
-                    root.toggle-curve-drawer();
-                }
-            }
+        }
         }
 
         HorizontalLayout {
@@ -275,7 +244,7 @@ export component MotionApp inherits Window {
                     }
 
                     Rectangle { vertical-stretch: 1; background: transparent; }
-                    ToolButton { icon: "plus"; text: "Add Motion Layer"; clicked => { root.add-layer(); } }
+                    IconButton { icon: "plus"; label: "Add Motion Layer"; clicked => { root.add-layer(); } }
                 }
             }
 
@@ -659,7 +628,7 @@ export component MotionApp inherits Window {
             }
         }
 
-        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+        ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }
     }
 
     palette := CommandPalette {
@@ -691,6 +660,5 @@ export component MotionApp inherits Window {
             root.palette-open = false;
             app-focus.focus();
         }
-    }
     }
 }

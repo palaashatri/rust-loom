@@ -1,5 +1,9 @@
 import {
-    AppHeader, WorkspaceToolbar, ToolButton, IconButton, PrimaryButton, StatusBar,
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
+} from "toolkit.slint";
+import {
+    ToolButton, IconButton, PrimaryButton,
     SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Field, MetricChip,
     Slider, SegmentedControl, StatusPill, CommandPalette, CommandPaletteItem
 } from "components.slint";
@@ -89,31 +93,27 @@ export component EncodeApp inherits Window {
 
         VerticalLayout {
         spacing: 0px;
-        AppHeader {
-            app-name: "Loom Encode";
-            document-title: root.queue-name;
-            icon: "package";
-            context: root.job-labels.length == 1 ? "1 job" : root.job-labels.length + " jobs";
-            state-text: root.running ? "Encoding" : root.backend-available ? "Encoder ready" : "Encoder unavailable";
-            // Distinguish a healthy local encoder from an unavailable one in
-            // the header; the idle ready state should not read as neutral or
-            // warning.
-            state-tone: root.running ? 1 : root.backend-available ? 2 : 4;
+        DocumentChrome {
+            title: root.queue-name;
+            trailing-text: root.job-labels.length == 1 ? "1 job" : root.job-labels.length + " jobs";
         }
-        WorkspaceToolbar {
-            ToolButton { icon: "new"; text: "New Queue"; clicked => { root.new-queue(); } }
-            ToolButton { icon: "open"; text: "Open"; clicked => { root.open-queue(); } }
-            ToolButton { icon: "save"; text: "Save"; clicked => { root.save-queue(); } }
-            ToolButton { icon: "save-as"; text: "Save As"; clicked => { root.save-as-queue(); } }
-            IconButton { icon: "undo"; label: "Undo queue edit"; enabled: root.can-undo && !root.running; clicked => { root.undo(); } }
-            IconButton { icon: "redo"; label: "Redo queue edit"; enabled: root.can-redo && !root.running; clicked => { root.redo(); } }
-            Rectangle { width: 1px; height: 20px; background: Theme.palette().border; }
-            ToolButton { icon: "plus"; text: "Add Job"; enabled: !root.running; clicked => { root.add-job(); } }
-            IconButton { icon: "trash"; label: "Remove selected job"; enabled: root.job-labels.length > 0 && !root.running; clicked => { root.remove-job(); } }
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            MetricChip { label: "Batch"; value: Math.round(root.batch-progress) + "%"; }
-            if !root.running : PrimaryButton { text: "Start Queue"; enabled: root.can-start; clicked => { root.start-queue(); } }
-            if root.running : ToolButton { icon: "stop"; text: "Cancel"; clicked => { root.cancel-queue(); } }
+        Toolbar {
+            ToolbarGroup {
+                AppleToolbarItem { icon: "plus"; label: "Add Job"; enabled: !root.running; clicked => { root.add-job(); } }
+                AppleToolbarItem { icon: "trash"; label: "Remove"; enabled: root.job-labels.length > 0 && !root.running; clicked => { root.remove-job(); } }
+            }
+            ToolbarSpacer {}
+            ToolbarGroup {
+                AppleToolbarItem {
+                    icon: root.running ? "stop" : "play";
+                    label: root.running ? "Cancel Queue" : "Start Queue";
+                    enabled: root.can-start || root.running;
+                    checked: root.running;
+                    clicked => {
+                        if (root.running) { root.cancel-queue(); } else { root.start-queue(); }
+                    }
+                }
+            }
         }
 
         HorizontalLayout {
@@ -259,7 +259,7 @@ export component EncodeApp inherits Window {
                 }
             }
         }
-        StatusBar { status-left: root.status-left; status-right: root.status-right; }
+        ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }
     }
 
     palette := CommandPalette {

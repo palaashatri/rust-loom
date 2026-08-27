@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use loom_desktop::{
-    FileDialogService, FileFilter, NativeFileDialogs, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_encode_core::{
     discover_ffmpeg, execute_job_with_cancel, load_encode_queue, probe_duration, save_encode_queue,
@@ -329,6 +330,38 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let (queue, _) = initial_queue(args)?;
     let backend = discover_ffmpeg(&[]).ok();
     refresh(&app, &queue, backend.as_ref(), false);
+    let menu_bar = build_standard_menu_bar(
+        "Loom Encode",
+        vec![],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![
+            Menu::new(
+                "Queue",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "queue.add_job",
+                        "Add Transcode Job",
+                        MenuShortcut::primary_shift("N"),
+                    ),
+                    MenuItem::action("queue.remove_job", "Remove Selected Job"),
+                    MenuItem::action_with_shortcut(
+                        "queue.start",
+                        "Start Queue",
+                        MenuShortcut::primary("R"),
+                    ),
+                    MenuItem::action("queue.cancel", "Cancel Queue"),
+                ],
+            ),
+        ],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
@@ -1044,6 +1077,38 @@ fn main() -> Result<(), String> {
     });
 
     wire_application(&app, state.clone());
+    let menu_bar = build_standard_menu_bar(
+        "Loom Encode",
+        vec![],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            true,
+        )],
+        vec![
+            Menu::new(
+                "Queue",
+                vec![
+                    MenuItem::action_with_shortcut(
+                        "queue.add_job",
+                        "Add Transcode Job",
+                        MenuShortcut::primary_shift("N"),
+                    ),
+                    MenuItem::action("queue.remove_job", "Remove Selected Job"),
+                    MenuItem::action_with_shortcut(
+                        "queue.start",
+                        "Start Queue",
+                        MenuShortcut::primary("R"),
+                    ),
+                    MenuItem::action("queue.cancel", "Cancel Queue"),
+                ],
+            ),
+        ],
+    );
+    let menu_service = NativeMenuBar::new();
+    let _ = menu_service.install_menu_bar(&menu_bar);
+
     wire_palette(&app);
     let queue = snapshot(&state);
     refresh(&app, &queue, state.backend.as_ref(), false);

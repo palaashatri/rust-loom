@@ -12,6 +12,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+pub mod menu;
+pub use menu::{
+    build_standard_menu_bar, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut,
+    NativeMenuBar, ScriptedMenuBar,
+};
+
 /// A display name and extension list presented by a native file dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileFilter {
@@ -304,6 +310,59 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn menu_bar_item_lookup_and_state_updates() {
+        let mut menu_bar = build_standard_menu_bar(
+            "Loom Test",
+            vec![MenuItem::action("file.export", "Export Custom...")],
+            vec![],
+            vec![],
+            vec![],
+        );
+        assert!(menu_bar.find_item("file.new").is_some());
+        assert!(menu_bar.find_item("file.export").is_some());
+        assert_eq!(menu_bar.find_item("nonexistent"), None);
+
+        // Update state
+        assert!(menu_bar.update_item_state("file.save", false, None));
+        let item = menu_bar.find_item("file.save").unwrap();
+        assert!(!item.is_enabled());
+
+        // Update check state
+        assert!(menu_bar.update_item_state("view.inspector", true, Some(false)));
+        if let Some(MenuItem::Check { checked, .. }) = menu_bar.find_item("view.inspector") {
+            assert!(!*checked);
+        } else {
+            panic!("expected check item");
+        }
+    }
+
+    #[test]
+    fn menu_bar_dbusmenu_json_generation() {
+        let menu_bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        let json = menu_bar.to_dbusmenu_json();
+        assert!(json.contains("File"));
+        assert!(json.contains("Edit"));
+        assert!(json.contains("View"));
+        assert!(json.contains("Window"));
+        assert!(json.contains("Help"));
+    }
+
+    #[test]
+    fn scripted_menu_bar_records_install_and_actions() {
+        let service = ScriptedMenuBar::new();
+        let bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        service.install_menu_bar(&bar).expect("install");
+        service.dispatch_action("file.new").expect("dispatch");
+        service.dispatch_action("edit.undo").expect("dispatch");
+
+        assert_eq!(service.installed_bars().len(), 1);
+        assert_eq!(
+            service.dispatched_actions(),
+            vec!["file.new".to_string(), "edit.undo".to_string()]
+        );
+    }
     #[test]
     fn suggested_name_cannot_escape_the_dialog_directory() {
         let dialogs = ScriptedFileDialogs::default();

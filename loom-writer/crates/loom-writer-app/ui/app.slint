@@ -1,6 +1,6 @@
 import {
-    Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    ToolbarIconButton, ToolkitStatusBar, CanvasSurface, InspectorSurface,
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface, InspectorSurface,
     SectionHeader, TextField, SegmentedControl, PropertyRow
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
@@ -9,9 +9,9 @@ import { Theme } from "theme.slint";
 export { Theme } from "theme.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
-/// A compact, reusable card for the New Document chooser. The preview is made
-/// from regular Loom primitives so it stays deterministic in software-rendered
-/// visual QA and does not imply unsupported document content.
+/// A Pages-class portrait template card for the New Document chooser.
+/// Uses realistic paper proportions (1:1.414 portrait) with deterministic
+/// Slint geometry to represent document templates.
 component TemplateCard inherits Rectangle {
     in property <int> template-index: 0;
     in property <string> template-name: "Blank";
@@ -19,8 +19,8 @@ component TemplateCard inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    width: 220px;
-    height: 218px;
+    width: 176px;
+    height: 248px;
     border-radius: Theme.tokens.metrics.radius-large;
     border-width: root.selected ? 2px : 1px;
     border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
@@ -31,20 +31,22 @@ component TemplateCard inherits Rectangle {
     accessible-action-default => { root.clicked(); }
 
     VerticalLayout {
-        spacing: 10px;
-        padding: 12px;
+        spacing: 8px;
+        padding: 10px;
+        alignment: start;
 
         Rectangle {
-            height: 124px;
-            border-radius: Theme.tokens.metrics.radius-medium;
+            height: 168px;
+            border-radius: 4px;
             border-width: 1px;
             border-color: Theme.palette().paper-line;
             background: Theme.palette().paper;
             clip: true;
 
+            // Template 0: Blank
             if root.template-index == 0 : VerticalLayout {
                 spacing: 8px;
-                padding: 20px;
+                padding: 16px;
                 Text {
                     text: "Aa";
                     font-size: 32px;
@@ -56,60 +58,70 @@ component TemplateCard inherits Rectangle {
                 }
                 Rectangle { height: 1px; background: Theme.palette().paper-line; }
             }
+
+            // Template 1: Report
             if root.template-index == 1 : VerticalLayout {
-                spacing: 7px;
-                padding: 16px;
-                Text { text: "REPORT"; font-size: 11px; font-weight: 700; color: Theme.palette().paper-ink; }
-                Rectangle { height: 2px; background: Theme.palette().content-accent; }
-                Rectangle { height: 4px; background: Theme.palette().paper-line; }
-                Rectangle { height: 4px; background: Theme.palette().paper-line; }
-                Rectangle { height: 4px; width: 72%; background: Theme.palette().paper-line; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-            if root.template-index == 2 : VerticalLayout {
-                spacing: 8px;
-                padding: 16px;
-                Text { text: "Your Name"; font-size: 12px; font-weight: 600; color: Theme.palette().paper-ink; }
-                Text { text: "Date"; font-size: 9px; color: Theme.palette().paper-muted; }
-                Rectangle { height: 1px; background: Theme.palette().paper-line; }
-                Text { text: "Dear Recipient,"; font-size: 9px; color: Theme.palette().paper-ink; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-            if root.template-index == 3 : VerticalLayout {
-                spacing: 7px;
+                spacing: 6px;
                 padding: 14px;
-                Text { text: "YOUR NAME"; font-size: 13px; font-weight: 700; color: Theme.palette().paper-ink; }
+                Text { text: "REPORT TITLE"; font-size: 10px; font-weight: 700; color: Theme.palette().paper-ink; }
+                Rectangle { height: 2px; background: Theme.palette().accent; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; width: 75%; background: Theme.palette().paper-line; }
+                Rectangle { height: 8px; background: transparent; }
+                Text { text: "Executive Summary"; font-size: 8px; font-weight: 600; color: Theme.palette().paper-muted; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; width: 85%; background: Theme.palette().paper-line; }
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+
+            // Template 2: Letter
+            if root.template-index == 2 : VerticalLayout {
+                spacing: 6px;
+                padding: 14px;
+                Text { text: "Your Name"; font-size: 11px; font-weight: 600; color: Theme.palette().paper-ink; }
+                Text { text: "October 24, 2026"; font-size: 8px; color: Theme.palette().paper-muted; }
+                Rectangle { height: 1px; background: Theme.palette().paper-line; }
+                Text { text: "Dear Recipient,"; font-size: 8px; color: Theme.palette().paper-ink; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; width: 60%; background: Theme.palette().paper-line; }
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+
+            // Template 3: CV / Resume
+            if root.template-index == 3 : VerticalLayout {
+                spacing: 5px;
+                padding: 12px;
+                Text { text: "YOUR NAME"; font-size: 11px; font-weight: 700; color: Theme.palette().paper-ink; }
                 Rectangle { height: 2px; background: Theme.palette().content-cool; }
-                Text { text: "EXPERIENCE"; font-size: 9px; font-weight: 600; color: Theme.palette().paper-muted; }
-                Rectangle { height: 4px; background: Theme.palette().paper-line; }
-                Rectangle { height: 4px; width: 80%; background: Theme.palette().paper-line; }
+                Text { text: "EXPERIENCE"; font-size: 8px; font-weight: 600; color: Theme.palette().paper-muted; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                Rectangle { height: 3px; width: 80%; background: Theme.palette().paper-line; }
+                Text { text: "EDUCATION"; font-size: 8px; font-weight: 600; color: Theme.palette().paper-muted; }
+                Rectangle { height: 3px; background: Theme.palette().paper-line; }
                 Rectangle { vertical-stretch: 1; background: transparent; }
             }
         }
 
-        Text {
-            text: root.template-name;
-            font-size: Theme.tokens.typography.body;
-            font-weight: 650;
-            color: Theme.palette().ink;
-            vertical-alignment: center;
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: root.template-name;
+                font-size: Theme.tokens.typography.body;
+                font-weight: 600;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                text: root.description;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
         }
-        Text {
-            text: root.description;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-secondary;
-            wrap: word-wrap;
-            vertical-stretch: 1;
-        }
-    }
-
-    if root.selected : Rectangle {
-        x: 12px;
-        y: 12px;
-        width: 4px;
-        height: 4px;
-        border-radius: 2px;
-        background: Theme.palette().accent;
     }
 
     touch := TouchArea {
@@ -117,27 +129,21 @@ component TemplateCard inherits Rectangle {
     }
 }
 
-/// Borderless multiline editing surface for the paper canvas. `TextInput` is
-/// the real editing and accessibility primitive; this wrapper owns only the
-/// paper-friendly palette, placeholder treatment, and focus forwarding so the
-/// native TextEdit frame never leaks into the document surface.
-component WriterTextInput inherits Rectangle {
+/// The document editor text area rendered inside the white page.
+component DocumentPageEditor inherits Rectangle {
     in-out property <string> text: "";
-    in property <string> placeholder-text: "";
+    in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
-    in property <length> font-size: Theme.tokens.typography.body-large;
+    in property <length> font-size: 14px;
     callback edited(string);
     callback key-pressed(event: KeyEvent) -> EventResult;
 
     background: transparent;
-    border-width: 0px;
-    clip: true;
     accessible-role: AccessibleRole.text-input;
-    accessible-label: "Document text";
+    accessible-label: "Document body";
     accessible-enabled: root.enabled;
     accessible-value <=> root.text;
-    accessible-placeholder-text: root.placeholder-text;
-    accessible-read-only: false;
+    accessible-placeholder-text: root.placeholder;
     accessible-action-default => { editor.focus(); }
     forward-focus: editor;
 
@@ -146,7 +152,7 @@ component WriterTextInput inherits Rectangle {
         y: 0px;
         width: root.width;
         height: root.height;
-        text: root.placeholder-text;
+        text: root.placeholder;
         font-size: root.font-size;
         color: Theme.palette().paper-muted;
         vertical-alignment: top;
@@ -178,42 +184,6 @@ component WriterTextInput inherits Rectangle {
     }
 }
 
-/// A Pages-inspired rail action that keeps the toolkit's real button
-/// semantics while collapsing to an icon-only target when the window is
-/// narrower than the comfortable label width. The narrow variant retains the
-/// full accessible label, so unsupported actions stay honest even when their
-/// visible label is hidden.
-component WriterRailAction inherits Rectangle {
-    in property <string> icon: "generic";
-    in property <string> label: "Action";
-    in property <bool> enabled: true;
-    in property <bool> checked: false;
-    in property <bool> show-label: false;
-    in property <length> labeled-width: 80px;
-    callback clicked;
-
-    width: root.show-label ? root.labeled-width : Theme.tokens.metrics.control-height;
-    height: Theme.tokens.metrics.control-height;
-    background: transparent;
-
-    if root.show-label : ToolbarButton {
-        width: root.width;
-        icon: root.icon;
-        label: root.label;
-        enabled: root.enabled;
-        checked: root.checked;
-        clicked => { root.clicked(); }
-    }
-    if !root.show-label : ToolbarIconButton {
-        width: root.width;
-        icon: root.icon;
-        label: root.label;
-        enabled: root.enabled;
-        checked: root.checked;
-        clicked => { root.clicked(); }
-    }
-}
-
 export component WriterApp inherits Window {
     title: "Loom Writer";
     min-width: 1024px;
@@ -222,9 +192,6 @@ export component WriterApp inherits Window {
     preferred-height: 800px;
     background: Theme.palette().canvas;
 
-    // Breakpoints are supplied by the host after it chooses the window size.
-    // Keeping them out of the implicit width calculation avoids Slint binding
-    // loops when optional toolbar children are added or removed.
     in property <bool> wide-toolbar: false;
     in property <bool> labeled-export: false;
     in-out property <bool> show-inspector: true;
@@ -244,7 +211,7 @@ export component WriterApp inherits Window {
     in-out property <bool> is-underline: false;
     in-out property <int> heading-level: 0;
     in-out property <int> text-alignment: 0;
-    in-out property <float> zoom-value: 88.0;
+    in-out property <float> zoom-value: 100.0;
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -349,6 +316,18 @@ export component WriterApp inherits Window {
                     root.export-pdf();
                     return accept;
                 }
+                if (event.text == "b" || event.text == "B") {
+                    root.toggle-bold();
+                    return accept;
+                }
+                if (event.text == "i" || event.text == "I") {
+                    root.toggle-italic();
+                    return accept;
+                }
+                if (event.text == "u" || event.text == "U") {
+                    root.toggle-underline();
+                    return accept;
+                }
             }
             return reject;
         }
@@ -357,390 +336,509 @@ export component WriterApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
-            // One 64px Pages-style action rail. Utility document actions stay
-            // compact on the left, while the named workspace actions are
-            // grouped around a title slot that is always mathematically
-            // centered. Labels collapse below 1180px; the icon variants keep
-            // their full accessible labels and truthful disabled state.
-            Rectangle {
-                height: 64px;
-                background: Theme.palette().chrome;
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    cross-axis-alignment: center;
-
-                    left-rail := Rectangle {
-                        horizontal-stretch: 1;
-                        background: transparent;
-
-                        HorizontalLayout {
-                            spacing: 4px;
-                            cross-axis-alignment: center;
-
-                            ToolbarGroup {
-                                background: Theme.palette().surface;
-                                border-width: 1px;
-                                border-color: Theme.palette().border;
-
-                                ToolbarIconButton { icon: "new"; label: "New document"; clicked => { root.new-doc(); } }
-                                ToolbarIconButton { icon: "open"; label: "Open document"; clicked => { root.open-doc(); } }
-                                ToolbarIconButton { icon: "save"; label: "Save"; clicked => { root.save-doc(); } }
-                                ToolbarIconButton { icon: "save-as"; label: "Save document as"; clicked => { root.save-as-doc(); } }
-                            }
-
-                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
-
-                            ToolbarGroup {
-                                background: Theme.palette().surface;
-                                border-width: 1px;
-                                border-color: Theme.palette().border;
-
-                                WriterRailAction {
-                                    icon: root.show-inspector ? "eye" : "eye-off";
-                                    label: "View";
-                                    enabled: true;
-                                    checked: root.show-inspector;
-                                    show-label: root.labeled-export;
-                                    labeled-width: 76px;
-                                    clicked => { root.toggle-inspector(); }
-                                }
-
-                                if root.labeled-export : Text {
-                                    text: "Zoom";
-                                    width: 34px;
-                                    font-size: Theme.tokens.typography.caption;
-                                    font-weight: 600;
-                                    color: Theme.palette().ink-secondary;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(40, root.zoom-value - 10); } }
-                                Text {
-                                    text: Math.round(root.zoom-value) + "%";
-                                    min-width: 44px;
-                                    font-size: Theme.tokens.typography.caption;
-                                    font-weight: 500;
-                                    color: Theme.palette().ink-secondary;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                ToolbarIconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(160, root.zoom-value + 10); } }
-                            }
-
-                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
-
-                            WriterRailAction {
-                                icon: "plus";
-                                label: "Add Page (unavailable in this document)";
-                                enabled: false;
-                                show-label: false;
-                                clicked => { }
-                            }
-                        }
-                    }
-
-                    title-slot := Rectangle {
-                        width: 200px;
-                        background: transparent;
-                    }
-
-                    right-rail := Rectangle {
-                        horizontal-stretch: 1;
-                        background: transparent;
-
-                        HorizontalLayout {
-                            spacing: 4px;
-                            alignment: end;
-                            cross-axis-alignment: center;
-
-                            ToolbarGroup {
-                                background: Theme.palette().surface;
-                                border-width: 1px;
-                                border-color: Theme.palette().border;
-
-                                WriterRailAction {
-                                    icon: "plus";
-                                    label: "Insert (unavailable in this document)";
-                                    enabled: false;
-                                    show-label: false;
-                                    clicked => { }
-                                }
-                                WriterRailAction {
-                                    icon: "table";
-                                    label: "Table insertion (unavailable)";
-                                    enabled: false;
-                                    show-label: false;
-                                    clicked => { }
-                                }
-                                WriterRailAction {
-                                    icon: "text";
-                                    label: "Text box insertion (unavailable)";
-                                    enabled: false;
-                                    show-label: false;
-                                    clicked => { }
-                                }
-                                WriterRailAction {
-                                    icon: "image";
-                                    label: "Media insertion (unavailable)";
-                                    enabled: false;
-                                    show-label: false;
-                                    clicked => { }
-                                }
-                            }
-
-                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
-
-                            ToolbarGroup {
-                                background: Theme.palette().surface;
-                                border-width: 1px;
-                                border-color: Theme.palette().border;
-
-                                WriterRailAction {
-                                    icon: "link";
-                                    label: "Share (unavailable offline)";
-                                    enabled: false;
-                                    show-label: false;
-                                    clicked => { }
-                                }
-                                WriterRailAction {
-                                    icon: "settings";
-                                    label: "Format";
-                                    enabled: true;
-                                    checked: root.show-inspector && root.inspector-tab == 0;
-                                    show-label: root.labeled-export;
-                                    labeled-width: 76px;
-                                    clicked => {
-                                        root.inspector-tab = 0;
-                                        if (!root.show-inspector) { root.toggle-inspector(); }
-                                    }
-                                }
-                                WriterRailAction {
-                                    icon: "document";
-                                    label: "Document";
-                                    enabled: true;
-                                    checked: root.show-inspector && root.inspector-tab == 1;
-                                    show-label: root.labeled-export;
-                                    labeled-width: 92px;
-                                    clicked => {
-                                        root.inspector-tab = 1;
-                                        if (!root.show-inspector) { root.toggle-inspector(); }
-                                    }
-                                }
-                            }
-
-                            Rectangle { width: 1px; height: 24px; background: Theme.palette().border; }
-
-                            ToolbarGroup {
-                                background: Theme.palette().surface;
-                                border-width: 1px;
-                                border-color: Theme.palette().border;
-
-                                ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: root.can-undo; clicked => { root.undo(); } }
-                                ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: root.can-redo; clicked => { root.redo(); } }
-                                if root.labeled-export : ToolbarButton {
-                                    width: 132px;
-                                    icon: "export";
-                                    label: "Export PDF";
-                                    primary: true;
-                                    clicked => { root.export-pdf(); }
-                                }
-                                if !root.labeled-export : ToolbarIconButton {
-                                    icon: "export";
-                                    label: "Export PDF";
-                                    clicked => { root.export-pdf(); }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                title-overlay := Text {
-                    x: (parent.width - self.width) / 2;
-                    y: 0px;
-                    width: 200px;
-                    height: parent.height;
-                    text: root.doc-title;
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 650;
-                    color: Theme.palette().ink;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-
-                Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
+            // Document Chrome Titlebar
+            DocumentChrome {
+                title: root.doc-title;
+                trailing-text: root.status-right;
             }
 
+            // Pages-Style Action Toolbar
+            Toolbar {
+                // Left group: View, Zoom, Add Page
+                ToolbarGroup {
+                    AppleToolbarItem { icon: "eye"; label: "View"; }
+                    AppleToolbarItem {
+                        icon: "zoom-in";
+                        label: Math.round(root.zoom-value) + "%";
+                        clicked => { root.zoom-value = (root.zoom-value >= 150 ? 100 : root.zoom-value + 25); }
+                    }
+                    AppleToolbarItem { icon: "plus"; label: "Add Page"; }
+                }
+
+                ToolbarSpacer { }
+
+                // Center group: Table, Chart, Text, Shape, Media, Comment
+                ToolbarGroup {
+                    AppleToolbarItem { icon: "table"; label: "Table"; clicked => { } }
+                    AppleToolbarItem { icon: "chart"; label: "Chart"; clicked => { } }
+                    AppleToolbarItem { icon: "text"; label: "Text"; clicked => { } }
+                    AppleToolbarItem { icon: "shape"; label: "Shape"; clicked => { } }
+                    AppleToolbarItem { icon: "image"; label: "Media"; clicked => { } }
+                    AppleToolbarItem { icon: "comment"; label: "Comment"; clicked => { } }
+                }
+
+                ToolbarSpacer { }
+
+                // Right group: Share, Format, Document / Export
+                ToolbarGroup {
+                    AppleToolbarItem { icon: "share"; label: "Share"; clicked => { } }
+                    AppleToolbarItem {
+                        icon: "format";
+                        label: "Format";
+                        checked: root.show-inspector;
+                        clicked => { root.toggle-inspector(); }
+                    }
+                    AppleToolbarItem {
+                        icon: "document";
+                        label: "Document";
+                        checked: !root.show-inspector;
+                        clicked => { root.toggle-inspector(); }
+                    }
+                    AppleToolbarItem {
+                        icon: "export";
+                        label: "Export";
+                        clicked => { root.export-pdf(); }
+                    }
+                }
+            }
+
+            // Main Editor Canvas and Right Inspector
             HorizontalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
 
+                // Document Canvas Area
                 CanvasSurface {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
 
+                    // Centered Document Page
                     Rectangle {
-                        width: parent.width;
-                        height: parent.height;
-                        background: Theme.palette().canvas;
+                        x: max(24px, (parent.width - self.width) / 2);
+                        y: max(24px, (parent.height - self.height) / 2);
+                        width: min(760px, max(320px, parent.width - 48px));
+                        height: min(980px, max(420px, parent.height - 48px));
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        background: Theme.palette().paper;
+                        drop-shadow-blur: 24px;
+                        drop-shadow-offset-y: 8px;
+                        drop-shadow-color: Theme.palette().shadow;
                         clip: true;
 
-                        page := Rectangle {
-                            width: min(760px, parent.width - 48px);
-                            height: max(520px, parent.height - 32px);
-                            x: (parent.width - self.width) / 2;
-                            y: max(16px, (parent.height - self.height) / 2);
-                            background: Theme.palette().paper;
-                            border-width: 1px;
-                            border-color: Theme.palette().paper-line;
-                            clip: true;
+                        VerticalLayout {
+                            padding-top: 48px;
+                            padding-bottom: 48px;
+                            padding-left: 56px;
+                            padding-right: 56px;
+                            spacing: 12px;
 
-                            Rectangle {
-                                x: 0px;
-                                y: 0px;
-                                width: parent.width;
-                                height: 26px;
-                                background: Theme.palette().surface;
-                                Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.palette().paper-line; }
-
-                                HorizontalLayout {
-                                    spacing: 0px;
-                                    padding-left: 64px;
-                                    padding-right: 64px;
-                                    for marker in ["0", "1", "2", "3", "4", "5", "6", "7"] : Rectangle {
-                                        horizontal-stretch: 1;
-                                        Text { text: marker; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-muted; vertical-alignment: center; }
-                                        Rectangle { x: 0px; y: parent.height - 7px; width: 1px; height: 7px; background: Theme.palette().paper-line; }
-                                    }
-                                }
+                            // Formatted Header Preview for Welcome Doc
+                            Text {
+                                text: "Welcome to Loom Writer";
+                                font-size: 24px;
+                                font-weight: 700;
+                                color: Theme.palette().paper-ink;
                             }
+                            Text {
+                                text: "A private, local-first word processor engineered with Apple Pages-class polish.";
+                                font-size: 13px;
+                                font-weight: 400;
+                                color: Theme.palette().paper-muted;
+                            }
+                            Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
 
-                            Rectangle {
-                                x: 0px;
-                                y: 26px;
-                                width: parent.width;
-                                height: parent.height - 26px;
-                                background: Theme.palette().paper;
-
-                                WriterTextInput {
-                                    x: 64px;
-                                    y: 46px;
-                                    width: parent.width - 128px;
-                                    height: parent.height - 76px;
-                                    text <=> root.doc-content;
-                                    font-size: Theme.tokens.typography.body-large;
-                                    placeholder-text: "Start writing…";
-                                    edited(content) => { root.document-edited(content); }
-                                    key-pressed(event) => {
-                                        if (event.modifiers.control && (event.text == "z" || event.text == "Z")) {
-                                            if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
-                                            accept
-                                        } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "y" || event.text == "Y")) {
-                                            root.redo();
-                                            accept
-                                        } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "s" || event.text == "S")) {
-                                            if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
-                                            accept
-                                        } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "o" || event.text == "O")) {
-                                            root.open-doc();
-                                            accept
-                                        } else if ((event.modifiers.control || event.modifiers.meta) && (event.text == "e" || event.text == "E")) {
-                                            root.export-pdf();
-                                            accept
-                                        }
-                                        reject
-                                    }
-                                }
+                            DocumentPageEditor {
+                                text <=> root.doc-content;
+                                font-size: 14px;
+                                edited(val) => { root.document-edited(val); }
                             }
                         }
                     }
                 }
 
+                // Apple Pages-Style Text Inspector
                 if root.show-inspector : InspectorSurface {
-                    width: 304px;
-                    title: "Format / Document";
+                    title: "Format";
+                    width: 280px;
 
                     VerticalLayout {
                         spacing: 12px;
-                        padding: 14px;
+                        padding: 12px;
+                        alignment: start;
+
+                        // Tab selector: Style | Layout | More
+                        SegmentedControl {
+                            items: ["Style", "Layout", "More"];
+                            current <=> root.inspector-tab;
+                            label: "Format Tabs";
+                        }
+
+                        // Paragraph Style Section
+                        SectionHeader { title: "Paragraph Style"; }
 
                         SegmentedControl {
-                            label: "Inspector section";
-                            items: ["Format", "Document"];
-                            current <=> root.inspector-tab;
+                            items: ["Body", "H1", "H2", "Title"];
+                            current <=> root.heading-level;
+                            label: "Heading Style";
+                            selected(idx) => { root.select-heading(idx); }
                         }
 
-                        if root.inspector-tab == 0 : VerticalLayout {
-                            spacing: 12px;
-                            SectionHeader { title: "Document-wide formatting"; }
-                            Text {
-                                text: "These controls apply to every paragraph. The legacy editor does not expose live range offsets yet.";
-                                font-size: Theme.tokens.typography.caption;
-                                color: Theme.palette().ink-secondary;
-                                wrap: word-wrap;
+                        // Font & Typography Section
+                        SectionHeader { title: "Font"; }
+
+                        PropertyRow {
+                            label: "Family";
+                            TextField {
+                                label: "Font family";
+                                value: "Helvetica Neue";
+                                enabled: false;
                             }
-                            PropertyRow {
-                                label: "Style";
-                                SegmentedControl {
-                                    label: "Document-wide paragraph style";
-                                    items: ["Body", "H1", "H2", "H3"];
-                                    current <=> root.heading-level;
-                                    selected(index) => { root.select-heading(index); }
-                                }
-                            }
-                            PropertyRow {
-                                label: "Alignment";
-                                SegmentedControl {
-                                    label: "Document-wide alignment";
-                                    items: ["Left", "Center", "Right"];
-                                    current <=> root.text-alignment;
-                                    selected(index) => { root.select-alignment(index); }
-                                }
-                            }
+                        }
+
+                        // Inline Formatting: B I U S
+                        PropertyRow {
+                            label: "Style";
                             HorizontalLayout {
-                                spacing: 6px;
-                                ToolbarIconButton { icon: "bold"; label: "Bold all paragraphs"; checked: root.is-bold; clicked => { root.is-bold = !root.is-bold; root.toggle-bold(); } }
-                                ToolbarIconButton { icon: "italic"; label: "Italic all paragraphs"; checked: root.is-italic; clicked => { root.is-italic = !root.is-italic; root.toggle-italic(); } }
-                                ToolbarIconButton { icon: "underline"; label: "Underline all paragraphs"; checked: root.is-underline; clicked => { root.is-underline = !root.is-underline; root.toggle-underline(); } }
+                                spacing: 4px;
+
+                                ToolbarIconButton {
+                                    icon: "bold";
+                                    label: "Bold";
+                                    checked: root.is-bold;
+                                    clicked => { root.toggle-bold(); }
+                                }
+                                ToolbarIconButton {
+                                    icon: "italic";
+                                    label: "Italic";
+                                    checked: root.is-italic;
+                                    clicked => { root.toggle-italic(); }
+                                }
+                                ToolbarIconButton {
+                                    icon: "underline";
+                                    label: "Underline";
+                                    checked: root.is-underline;
+                                    clicked => { root.toggle-underline(); }
+                                }
+                                ToolbarIconButton {
+                                    icon: "strikethrough";
+                                    label: "Strikethrough";
+                                    checked: false;
+                                    clicked => { }
+                                }
                             }
-                            Rectangle { vertical-stretch: 1; background: transparent; }
                         }
 
-                        if root.inspector-tab == 1 : VerticalLayout {
-                            spacing: 12px;
-                            SectionHeader { title: "Page layout"; }
-                            Text {
-                                text: "Page layout controls are disabled because the current Writer document schema stores text and paragraph formatting only.";
-                                font-size: Theme.tokens.typography.caption;
-                                color: Theme.palette().ink-secondary;
-                                wrap: word-wrap;
+                        // Alignment Section
+                        SectionHeader { title: "Alignment"; }
+
+                        SegmentedControl {
+                            items: ["Left", "Center", "Right", "Justify"];
+                            current <=> root.text-alignment;
+                            label: "Text Alignment";
+                            selected(idx) => { root.select-alignment(idx); }
+                        }
+
+                        PropertyRow {
+                            label: "Indentation";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                ToolbarIconButton {
+                                    icon: "outdent";
+                                    label: "Decrease indent";
+                                    clicked => { }
+                                }
+                                ToolbarIconButton {
+                                    icon: "indent";
+                                    label: "Increase indent";
+                                    clicked => { }
+                                }
                             }
-                            PropertyRow {
-                                label: "Page size";
-                                TextField { label: "Page size (unavailable)"; value: "Not available"; enabled: false; }
+                        }
+
+                        // Spacing & Lists Section
+                        SectionHeader { title: "Spacing & Lists"; }
+
+                        PropertyRow {
+                            label: "Line Spacing";
+                            TextField {
+                                label: "Line Spacing";
+                                value: "1.15";
+                                enabled: false;
                             }
-                            PropertyRow {
-                                label: "Orientation";
-                                SegmentedControl { label: "Orientation (unavailable)"; items: ["Portrait", "Landscape"]; current: 0; enabled: false; }
+                        }
+
+                        PropertyRow {
+                            label: "Bullets";
+                            TextField {
+                                label: "Bullets & Lists";
+                                value: "None";
+                                enabled: false;
                             }
-                            PropertyRow {
-                                label: "Margins";
-                                TextField { label: "Margins (unavailable)"; value: "Not available"; enabled: false; }
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+
+                        // Document Statistics Summary Card
+                        Rectangle {
+                            height: 64px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            background: Theme.palette().surface-sunken;
+                            border-width: 1px;
+                            border-color: Theme.palette().border;
+                            padding: 8px;
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                alignment: center;
+                                Text {
+                                    text: "Document Statistics";
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                Text {
+                                    text: root.status-left;
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    overflow: elide;
+                                }
                             }
-                            Rectangle { vertical-stretch: 1; background: transparent; }
                         }
                     }
                 }
             }
 
+            // Standard Status Bar
             ToolkitStatusBar {
                 leading: root.status-left;
-                trailing: root.status-right + (root.status-right == "" ? "" : "  •  ") + Math.round(root.zoom-value) + "%";
+                trailing: root.status-right;
             }
         }
+    }
+
+    // Modal Template Chooser matching Apple Pages reference
+    if root.template-chooser-open : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+
+        Rectangle {
+            x: (parent.width - 960px) / 2;
+            y: (parent.height - 620px) / 2;
+            width: 960px;
+            height: 620px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            clip: true;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+
+                // Main body: Sidebar + Content Grid
+                HorizontalLayout {
+                    spacing: 0px;
+                    vertical-stretch: 1;
+
+                    // Left Category Sidebar
+                    Rectangle {
+                        width: 220px;
+                        background: Theme.palette().panel;
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            padding-top: 16px; padding-bottom: 16px; padding-left: 12px; padding-right: 12px;
+
+                            Text {
+                                text: "TEMPLATES";
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: Theme.palette().ink-secondary;
+                                padding-left: 8px;
+                                padding-bottom: 4px;
+                            }
+
+                            // Category items
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.template-category == 0 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "grid"; tint: root.template-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "All Templates";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.template-category == 0 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-template-category(0); } }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.template-category == 1 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "document"; tint: root.template-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "Basic";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.template-category == 1 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-template-category(1); } }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.template-category == 2 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "folder"; tint: root.template-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "Letters";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.template-category == 2 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-template-category(2); } }
+                            }
+
+                            Rectangle {
+                                height: 32px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
+                                background: root.template-category == 3 ? Theme.palette().surface-raised : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: "layers"; tint: root.template-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    Text {
+                                        text: "Curricula Vitae";
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: root.template-category == 3 ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.choose-template-category(3); } }
+                            }
+
+                            Rectangle { vertical-stretch: 1; background: transparent; }
+
+                            // Bottom Language indicator
+                            HorizontalLayout {
+                                spacing: 6px; padding: 8px;
+                                Text {
+                                    text: "English (US)";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                                Icon { size: 12px; icon: "chevron-down"; tint: Theme.palette().ink-secondary; }
+                            }
+                        }
+
+                        Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().border; }
+                    }
+
+                    // Right Content Area
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        padding-top: 24px; padding-bottom: 20px; padding-left: 28px; padding-right: 28px;
+                        spacing: 16px;
+
+                        Text {
+                            text: "Choose a Template";
+                            font-size: 24px;
+                            font-weight: 700;
+                            color: Theme.palette().ink;
+                        }
+
+                        // Template Card Grid
+                        HorizontalLayout {
+                            spacing: 16px;
+                            alignment: start;
+
+                            if root.template-visible(0) : TemplateCard {
+                                template-index: 0;
+                                template-name: "Blank";
+                                description: "A clean page for any idea";
+                                selected: root.template-selected == 0;
+                                clicked => { root.template-selected = 0; }
+                            }
+
+                            if root.template-visible(1) : TemplateCard {
+                                template-index: 1;
+                                template-name: "Report";
+                                description: "A structured document";
+                                selected: root.template-selected == 1;
+                                clicked => { root.template-selected = 1; }
+                            }
+
+                            if root.template-visible(2) : TemplateCard {
+                                template-index: 2;
+                                template-name: "Letter";
+                                description: "Formal correspondence";
+                                selected: root.template-selected == 2;
+                                clicked => { root.template-selected = 2; }
+                            }
+
+                            if root.template-visible(3) : TemplateCard {
+                                template-index: 3;
+                                template-name: "CV";
+                                description: "Professional resume";
+                                selected: root.template-selected == 3;
+                                clicked => { root.template-selected = 3; }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+                    }
+                }
+
+                // Bottom Action Bar
+                Rectangle {
+                    height: 56px;
+                    background: Theme.palette().chrome;
+
+                    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        cross-axis-alignment: center;
+
+                        Text {
+                            text: "Escape to cancel • Return to create";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+
+                        ToolbarButton {
+                            label: "Cancel";
+                            clicked => { root.cancel-template(); }
+                        }
+
+                        ToolbarButton {
+                            label: "Create Document";
+                            primary: true;
+                            clicked => { root.create-template(root.template-selected); }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
         palette := CommandPalette {
             x: 0px;
@@ -761,154 +859,7 @@ export component WriterApp inherits Window {
             backspace => { root.palette-backspace(); }
             close-requested => {
                 root.palette-open = false;
-                app-focus.focus();
+                root.palette-close();
             }
         }
-
-        if root.template-chooser-open : Rectangle {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: parent.height;
-            background: Theme.palette().canvas;
-            clip: true;
-
-            VerticalLayout {
-                spacing: 0px;
-                padding: 0px;
-
-                Rectangle {
-                    height: 84px;
-                    background: Theme.palette().chrome;
-                    HorizontalLayout {
-                        spacing: 14px;
-                        padding-left: 28px;
-                        padding-right: 28px;
-                        cross-axis-alignment: center;
-                        Icon { icon: "document"; size: 26px; tint: Theme.palette().accent; }
-                        VerticalLayout {
-                            spacing: 2px;
-                            Text { text: "New Document"; font-size: Theme.tokens.typography.heading; font-weight: 700; color: Theme.palette().ink; }
-                            Text { text: "Choose a starting point for your next piece"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Text {
-                            text: "4 starting points";
-                            font-size: Theme.tokens.typography.caption;
-                            color: Theme.palette().ink-secondary;
-                            vertical-alignment: center;
-                        }
-                    }
-                    Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
-                }
-
-                HorizontalLayout {
-                    spacing: 0px;
-                    vertical-stretch: 1;
-
-                    Rectangle {
-                        width: 196px;
-                        background: Theme.palette().panel;
-                        VerticalLayout {
-                            spacing: 4px;
-                            padding-top: 18px;
-                            padding-bottom: 18px;
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            Text { text: "TEMPLATES"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().ink-secondary; }
-                            Rectangle { height: 8px; background: transparent; }
-                            for category[index] in ["All templates", "Basic", "Letters", "Curriculum vitae"] : Rectangle {
-                                height: 34px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                border-width: category-focus.has-focus ? 1px : 0px;
-                                border-color: Theme.palette().focus;
-                                background: index == root.template-category ? Theme.palette().selection-soft : category-touch.has-hover ? Theme.palette().surface-raised : transparent;
-                                accessible-role: button;
-                                accessible-label: category;
-                                accessible-action-default => { root.choose-template-category(index); }
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    padding-left: 10px;
-                                    padding-right: 10px;
-                                    cross-axis-alignment: center;
-                                    Icon { icon: index == 3 ? "text" : index == 2 ? "document" : index == 1 ? "plus" : "layers"; size: 15px; tint: index == root.template-category ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text { text: category; font-size: Theme.tokens.typography.body; font-weight: index == root.template-category ? 600 : 450; color: Theme.palette().ink; vertical-alignment: center; }
-                                }
-                                category-focus := FocusScope {
-                                    enabled: true;
-                                    key-pressed(event) => {
-                                        if (event.text == Key.Space || event.text == Key.Return) {
-                                            root.choose-template-category(index);
-                                            return accept;
-                                        }
-                                        return reject;
-                                    }
-                                }
-                                category-touch := TouchArea {
-                                    clicked => { category-focus.focus(); root.choose-template-category(index); }
-                                }
-                            }
-                            Rectangle { vertical-stretch: 1; background: transparent; }
-                            Text { text: "Loom Writer"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; }
-                        }
-                        Rectangle { x: root.width - 1px; width: 1px; height: root.height; background: Theme.palette().border; }
-                    }
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        background: Theme.palette().canvas;
-                        VerticalLayout {
-                            spacing: 18px;
-                            padding: 28px;
-                            Text { text: "Start with a template"; font-size: Theme.tokens.typography.heading; font-weight: 700; color: Theme.palette().ink; }
-                            Text { text: "Every template creates a real editable Writer document. You can change or remove all placeholder text."; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; wrap: word-wrap; }
-
-                            if root.wide-toolbar : HorizontalLayout {
-                                spacing: 18px;
-                                horizontal-stretch: 1;
-                                if root.template-visible(0) : TemplateCard { template-index: 0; template-name: "Blank"; description: "A clean page for any idea"; selected: root.template-selected == 0; clicked => { root.template-selected = 0; } }
-                                if root.template-visible(1) : TemplateCard { template-index: 1; template-name: "Report"; description: "A structured report with headings"; selected: root.template-selected == 1; clicked => { root.template-selected = 1; } }
-                                if root.template-visible(2) : TemplateCard { template-index: 2; template-name: "Letter"; description: "A polished letter with greeting"; selected: root.template-selected == 2; clicked => { root.template-selected = 2; } }
-                                if root.template-visible(3) : TemplateCard { template-index: 3; template-name: "CV"; description: "A concise curriculum vitae"; selected: root.template-selected == 3; clicked => { root.template-selected = 3; } }
-                            }
-                            if !root.wide-toolbar : VerticalLayout {
-                                spacing: 18px;
-                                if root.template-category == 0 || root.template-category == 1 : HorizontalLayout {
-                                    spacing: 18px;
-                                    if root.template-visible(0) : TemplateCard { template-index: 0; template-name: "Blank"; description: "A clean page for any idea"; selected: root.template-selected == 0; clicked => { root.template-selected = 0; } }
-                                    if root.template-visible(1) : TemplateCard { template-index: 1; template-name: "Report"; description: "A structured report with headings"; selected: root.template-selected == 1; clicked => { root.template-selected = 1; } }
-                                }
-                                if root.template-category == 0 : HorizontalLayout {
-                                    spacing: 18px;
-                                    if root.template-visible(2) : TemplateCard { template-index: 2; template-name: "Letter"; description: "A polished letter with greeting"; selected: root.template-selected == 2; clicked => { root.template-selected = 2; } }
-                                    if root.template-visible(3) : TemplateCard { template-index: 3; template-name: "CV"; description: "A concise curriculum vitae"; selected: root.template-selected == 3; clicked => { root.template-selected = 3; } }
-                                }
-                                if root.template-category == 2 || root.template-category == 3 : HorizontalLayout {
-                                    spacing: 18px;
-                                    if root.template-visible(2) : TemplateCard { template-index: 2; template-name: "Letter"; description: "A polished letter with greeting"; selected: root.template-selected == 2; clicked => { root.template-selected = 2; } }
-                                    if root.template-visible(3) : TemplateCard { template-index: 3; template-name: "CV"; description: "A concise curriculum vitae"; selected: root.template-selected == 3; clicked => { root.template-selected = 3; } }
-                                }
-                            }
-                            Rectangle { vertical-stretch: 1; background: transparent; }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    height: 68px;
-                    background: Theme.palette().chrome;
-                    Rectangle { x: 0px; y: 0px; width: root.width; height: 1px; background: Theme.palette().border; }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        padding-left: 28px;
-                        padding-right: 28px;
-                        cross-axis-alignment: center;
-                        Text { text: "Escape to cancel"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-stretch: 1; }
-                        ToolbarButton { width: 92px; label: "Cancel"; clicked => { root.cancel-template(); } }
-                        ToolbarButton { width: 176px; icon: "check"; label: "Create document"; primary: true; clicked => { root.create-template(root.template-selected); } }
-                    }
-                }
-            }
-        }
-    }
 }
