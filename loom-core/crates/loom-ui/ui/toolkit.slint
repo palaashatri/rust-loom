@@ -11,22 +11,11 @@ export component DocumentChrome inherits Rectangle {
     in property <string> title: "Untitled";
     in property <bool> modified: false;
     in property <string> trailing-text: "";
-    // Native window chrome owns traffic lights on macOS. Headless/non-native
-    // hosts may opt in explicitly when they need an in-surface affordance.
-    in property <bool> show-traffic-lights: false;
     min-height: Theme.tokens.metrics.header-height;
     max-height: Theme.tokens.metrics.header-height;
     background: Theme.palette().chrome;
     HorizontalLayout {
         spacing: 12px; padding-left: 12px; padding-right: 12px; cross-axis-alignment: center;
-
-        // macOS native traffic lights (Close, Minimize, Zoom)
-        if root.show-traffic-lights : HorizontalLayout {
-            spacing: 8px; cross-axis-alignment: center; width: 56px;
-            Rectangle { width: 12px; height: 12px; border-radius: 6px; background: Theme.palette().danger; }
-            Rectangle { width: 12px; height: 12px; border-radius: 6px; background: Theme.palette().warning; }
-            Rectangle { width: 12px; height: 12px; border-radius: 6px; background: Theme.palette().success; }
-        }
 
         Text {
             text: root.title + (root.modified ? " — Edited" : "");
@@ -41,7 +30,6 @@ export component DocumentChrome inherits Rectangle {
             font-weight: 500; color: Theme.palette().ink-secondary; vertical-alignment: center;
             max-width: 320px; overflow: elide; horizontal-alignment: right;
         }
-        if root.trailing-text == "" && root.show-traffic-lights : Rectangle { width: 56px; }
     }
     Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
 }
@@ -153,6 +141,47 @@ export component ToolbarIconButton inherits Rectangle {
     touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
 }
 
+/// Compact command affordance for actions moved out of a constrained toolbar.
+/// The host owns the menu model; this primitive only provides the shared
+/// hit-target, keyboard path, and accessible name.
+export component ToolbarOverflowButton inherits Rectangle {
+    in property <string> label: "More actions";
+    in property <bool> enabled: true;
+    callback clicked;
+    width: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: focus.has-focus ? Theme.palette().focus : transparent;
+    background: !root.enabled ? transparent
+        : touch.pressed ? Theme.palette().surface-sunken
+        : touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-description: "Opens the toolbar overflow menu";
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Icon {
+        x: (root.width - 16px) / 2;
+        y: (root.height - 16px) / 2;
+        size: 16px;
+        icon: "more";
+        tint: !root.enabled ? Theme.palette().ink-disabled : Theme.palette().ink-secondary;
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) { root.clicked(); return accept; }
+            return reject;
+        }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
+}
+
+/// Compatibility spelling for hosts that call this an overflow menu button.
+/// Geometry and behavior remain owned by ToolbarOverflowButton above.
+export component OverflowMenuButton inherits ToolbarOverflowButton { }
+
 export component ToolbarButton inherits Rectangle {
     in property <string> icon: "";
     in property <string> label: "Action";
@@ -206,6 +235,7 @@ export component ToolbarButton inherits Rectangle {
 
 export component PanelHeader inherits Rectangle {
     in property <string> title: "Panel";
+    in property <string> detail: "";
     min-height: Theme.tokens.metrics.panel-header-height;
     max-height: Theme.tokens.metrics.panel-header-height;
     background: Theme.palette().panel;
@@ -216,16 +246,21 @@ export component PanelHeader inherits Rectangle {
             text: root.title; font-size: Theme.tokens.typography.title; font-weight: 600;
             color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; overflow: elide;
         }
+        if root.detail != "" : Text {
+            text: root.detail; font-size: Theme.tokens.typography.micro; font-weight: 600;
+            color: Theme.palette().ink-disabled; max-width: 160px; overflow: elide;
+        }
         @children
     }
 }
 
 export component SidebarSurface inherits Rectangle {
     in property <string> title: "";
+    in property <string> detail: "";
     min-width: 200px; max-width: 360px; background: Theme.palette().panel;
     VerticalLayout {
         spacing: 0px; padding: 0px;
-        if root.title != "" : PanelHeader { title: root.title; }
+        if root.title != "" : PanelHeader { title: root.title; detail: root.detail; }
         Rectangle { vertical-stretch: 1; background: Theme.palette().panel; @children }
     }
     Rectangle { x: root.width - 1px; width: 1px; height: root.height; background: Theme.palette().border; }
@@ -233,10 +268,11 @@ export component SidebarSurface inherits Rectangle {
 
 export component InspectorSurface inherits Rectangle {
     in property <string> title: "Inspector";
+    in property <string> detail: "";
     min-width: 240px; max-width: 360px; background: Theme.palette().panel;
     VerticalLayout {
         spacing: 0px; padding: 0px;
-        PanelHeader { title: root.title; }
+        PanelHeader { title: root.title; detail: root.detail; }
         Rectangle { vertical-stretch: 1; background: Theme.palette().panel; @children }
     }
     Rectangle { x: 0px; width: 1px; height: root.height; background: Theme.palette().border; }
@@ -382,15 +418,21 @@ export component SegmentedControl inherits Rectangle {
     HorizontalLayout {
         spacing: 2px; padding: 2px;
         for item[idx] in root.items : Rectangle {
+            // Keep each segment's preferred size independent of root.width.
+            // A child width derived from its parent feeds the measured width
+            // back into this content-sized control and can leave labels
+            // clipped or painted over a neighbour.
+            min-width: max(48px, segment-label.preferred-width + 16px);
+            preferred-width: max(48px, segment-label.preferred-width + 16px);
             horizontal-stretch: 1;
             border-radius: 4px;
             background: idx == root.current ? Theme.palette().surface-raised : item-touch.has-hover ? Theme.palette().surface : transparent;
             border-width: idx == root.current ? 1px : 0px;
             border-color: idx == root.current ? Theme.palette().border-strong : transparent;
-            Text {
+            segment-label := Text {
                 text: item; font-size: 11px; font-weight: idx == root.current ? 600 : 500;
                 color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
-                horizontal-alignment: center; vertical-alignment: center; overflow: elide;
+                horizontal-alignment: center; vertical-alignment: center;
             }
             item-touch := TouchArea {
                 enabled: root.enabled;

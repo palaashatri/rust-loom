@@ -5,26 +5,25 @@
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
+import {
+    Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+    ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+    InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+    TabStrip, ToolkitStatusBar
+} from "toolkit.slint";
 
-/// Standard application window chrome: title bar, optional status bar,
-/// and a host-provided content area (via `@children`).
-/// Bottom status bar showing non-color-coded state information.
-export component StatusBar inherits Rectangle {
+// Canonical primitive implementations live in toolkit.slint. The exports at
+// the end of this file keep the legacy module path source-compatible while
+// ensuring applications do not silently fork toolbar, panel, field, tab, or
+// status geometry.
+
+/// Compatibility status bar. Rendering and geometry are owned by the
+/// tokenized ToolkitStatusBar primitive.
+export component StatusBar inherits ToolkitStatusBar {
     in property <string> status-left: "";
     in property <string> status-right: "";
-    min-height: Theme.tokens.metrics.status-height;
-    max-height: Theme.tokens.metrics.status-height;
-    background: Theme.palette().chrome;
-    Rectangle { y: 0px; height: 1px; width: parent.width; background: Theme.palette().border; }
-    HorizontalLayout {
-        spacing: 12px;
-        padding-left: 14px;
-        padding-right: 14px;
-        cross-axis-alignment: center;
-        Rectangle { width: 5px; height: 5px; border-radius: 3px; background: Theme.palette().accent; }
-        Text { text: root.status-left; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
-        Text { text: root.status-right; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-disabled; vertical-alignment: center; max-width: 320px; overflow: elide; }
-    }
+    leading: root.status-left;
+    trailing: root.status-right;
 }
 
 
@@ -79,69 +78,15 @@ export component LoomWindow inherits Window {
     }
 }
 
-/// Toolbar button with optional icon and text.
-export component ToolButton inherits Rectangle {
+/// Compatibility spelling for the canonical horizontal toolbar button.
+export component ToolButton inherits ToolbarButton {
     in property <string> text: "";
-    in property <string> icon: "";
-    in property <bool> checked: false;
-    in property <bool> enabled: true;
-    callback clicked;
-    height: Theme.tokens.metrics.control-height;
-    // Preserve the complete action label whenever a toolbar is constrained.
-    // The old 28px floor let the text paint into the next control.
-    min-width: max(Theme.tokens.metrics.control-height,
-        tool-label.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + 6px : 0px) + 20px);
-    preferred-width: max(Theme.tokens.metrics.control-height,
-        tool-label.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + 6px : 0px) + 20px);
-    border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: 1px;
-    border-color: !root.enabled ? transparent : focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().border : transparent;
-    background: !root.enabled ? transparent : touch.pressed ? Theme.palette().surface-sunken : root.checked ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-raised : transparent;
-    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
-    accessible-role: button;
-    accessible-label: root.text != "" ? root.text : root.icon;
-    accessible-action-default => { if (root.enabled) { root.clicked(); } }
-    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
-    HorizontalLayout {
-        spacing: 6px;
-        alignment: center;
-        padding-left: root.icon != "" ? 8px : 11px;
-        padding-right: root.text != "" ? 11px : 8px;
-        if root.icon != "" : Icon { icon: root.icon; size: Theme.tokens.metrics.icon-size; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
-        tool-label := Text { text: root.text; font-size: Theme.tokens.typography.body; font-weight: root.checked ? 650 : 500; color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled; }
-    }
-    if root.checked : Rectangle { x: 8px; y: parent.height - 3px; width: parent.width - 16px; height: 2px; border-radius: 1px; background: Theme.palette().accent; }
-    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
+    label: root.text;
 }
 
 
-/// Icon-only square button with an accessible label.
-export component IconButton inherits Rectangle {
-    in property <string> icon: "generic";
-    in property <string> label: "";
-    in property <bool> enabled: true;
-    in property <bool> checked: false;
-    callback clicked;
-    width: Theme.tokens.metrics.control-height;
-    height: Theme.tokens.metrics.control-height;
-    border-radius: Theme.tokens.metrics.radius-medium;
-    border-width: 1px;
-    border-color: !root.enabled ? transparent : focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : touch.has-hover ? Theme.palette().border : transparent;
-    background: !root.enabled ? transparent : touch.pressed ? Theme.palette().surface-sunken : root.checked ? Theme.palette().selection-soft : touch.has-hover ? Theme.palette().surface-raised : transparent;
-    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
-    accessible-role: button;
-    accessible-label: root.label != "" ? root.label : root.icon;
-    accessible-action-default => { if (root.enabled) { root.clicked(); } }
-    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
-    Icon {
-        x: (root.width - 16px) / 2;
-        y: (root.height - 16px) / 2;
-        icon: root.icon;
-        size: 16px;
-        tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
-    }
-    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
-}
+/// Compatibility spelling for the canonical compact icon button.
+export component IconButton inherits ToolbarIconButton { }
 
 
 /// Primary action button (accent background).
@@ -164,76 +109,6 @@ export component PrimaryButton inherits Rectangle {
     touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
 
-
-/// A search-style text input with a magnifier icon.
-export component SearchField inherits Rectangle {
-    in property <string> placeholder: "Search";
-    in-out property <string> value: "";
-    in property <bool> enabled: true;
-    callback edited(string);
-    accessible-role: AccessibleRole.text-input;
-    accessible-label: root.placeholder;
-    height: 30px;
-    min-width: 160px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: text-input.has-focus || focus-scope.has-focus ? Theme.palette().focus
-        : touch.has-hover ? Theme.palette().accent
-        : Theme.palette().border-strong;
-    background: Theme.palette().surface;
-
-    animate border-color, background {
-        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-    }
-
-    Icon {
-        x: 7px;
-        y: (root.height - 14px) / 2;
-        icon: "search";
-        size: 14px;
-        tint: text-input.has-focus ? Theme.palette().accent : Theme.palette().ink-disabled;
-    }
-
-    text-input := TextInput {
-        x: 26px;
-        y: 0px;
-        width: root.width - 32px;
-        height: root.height;
-        enabled: root.enabled;
-        vertical-alignment: center;
-        font-size: Theme.tokens.typography.body;
-        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-        text: root.value;
-        edited => {
-            root.value = text-input.text;
-            root.edited(text-input.text);
-        }
-    }
-
-    if root.value == "" : Text {
-        x: 26px;
-        y: 0px;
-        width: root.width - 32px;
-        height: root.height;
-        vertical-alignment: center;
-        horizontal-alignment: start;
-        font-size: Theme.tokens.typography.body;
-        color: Theme.palette().ink-disabled;
-        text: root.placeholder;
-    }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => {
-            text-input.focus();
-        }
-    }
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-    }
-}
 
 /// Labeled text field.
 export component Field inherits Rectangle {
@@ -277,260 +152,13 @@ export component Field inherits Rectangle {
     accessible-label: root.label;
 }
 
-/// Segmented control for mutually exclusive choices.
-export component SegmentedControl inherits Rectangle {
-    in property <[string]> items: [];
-    in property <string> label: "Options";
-    in property <bool> enabled: true;
-    in-out property <int> current: 0;
-    callback selected(int);
-    height: 28px;
-    border-radius: 6px;
-    background: Theme.palette().surface-sunken;
-    border-width: 1px;
-    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border;
-    accessible-role: radio-group;
-    accessible-label: root.label;
+/// Compatibility spelling for the canonical range slider.
+export component Slider inherits RangeSlider { }
 
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (!root.enabled || root.items.length == 0) { return reject; }
-            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
-                root.current = max(0, root.current - 1);
-                root.selected(root.current);
-                return accept;
-            }
-            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
-                root.current = min(root.items.length - 1, root.current + 1);
-                root.selected(root.current);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
-    HorizontalLayout {
-        spacing: 2px;
-        padding: 2px;
-        for item[idx] in root.items : Rectangle {
-            // Give every option a deterministic share of the control. A
-            // stretch-only child with no preferred width can collapse to zero
-            // in a toolbar layout, leaving later labels painted outside the
-            // segmented surface.
-            width: root.items.length > 0 ? max(0px, (root.width - 4px) / root.items.length) : 0px;
-            preferred-width: root.items.length > 0 ? max(0px, (root.width - 4px) / root.items.length) : 0px;
-            horizontal-stretch: 0;
-            border-radius: 4px;
-            background: touch.pressed || idx == root.current ? Theme.palette().surface : transparent;
-            border-width: 1px;
-            border-color: idx == root.current ? Theme.palette().accent : transparent;
-            Text {
-                text: item;
-                x: 4px;
-                width: max(0px, parent.width - 8px);
-                font-size: Theme.tokens.typography.title;
-                color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-            touch := TouchArea {
-                enabled: root.enabled;
-                clicked => {
-                    focus-scope.focus();
-                    root.current = idx;
-                    root.selected(idx);
-                }
-            }
-            accessible-role: button;
-            accessible-label: item;
-            accessible-action-default => {
-                if (root.enabled) {
-                    root.current = idx;
-                    root.selected(idx);
-                }
-            }
-        }
-    }
-}
-
-/// Linear range slider control.
-export component Slider inherits Rectangle {
-    in property <string> label: "Value";
-    in-out property <float> value: 0.0;
-    in property <float> minimum: 0.0;
-    in property <float> maximum: 100.0;
-    in property <bool> enabled: true;
-    callback changed(float);
-
-    height: 24px;
-    min-width: 120px;
-    background: transparent;
-
-    accessible-role: slider;
-    accessible-value: root.value;
-    accessible-value-minimum: root.minimum;
-    accessible-value-maximum: root.maximum;
-    accessible-label: root.label;
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (!root.enabled) { return reject; }
-            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) {
-                root.value = max(root.minimum, root.value - (root.maximum - root.minimum) / 20.0);
-                root.changed(root.value);
-                return accept;
-            } else if (event.text == Key.RightArrow || event.text == Key.UpArrow) {
-                root.value = min(root.maximum, root.value + (root.maximum - root.minimum) / 20.0);
-                root.changed(root.value);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
-    Rectangle {
-        y: (root.height - 4px) / 2;
-        width: root.width;
-        height: 4px;
-        border-radius: 2px;
-        background: Theme.palette().surface-sunken;
-        border-width: 1px;
-        border-color: Theme.palette().border;
-
-        Rectangle {
-            x: 0px;
-            y: 0px;
-            width: root.maximum > root.minimum ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * parent.width, 0px, parent.width) : 0px;
-            height: parent.height;
-            border-radius: 2px;
-            background: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
-        }
-    }
-
-    Rectangle {
-        x: root.maximum > root.minimum ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * (root.width - 16px), 0px, root.width - 16px) : 0px;
-        y: (root.height - 16px) / 2;
-        width: 16px;
-        height: 16px;
-        border-radius: 8px;
-        background: Theme.palette().surface;
-        border-width: 2px;
-        border-color: !root.enabled ? Theme.palette().ink-disabled
-            : focus-scope.has-focus ? Theme.palette().focus
-            : touch.pressed || touch.has-hover ? Theme.palette().accent-hover
-            : Theme.palette().accent;
-
-        animate border-color, background {
-            duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-            easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-        }
-    }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        moved => {
-            if (self.pressed) {
-                focus-scope.focus();
-                root.value = root.minimum + max(0.0, min(1.0, self.mouse-x / root.width)) * (root.maximum - root.minimum);
-                root.changed(root.value);
-            }
-        }
-        clicked => {
-            focus-scope.focus();
-            root.value = root.minimum + max(0.0, min(1.0, self.mouse-x / root.width)) * (root.maximum - root.minimum);
-            root.changed(root.value);
-        }
-    }
-}
-
-/// Toggle switch component for boolean options.
-export component Switch inherits Rectangle {
-    in-out property <bool> checked: false;
+/// Compatibility spelling for the canonical toggle control.
+export component Switch inherits Toggle {
     in property <string> text: "";
-    in property <bool> enabled: true;
-    callback toggled(bool);
-
-    height: 24px;
-    min-width: 40px;
-    background: transparent;
-
-    accessible-role: checkbox;
-    accessible-checked: root.checked;
-    accessible-label: root.text;
-    accessible-action-default => {
-        if (root.enabled) {
-            root.checked = !root.checked;
-            root.toggled(root.checked);
-        }
-    }
-
-    focus-scope := FocusScope {
-        enabled: root.enabled;
-        key-pressed(event) => {
-            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
-                root.checked = !root.checked;
-                root.toggled(root.checked);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
-    HorizontalLayout {
-        spacing: 8px;
-        alignment: start;
-
-        Rectangle {
-            width: 36px;
-            height: 20px;
-            border-radius: 10px;
-            background: !root.enabled ? Theme.palette().surface-sunken
-                : root.checked ? (touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
-                : Theme.palette().surface-sunken;
-            border-width: 1px;
-            border-color: focus-scope.has-focus ? Theme.palette().focus
-                : root.checked ? Theme.palette().accent
-                : Theme.palette().border-strong;
-
-            animate background, border-color {
-                duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-                easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-            }
-
-            Rectangle {
-                x: root.checked ? 17px : 3px;
-                y: 3px;
-                width: 14px;
-                height: 14px;
-                border-radius: 7px;
-                background: root.checked ? Theme.palette().accent-ink : (root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled);
-
-                animate x {
-                    duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
-                    easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
-                }
-            }
-        }
-
-        if root.text != "" : Text {
-            text: root.text;
-            font-size: Theme.tokens.typography.body;
-            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-            vertical-alignment: center;
-        }
-    }
-
-    touch := TouchArea {
-        enabled: root.enabled;
-        clicked => {
-            focus-scope.focus();
-            root.checked = !root.checked;
-            root.toggled(root.checked);
-        }
-    }
+    label: root.text;
 }
 
 /// Tab bar navigation control.
@@ -1035,24 +663,6 @@ export component AppHeader inherits Rectangle {
 }
 
 
-/// Consistent title row for sidebars, inspectors, browsers and timeline panes.
-export component PanelHeader inherits Rectangle {
-    in property <string> title: "Panel";
-    in property <string> detail: "";
-    min-height: Theme.tokens.metrics.panel-header-height;
-    max-height: Theme.tokens.metrics.panel-header-height;
-    background: Theme.palette().panel;
-    HorizontalLayout {
-        spacing: 8px; padding-left: 12px; padding-right: 10px; cross-axis-alignment: center;
-        Rectangle { width: 3px; height: 14px; border-radius: 2px; background: Theme.palette().accent; }
-        Text { text: root.title; font-size: Theme.tokens.typography.title; font-weight: 700; color: Theme.palette().ink; overflow: elide; }
-        Rectangle { horizontal-stretch: 1; background: transparent; }
-        if root.detail != "" : Text { text: root.detail; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().ink-disabled; max-width: 160px; overflow: elide; }
-    }
-    Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: Theme.palette().border; }
-}
-
-
 /// Vertical workspace/mode rail item with an explicit selected state and full
 /// keyboard/accessibility behavior.
 export component RailButton inherits Rectangle {
@@ -1090,42 +700,10 @@ export component Hairline inherits Rectangle {
     background: Theme.palette().border;
 }
 
-/// Raised toolbar surface with a consistent compact layout slot.
-export component WorkspaceToolbar inherits Rectangle {
-    min-height: Theme.tokens.metrics.toolbar-height;
-    max-height: Theme.tokens.metrics.toolbar-height;
-    background: Theme.palette().chrome;
-    VerticalLayout {
-        spacing: 0px;
-        HorizontalLayout { spacing: 4px; padding-left: 8px; padding-right: 8px; cross-axis-alignment: center; @children }
-        Rectangle { height: 1px; background: Theme.palette().border; }
-    }
-}
-
-
-/// Quiet sidebar surface used for libraries, outlines, layers and media bins.
-export component SidebarSurface inherits Rectangle {
-    in property <string> title: "";
-    in property <string> detail: "";
-    min-width: 200px;
-    max-width: 360px;
-    background: Theme.palette().panel;
-    border-width: 0px;
-    VerticalLayout { spacing: 0px; PanelHeader { title: root.title; detail: root.detail; } @children }
-}
-
-
-/// Contextual inspector surface shared across the suite.
-export component InspectorSurface inherits Rectangle {
-    in property <string> title: "Inspector";
-    in property <string> detail: "";
-    min-width: 240px;
-    max-width: 360px;
-    background: Theme.palette().panel;
-    border-width: 0px;
-    VerticalLayout { spacing: 0px; PanelHeader { title: root.title; detail: root.detail; } @children }
-}
-
+/// Compatibility spelling for the canonical toolbar surface. The shared
+/// Toolbar owns the single-line geometry and leaves overflow behavior to the
+/// host through ToolbarOverflowButton.
+export component WorkspaceToolbar inherits Toolbar { }
 
 /// Subtle rounded card for library rows, jobs, tracks and layers.
 export component WorkspaceRow inherits Rectangle {
@@ -1160,45 +738,12 @@ export component CanvasBackdrop inherits Rectangle {
 }
 
 
-/// Compact tab strip for inspectors and browsers.
-export component PaneTabs inherits Rectangle {
+/// Compatibility spelling for the canonical tab strip.
+export component PaneTabs inherits TabStrip {
     in property <[string]> items: [];
     in property <string> label: "Panel tabs";
-    in-out property <int> current: 0;
-    callback selected(int);
-    height: 36px; background: Theme.palette().panel;
-    accessible-role: tab-list;
+    tabs: root.items;
     accessible-label: root.label;
-    focus-scope := FocusScope {
-        key-pressed(event) => {
-            if (root.items.length == 0) { return reject; }
-            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
-                root.current = max(0, root.current - 1);
-                root.selected(root.current);
-                return accept;
-            }
-            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
-                root.current = min(root.items.length - 1, root.current + 1);
-                root.selected(root.current);
-                return accept;
-            }
-            return reject;
-        }
-    }
-    HorizontalLayout {
-        spacing: 3px; padding-left: 8px; padding-right: 8px; padding-top: 4px; padding-bottom: 4px;
-        for item[idx] in root.items : Rectangle {
-            min-width: 56px; border-radius: 8px;
-            background: idx == root.current ? Theme.palette().surface-raised : tab-touch.has-hover ? Theme.palette().surface-sunken : transparent;
-            border-width: 1px; border-color: idx == root.current ? Theme.palette().border-strong : transparent;
-            Text { text: item; font-size: Theme.tokens.typography.caption; font-weight: idx == root.current ? 700 : 500; color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; }
-            if idx == root.current : Rectangle { y: parent.height - 3px; x: 10px; width: parent.width - 20px; height: 2px; border-radius: 1px; background: Theme.palette().accent; }
-            tab-touch := TouchArea { clicked => { focus-scope.focus(); root.current = idx; root.selected(idx); } }
-            accessible-role: button;
-            accessible-label: item;
-            accessible-action-default => { root.current = idx; root.selected(idx); }
-        }
-    }
 }
 
 
@@ -1457,3 +1002,48 @@ export component CommandPalette inherits Rectangle {
         }
     }
 }
+
+// Slint's default Rust component selection only emits roots that inherit
+// Window. Keep the production palette as a Rectangle so applications can
+// embed it in their own windows, and expose a tiny Window root solely for
+// deterministic shared-component tests. The harness forwards the palette's
+// real state and callbacks; it does not duplicate palette rendering.
+export component CommandPaletteTestWindow inherits Window {
+    in property <bool> open: false;
+    in property <[CommandPaletteItem]> commands: [];
+    in-out property <string> query: "";
+    in-out property <int> selected: 0;
+    callback command-invoked(int);
+    callback query-changed(string);
+    callback move-selection(int);
+    callback key-text(string);
+    callback backspace;
+    callback close-requested;
+
+    background: transparent;
+
+    palette := CommandPalette {
+        width: parent.width;
+        height: parent.height;
+        open: root.open;
+        commands: root.commands;
+        query <=> root.query;
+        selected <=> root.selected;
+        command-invoked(index) => { root.command-invoked(index); }
+        query-changed(value) => { root.query-changed(value); }
+        move-selection(delta) => { root.move-selection(delta); }
+        key-text(value) => { root.key-text(value); }
+        backspace => { root.backspace(); }
+        close-requested => { root.close-requested(); }
+    }
+}
+
+// Re-export the canonical shared primitives for legacy consumers of
+// components.slint. There is one implementation for each primitive; these
+// exports are compatibility names, not alternate geometry or state logic.
+export {
+    Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+    ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+    InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+    TabStrip, ToolkitStatusBar
+} from "toolkit.slint";

@@ -19,6 +19,12 @@
 
 slint::include_modules!();
 
+/// Rust-side compatibility handle for the embeddable Slint `CommandPalette`
+/// Rectangle. Slint's default Rust generator exposes Window roots, so this
+/// alias points at the generated forwarding test/preview root while the
+/// production component remains a Rectangle for Slint application imports.
+pub type CommandPalette = CommandPaletteTestWindow;
+
 #[cfg(test)]
 mod smoke_window {
     include!(concat!(env!("OUT_DIR"), "/smoke.rs"));
@@ -68,6 +74,7 @@ pub const ICON_NAMES: &[&str] = &[
     "mask",
     "mic",
     "minus",
+    "more",
     "music",
     "mute",
     "new",

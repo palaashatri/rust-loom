@@ -107,9 +107,10 @@ export global Theme {
             : light-tokens;
     }
     public pure function palette() -> Palette {
-        return active-theme == "dark" ? ThemeDark.tokens.palette
-            : active-theme == "high-contrast" ? ThemeHighContrast.tokens.palette
-            : tokens.palette;
+        // All consumers read the same active token bundle. Keeping palette()
+        // on `tokens` prevents palette-only branches from drifting away from
+        // typography, metrics, motion, or reduced-motion state.
+        return tokens.palette;
     }
 }
 

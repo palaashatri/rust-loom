@@ -99,6 +99,30 @@ def component_used(text: str, name: str) -> bool:
     )
 
 
+def exported_component_count(text: str, name: str) -> int:
+    """Count real exported declarations, excluding imports/re-exports."""
+    return len(re.findall(rf"(?m)^\s*export component {re.escape(name)}\b", text))
+
+
+def exported_component_block(text: str, name: str) -> str:
+    """Return one exported component's balanced Slint block."""
+    marker = re.search(rf"(?m)^\s*export component {re.escape(name)}\b", text)
+    if marker is None:
+        return ""
+    opening = text.find("{", marker.end())
+    if opening < 0:
+        return ""
+    depth = 0
+    for index in range(opening, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[marker.start() : index + 1]
+    return ""
+
+
 def audit_design_contract() -> None:
     contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
     tokens_path = ROOT / "loom-design-bible/tokens/loom.toml"
@@ -151,6 +175,89 @@ def audit_design_contract() -> None:
         "design system: compact icon-button geometry must remain 28px with a 16px icon",
     )
 
+    ownership = contract.get("primitive-ownership", {})
+    expected_ownership = {
+        "canonical-module": "loom-core/crates/loom-ui/ui/toolkit.slint",
+        "icon-module": "loom-core/crates/loom-ui/ui/icons.slint",
+        "compatibility-module": "loom-core/crates/loom-ui/ui/components.slint",
+        "toolbar": "Toolbar",
+        "toolbar-group": "ToolbarGroup",
+        "toolbar-button": "ToolbarButton",
+        "toolbar-icon-button": "ToolbarIconButton",
+        "toolbar-overflow-button": "ToolbarOverflowButton",
+        "panel-header": "PanelHeader",
+        "sidebar": "SidebarSurface",
+        "inspector": "InspectorSurface",
+        "status": "ToolkitStatusBar",
+        "icon": "Icon",
+    }
+    for key, expected in expected_ownership.items():
+        require(ownership.get(key) == expected, f"design system: primitive ownership drift for {key}")
+
+    expected_wrappers = {
+        "StatusBar": "ToolkitStatusBar",
+        "ToolButton": "ToolbarButton",
+        "IconButton": "ToolbarIconButton",
+        "WorkspaceToolbar": "Toolbar",
+        "PaneTabs": "TabStrip",
+        "Slider": "RangeSlider",
+        "Switch": "Toggle",
+    }
+    require(
+        ownership.get("legacy-wrappers") == expected_wrappers,
+        "design system: legacy wrapper map was weakened or changed",
+    )
+    expected_reexports = {
+        "Toolbar": "Toolbar",
+        "ToolbarGroup": "ToolbarGroup",
+        "ToolbarSpacer": "ToolbarSpacer",
+        "ToolbarButton": "ToolbarButton",
+        "ToolbarIconButton": "ToolbarIconButton",
+        "ToolbarOverflowButton": "ToolbarOverflowButton",
+        "OverflowMenuButton": "OverflowMenuButton",
+        "PanelHeader": "PanelHeader",
+        "SidebarSurface": "SidebarSurface",
+        "InspectorSurface": "InspectorSurface",
+        "SearchField": "SearchField",
+        "SegmentedControl": "SegmentedControl",
+        "Toggle": "Toggle",
+        "RangeSlider": "RangeSlider",
+        "TabStrip": "TabStrip",
+        "ToolkitStatusBar": "ToolkitStatusBar",
+    }
+    require(
+        ownership.get("legacy-reexports") == expected_reexports,
+        "design system: legacy re-export map was weakened or changed",
+    )
+
+    overflow = contract.get("overflow-policy", {})
+    expected_overflow = {
+        "canonical-button": "ToolbarOverflowButton",
+        "compatibility-button": "OverflowMenuButton",
+        "icon": "more",
+        "accessible-role": "button",
+        "accessible-description": "Opens the toolbar overflow menu",
+        "keyboard-activation": ["Space", "Enter"],
+        "priority-1-mode": "icon-only",
+        "priority-2-mode": "overflow",
+        "priority-1-breakpoint": 1180,
+        "priority-2-breakpoint": 1320,
+        "primary-workspace-min-width": 480,
+        "preserve-primary-workspace": True,
+    }
+    for key, expected in expected_overflow.items():
+        require(overflow.get(key) == expected, f"design system: overflow policy drift for {key}")
+    require(
+        contract.get("toolbar", {}).get("priority-1-icon-only-below")
+        == overflow.get("priority-1-breakpoint"),
+        "design system: P1 overflow breakpoint must have one owner",
+    )
+    require(
+        contract.get("toolbar", {}).get("priority-2-overflow-below")
+        == overflow.get("priority-2-breakpoint"),
+        "design system: P2 overflow breakpoint must have one owner",
+    )
+
     for theme_name in ("light", "dark", "high-contrast"):
         contract_palette = contract.get("palette", {}).get(theme_name, {})
         token_palette = tokens.get("palette", {}).get(theme_name, {})
@@ -180,7 +287,7 @@ def audit_toolkit() -> None:
     toolkit = read("loom-core/crates/loom-ui/ui/toolkit.slint")
     required_components = (
         "DocumentChrome", "Toolbar", "ToolbarGroup", "ToolbarSpacer",
-        "ToolbarButton", "ToolbarIconButton", "PanelHeader", "SidebarSurface",
+        "ToolbarButton", "ToolbarIconButton", "ToolbarOverflowButton", "PanelHeader", "SidebarSurface",
         "InspectorSurface", "SectionHeader", "ToolkitStatusBar", "CanvasSurface",
         "ContentSurface", "TextField", "SearchField", "SegmentedControl",
         "Toggle", "RangeSlider", "PropertyRow", "TabStrip",
@@ -189,41 +296,29 @@ def audit_toolkit() -> None:
         require(f"export component {component}" in toolkit, f"shared toolkit: missing {component}")
 
     for component in ("ToolbarButton", "ToolbarIconButton", "Toggle"):
-        marker = f"export component {component}"
-        start = toolkit.find(marker)
-        end = toolkit.find("\nexport component ", start + len(marker))
-        block = toolkit[start:] if end < 0 else toolkit[start:end]
+        block = exported_component_block(toolkit, component)
         for token in ("accessible-role", "accessible-label", "accessible-action-default", "key-pressed(event)"):
             require(token in block, f"shared toolkit: {component} missing {token}")
 
     for component in ("TextField", "SearchField", "SegmentedControl", "RangeSlider"):
-        marker = f"export component {component}"
-        start = toolkit.find(marker)
-        end = toolkit.find("\nexport component ", start + len(marker))
-        block = toolkit[start:] if end < 0 else toolkit[start:end]
+        block = exported_component_block(toolkit, component)
         require("accessible-role" in block and "accessible-label" in block, f"shared toolkit: {component} lacks accessibility metadata")
 
     require(not re.search(r"#[0-9a-fA-F]{6,8}", toolkit), "shared toolkit: hard-coded palette color")
 
-    toolbar_start = toolkit.find("export component Toolbar")
-    toolbar_end = toolkit.find("\nexport component ", toolbar_start + 1)
-    toolbar = toolkit[toolbar_start:] if toolbar_end < 0 else toolkit[toolbar_start:toolbar_end]
+    toolbar = exported_component_block(toolkit, "Toolbar")
     require(
         "min-height: 48px;" in toolbar and "max-height: 52px;" in toolbar,
         "shared toolkit: Toolbar must reserve a 48–52px labeled-control slot",
     )
 
-    group_start = toolkit.find("export component ToolbarGroup")
-    group_end = toolkit.find("\nexport component ", group_start + 1)
-    group = toolkit[group_start:] if group_end < 0 else toolkit[group_start:group_end]
+    group = exported_component_block(toolkit, "ToolbarGroup")
     require(
         "min-height: 48px;" in group and "max-height: 52px;" in group,
         "shared toolkit: ToolbarGroup must reserve a 48–52px labeled-control slot",
     )
 
-    item_start = toolkit.find("export component AppleToolbarItem")
-    item_end = toolkit.find("\nexport component ", item_start + 1)
-    item = toolkit[item_start:] if item_end < 0 else toolkit[item_start:item_end]
+    item = exported_component_block(toolkit, "AppleToolbarItem")
     require(
         "min-height: 48px;" in item and "max-height: 52px;" in item,
         "shared toolkit: AppleToolbarItem must reserve a 48–52px labeled-control slot",
@@ -245,14 +340,115 @@ def audit_toolkit() -> None:
         "shared toolkit: AppleToolbarItem labels must allow elision within their slot",
     )
 
-    compact_start = toolkit.find("export component ToolbarIconButton")
-    compact_end = toolkit.find("\nexport component ", compact_start + 1)
-    compact = toolkit[compact_start:] if compact_end < 0 else toolkit[compact_start:compact_end]
+    compact = exported_component_block(toolkit, "ToolbarIconButton")
     require(
         "width: Theme.tokens.metrics.control-height;" in compact
         and "height: Theme.tokens.metrics.control-height;" in compact
         and "size: 16px;" in compact,
         "shared toolkit: ToolbarIconButton must retain tokenized 28px/16px compact geometry",
+    )
+
+    overflow = exported_component_block(toolkit, "ToolbarOverflowButton")
+    for token in (
+        "accessible-role: button",
+        "accessible-label:",
+        "accessible-description: \"Opens the toolbar overflow menu\"",
+        "accessible-action-default",
+        "key-pressed(event)",
+        "Key.Space",
+        "Key.Return",
+        'icon: "more"',
+        "Theme.tokens.metrics.control-height",
+    ):
+        require(token in overflow, f"shared toolkit: ToolbarOverflowButton missing {token}")
+
+    for component in ("PanelHeader", "ToolkitStatusBar"):
+        block = exported_component_block(toolkit, component)
+        require("Theme.tokens" in block and "Theme.palette()" in block, f"shared toolkit: {component} is not tokenized")
+    for component in ("SidebarSurface", "InspectorSurface"):
+        block = exported_component_block(toolkit, component)
+        # Panel surfaces use fixed min/max widths from the machine contract;
+        # their colors and nested header remain semantic/tokenized.
+        require("Theme.palette()" in block and "PanelHeader" in block, f"shared toolkit: {component} is not tokenized")
+
+
+def audit_shared_primitive_ownership() -> None:
+    toolkit = read("loom-core/crates/loom-ui/ui/toolkit.slint")
+    icons = read("loom-core/crates/loom-ui/ui/icons.slint")
+    components = read("loom-core/crates/loom-ui/ui/components.slint")
+
+    canonical = (
+        "Toolbar",
+        "ToolbarGroup",
+        "ToolbarButton",
+        "ToolbarIconButton",
+        "ToolbarOverflowButton",
+        "PanelHeader",
+        "SidebarSurface",
+        "InspectorSurface",
+        "ToolkitStatusBar",
+    )
+    for name in canonical:
+        require(exported_component_count(toolkit, name) == 1, f"shared ownership: toolkit must define exactly one {name}")
+        require(
+            exported_component_count(components, name) == 0,
+            f"shared ownership: components.slint must not define a second {name}",
+        )
+
+    require(exported_component_count(icons, "Icon") == 1, "shared ownership: icons.slint must define exactly one Icon")
+    require(exported_component_count(toolkit, "Icon") == 0, "shared ownership: toolkit must not define Icon")
+    require(exported_component_count(components, "Icon") == 0, "shared ownership: components.slint must not define Icon")
+
+    wrappers = {
+        "StatusBar": "ToolkitStatusBar",
+        "ToolButton": "ToolbarButton",
+        "IconButton": "ToolbarIconButton",
+        "WorkspaceToolbar": "Toolbar",
+        "PaneTabs": "TabStrip",
+        "Slider": "RangeSlider",
+        "Switch": "Toggle",
+    }
+    for legacy, target in wrappers.items():
+        require(
+            re.search(rf"(?m)^\s*export component {legacy}\s+inherits\s+{target}\b", components)
+            is not None,
+            f"shared ownership: {legacy} must wrap {target}",
+        )
+
+    reexport_start = components.find("// Re-export the canonical shared primitives")
+    reexports = components[reexport_start:] if reexport_start >= 0 else ""
+    require('} from "toolkit.slint";' in reexports, "shared ownership: compatibility module must re-export toolkit primitives")
+    for name in (
+        "Toolbar",
+        "ToolbarGroup",
+        "ToolbarSpacer",
+        "ToolbarButton",
+        "ToolbarIconButton",
+        "ToolbarOverflowButton",
+        "OverflowMenuButton",
+        "PanelHeader",
+        "SidebarSurface",
+        "InspectorSurface",
+        "SearchField",
+        "SegmentedControl",
+        "Toggle",
+        "RangeSlider",
+        "TabStrip",
+        "ToolkitStatusBar",
+    ):
+        require(re.search(rf"\b{re.escape(name)}\b", reexports) is not None, f"shared ownership: missing {name} re-export")
+
+    shared = "\n".join((toolkit, icons, components)).lower()
+    require(
+        not re.search(r"traffic[\s_-]*lights?|macos[\s_-]*(?:traffic|close|minimize|zoom)|window[\s_-]*control", shared),
+        "shared ownership: simulated macOS traffic-light/window controls remain",
+    )
+
+    segmented = exported_component_block(toolkit, "SegmentedControl")
+    require(
+        re.search(r"(?m)^\s*(?:width|min-width|preferred-width|max-width):[^;\n]*root\.width", segmented)
+        is None,
+        "shared ownership: SegmentedControl segment sizing must not depend on parent width",
     )
 
 
@@ -306,6 +502,7 @@ def audit_app(app: str) -> str:
 audit_design_contract()
 audit_toolkit()
 audit_icons()
+audit_shared_primitive_ownership()
 app_text = {app: audit_app(app) for app in APPS}
 
 for app, required in {
@@ -317,8 +514,14 @@ for app, required in {
         require(token in app_text[app], f"{app}: missing direct-manipulation contract {token}")
 
 legacy = read("loom-core/crates/loom-ui/ui/components.slint")
-for component in ("WorkspaceToolbar", "SidebarSurface", "InspectorSurface", "PaneTabs", "CanvasBackdrop", "TransportButton"):
+for component in ("WorkspaceToolbar", "PaneTabs", "CanvasBackdrop", "TransportButton"):
     require(f"export component {component}" in legacy, f"legacy compatibility UI: missing {component}")
+for component in ("SidebarSurface", "InspectorSurface"):
+    require(
+        re.search(rf"\b{re.escape(component)}\b", legacy[legacy.find("// Re-export the canonical shared primitives") :])
+        is not None,
+        f"legacy compatibility UI: missing {component} re-export",
+    )
 
 native = read(".github/workflows/cross-platform.yml")
 for token in ("windows-2025", "macos-15", "macos-15-intel", "native-ui-matrix.py", "1024x720", "1440x900", "1920x1200", "upload-artifact"):

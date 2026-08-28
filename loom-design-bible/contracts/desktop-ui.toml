@@ -342,6 +342,70 @@ radius = 4
 delay-ms = 400
 
 # ---------------------------------------------------------------------------
+# Primitive ownership. The toolkit is the sole geometry/state implementation
+# for shared chrome. `components.slint` keeps source compatibility through the
+# wrapper/re-export maps below; it must not grow a second implementation.
+# ---------------------------------------------------------------------------
+[primitive-ownership]
+canonical-module = "loom-core/crates/loom-ui/ui/toolkit.slint"
+icon-module = "loom-core/crates/loom-ui/ui/icons.slint"
+compatibility-module = "loom-core/crates/loom-ui/ui/components.slint"
+toolbar = "Toolbar"
+toolbar-group = "ToolbarGroup"
+toolbar-button = "ToolbarButton"
+toolbar-icon-button = "ToolbarIconButton"
+toolbar-overflow-button = "ToolbarOverflowButton"
+panel-header = "PanelHeader"
+sidebar = "SidebarSurface"
+inspector = "InspectorSurface"
+status = "ToolkitStatusBar"
+icon = "Icon"
+
+[primitive-ownership.legacy-wrappers]
+StatusBar = "ToolkitStatusBar"
+ToolButton = "ToolbarButton"
+IconButton = "ToolbarIconButton"
+WorkspaceToolbar = "Toolbar"
+PaneTabs = "TabStrip"
+Slider = "RangeSlider"
+Switch = "Toggle"
+
+[primitive-ownership.legacy-reexports]
+Toolbar = "Toolbar"
+ToolbarGroup = "ToolbarGroup"
+ToolbarSpacer = "ToolbarSpacer"
+ToolbarButton = "ToolbarButton"
+ToolbarIconButton = "ToolbarIconButton"
+ToolbarOverflowButton = "ToolbarOverflowButton"
+OverflowMenuButton = "OverflowMenuButton"
+PanelHeader = "PanelHeader"
+SidebarSurface = "SidebarSurface"
+InspectorSurface = "InspectorSurface"
+SearchField = "SearchField"
+SegmentedControl = "SegmentedControl"
+Toggle = "Toggle"
+RangeSlider = "RangeSlider"
+TabStrip = "TabStrip"
+ToolkitStatusBar = "ToolkitStatusBar"
+
+# Compact mode must preserve the primary canvas/grid/timeline width. P1
+# actions become icon-only and P2 actions move to the one canonical overflow
+# command before any primary workspace minimum is violated.
+[overflow-policy]
+canonical-button = "ToolbarOverflowButton"
+compatibility-button = "OverflowMenuButton"
+icon = "more"
+accessible-role = "button"
+accessible-description = "Opens the toolbar overflow menu"
+keyboard-activation = ["Space", "Enter"]
+priority-1-mode = "icon-only"
+priority-2-mode = "overflow"
+priority-1-breakpoint = 1180
+priority-2-breakpoint = 1320
+primary-workspace-min-width = 480
+preserve-primary-workspace = true
+
+# ---------------------------------------------------------------------------
 # Toolbar policy. Priority 0 survives all supported widths; priority 1 may
 # become icon-only; priority 2 moves to overflow. Compact icon-only controls
 # keep the [component.icon-button] geometry. Icon-over-label controls use the
