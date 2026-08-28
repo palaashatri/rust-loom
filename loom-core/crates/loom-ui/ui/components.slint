@@ -133,7 +133,13 @@ export component IconButton inherits Rectangle {
     accessible-label: root.label != "" ? root.label : root.icon;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
     focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
-    Icon { icon: root.icon; size: 16px; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
+    Icon {
+        x: (root.width - 16px) / 2;
+        y: (root.height - 16px) / 2;
+        icon: root.icon;
+        size: 16px;
+        tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
+    }
     touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
 
@@ -323,7 +329,7 @@ export component SegmentedControl inherits Rectangle {
                 text: item;
                 x: 4px;
                 width: max(0px, parent.width - 8px);
-                font-size: Theme.tokens.typography.caption;
+                font-size: Theme.tokens.typography.title;
                 color: idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -630,7 +636,7 @@ export component ModalDialog inherits Rectangle {
     Rectangle {
         width: 100%;
         height: 100%;
-        background: #00000040;
+        background: Theme.palette().scrim;
 
         TouchArea {
             clicked => {
@@ -639,10 +645,25 @@ export component ModalDialog inherits Rectangle {
         }
     }
 
-    Rectangle {
-        width: min(480px, root.width - 32px);
-        max-height: min(520px, root.height - 32px);
-        border-radius: 10px;
+    dialog-surface := Rectangle {
+        // Keep the sheet content-sized for ordinary dialogs while bounding it
+        // to the viewport.  A fixed 520px height leaves large blank regions
+        // around short confirmation dialogs and makes the modal feel broken.
+        private property <length> available-width: max(0px, root.width - 32px);
+        private property <length> available-height: max(0px, root.height - 32px);
+        private property <length> dialog-width: min(480px, available-width);
+        private property <length> dialog-height: min(520px,
+            max(132px, dialog-layout.preferred-height));
+        private property <length> sheet-height: min(dialog-height, available-height);
+        x: (root.width - dialog-width) / 2;
+        y: (root.height - sheet-height) / 2;
+        width: dialog-width;
+        // The explicit bound keeps the centered sheet inside a short window;
+        // dialog-layout supplies the intrinsic height for normal content.
+        height: sheet-height;
+        min-height: min(132px, available-height);
+        max-height: available-height;
+        border-radius: Theme.tokens.metrics.radius-large;
         background: Theme.palette().surface;
         border-width: 1px;
         border-color: Theme.palette().border-strong;
@@ -657,7 +678,11 @@ export component ModalDialog inherits Rectangle {
             }
         }
 
-        VerticalLayout {
+        dialog-layout := VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: 100%;
+            height: 100%;
             spacing: 0px;
             padding: 0px;
 
@@ -919,13 +944,19 @@ export component StatusPill inherits Rectangle {
     in property <string> text: "Local";
     in property <int> tone: 0;
     in property <length> max-content-width: 320px;
+    // Callers in a constrained row can provide the actual width available
+    // after sibling controls. A non-positive value keeps the intrinsic cap.
+    in property <length> available-width: 0px;
+    private property <length> width-cap: root.available-width > 0px
+        ? min(root.max-content-width, root.available-width)
+        : root.max-content-width;
     // Intrinsic sizing keeps short status labels balanced, but long diagnostic
     // text must never force a narrow sidebar wider than its parent.  Callers
     // with a constrained panel pass its available content width; the label
     // elides once the cap is reached.
-    min-width: max(48px, min(measure-label.preferred-width + 16px, root.max-content-width));
-    preferred-width: max(48px, min(measure-label.preferred-width + 16px, root.max-content-width));
-    max-width: root.max-content-width;
+    min-width: max(48px, min(measure-label.preferred-width + 16px, root.width-cap));
+    preferred-width: max(48px, min(measure-label.preferred-width + 16px, root.width-cap));
+    max-width: max(48px, root.width-cap);
     height: 22px;
     border-radius: 11px;
     border-width: 1px;
@@ -1014,7 +1045,7 @@ export component PanelHeader inherits Rectangle {
     HorizontalLayout {
         spacing: 8px; padding-left: 12px; padding-right: 10px; cross-axis-alignment: center;
         Rectangle { width: 3px; height: 14px; border-radius: 2px; background: Theme.palette().accent; }
-        Text { text: root.title; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink; overflow: elide; }
+        Text { text: root.title; font-size: Theme.tokens.typography.title; font-weight: 700; color: Theme.palette().ink; overflow: elide; }
         Rectangle { horizontal-stretch: 1; background: transparent; }
         if root.detail != "" : Text { text: root.detail; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().ink-disabled; max-width: 160px; overflow: elide; }
     }
@@ -1103,7 +1134,7 @@ export component WorkspaceRow inherits Rectangle {
     in property <bool> emphasized: false;
     in property <bool> enabled: true;
     callback clicked;
-    min-height: 42px; border-radius: 9px; border-width: 1px;
+    min-height: 42px; border-radius: Theme.tokens.metrics.radius-medium; border-width: 1px;
     border-color: focus-scope.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().accent : root.emphasized ? Theme.palette().border-strong : transparent;
     background: root.selected ? Theme.palette().selection-soft : touch.has-hover && root.enabled ? Theme.palette().surface-raised : transparent;
     animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }

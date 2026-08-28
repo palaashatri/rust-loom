@@ -220,8 +220,8 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
             .jobs
             .iter()
             .map(|job| match job.status {
-                JobStatus::Complete => 1,
-                JobStatus::Failed(_) => 2,
+                JobStatus::Complete => 2,
+                JobStatus::Failed(_) => 4,
                 JobStatus::Encoding { .. } => 3,
                 JobStatus::Queued => 0,
             })
@@ -312,7 +312,10 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     if args.palette {
         app.set_palette_query(SharedString::from("qu"));
         rebuild_palette(&app, "qu");
-        app.set_palette_selected(1);
+        // The filtered screenshot probe has one matching queue command.
+        // Keep the preview selection within that list so the Flickable does
+        // not scroll its only row into the clipped viewport.
+        app.set_palette_selected(0);
         app.set_palette_open(true);
     }
     app.set_status_left("Queue ready · source paths are editable".into());
@@ -334,30 +337,24 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         "Loom Encode",
         vec![],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
+        vec![Menu::new(
+            "Queue",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "queue.add_job",
+                    "Add Transcode Job",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("queue.remove_job", "Remove Selected Job"),
+                MenuItem::action_with_shortcut(
+                    "queue.start",
+                    "Start Queue",
+                    MenuShortcut::primary("R"),
+                ),
+                MenuItem::action("queue.cancel", "Cancel Queue"),
+            ],
         )],
-        vec![
-            Menu::new(
-                "Queue",
-                vec![
-                    MenuItem::action_with_shortcut(
-                        "queue.add_job",
-                        "Add Transcode Job",
-                        MenuShortcut::primary_shift("N"),
-                    ),
-                    MenuItem::action("queue.remove_job", "Remove Selected Job"),
-                    MenuItem::action_with_shortcut(
-                        "queue.start",
-                        "Start Queue",
-                        MenuShortcut::primary("R"),
-                    ),
-                    MenuItem::action("queue.cancel", "Cancel Queue"),
-                ],
-            ),
-        ],
     );
     let menu_service = NativeMenuBar::new();
     let _ = menu_service.install_menu_bar(&menu_bar);
@@ -1081,30 +1078,24 @@ fn main() -> Result<(), String> {
         "Loom Encode",
         vec![],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
+        vec![Menu::new(
+            "Queue",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "queue.add_job",
+                    "Add Transcode Job",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("queue.remove_job", "Remove Selected Job"),
+                MenuItem::action_with_shortcut(
+                    "queue.start",
+                    "Start Queue",
+                    MenuShortcut::primary("R"),
+                ),
+                MenuItem::action("queue.cancel", "Cancel Queue"),
+            ],
         )],
-        vec![
-            Menu::new(
-                "Queue",
-                vec![
-                    MenuItem::action_with_shortcut(
-                        "queue.add_job",
-                        "Add Transcode Job",
-                        MenuShortcut::primary_shift("N"),
-                    ),
-                    MenuItem::action("queue.remove_job", "Remove Selected Job"),
-                    MenuItem::action_with_shortcut(
-                        "queue.start",
-                        "Start Queue",
-                        MenuShortcut::primary("R"),
-                    ),
-                    MenuItem::action("queue.cancel", "Cancel Queue"),
-                ],
-            ),
-        ],
     );
     let menu_service = NativeMenuBar::new();
     let _ = menu_service.install_menu_bar(&menu_bar);

@@ -41,6 +41,11 @@ export component PhotoApp inherits Window {
     in property <bool> has-preview: false;
 
     in-out property <int> active-tool: 0;
+    // Pan is a viewport mode, not a paint/select tool. Keep it separate from
+    // the tool index so the palette's Pan command cannot accidentally mark
+    // Brush as active or make the canvas draggable while another tool is in
+    // use.
+    in-out property <bool> pan-mode: false;
     in-out property <int> inspector-tab: 0;
     in-out property <float> brightness-value: 0.0;
     in-out property <float> contrast-value: 0.0;
@@ -117,19 +122,19 @@ export component PhotoApp inherits Window {
                         icon: "cursor";
                         label: "Select";
                         checked: root.active-tool == 0;
-                        clicked => { root.active-tool = 0; root.select-tool("select"); }
+                        clicked => { root.active-tool = 0; root.pan-mode = false; root.select-tool("select"); }
                     }
                     AppleToolbarItem {
                         icon: "brush";
                         label: "Brush";
                         checked: root.active-tool == 1;
-                        clicked => { root.active-tool = 1; root.select-tool("brush"); }
+                        clicked => { root.active-tool = 1; root.pan-mode = false; root.select-tool("brush"); }
                     }
                     AppleToolbarItem {
                         icon: "wand";
                         label: "Wand";
                         checked: root.active-tool == 2;
-                        clicked => { root.active-tool = 2; root.select-tool("wand"); }
+                        clicked => { root.active-tool = 2; root.pan-mode = false; root.select-tool("wand"); }
                     }
                 }
 
@@ -157,9 +162,14 @@ export component PhotoApp inherits Window {
                         checked: root.inspector-visible;
                         clicked => { root.show-inspector = !root.show-inspector; }
                     }
-                    AppleToolbarItem {
+                    if root.labeled-export : AppleToolbarItem {
                         icon: "export";
                         label: "Export";
+                        clicked => { root.export-png(); }
+                    }
+                    if !root.labeled-export : ToolbarIconButton {
+                        icon: "export";
+                        label: "Export PNG";
                         clicked => { root.export-png(); }
                     }
                 }
@@ -186,60 +196,6 @@ export component PhotoApp inherits Window {
                         if root.show-grid : Rectangle { x: parent.width * 3 / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
                         if root.show-grid : Rectangle { y: parent.height / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
                         if root.show-grid : Rectangle { y: parent.height * 3 / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
-
-                        // Keep the canvas tools on the canvas edge so their
-                        // names and state remain discoverable at compact
-                        // widths. The same callbacks are used by the former
-                        // tool rail and remain keyboard/accessibility-aware.
-                        tool-overlay := Rectangle {
-                            x: 12px;
-                            y: 12px;
-                            width: min(360px, parent.width - 24px);
-                            height: 36px;
-                            border-radius: Theme.tokens.metrics.radius-medium;
-                            border-width: 1px;
-                            border-color: Theme.palette().border;
-                            background: Theme.palette().overlay;
-                            HorizontalLayout {
-                                spacing: 4px;
-                                padding-left: 4px;
-                                padding-right: 6px;
-                                cross-axis-alignment: center;
-                                Text {
-                                    text: root.active-tool == 1 ? "Pan" : "Select";
-                                    width: 48px;
-                                    font-size: Theme.tokens.typography.caption;
-                                    font-weight: 600;
-                                    color: Theme.palette().ink-secondary;
-                                    vertical-alignment: center;
-                                }
-                                ToolbarIconButton {
-                                    icon: "cursor";
-                                    label: "Select tool";
-                                    checked: root.active-tool == 0;
-                                    clicked => { root.active-tool = 0; root.select-tool("Select"); }
-                                }
-                                ToolbarIconButton {
-                                    icon: "cursor";
-                                    label: "Pan tool";
-                                    checked: root.active-tool == 1;
-                                    clicked => { root.active-tool = 1; root.select-tool("Pan"); }
-                                }
-                                ToolbarIconButton {
-                                    icon: "grid";
-                                    label: "Toggle grid";
-                                    checked: root.show-grid;
-                                    clicked => { root.show-grid = !root.show-grid; }
-                                }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
-                                Text {
-                                    text: root.show-grid ? "Grid on" : "Grid off";
-                                    font-size: Theme.tokens.typography.caption;
-                                    color: Theme.palette().ink-secondary;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
 
                         if root.has-preview : viewport := Rectangle {
                             property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
@@ -308,8 +264,8 @@ export component PhotoApp inherits Window {
                         }
 
                         canvas-pan := TouchArea {
-                            enabled: root.has-preview;
-                            mouse-cursor: root.active-tool == 1 ? (self.pressed ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.default;
+                            enabled: root.has-preview && root.pan-mode;
+                            mouse-cursor: root.pan-mode ? (self.pressed ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.default;
                             property <length> start-pan-x: 0px;
                             property <length> start-pan-y: 0px;
                             pointer-event(event) => {
@@ -469,7 +425,7 @@ export component PhotoApp inherits Window {
             }
 
             ToolkitStatusBar {
-                leading: root.status-left + "  •  " + (root.active-tool == 1 ? (canvas-pan.pressed ? "Panning viewport" : "Pan tool") : "Select tool");
+                leading: root.status-left + "  •  " + (root.pan-mode ? (canvas-pan.pressed ? "Panning viewport" : "Pan tool") : root.active-tool == 0 ? "Select tool" : root.active-tool == 1 ? "Brush tool" : "Wand tool");
                 trailing: root.status-right + "  •  " + Math.round(root.zoom-value) + "%";
             }
         }

@@ -32,6 +32,8 @@ accessibility-text-scale = 2.0
 required-themes = ["light", "dark", "high-contrast"]
 max-unintentional-overlap-px = 0
 max-control-label-clipping-px = 0
+# Regular horizontal action labels must remain intact; icon-over-label
+# captions use the dedicated labeled-toolbar-item elision rule below.
 max-action-label-truncation = 0
 max-toolbar-lines = 1
 max-toolbar-groups = 3
@@ -156,7 +158,7 @@ panel = "#F9F9FA"
 overlay = "#FFFFFFF8"
 ink = "#18181B"
 ink-secondary = "#64646E"
-ink-disabled = "#A1A1AA"
+ink-disabled = "#5F5F68"
 accent = "#D95324"
 accent-hover = "#E66333"
 accent-pressed = "#B84016"
@@ -198,7 +200,7 @@ panel = "#161619"
 overlay = "#24242AF2"
 ink = "#F4F4F6"
 ink-secondary = "#9898A0"
-ink-disabled = "#585860"
+ink-disabled = "#8C8C94"
 accent = "#E06338"
 accent-hover = "#ED754A"
 accent-pressed = "#CA5329"
@@ -291,6 +293,18 @@ icon = 16
 radius = 6
 tooltip-required = true
 
+# Icon-over-label toolbar controls use a taller slot so the icon and 10px
+# caption have independent breathing room. Their labels may elide when the
+# item reaches its intrinsic minimum; the regular horizontal action contract
+# below still requires labels to remain fully visible.
+[component.labeled-toolbar-item]
+min-height = 48
+max-height = 52
+icon = 18
+label-size = 10
+padding-y = 4
+allow-label-elision = true
+
 [component.segmented]
 height = 28
 radius = 6
@@ -329,8 +343,10 @@ delay-ms = 400
 
 # ---------------------------------------------------------------------------
 # Toolbar policy. Priority 0 survives all supported widths; priority 1 may
-# become icon-only; priority 2 moves to overflow. Controls never shrink below
-# intrinsic label width and action labels never ellipsize.
+# become icon-only; priority 2 moves to overflow. Compact icon-only controls
+# keep the [component.icon-button] geometry. Icon-over-label controls use the
+# [component.labeled-toolbar-item] slot and may elide their caption at the
+# intrinsic minimum; regular horizontal action labels remain fully visible.
 # ---------------------------------------------------------------------------
 [toolbar]
 max-groups = 3
@@ -341,13 +357,18 @@ priority-1-icon-only-below = 1180
 priority-2-overflow-below = 1320
 never-scroll = true
 never-wrap = true
+# Applies to regular horizontal action labels; labeled toolbar captions use
+# component.labeled-toolbar-item.allow-label-elision instead.
 never-truncate-actions = true
+allow-labeled-item-elision = true
 all-items-have-menu-command = true
 show-app-name = false
 show-neutral-local-state = false
 
 # ---------------------------------------------------------------------------
-# Text truncation policy.
+# Text truncation policy. The action/control defaults apply to regular
+# horizontal controls; the labeled toolbar item is the explicit caption
+# exception documented above.
 # ---------------------------------------------------------------------------
 [truncation]
 allow-user-content = true
@@ -357,6 +378,7 @@ allow-track-name = true
 allow-layer-name = true
 allow-action-label = false
 allow-control-label = false
+allow-labeled-toolbar-label = true
 allow-section-title = false
 allow-status-severity = false
 tooltip-required-when-ellipsized = true
@@ -434,8 +456,12 @@ app-local-control-radii = true
 app-local-control-heights = true
 app-local-toolbar-shells = true
 persistent-canvas-status-overlays = true
+# Standard horizontal button/control labels may not ellipsize. The
+# icon-over-label toolbar caption is governed by its dedicated component
+# contract and is intentionally exempt.
 button-label-ellipsis = true
 control-label-ellipsis = true
+labeled-toolbar-label-ellipsis = false
 nested-panel-scrollbars = true
 scrolling-toolbar = true
 wrapped-toolbar = true

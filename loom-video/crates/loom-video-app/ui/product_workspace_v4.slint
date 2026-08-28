@@ -21,7 +21,9 @@ export component VideoApp inherits Window {
     in property <bool> compact-layout: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
-    property <length> track-header-width: root.compact-layout ? 136px : 180px;
+    // Timeline grammar reserves 180px for track controls at every width so
+    // mute/solo actions and names do not collide with the ruler lane.
+    property <length> track-header-width: 180px;
     property <float> frame-step: 1.0 / 30.0;
     property <bool> show-inspector: true;
 
@@ -38,6 +40,7 @@ export component VideoApp inherits Window {
     in property <int> active-clip-index: 0;
     in property <image> preview-image;
     in property <bool> has-preview: false;
+    in property <bool> preview-synthetic: false;
     in property <bool> backend-available: false;
     in property <string> backend-version: "FFmpeg not found";
     in property <float> timeline-duration: 1;
@@ -160,7 +163,7 @@ export component VideoApp inherits Window {
             vertical-stretch: 1;
 
             SidebarSurface {
-                width: root.compact-layout ? 190px : 258px;
+                width: root.compact-layout ? 200px : 258px;
                 title: "Media";
                 detail: root.media-bin-items.length + " imported · " + root.clip-labels.length + " clips";
                 VerticalLayout {
@@ -318,11 +321,11 @@ export component VideoApp inherits Window {
                                     HorizontalLayout {
                                         padding-left: 8px;
                                         padding-right: 8px;
-                                        Text { text: "0s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: 9px; }
-                                        Text { text: Math.round(root.timeline-duration * 0.25 * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: 9px; horizontal-alignment: center; }
-                                        Text { text: Math.round(root.timeline-duration * 0.5 * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: 9px; horizontal-alignment: center; }
-                                        Text { text: Math.round(root.timeline-duration * 0.75 * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: 9px; horizontal-alignment: center; }
-                                        Text { text: Math.round(root.timeline-duration * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: 9px; horizontal-alignment: right; }
+                                        Text { text: "0s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; }
+                                        Text { text: Math.round(root.timeline-duration * 0.25 * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; horizontal-alignment: center; }
+                                        Text { text: Math.round(root.timeline-duration * 0.5 * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; horizontal-alignment: center; }
+                                        Text { text: Math.round(root.timeline-duration * 0.75 * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; horizontal-alignment: center; }
+                                        Text { text: Math.round(root.timeline-duration * 10) / 10 + "s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; horizontal-alignment: right; }
                                     }
                                     ruler-scrub := TouchArea {
                                         mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
@@ -379,8 +382,10 @@ export component VideoApp inherits Window {
                                     background: Theme.palette().media-stage;
                                     for clip[clip-index] in root.clip-labels : Rectangle {
                                         visible: index == 0;
-                                        x: parent.width * root.clip-starts[clip-index] / Math.max(0.01, root.timeline-duration);
-                                        width: Math.max(56px, parent.width * root.clip-durations[clip-index] / Math.max(0.01, root.timeline-duration) - 3px);
+                                        property <length> clip-start-x: clamp(parent.width * root.clip-starts[clip-index] / Math.max(0.01, root.timeline-duration), 0px, max(0px, parent.width - 56px));
+                                        property <length> clip-render-width: max(0px, min(max(56px, parent.width * root.clip-durations[clip-index] / Math.max(0.01, root.timeline-duration) - 3px), max(0px, parent.width - self.clip-start-x - 3px)));
+                                        x: self.clip-start-x;
+                                        width: self.clip-render-width;
                                         y: 6px;
                                         height: 52px;
                                         border-radius: 7px;
@@ -395,7 +400,7 @@ export component VideoApp inherits Window {
                                             HorizontalLayout {
                                                 spacing: 5px;
                                                 Icon { icon: "waveform"; size: 16px; tint: Theme.palette().paper-line; }
-                                                Text { text: Math.round(root.clip-durations[clip-index] * 100) / 100 + "s"; font-size: 9px; color: Theme.palette().paper-muted; vertical-alignment: center; }
+                                                Text { text: Math.round(root.clip-durations[clip-index] * 100) / 100 + "s"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-muted; vertical-alignment: center; }
                                             }
                                         }
                                         clip-touch := TouchArea { clicked => { timeline-focus.focus(); root.select-clip(clip-index); } }
@@ -417,7 +422,7 @@ export component VideoApp inherits Window {
 
             if root.show-inspector : Rectangle { width: 1px; background: Theme.palette().border; }
             if root.show-inspector : InspectorSurface {
-                width: root.compact-layout ? 236px : 306px;
+                width: root.compact-layout ? 240px : 306px;
                 title: "Inspector";
                 detail: root.clip-labels.length > 0 ? "Selected clip" : "No selection";
                 PaneTabs { items: ["Clip", "Edit", "Export"]; current <=> root.inspector-tab; }

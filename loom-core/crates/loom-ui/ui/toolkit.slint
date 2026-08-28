@@ -11,7 +11,9 @@ export component DocumentChrome inherits Rectangle {
     in property <string> title: "Untitled";
     in property <bool> modified: false;
     in property <string> trailing-text: "";
-    in property <bool> show-traffic-lights: true;
+    // Native window chrome owns traffic lights on macOS. Headless/non-native
+    // hosts may opt in explicitly when they need an in-surface affordance.
+    in property <bool> show-traffic-lights: false;
     min-height: Theme.tokens.metrics.header-height;
     max-height: Theme.tokens.metrics.header-height;
     background: Theme.palette().chrome;
@@ -45,6 +47,9 @@ export component DocumentChrome inherits Rectangle {
 }
 
 export component Toolbar inherits Rectangle {
+    // Labeled (icon-over-label) controls need a taller slot than compact
+    // icon-only chrome; otherwise the label baseline is pressed into the
+    // separator at native/retina scale.
     min-height: 48px;
     max-height: 52px;
     background: Theme.palette().chrome;
@@ -54,8 +59,8 @@ export component Toolbar inherits Rectangle {
 
 export component ToolbarGroup inherits Rectangle {
     in property <bool> leading-separation: false;
-    min-height: 44px;
-    max-height: 48px;
+    min-height: 48px;
+    max-height: 52px;
     background: transparent;
     HorizontalLayout { spacing: 2px; padding-left: root.leading-separation ? 10px : 0px; cross-axis-alignment: center; @children }
 }
@@ -72,8 +77,9 @@ export component AppleToolbarItem inherits Rectangle {
 
     min-width: max(48px, label-text.preferred-width + 16px);
     preferred-width: max(48px, label-text.preferred-width + 16px);
-    height: 44px;
-    border-radius: 6px;
+    min-height: 48px;
+    max-height: 52px;
+    border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
     background: !root.enabled ? transparent

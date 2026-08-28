@@ -57,12 +57,15 @@ struct ThemeTokens {
 }
 
 export global Theme {
-    in-out property <ThemeTokens> tokens: {
+    private property <ThemeTokens> light-tokens: {
         palette: {
             canvas: #f4f4f6, canvas-alt: #eaeaef, surface: #ffffff,
             surface-raised: #ffffff, surface-sunken: #ededf2, chrome: #ffffff,
             panel: #f9f9fa, overlay: #fffffff8, ink: #18181b,
-            ink-secondary: #64646e, ink-disabled: #a1a1aa, accent: #d95324,
+            ink-secondary: #64646e,
+            // Keep disabled labels subordinate while meeting the 4.5:1
+            // body-text floor on light canvas, panel, surface, and wells.
+            ink-disabled: #5f5f68, accent: #d95324,
             accent-hover: #e66333, accent-pressed: #b84016, accent-ink: #ffffff,
             success: #16a34a, warning: #d97706, danger: #dc2626, info: #0284c7,
             border: #e2e2e8, border-strong: #c8c8d2, focus: #d95324,
@@ -92,7 +95,17 @@ export global Theme {
         reduced-motion: false,
     };
 
+    // Keep one complete, writable token bundle for consumers while selecting
+    // the corresponding immutable theme bundle whenever the active theme
+    // changes. This ensures reduced-motion and all non-palette tokens follow
+    // the selected theme instead of only the palette function changing.
+    in-out property <ThemeTokens> tokens: light-tokens;
     in-out property <string> active-theme: "light";
+    changed active-theme => {
+        tokens = active-theme == "dark" ? ThemeDark.tokens
+            : active-theme == "high-contrast" ? ThemeHighContrast.tokens
+            : light-tokens;
+    }
     public pure function palette() -> Palette {
         return active-theme == "dark" ? ThemeDark.tokens.palette
             : active-theme == "high-contrast" ? ThemeHighContrast.tokens.palette
@@ -106,7 +119,7 @@ export global ThemeDark {
             canvas: #121214, canvas-alt: #0e0e10, surface: #1a1a1e,
             surface-raised: #24242a, surface-sunken: #141416, chrome: #1a1a1e,
             panel: #161619, overlay: #24242af2, ink: #f4f4f6,
-            ink-secondary: #9898a0, ink-disabled: #585860, accent: #e06338,
+            ink-secondary: #9898a0, ink-disabled: #8c8c94, accent: #e06338,
             accent-hover: #ed754a, accent-pressed: #ca5329, accent-ink: #ffffff,
             success: #22c55e, warning: #f59e0b, danger: #ef4444, info: #38bdf8,
             border: #2a2a30, border-strong: #3c3c46, focus: #e06338,

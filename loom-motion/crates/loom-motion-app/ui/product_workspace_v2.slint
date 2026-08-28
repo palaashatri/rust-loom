@@ -18,7 +18,9 @@ export component MotionApp inherits Window {
     in property <bool> compact-layout: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
-    property <length> layer-column-width: root.compact-layout ? 188px : 246px;
+    // Timeline and panel contracts keep the layer header readable even in the
+    // compact composition. The 200px floor also matches the sidebar minimum.
+    property <length> layer-column-width: root.compact-layout ? 200px : 246px;
 
     in property <string> comp-name: "Untitled Composition";
     in property <string> timecode-text: "00:00:00:00 (60 fps)";
@@ -117,15 +119,29 @@ export component MotionApp inherits Window {
 
         Toolbar {
             ToolbarGroup {
-                AppleToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
-                AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
-                AppleToolbarItem {
+                if root.compact-layout : ToolbarIconButton { icon: "cursor"; label: "Transform"; checked: true; }
+                if !root.compact-layout : AppleToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
+                if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Add layer"; clicked => { root.add-layer(); } }
+                if !root.compact-layout : AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+                if root.compact-layout : ToolbarIconButton {
+                    icon: "grid";
+                    label: "Toggle guides";
+                    checked: root.show-guides;
+                    clicked => { root.show-guides = !root.show-guides; }
+                }
+                if !root.compact-layout : AppleToolbarItem {
                     icon: "grid";
                     label: "Guides";
                     checked: root.show-guides;
                     clicked => { root.show-guides = !root.show-guides; }
                 }
-                AppleToolbarItem {
+                if root.compact-layout : ToolbarIconButton {
+                    icon: "eye";
+                    label: "Toggle safe area";
+                    checked: root.show-safe-area;
+                    clicked => { root.show-safe-area = !root.show-safe-area; }
+                }
+                if !root.compact-layout : AppleToolbarItem {
                     icon: "eye";
                     label: "Safe Area";
                     checked: root.show-safe-area;
@@ -137,8 +153,9 @@ export component MotionApp inherits Window {
 
             // Center Transport group
             ToolbarGroup {
-                AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
-                AppleToolbarItem {
+                if root.compact-layout : ToolbarIconButton { icon: "chevron-left"; label: "Step back"; clicked => { root.step-back(); } }
+                if !root.compact-layout : AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
+                if root.compact-layout : ToolbarIconButton {
                     icon: root.is-playing ? "pause" : "play";
                     label: root.is-playing ? "Pause" : "Play";
                     checked: root.is-playing;
@@ -147,8 +164,27 @@ export component MotionApp inherits Window {
                         root.play-pause();
                     }
                 }
-                AppleToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
-                AppleToolbarItem {
+                if !root.compact-layout : AppleToolbarItem {
+                    icon: root.is-playing ? "pause" : "play";
+                    label: root.is-playing ? "Pause" : "Play";
+                    checked: root.is-playing;
+                    clicked => {
+                        root.is-playing = !root.is-playing;
+                        root.play-pause();
+                    }
+                }
+                if root.compact-layout : ToolbarIconButton { icon: "chevron-right"; label: "Step forward"; clicked => { root.step-forward(); } }
+                if !root.compact-layout : AppleToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
+                if root.compact-layout : ToolbarIconButton {
+                    icon: "redo";
+                    label: "Toggle loop";
+                    checked: root.is-looping;
+                    clicked => {
+                        root.is-looping = !root.is-looping;
+                        root.toggle-loop();
+                    }
+                }
+                if !root.compact-layout : AppleToolbarItem {
                     icon: "redo";
                     label: "Loop";
                     checked: root.is-looping;
@@ -163,7 +199,16 @@ export component MotionApp inherits Window {
 
             // Right Inspector & Export
             ToolbarGroup {
-                AppleToolbarItem {
+                if root.compact-layout : ToolbarIconButton {
+                    icon: "timeline";
+                    label: "Toggle curves";
+                    checked: root.curve-drawer-open;
+                    clicked => {
+                        root.curve-drawer-open = !root.curve-drawer-open;
+                        root.toggle-curve-drawer();
+                    }
+                }
+                if !root.compact-layout : AppleToolbarItem {
                     icon: "timeline";
                     label: "Curves";
                     checked: root.curve-drawer-open;
@@ -172,10 +217,19 @@ export component MotionApp inherits Window {
                         root.toggle-curve-drawer();
                     }
                 }
-                AppleToolbarItem {
+                if root.compact-layout : ToolbarIconButton { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
+                if !root.compact-layout : AppleToolbarItem {
                     icon: "export";
                     label: "Export SVG";
                     clicked => { root.export-frame(); }
+                }
+                if root.compact-layout : ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
+                if root.compact-layout : Slider { label: "Zoom"; minimum: 10; maximum: 200; value <=> root.zoom-value; width: 120px; }
+                if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); } }
+                if !root.compact-layout : AppleToolbarItem {
+                    icon: "zoom-in";
+                    label: Math.round(root.zoom-value) + "%";
+                    clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; }
                 }
             }
         }
@@ -436,24 +490,6 @@ export component MotionApp inherits Window {
                         }
                     }
 
-                Rectangle {
-                    x: 28px;
-                    y: parent.height - 58px;
-                    width: 260px;
-                    height: 36px;
-                    border-radius: 10px;
-                    background: Theme.palette().overlay;
-                    border-width: 1px;
-                    border-color: Theme.palette().border;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        padding-left: 9px;
-                        padding-right: 9px;
-                        IconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
-                        Slider { label: "Zoom"; minimum: 10; maximum: 200; value <=> root.zoom-value; horizontal-stretch: 1; }
-                        IconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); } }
-                    }
-                }
             }
 
                 Rectangle {
@@ -489,7 +525,7 @@ export component MotionApp inherits Window {
             Rectangle { width: 1px; background: Theme.palette().border; }
 
             InspectorSurface {
-                width: root.inspector-expanded ? (root.compact-layout ? 236px : 304px) : 50px;
+                width: root.inspector-expanded ? (root.compact-layout ? 240px : 304px) : 50px;
                 title: root.inspector-expanded ? "Inspector" : "";
                 detail: root.inspector-expanded && root.layer-labels.length > 0 ? "Layer " + (root.active-layer-index + 1) : "";
                 animate width {
@@ -554,13 +590,16 @@ export component MotionApp inherits Window {
         }
 
         Rectangle {
-            height: root.compact-layout ? 158px : 182px;
+            // The shared timeline grammar requires a 220px minimum in every
+            // responsive mode; shrinking it made the ruler and track controls
+            // compete with the canvas at the compact breakpoint.
+            height: 220px;
             background: Theme.palette().panel;
             VerticalLayout {
                 spacing: 0px;
                 PanelHeader { title: "Timeline"; detail: root.timecode-display; }
                 Rectangle {
-                    height: 26px;
+                    height: 24px;
                     background: Theme.palette().chrome;
                     HorizontalLayout {
                         spacing: 0px;
@@ -586,7 +625,7 @@ export component MotionApp inherits Window {
                         padding-bottom: 5px;
                         for label[idx] in root.layer-labels : WorkspaceRow {
                             label: label;
-                            height: 42px;
+                            height: 44px;
                             selected: idx == root.active-layer-index;
                             clicked => { root.select-layer(idx); }
                             HorizontalLayout {

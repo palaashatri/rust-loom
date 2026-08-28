@@ -440,11 +440,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Format Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
         vec![Menu::new(
             "Slide",
             vec![
@@ -998,11 +994,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Format Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
         vec![Menu::new(
             "Slide",
             vec![
@@ -1339,6 +1331,14 @@ mod desktop_tests {
             .elements
             .iter()
             .all(|element| element.content.is_empty()));
+    }
+
+    #[test]
+    fn optional_inspector_and_notes_drawer_are_closed_by_default() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        assert!(!app.get_show_inspector());
+        assert!(!app.get_show_notes_drawer());
     }
 
     #[test]

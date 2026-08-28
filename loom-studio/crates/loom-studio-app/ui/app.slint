@@ -167,7 +167,7 @@ export component StudioApp inherits Window {
             vertical-stretch: 1;
 
             SidebarSurface {
-                width: root.compact-layout ? 190px : 248px;
+                width: root.compact-layout ? 200px : 248px;
                 title: "Library";
                 detail: root.track-labels.length + " tracks";
                 VerticalLayout {
@@ -178,9 +178,53 @@ export component StudioApp inherits Window {
                     ToolButton { icon: "import"; text: "Import WAV"; enabled: root.import-path != ""; clicked => { root.import-audio(root.import-path); } }
                     Rectangle { height: 1px; background: Theme.palette().border; }
                     Text { text: "MIDI input"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                    if root.midi-ports.length > 0 : SegmentedControl {
+                    if root.midi-ports.length > 0 && root.midi-ports.length <= 6 : SegmentedControl {
                         items: root.midi-ports;
                         current <=> root.selected-midi-port;
+                    }
+                    // A segmented control allocates one intrinsic segment per
+                    // port and becomes unreadable once a host exposes more
+                    // than six devices. Use a bounded pager for larger MIDI
+                    // inventories while retaining keyboard/accessibility-safe
+                    // selection and the same connect command.
+                    if root.midi-ports.length > 6 : Rectangle {
+                        height: 28px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        background: Theme.palette().surface-sunken;
+                        HorizontalLayout {
+                            spacing: 2px;
+                            padding-left: 2px;
+                            padding-right: 2px;
+                            IconButton {
+                                icon: "chevron-left";
+                                label: "Previous MIDI input";
+                                clicked => {
+                                    root.selected-midi-port = root.selected-midi-port <= 0
+                                        ? root.midi-ports.length - 1
+                                        : root.selected-midi-port - 1;
+                                }
+                            }
+                            Text {
+                                text: root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
+                                horizontal-stretch: 1;
+                                font-size: Theme.tokens.typography.caption;
+                                color: Theme.palette().ink;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            IconButton {
+                                icon: "chevron-right";
+                                label: "Next MIDI input";
+                                clicked => {
+                                    root.selected-midi-port = Math.mod(root.selected-midi-port + 1, root.midi-ports.length);
+                                }
+                            }
+                        }
+                        accessible-role: button;
+                        accessible-label: "MIDI input " + root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
                     }
                     ToolButton { icon: "keyboard"; text: "Connect MIDI"; enabled: root.midi-ports.length > 0; clicked => { root.connect-midi(root.selected-midi-port); } }
                     StatusPill {
@@ -237,7 +281,7 @@ export component StudioApp inherits Window {
                             HorizontalLayout {
                                 spacing: 0px;
                                 Rectangle {
-                                    width: root.compact-layout ? 190px : 230px;
+                                    width: root.compact-layout ? 180px : 230px;
                                     background: Theme.palette().surface;
                                     HorizontalLayout {
                                         padding-left: 8px;
@@ -249,7 +293,7 @@ export component StudioApp inherits Window {
                                         VerticalLayout {
                                             spacing: 1px;
                                             Text { text: label; color: Theme.palette().ink; font-size: 11px; font-weight: 650; overflow: elide; }
-                                            Text { text: root.track-kinds[index] + " · " + root.track-region-counts[index] + " regions"; color: Theme.palette().ink-secondary; font-size: 9px; overflow: elide; }
+                                            Text { text: root.track-kinds[index] + " · " + root.track-region-counts[index] + " regions"; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.micro; overflow: elide; }
                                         }
                                     }
                                 }
@@ -257,8 +301,10 @@ export component StudioApp inherits Window {
                                     horizontal-stretch: 1;
                                     background: Math.mod(index, 2) == 0 ? Theme.palette().media-stage : Theme.palette().media-stage;
                                     if root.track-region-counts[index] > 0 : Rectangle {
-                                        x: parent.width * root.track-region-starts[index] / Math.max(0.01, root.duration-seconds);
-                                        width: Math.max(54px, parent.width * root.track-region-durations[index] / Math.max(0.01, root.duration-seconds));
+                                        property <length> region-start-x: clamp(parent.width * root.track-region-starts[index] / Math.max(0.01, root.duration-seconds), 0px, max(0px, parent.width - 54px));
+                                        property <length> region-render-width: max(0px, min(max(54px, parent.width * root.track-region-durations[index] / Math.max(0.01, root.duration-seconds)), max(0px, parent.width - self.region-start-x - 2px)));
+                                        x: self.region-start-x;
+                                        width: self.region-render-width;
                                         y: 8px;
                                         height: parent.height - 16px;
                                         border-radius: 7px;
@@ -283,7 +329,7 @@ export component StudioApp inherits Window {
             Rectangle { width: 1px; background: Theme.palette().border; }
 
             InspectorSurface {
-                width: root.compact-layout ? 232px : 292px;
+                width: root.compact-layout ? 240px : 292px;
                 title: "Mixer";
                 detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
                 VerticalLayout {

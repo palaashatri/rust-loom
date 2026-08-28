@@ -19,10 +19,17 @@ export component Icon inherits Rectangle {
     Path {
         x: 0px;
         y: 0px;
-        width: 20px;
-        height: 20px;
+        // Scale the 20-unit source path into the requested icon slot. Keeping
+        // a fixed 20px viewport made small (14/16/18px) icons paint into their
+        // neighbouring labels and outside their button bounds.
+        width: parent.width;
+        height: parent.height;
         stroke: parent.tint;
-        stroke-width: 1.5px;
+        // Path geometry is fitted to the requested icon slot, but Slint keeps
+        // stroke-width in logical pixels rather than applying that fit scale.
+        // Scale the source-grid stroke with the slot so 14/16/18px icons keep
+        // the same proportional weight as the 20px source artwork.
+        stroke-width: 1.5px * (parent.width / 20px);
         fill: transparent;
         stroke-line-cap: round;
         stroke-line-join: round;

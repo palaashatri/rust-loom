@@ -14,8 +14,8 @@ use std::sync::Mutex;
 
 pub mod menu;
 pub use menu::{
-    build_standard_menu_bar, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut,
-    NativeMenuBar, ScriptedMenuBar,
+    build_standard_menu_bar, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeMenuBar,
+    ScriptedMenuBar,
 };
 
 /// A display name and extension list presented by a native file dialog.
@@ -309,7 +309,6 @@ mod tests {
             Err(DesktopError::ScriptExhausted("save_file"))
         );
     }
-
 
     #[test]
     fn menu_bar_item_lookup_and_state_updates() {

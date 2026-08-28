@@ -305,7 +305,13 @@ fn layout_breakpoints(width: u32) -> (bool, bool) {
 fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     let (show_quick_formulas, labeled_export) = layout_breakpoints(width);
     app.set_show_quick_formulas(show_quick_formulas);
+    app.set_wide_toolbar(show_quick_formulas);
     app.set_labeled_export(labeled_export);
+    let inspector_available = width >= 1180;
+    app.set_inspector_available(inspector_available);
+    if !inspector_available {
+        app.set_show_inspector(false);
+    }
 }
 
 fn wire_responsive_layout(app: &SheetsApp) {
@@ -329,7 +335,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     if args.palette {
         app.set_palette_query(SharedString::from("ex"));
         rebuild_palette(&app, "ex");
-        app.set_palette_selected(1);
+        // The filtered screenshot probe has one matching export command.
+        // Keep the preview selection within that list so the Flickable does
+        // not scroll its only row into the clipped viewport.
+        app.set_palette_selected(0);
         app.set_palette_open(true);
     }
     if args.template_chooser {
@@ -679,7 +688,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_show_inspector(!app.get_show_inspector());
+                if app.get_inspector_available() {
+                    app.set_show_inspector(!app.get_show_inspector());
+                }
             }
         });
     }
@@ -746,11 +757,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Format Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
         vec![Menu::new(
             "Table",
             vec![
@@ -1170,5 +1177,12 @@ mod tests {
         assert_eq!(layout_breakpoints(1319), (false, true));
         assert_eq!(layout_breakpoints(1320), (true, true));
         assert_eq!(layout_breakpoints(1440), (true, true));
+    }
+
+    #[test]
+    fn sheets_inspector_is_closed_by_default() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        assert!(!app.get_show_inspector());
     }
 }

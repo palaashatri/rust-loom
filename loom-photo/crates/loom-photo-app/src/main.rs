@@ -266,6 +266,18 @@ fn configure_responsive_width(app: &PhotoApp, width: u32) {
     app.set_labeled_export(width >= 1320);
 }
 
+/// Resolve a tool command into the independent paint/select index and viewport
+/// pan mode. Pan must not reuse the Brush index: doing so makes a palette Pan
+/// invocation silently change the active toolbar tool.
+fn photo_tool_state(tool: &str) -> (i32, bool) {
+    match tool.trim().to_ascii_lowercase().as_str() {
+        "pan" => (0, true),
+        "brush" => (1, false),
+        "wand" => (2, false),
+        _ => (0, false),
+    }
+}
+
 fn wire_responsive_layout(app: &PhotoApp) {
     let app_ref = app.as_weak();
     app.on_window_resized(move |width| {
@@ -658,11 +670,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             MenuItem::action("file.export_jpeg", "Export as JPEG..."),
         ],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![Menu::new(
             "Layer",
             vec![
@@ -1009,6 +1017,9 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_select_tool(move |tool| {
             if let Some(app) = app_ref.upgrade() {
+                let (active_tool, pan_mode) = photo_tool_state(tool.as_str());
+                app.set_active_tool(active_tool);
+                app.set_pan_mode(pan_mode);
                 set_status(&app, format!("{} tool selected", tool.as_str()));
             }
         });
@@ -1106,11 +1117,7 @@ fn main() -> Result<(), String> {
             MenuItem::action("file.export_jpeg", "Export as JPEG..."),
         ],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![Menu::new(
             "Layer",
             vec![
@@ -1336,5 +1343,13 @@ mod tests {
             ensure_extension(PathBuf::from("already.jpeg"), "jpg"),
             PathBuf::from("already.jpeg")
         );
+    }
+
+    #[test]
+    fn pan_tool_is_a_viewport_mode_separate_from_brush() {
+        assert_eq!(photo_tool_state("Pan"), (0, true));
+        assert_eq!(photo_tool_state("brush"), (1, false));
+        assert_eq!(photo_tool_state("WAND"), (2, false));
+        assert_eq!(photo_tool_state("unknown"), (0, false));
     }
 }

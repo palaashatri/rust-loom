@@ -121,15 +121,18 @@ component SheetTemplateCard inherits Rectangle {
 
 export component SheetsApp inherits Window {
     title: "Loom Sheets";
-    min-width: 1024px;
-    min-height: 720px;
+    min-width: 900px;
+    min-height: 680px;
     preferred-width: 1280px;
     preferred-height: 800px;
     background: Theme.palette().canvas;
 
     in property <bool> show-quick-formulas: false;
+    in property <bool> wide-toolbar: false;
     in property <bool> labeled-export: false;
-    in-out property <bool> show-inspector: true;
+    in-out property <bool> show-inspector: false;
+    in property <bool> inspector-available: true;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     in-out property <int> inspector-tab: 0;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
@@ -149,7 +152,6 @@ export component SheetsApp inherits Window {
     property <string> formula-edit-buffer: "";
     in property <string> selection-value: "";
     in-out property <string> formula-feedback: "Ready";
-    in-out property <float> zoom-value: 100.0;
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -207,6 +209,10 @@ export component SheetsApp inherits Window {
         } else if (category-index == 3) {
             root.template-selected = 2;
         }
+    }
+
+    function compact-label(full-label: string) -> string {
+        return root.wide-toolbar ? full-label : "";
     }
 
     template-chooser-focus := FocusScope {
@@ -318,22 +324,26 @@ export component SheetsApp inherits Window {
 
             // Action Toolbar
             Toolbar {
-                // Left group: View, Zoom, Add Category
+                // Left group: View, page zoom, Add Category
                 ToolbarGroup {
                     AppleToolbarItem {
                         icon: "eye";
-                        label: "View";
-                        clicked => { root.show-inspector = !root.show-inspector; }
+                        label: root.compact-label("View");
+                        accessible-label: "View";
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
                     }
                     AppleToolbarItem {
                         icon: "zoom-in";
-                        label: Math.round(root.zoom-value) + "%";
-                        clicked => { root.zoom-value = (root.zoom-value >= 150 ? 100 : root.zoom-value + 25); }
+                        label: root.compact-label("Page Zoom");
+                        accessible-label: "Page zoom unavailable";
+                        enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "plus";
-                        label: "Category";
-                        clicked => { root.new-sheet(); }
+                        label: root.compact-label("Add Category");
+                        accessible-label: "Add category unavailable";
+                        enabled: false;
                     }
                 }
 
@@ -341,34 +351,38 @@ export component SheetsApp inherits Window {
 
                 // Numbers-style center tools: Table, Pivot, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: "Table"; enabled: false; }
-                    AppleToolbarItem { icon: "grid"; label: "Pivot Table"; enabled: false; }
-                    AppleToolbarItem { icon: "chart"; label: "Chart"; enabled: false; }
-                    AppleToolbarItem { icon: "text"; label: "Text"; enabled: false; }
-                    AppleToolbarItem { icon: "shape"; label: "Shape"; enabled: false; }
-                    AppleToolbarItem { icon: "image"; label: "Media"; enabled: false; }
-                    AppleToolbarItem { icon: "comment"; label: "Comment"; enabled: false; }
+                    AppleToolbarItem { icon: "table"; label: root.compact-label("Table"); accessible-label: "Insert table unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "grid"; label: root.compact-label("Pivot Table"); accessible-label: "Insert pivot table unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "chart"; label: root.compact-label("Chart"); accessible-label: "Insert chart unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "text"; label: root.compact-label("Text"); accessible-label: "Insert text box unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "shape"; label: root.compact-label("Shape"); accessible-label: "Insert shape unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "image"; label: root.compact-label("Media"); accessible-label: "Insert media unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
                 ToolbarSpacer { }
 
                 // Right tools: Share, Format, Organize, Export
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "share"; label: "Share"; enabled: false; }
+                    AppleToolbarItem { icon: "share"; label: root.compact-label("Share"); accessible-label: "Share unavailable"; enabled: false; }
                     AppleToolbarItem {
                         icon: "format";
-                        label: "Format";
-                        checked: root.show-inspector;
-                        clicked => { root.show-inspector = !root.show-inspector; }
+                        label: root.compact-label("Format");
+                        accessible-label: "Format inspector";
+                        checked: root.inspector-visible;
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
                     }
                     AppleToolbarItem {
                         icon: "organize";
-                        label: "Organize";
+                        label: root.compact-label("Organize");
+                        accessible-label: "Organize unavailable";
                         enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "export";
-                        label: "Export";
+                        label: root.labeled-export ? "Export" : "";
+                        accessible-label: "Export CSV";
                         clicked => { root.export-csv(); }
                     }
                 }
@@ -425,8 +439,9 @@ export component SheetsApp inherits Window {
                         }
                     }
 
-                    // Quick formula buttons
-                    HorizontalLayout {
+                    // Quick formula buttons appear only when the wide toolbar
+                    // breakpoint has enough room beside the formula field.
+                    if root.show-quick-formulas : HorizontalLayout {
                         spacing: 2px;
                         ToolbarButton { label: "SUM"; clicked => { root.quick-formula("SUM"); } }
                         ToolbarButton { label: "AVG"; clicked => { root.quick-formula("AVERAGE"); } }
@@ -457,7 +472,7 @@ export component SheetsApp inherits Window {
                 vertical-stretch: 1;
 
                 // Spreadsheet Canvas Area
-                CanvasSurface {
+                    CanvasSurface {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
 
@@ -465,8 +480,8 @@ export component SheetsApp inherits Window {
                     Rectangle {
                         x: 24px;
                         y: 20px;
-                        width: min(900px, parent.width - 48px);
-                        height: min(560px, parent.height - 40px);
+                        width: max(1px, parent.width - 48px);
+                        height: max(1px, parent.height - 40px);
                         border-radius: 4px;
                         border-width: 1px;
                         border-color: Theme.palette().border;
@@ -500,6 +515,8 @@ export component SheetsApp inherits Window {
                             // Spreadsheet Data Grid
                             GridLayout {
                                 spacing: 0px;
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
 
                                 // Column Headers Row
                                 Row {
@@ -597,7 +614,7 @@ export component SheetsApp inherits Window {
                 }
 
                 // Apple Numbers-Style 4-Tab Inspector
-                if root.show-inspector : InspectorSurface {
+                if root.inspector-visible : InspectorSurface {
                     title: "Format";
                     width: 280px;
 
@@ -792,11 +809,11 @@ export component SheetsApp inherits Window {
                             background: Theme.palette().surface-sunken;
                             border-width: 1px;
                             border-color: Theme.palette().border;
-                            padding: 8px;
 
                             VerticalLayout {
                                 spacing: 2px;
                                 alignment: center;
+                                padding: 8px;
                                 Text {
                                     text: "Cell " + root.selected-cell;
                                     font-size: Theme.tokens.typography.caption;
@@ -832,10 +849,13 @@ export component SheetsApp inherits Window {
         background: Theme.palette().scrim;
 
         Rectangle {
-            x: (parent.width - 960px) / 2;
-            y: (parent.height - 620px) / 2;
-            width: 960px;
-            height: 620px;
+            // Template selection is a primary workspace, not a compact
+            // confirmation sheet. Match the desktop scale while preserving
+            // an outer margin at the supported compact size.
+            width: min(1160px, max(1px, parent.width - 48px));
+            x: (parent.width - self.width) / 2;
+            height: min(760px, max(480px, parent.height - 48px));
+            y: (parent.height - self.height) / 2;
             border-radius: Theme.tokens.metrics.radius-large;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -981,32 +1001,39 @@ export component SheetsApp inherits Window {
                             color: Theme.palette().ink;
                         }
 
-                        HorizontalLayout {
+                        VerticalLayout {
                             spacing: 16px;
-                            alignment: start;
 
-                            if root.template-visible(0) : SheetTemplateCard {
-                                template-index: 0;
-                                template-name: "Blank";
-                                description: "Simple table layout";
-                                selected: root.template-selected == 0;
-                                clicked => { root.template-selected = 0; }
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                if root.template-visible(0) : SheetTemplateCard {
+                                    template-index: 0;
+                                    template-name: "Blank";
+                                    description: "Simple table layout";
+                                    selected: root.template-selected == 0;
+                                    clicked => { root.template-selected = 0; }
+                                }
+
+                                if root.template-visible(1) : SheetTemplateCard {
+                                    template-index: 1;
+                                    template-name: "Monthly Budget";
+                                    description: "Income and expenses tracker";
+                                    selected: root.template-selected == 1;
+                                    clicked => { root.template-selected = 1; }
+                                }
                             }
 
-                            if root.template-visible(1) : SheetTemplateCard {
-                                template-index: 1;
-                                template-name: "Monthly Budget";
-                                description: "Income and expenses tracker";
-                                selected: root.template-selected == 1;
-                                clicked => { root.template-selected = 1; }
-                            }
+                            HorizontalLayout {
+                                spacing: 16px;
 
-                            if root.template-visible(2) : SheetTemplateCard {
-                                template-index: 2;
-                                template-name: "Invoice & Expenses";
-                                description: "Track billing and totals";
-                                selected: root.template-selected == 2;
-                                clicked => { root.template-selected = 2; }
+                                if root.template-visible(2) : SheetTemplateCard {
+                                    template-index: 2;
+                                    template-name: "Invoice & Expenses";
+                                    description: "Track billing and totals";
+                                    selected: root.template-selected == 2;
+                                    clicked => { root.template-selected = 2; }
+                                }
                             }
                         }
 

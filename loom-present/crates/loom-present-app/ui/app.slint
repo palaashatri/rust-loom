@@ -56,7 +56,9 @@ component ThemeCard inherits Rectangle {
                     text: root.theme-name;
                     font-size: 11px;
                     font-weight: 700;
-                    color: (root.theme-index == 3) ? Theme.palette().accent-ink : Theme.palette().paper-ink;
+                    color: root.theme-index == 1 ? Theme.palette().ink
+                        : root.theme-index == 3 ? Theme.palette().accent-ink
+                        : Theme.palette().paper-ink;
                     horizontal-alignment: center;
                 }
                 Rectangle {
@@ -67,7 +69,9 @@ component ThemeCard inherits Rectangle {
                 Text {
                     text: "Presentation Title";
                     font-size: 8px;
-                    color: (root.theme-index == 3) ? Theme.palette().accent-ink : Theme.palette().paper-muted;
+                    color: root.theme-index == 1 ? Theme.palette().ink-secondary
+                        : root.theme-index == 3 ? Theme.palette().accent-ink
+                        : Theme.palette().paper-muted;
                     horizontal-alignment: center;
                 }
             }
@@ -176,7 +180,7 @@ export component PresentApp inherits Window {
     preferred-height: 800px;
     background: Theme.palette().canvas;
 
-    in property <bool> show-inspector: true;
+    in property <bool> show-inspector: false;
     in property <bool> labeled-export: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
@@ -200,7 +204,7 @@ export component PresentApp inherits Window {
     in property <string> status-right: "Offline";
 
     in-out property <string> slide-notes: "";
-    in-out property <bool> show-notes-drawer: true;
+    in-out property <bool> show-notes-drawer: false;
     in-out property <bool> is-preview-mode: false;
     in-out property <int> active-template-index: 1;
     in-out property <int> inspector-tab: 0;
@@ -273,6 +277,10 @@ export component PresentApp inherits Window {
         }
     }
 
+    function compact-label(full-label: string) -> string {
+        return root.labeled-export ? full-label : "";
+    }
+
     theme-chooser-focus := FocusScope {
         enabled: root.theme-chooser-open;
         key-pressed(event) => {
@@ -340,17 +348,20 @@ export component PresentApp inherits Window {
                 ToolbarGroup {
                     AppleToolbarItem {
                         icon: "eye";
-                        label: "View";
+                        label: root.compact-label("View");
+                        accessible-label: "View speaker notes";
                         clicked => { root.show-notes-drawer = !root.show-notes-drawer; }
                     }
                     AppleToolbarItem {
                         icon: "format";
-                        label: "Theme";
+                        label: root.compact-label("Theme");
+                        accessible-label: "Choose theme";
                         clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
                     }
                     AppleToolbarItem {
                         icon: "plus";
-                        label: "Add Slide";
+                        label: root.compact-label("Add Slide");
+                        accessible-label: "Add slide";
                         clicked => { root.add-slide(); }
                     }
                 }
@@ -359,12 +370,12 @@ export component PresentApp inherits Window {
 
                 // Keynote-style center insert group: Table, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: "Table"; enabled: false; }
-                    AppleToolbarItem { icon: "chart"; label: "Chart"; enabled: false; }
-                    AppleToolbarItem { icon: "text"; label: "Text"; clicked => { root.add-text(); } }
-                    AppleToolbarItem { icon: "shape"; label: "Shape"; clicked => { root.add-shape(); } }
-                    AppleToolbarItem { icon: "image"; label: "Media"; enabled: false; }
-                    AppleToolbarItem { icon: "comment"; label: "Comment"; enabled: false; }
+                    AppleToolbarItem { icon: "table"; label: root.compact-label("Table"); accessible-label: "Insert table unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "chart"; label: root.compact-label("Chart"); accessible-label: "Insert chart unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "text"; label: root.compact-label("Text"); accessible-label: "Add text"; clicked => { root.add-text(); } }
+                    AppleToolbarItem { icon: "shape"; label: root.compact-label("Shape"); accessible-label: "Add shape"; clicked => { root.add-shape(); } }
+                    AppleToolbarItem { icon: "image"; label: root.compact-label("Media"); accessible-label: "Insert media unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
                 ToolbarSpacer { }
@@ -373,23 +384,27 @@ export component PresentApp inherits Window {
                 ToolbarGroup {
                     AppleToolbarItem {
                         icon: "play";
-                        label: "Play";
+                        label: root.compact-label("Play");
+                        accessible-label: "Play presentation";
                         clicked => { root.toggle-preview-mode(); }
                     }
                     AppleToolbarItem {
                         icon: "format";
-                        label: "Format";
+                        label: root.compact-label("Format");
+                        accessible-label: "Format inspector";
                         checked: root.show-inspector;
                         clicked => { root.toggle-inspector(); }
                     }
                     AppleToolbarItem {
                         icon: "share";
-                        label: "Share";
+                        label: root.compact-label("Share");
+                        accessible-label: "Share unavailable";
                         enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "export";
-                        label: "Export";
+                        label: root.labeled-export ? "Export" : "";
+                        accessible-label: "Export PDF";
                         clicked => { root.export-pdf(); }
                     }
                 }
@@ -403,7 +418,7 @@ export component PresentApp inherits Window {
                 // Left Slide Miniature Strip
                 if !root.is-preview-mode : SidebarSurface {
                     title: "Slides";
-                    width: 180px;
+                    width: 220px;
 
                     VerticalLayout {
                         spacing: 8px;
@@ -704,10 +719,13 @@ export component PresentApp inherits Window {
         background: Theme.palette().scrim;
 
         Rectangle {
-            x: (parent.width - 960px) / 2;
-            y: (parent.height - 620px) / 2;
-            width: 960px;
-            height: 620px;
+            // The theme browser is intentionally large enough for visual
+            // comparison; fixed 960×620 geometry looked like a cramped
+            // dialog on wide macOS displays.
+            width: min(1160px, max(1px, parent.width - 48px));
+            height: min(760px, max(480px, parent.height - 48px));
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
             border-radius: Theme.tokens.metrics.radius-large;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -865,44 +883,55 @@ export component PresentApp inherits Window {
                             }
                         }
 
-                        HorizontalLayout {
+                        // The modal content column is 684px wide at the
+                        // reference viewport. Two rows keep every 200px-wide
+                        // widescreen card inside that column instead of
+                        // clipping the fourth card at the right edge.
+                        VerticalLayout {
                             spacing: 16px;
-                            alignment: start;
 
-                            if root.theme-visible(0) : ThemeCard {
-                                theme-index: 0;
-                                theme-name: "Basic White";
-                                description: "Clean white presentation";
-                                is-wide: root.aspect-ratio-wide;
-                                selected: root.theme-selected == 0;
-                                clicked => { root.theme-selected = 0; }
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                if root.theme-visible(0) : ThemeCard {
+                                    theme-index: 0;
+                                    theme-name: "Basic White";
+                                    description: "Clean white presentation";
+                                    is-wide: root.aspect-ratio-wide;
+                                    selected: root.theme-selected == 0;
+                                    clicked => { root.theme-selected = 0; }
+                                }
+
+                                if root.theme-visible(1) : ThemeCard {
+                                    theme-index: 1;
+                                    theme-name: "Basic Black";
+                                    description: "Sleek dark presentation";
+                                    is-wide: root.aspect-ratio-wide;
+                                    selected: root.theme-selected == 1;
+                                    clicked => { root.theme-selected = 1; }
+                                }
                             }
 
-                            if root.theme-visible(1) : ThemeCard {
-                                theme-index: 1;
-                                theme-name: "Basic Black";
-                                description: "Sleek dark presentation";
-                                is-wide: root.aspect-ratio-wide;
-                                selected: root.theme-selected == 1;
-                                clicked => { root.theme-selected = 1; }
-                            }
+                            HorizontalLayout {
+                                spacing: 16px;
 
-                            if root.theme-visible(2) : ThemeCard {
-                                theme-index: 2;
-                                theme-name: "Classic Editorial";
-                                description: "Refined typographic layout";
-                                is-wide: root.aspect-ratio-wide;
-                                selected: root.theme-selected == 2;
-                                clicked => { root.theme-selected = 2; }
-                            }
+                                if root.theme-visible(2) : ThemeCard {
+                                    theme-index: 2;
+                                    theme-name: "Classic Editorial";
+                                    description: "Refined typographic layout";
+                                    is-wide: root.aspect-ratio-wide;
+                                    selected: root.theme-selected == 2;
+                                    clicked => { root.theme-selected = 2; }
+                                }
 
-                            if root.theme-visible(3) : ThemeCard {
-                                theme-index: 3;
-                                theme-name: "Dynamic Accent";
-                                description: "Bold gradient styling";
-                                is-wide: root.aspect-ratio-wide;
-                                selected: root.theme-selected == 3;
-                                clicked => { root.theme-selected = 3; }
+                                if root.theme-visible(3) : ThemeCard {
+                                    theme-index: 3;
+                                    theme-name: "Dynamic Accent";
+                                    description: "Bold gradient styling";
+                                    is-wide: root.aspect-ratio-wide;
+                                    selected: root.theme-selected == 3;
+                                    clicked => { root.theme-selected = 3; }
+                                }
                             }
                         }
 

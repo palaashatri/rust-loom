@@ -134,6 +134,7 @@ struct AppState {
     dialogs: Arc<dyn FileDialogService>,
     selected_clip: Mutex<usize>,
     preview: Mutex<Option<VideoFrame>>,
+    preview_synthetic: AtomicBool,
     tools: Option<MediaTools>,
     player: Mutex<Option<Child>>,
     exporting: AtomicBool,
@@ -213,6 +214,14 @@ fn timeline_duration(project: &VideoProject) -> f64 {
         .max(0.01)
 }
 
+fn clip_display_name(clip: &Clip) -> String {
+    if clip.source_path.trim().is_empty() {
+        format!("{} · offline sample", clip.name)
+    } else {
+        clip.name.clone()
+    }
+}
+
 fn procedural_preview() -> VideoFrame {
     let (width, height) = (640, 360);
     let mut pixels = vec![0u8; width * height * 4];
@@ -289,7 +298,7 @@ fn refresh(app: &VideoApp, state: &AppState) {
     app.set_clip_labels(ModelRc::new(VecModel::from(
         clips
             .iter()
-            .map(|clip| SharedString::from(clip.name.as_str()))
+            .map(|clip| SharedString::from(clip_display_name(clip)))
             .collect::<Vec<_>>(),
     )));
     app.set_clip_starts(ModelRc::new(VecModel::from(
@@ -333,9 +342,15 @@ fn refresh(app: &VideoApp, state: &AppState) {
             .map(|tools| SharedString::from(tools.version.as_str()))
             .unwrap_or_else(|| "Install FFmpeg, FFprobe and FFplay on PATH".into()),
     );
+    let preview_synthetic = state.preview_synthetic.load(Ordering::Relaxed);
+    app.set_preview_synthetic(preview_synthetic);
     app.set_status_right(
         if state.tools.is_some() {
-            "Local FFmpeg media"
+            if preview_synthetic {
+                "Local FFmpeg · synthetic preview"
+            } else {
+                "Local FFmpeg media"
+            }
         } else {
             "Media backend unavailable"
         }
@@ -380,6 +395,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         dialogs: Arc::new(NativeFileDialogs),
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
+        preview_synthetic: AtomicBool::new(true),
         tools: discover_media_tools().ok(),
         player: Mutex::new(None),
         exporting: AtomicBool::new(false),
@@ -409,6 +425,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         dialogs: Arc::new(NativeFileDialogs),
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
+        preview_synthetic: AtomicBool::new(true),
         tools: discover_media_tools().ok(),
         player: Mutex::new(None),
         exporting: AtomicBool::new(false),
@@ -422,11 +439,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![Menu::new(
             "Clip",
             vec![
@@ -504,9 +517,11 @@ fn request_preview(state: Arc<AppState>, weak: slint::Weak<VideoApp>, timeline_t
         move || match decode_preview_frame(&tools, &path, source_time, 960, 540) {
             Ok(frame) => {
                 *lock(&state.preview) = Some(frame.clone());
+                state.preview_synthetic.store(false, Ordering::Relaxed);
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     app.set_preview_image(frame_image(&frame));
                     app.set_has_preview(true);
+                    app.set_preview_synthetic(false);
                     app.set_status_left(format!("Decoded preview at {timeline_time:.2}s").into());
                 });
             }
@@ -529,6 +544,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 *lock(&state.save_path) = None;
                 *lock(&state.selected_clip) = 0;
                 *lock(&state.preview) = Some(procedural_preview());
+                state.preview_synthetic.store(true, Ordering::Relaxed);
                 refresh(&app, &state);
                 app.set_status_left("New untitled project created".into());
             }
@@ -549,6 +565,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                         Ok(project) => {
                             *lock(&state.session) = VideoSession::new(project);
                             *lock(&state.save_path) = Some(path.clone());
+                            state.preview_synthetic.store(true, Ordering::Relaxed);
                             refresh(&app, &state);
                             app.set_status_left(
                                 format!("Opened {}", path.file_name().unwrap().to_string_lossy())
@@ -738,6 +755,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                             .clips
                             .len()
                             .saturating_sub(1);
+                        state.preview_synthetic.store(true, Ordering::Relaxed);
                         drop(session);
                         refresh(&app, &state);
                         app.set_status_left(
@@ -1121,6 +1139,7 @@ fn main() -> Result<(), String> {
         dialogs: Arc::new(NativeFileDialogs),
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
+        preview_synthetic: AtomicBool::new(true),
         tools: discover_media_tools().ok(),
         player: Mutex::new(None),
         exporting: AtomicBool::new(false),
@@ -1135,11 +1154,7 @@ fn main() -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![Menu::new(
             "Clip",
             vec![
@@ -1418,6 +1433,7 @@ mod tests {
             dialogs: Arc::new(scripted),
             selected_clip: Mutex::new(0),
             preview: Mutex::new(Some(procedural_preview())),
+            preview_synthetic: AtomicBool::new(true),
             tools: None,
             player: Mutex::new(None),
             exporting: AtomicBool::new(false),
@@ -1437,6 +1453,17 @@ mod tests {
         assert_eq!(*lock(&state.save_path), None);
         assert_eq!(lock(&state.session).project.name, "Untitled Project");
         assert_eq!(app.get_project_name().as_str(), "Untitled Project");
+    }
+
+    #[test]
+    fn offline_sample_clips_are_labelled_without_source_paths() {
+        let mut offline = Clip::new("clip", "Opening Scene", 2.0);
+        assert_eq!(
+            clip_display_name(&offline),
+            "Opening Scene · offline sample"
+        );
+        offline.source_path = "/tmp/source.mov".into();
+        assert_eq!(clip_display_name(&offline), "Opening Scene");
     }
 
     #[test]

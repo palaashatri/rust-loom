@@ -742,6 +742,14 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     let (wide_toolbar, labeled_export) = layout_breakpoints(width);
     app.set_wide_toolbar(wide_toolbar);
     app.set_labeled_export(labeled_export);
+    // The inspector is optional chrome. Keep the page dominant at compact
+    // widths and allow it to be opened only once the contract's minimum
+    // primary-surface share can be preserved.
+    let inspector_available = width >= 1180;
+    app.set_inspector_available(inspector_available);
+    if !inspector_available {
+        app.set_show_inspector(false);
+    }
 }
 
 fn wire_responsive_layout(app: &WriterApp) {
@@ -878,8 +886,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
-                let visible = app.get_show_inspector();
-                app.set_show_inspector(!visible);
+                if app.get_inspector_available() {
+                    let visible = app.get_show_inspector();
+                    app.set_show_inspector(!visible);
+                }
             }
         });
     }
@@ -1103,11 +1113,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Format Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
         vec![Menu::new(
             "Format",
             vec![
@@ -1442,6 +1448,13 @@ mod tests {
     }
 
     #[test]
+    fn writer_inspector_is_closed_by_default() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        assert!(!app.get_show_inspector());
+    }
+
+    #[test]
     fn window_resize_updates_breakpoint_flags() {
         set_platform();
         let app = WriterApp::new().expect("create WriterApp");
@@ -1499,9 +1512,14 @@ mod tests {
         let letters =
             snapshot_component(&app, 1440.0, 900.0, 1.0).expect("render letter templates");
         assert_eq!(app.get_template_category(), 2);
-        assert_ne!(
-            all.get_pixel(500, 220),
-            letters.get_pixel(500, 220),
+        // The chooser now scales to 1160px at this viewport, placing the
+        // Report card in this content-region rectangle. Check the full card
+        // region instead of one global pixel so the filter test stays tied to
+        // the actual card rather than the old 960px modal geometry.
+        let report_card_changed =
+            (220..396).any(|y| (674..814).any(|x| all.get_pixel(x, y) != letters.get_pixel(x, y)));
+        assert!(
+            report_card_changed,
             "selecting Letters must remove the Report card from the chooser"
         );
     }

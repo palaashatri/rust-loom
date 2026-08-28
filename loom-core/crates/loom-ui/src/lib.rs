@@ -251,6 +251,48 @@ mod visual_tests {
     }
 
     #[test]
+    fn active_theme_switches_the_complete_token_bundle() {
+        loom_test_support::capture::set_platform();
+        let window = SmokeWindow::new().expect("create Loom UI reference window");
+        let theme = Theme::get(&window);
+
+        theme.set_active_theme("light".into());
+        slint::platform::update_timers_and_animations();
+        let light = theme.get_tokens();
+        assert_eq!(
+            light.palette.canvas,
+            slint::Color::from_argb_encoded(0xfff4f4f6)
+        );
+        assert!(!light.reduced_motion);
+        assert_eq!(light.motion.standard_ms, 180);
+
+        theme.set_active_theme("dark".into());
+        slint::platform::update_timers_and_animations();
+        let dark = theme.get_tokens();
+        assert_eq!(
+            dark.palette.canvas,
+            slint::Color::from_argb_encoded(0xff121214)
+        );
+        assert_eq!(
+            dark.palette.ink_disabled,
+            slint::Color::from_argb_encoded(0xff8c8c94)
+        );
+        assert!(!dark.reduced_motion);
+        assert_eq!(dark.motion.standard_ms, 180);
+
+        theme.set_active_theme("high-contrast".into());
+        slint::platform::update_timers_and_animations();
+        let high_contrast = theme.get_tokens();
+        assert_eq!(
+            high_contrast.palette.canvas,
+            slint::Color::from_argb_encoded(0xff000000)
+        );
+        assert!(high_contrast.reduced_motion);
+        assert_eq!(high_contrast.motion.standard_ms, 0);
+        assert_eq!(high_contrast.metrics.toolbar_height, 40.0);
+    }
+
+    #[test]
     fn command_palette_clips_long_lists_to_modal_surface() {
         use std::rc::Rc;
 

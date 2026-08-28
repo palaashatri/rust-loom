@@ -411,11 +411,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![Menu::new(
             "Composition",
             vec![
@@ -939,11 +935,7 @@ fn main() -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![Menu::new(
             "Composition",
             vec![

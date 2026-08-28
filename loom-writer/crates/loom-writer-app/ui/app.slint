@@ -199,15 +199,17 @@ component DocumentPageEditor inherits Rectangle {
 
 export component WriterApp inherits Window {
     title: "Loom Writer";
-    min-width: 1024px;
-    min-height: 720px;
+    min-width: 900px;
+    min-height: 680px;
     preferred-width: 1280px;
     preferred-height: 800px;
     background: Theme.palette().canvas;
 
     in property <bool> wide-toolbar: false;
     in property <bool> labeled-export: false;
-    in-out property <bool> show-inspector: true;
+    in-out property <bool> show-inspector: false;
+    in property <bool> inspector-available: true;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     in-out property <int> inspector-tab: 0;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
@@ -224,7 +226,6 @@ export component WriterApp inherits Window {
     in-out property <bool> is-underline: false;
     in-out property <int> heading-level: 0;
     in-out property <int> text-alignment: 0;
-    in-out property <float> zoom-value: 100.0;
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -280,6 +281,10 @@ export component WriterApp inherits Window {
         } else if (category-index == 3) {
             root.template-selected = 3;
         }
+    }
+
+    function compact-label(full-label: string) -> string {
+        return root.wide-toolbar ? full-label : "";
     }
 
     template-chooser-focus := FocusScope {
@@ -357,22 +362,26 @@ export component WriterApp inherits Window {
 
             // Pages-Style Action Toolbar
             Toolbar {
-                // Left group: View, Zoom, Add Page
+                // Left group: View, page zoom, Add Page
                 ToolbarGroup {
                     AppleToolbarItem {
                         icon: "eye";
-                        label: "View";
-                        clicked => { root.toggle-inspector(); }
+                        label: root.compact-label("View");
+                        accessible-label: "View";
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
                     }
                     AppleToolbarItem {
                         icon: "zoom-in";
-                        label: Math.round(root.zoom-value) + "%";
-                        clicked => { root.zoom-value = (root.zoom-value >= 150 ? 100 : root.zoom-value + 25); }
+                        label: root.compact-label("Page Zoom");
+                        accessible-label: "Page zoom unavailable";
+                        enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "plus";
-                        label: "Add Page";
-                        clicked => { root.new-doc(); }
+                        label: root.compact-label("Add Page");
+                        accessible-label: "Add Page unavailable";
+                        enabled: false;
                     }
                 }
 
@@ -380,34 +389,38 @@ export component WriterApp inherits Window {
 
                 // Center group: Table, Chart, Text, Shape, Media, Comment
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: "Table"; enabled: false; }
-                    AppleToolbarItem { icon: "chart"; label: "Chart"; enabled: false; }
-                    AppleToolbarItem { icon: "text"; label: "Text"; enabled: false; }
-                    AppleToolbarItem { icon: "shape"; label: "Shape"; enabled: false; }
-                    AppleToolbarItem { icon: "image"; label: "Media"; enabled: false; }
-                    AppleToolbarItem { icon: "comment"; label: "Comment"; enabled: false; }
+                    AppleToolbarItem { icon: "table"; label: root.compact-label("Table"); accessible-label: "Insert table unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "chart"; label: root.compact-label("Chart"); accessible-label: "Insert chart unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "text"; label: root.compact-label("Text"); accessible-label: "Insert text box unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "shape"; label: root.compact-label("Shape"); accessible-label: "Insert shape unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "image"; label: root.compact-label("Media"); accessible-label: "Insert media unavailable"; enabled: false; }
+                    AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
                 ToolbarSpacer { }
 
                 // Right group: Share, Format, Document / Export
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "share"; label: "Share"; enabled: false; }
+                    AppleToolbarItem { icon: "share"; label: root.compact-label("Share"); accessible-label: "Share unavailable"; enabled: false; }
                     AppleToolbarItem {
                         icon: "format";
-                        label: "Format";
-                        checked: root.show-inspector;
-                        clicked => { if (!root.show-inspector) { root.toggle-inspector(); } }
+                        label: root.compact-label("Format");
+                        accessible-label: "Format inspector";
+                        checked: root.inspector-visible;
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
                     }
                     AppleToolbarItem {
                         icon: "document";
-                        label: "Document";
+                        label: root.compact-label("Document");
+                        accessible-label: "Document settings unavailable";
                         checked: false;
-                        clicked => { root.open-doc(); }
+                        enabled: false;
                     }
                     AppleToolbarItem {
                         icon: "export";
-                        label: "Export";
+                        label: root.labeled-export ? "Export" : "";
+                        accessible-label: "Export PDF";
                         clicked => { root.export-pdf(); }
                     }
                 }
@@ -425,10 +438,15 @@ export component WriterApp inherits Window {
 
                     // Centered Document Page
                     Rectangle {
+                        // Keep the editable page recognizably portrait at
+                        // every desktop height. Width must follow the paper
+                        // height rather than independently consuming a wide
+                        // canvas, which produced a landscape "document".
+                        private property <length> page-height: min(1080px, max(420px, parent.height - 48px));
                         x: max(24px, (parent.width - self.width) / 2);
                         y: max(24px, (parent.height - self.height) / 2);
-                        width: min(760px, max(320px, parent.width - 48px));
-                        height: min(980px, max(420px, parent.height - 48px));
+                        width: min(820px, max(320px, self.page-height * 0.72));
+                        height: self.page-height;
                         border-radius: 4px;
                         border-width: 1px;
                         border-color: Theme.palette().border;
@@ -445,15 +463,14 @@ export component WriterApp inherits Window {
                             padding-right: 56px;
                             spacing: 12px;
 
-                            // Formatted Header Preview for Welcome Doc
                             Text {
-                                text: "Welcome to Loom Writer";
-                                font-size: 24px;
+                                text: root.doc-title;
+                                font-size: 22px;
                                 font-weight: 700;
                                 color: Theme.palette().paper-ink;
                             }
                             Text {
-                                text: "A private, local-first word processor engineered with Apple Pages-class polish.";
+                                text: "Local-first document";
                                 font-size: 13px;
                                 font-weight: 400;
                                 color: Theme.palette().paper-muted;
@@ -462,7 +479,7 @@ export component WriterApp inherits Window {
 
                             DocumentPageEditor {
                                 text <=> root.doc-content;
-                                font-size: 14px;
+                                font-size: 15px;
                                 edited(val) => { root.document-edited(val); }
                             }
                         }
@@ -470,7 +487,7 @@ export component WriterApp inherits Window {
                 }
 
                 // Apple Pages-Style Text Inspector
-                if root.show-inspector : InspectorSurface {
+                if root.inspector-visible : InspectorSurface {
                     title: "Format";
                     width: 280px;
 
@@ -641,10 +658,12 @@ export component WriterApp inherits Window {
         background: Theme.palette().scrim;
 
         Rectangle {
-            x: (parent.width - 960px) / 2;
-            y: (parent.height - 620px) / 2;
-            width: 960px;
-            height: 620px;
+            // Keep the chooser almost as broad and tall as the surrounding
+            // window, while retaining a visible margin on compact desktops.
+            width: min(1160px, max(1px, parent.width - 48px));
+            x: (parent.width - self.width) / 2;
+            height: min(760px, max(480px, parent.height - 48px));
+            y: (parent.height - self.height) / 2;
             border-radius: Theme.tokens.metrics.radius-large;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -787,41 +806,49 @@ export component WriterApp inherits Window {
                             color: Theme.palette().ink;
                         }
 
-                        // Template Card Grid
-                        HorizontalLayout {
+                        // Two rows keep the fixed paper preview cards inside
+                        // the content column at the 900px contract minimum.
+                        VerticalLayout {
                             spacing: 16px;
-                            alignment: start;
 
-                            if root.template-visible(0) : TemplateCard {
-                                template-index: 0;
-                                template-name: "Blank";
-                                description: "A clean page for any idea";
-                                selected: root.template-selected == 0;
-                                clicked => { root.template-selected = 0; }
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                if root.template-visible(0) : TemplateCard {
+                                    template-index: 0;
+                                    template-name: "Blank";
+                                    description: "A clean page for any idea";
+                                    selected: root.template-selected == 0;
+                                    clicked => { root.template-selected = 0; }
+                                }
+
+                                if root.template-visible(1) : TemplateCard {
+                                    template-index: 1;
+                                    template-name: "Report";
+                                    description: "A structured document";
+                                    selected: root.template-selected == 1;
+                                    clicked => { root.template-selected = 1; }
+                                }
                             }
 
-                            if root.template-visible(1) : TemplateCard {
-                                template-index: 1;
-                                template-name: "Report";
-                                description: "A structured document";
-                                selected: root.template-selected == 1;
-                                clicked => { root.template-selected = 1; }
-                            }
+                            HorizontalLayout {
+                                spacing: 16px;
 
-                            if root.template-visible(2) : TemplateCard {
-                                template-index: 2;
-                                template-name: "Letter";
-                                description: "Formal correspondence";
-                                selected: root.template-selected == 2;
-                                clicked => { root.template-selected = 2; }
-                            }
+                                if root.template-visible(2) : TemplateCard {
+                                    template-index: 2;
+                                    template-name: "Letter";
+                                    description: "Formal correspondence";
+                                    selected: root.template-selected == 2;
+                                    clicked => { root.template-selected = 2; }
+                                }
 
-                            if root.template-visible(3) : TemplateCard {
-                                template-index: 3;
-                                template-name: "CV";
-                                description: "Professional resume";
-                                selected: root.template-selected == 3;
-                                clicked => { root.template-selected = 3; }
+                                if root.template-visible(3) : TemplateCard {
+                                    template-index: 3;
+                                    template-name: "CV";
+                                    description: "Professional resume";
+                                    selected: root.template-selected == 3;
+                                    clicked => { root.template-selected = 3; }
+                                }
                             }
                         }
 

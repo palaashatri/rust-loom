@@ -487,11 +487,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![
             Menu::new(
                 "Track",
@@ -926,13 +922,11 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 let next = !state.metronome_enabled.get();
                 state.metronome_enabled.set(next);
                 app.set_metronome_on(next);
-                app.set_status_left(
-                    if next {
-                        "Metronome enabled".into()
-                    } else {
-                        "Metronome disabled".into()
-                    },
-                );
+                app.set_status_left(if next {
+                    "Metronome enabled".into()
+                } else {
+                    "Metronome disabled".into()
+                });
             }
         });
     }
@@ -1264,11 +1258,7 @@ fn main() -> Result<(), String> {
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check(
-            "view.inspector",
-            "Inspector",
-            true,
-        )],
+        vec![MenuItem::check("view.inspector", "Inspector", true)],
         vec![
             Menu::new(
                 "Track",

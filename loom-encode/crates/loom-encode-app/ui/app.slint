@@ -154,6 +154,7 @@ export component EncodeApp inherits Window {
                                         StatusPill {
                                             text: root.job-statuses[index];
                                             tone: root.job-tones[index];
+                                            max-content-width: root.compact-layout ? 210px : 280px;
                                         }
                                         Rectangle { horizontal-stretch: 1; background: transparent; }
                                         Text { text: Math.round(root.job-progresses[index]) + "%"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink; }
@@ -195,12 +196,19 @@ export component EncodeApp inherits Window {
                         }
                     }
                     Rectangle { height: 1px; background: Theme.palette().border; }
-                    Text { text: "ACTIVE JOB"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                    HorizontalLayout {
+                        height: 28px;
+                        Text { text: "ACTIVE JOB"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        MetricChip {
+                            label: "Progress";
+                            value: Math.round(root.active-job-progress) + "%";
+                        }
+                    }
                     Rectangle {
                         height: 10px; border-radius: 5px; background: Theme.palette().surface-sunken;
                         Rectangle { width: parent.width * root.active-job-progress / 100; height: parent.height; border-radius: 5px; background: Theme.palette().accent; }
                     }
-                    Text { text: Math.round(root.active-job-progress) + "%"; font-size: Theme.tokens.typography.display; font-weight: 700; color: Theme.palette().ink; }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                     Rectangle {
                         height: 86px; border-radius: 12px; background: Theme.palette().surface;
@@ -241,10 +249,19 @@ export component EncodeApp inherits Window {
                     if root.inspector-tab == 1 : VerticalLayout {
                         spacing: 10px;
                         Text { text: "DELIVERY PRESET"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        SegmentedControl {
+                        if !root.compact-layout : SegmentedControl {
                             items: ["Web 1080p", "ProRes 422", "AV1 High"];
                             current: root.selected-preset == "ProRes 422" ? 1 : root.selected-preset == "AV1 High" ? 2 : 0;
                             selected(index) => { root.preset-changed(index == 1 ? "ProRes 422" : index == 2 ? "AV1 High" : "Web 1080p"); }
+                        }
+                        if root.compact-layout : VerticalLayout {
+                            spacing: 4px;
+                            for preset[index] in ["Web 1080p", "ProRes 422", "AV1 High"] : ToolButton {
+                                text: preset;
+                                horizontal-stretch: 1;
+                                checked: root.selected-preset == preset;
+                                clicked => { root.preset-changed(preset); }
+                            }
                         }
                         Text { text: root.selected-job-details; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; }
                     }

@@ -129,6 +129,28 @@ def audit_design_contract() -> None:
     require(contract.get("toolbar", {}).get("max-groups") == 3, "design system: toolbar group maximum must remain three")
     require(contract.get("controls", {}).get("minimum-pointer-target") == 28, "design system: pointer target must remain 28px")
 
+    labeled_toolbar = contract.get("component", {}).get("labeled-toolbar-item", {})
+    require(
+        labeled_toolbar.get("min-height") == 48 and labeled_toolbar.get("max-height") == 52,
+        "design system: labeled toolbar item height must remain in the 48–52px range",
+    )
+    require(
+        labeled_toolbar.get("label-size") == 10,
+        "design system: labeled toolbar item text must remain 10px",
+    )
+    require(
+        labeled_toolbar.get("allow-label-elision") is True,
+        "design system: labeled toolbar item labels must explicitly allow elision",
+    )
+
+    compact_icon_button = contract.get("component", {}).get("icon-button", {})
+    require(
+        compact_icon_button.get("width") == 28
+        and compact_icon_button.get("height") == 28
+        and compact_icon_button.get("icon") == 16,
+        "design system: compact icon-button geometry must remain 28px with a 16px icon",
+    )
+
     for theme_name in ("light", "dark", "high-contrast"):
         contract_palette = contract.get("palette", {}).get(theme_name, {})
         token_palette = tokens.get("palette", {}).get(theme_name, {})
@@ -183,6 +205,69 @@ def audit_toolkit() -> None:
 
     require(not re.search(r"#[0-9a-fA-F]{6,8}", toolkit), "shared toolkit: hard-coded palette color")
 
+    toolbar_start = toolkit.find("export component Toolbar")
+    toolbar_end = toolkit.find("\nexport component ", toolbar_start + 1)
+    toolbar = toolkit[toolbar_start:] if toolbar_end < 0 else toolkit[toolbar_start:toolbar_end]
+    require(
+        "min-height: 48px;" in toolbar and "max-height: 52px;" in toolbar,
+        "shared toolkit: Toolbar must reserve a 48–52px labeled-control slot",
+    )
+
+    group_start = toolkit.find("export component ToolbarGroup")
+    group_end = toolkit.find("\nexport component ", group_start + 1)
+    group = toolkit[group_start:] if group_end < 0 else toolkit[group_start:group_end]
+    require(
+        "min-height: 48px;" in group and "max-height: 52px;" in group,
+        "shared toolkit: ToolbarGroup must reserve a 48–52px labeled-control slot",
+    )
+
+    item_start = toolkit.find("export component AppleToolbarItem")
+    item_end = toolkit.find("\nexport component ", item_start + 1)
+    item = toolkit[item_start:] if item_end < 0 else toolkit[item_start:item_end]
+    require(
+        "min-height: 48px;" in item and "max-height: 52px;" in item,
+        "shared toolkit: AppleToolbarItem must reserve a 48–52px labeled-control slot",
+    )
+    require(
+        "font-size: 10px;" in item,
+        "shared toolkit: AppleToolbarItem labels must use 10px text",
+    )
+    require(
+        "size: 18px;" in item,
+        "shared toolkit: AppleToolbarItem icons must use the labeled-toolbar size",
+    )
+    require(
+        "padding-top: 4px;" in item and "padding-bottom: 4px;" in item,
+        "shared toolkit: AppleToolbarItem must preserve 4px vertical padding",
+    )
+    require(
+        "overflow: elide;" in item,
+        "shared toolkit: AppleToolbarItem labels must allow elision within their slot",
+    )
+
+    compact_start = toolkit.find("export component ToolbarIconButton")
+    compact_end = toolkit.find("\nexport component ", compact_start + 1)
+    compact = toolkit[compact_start:] if compact_end < 0 else toolkit[compact_start:compact_end]
+    require(
+        "width: Theme.tokens.metrics.control-height;" in compact
+        and "height: Theme.tokens.metrics.control-height;" in compact
+        and "size: 16px;" in compact,
+        "shared toolkit: ToolbarIconButton must retain tokenized 28px/16px compact geometry",
+    )
+
+
+def audit_icons() -> None:
+    icons = read("loom-core/crates/loom-ui/ui/icons.slint")
+    path = next(blocks(icons, "Path {"), "")
+    require(
+        "width: parent.width;" in path and "height: parent.height;" in path,
+        "shared icons: Icon Path must scale to the requested parent dimensions",
+    )
+    require(
+        not re.search(r"(?m)^\s*(?:width|height):\s*20px;", path),
+        "shared icons: Icon Path must not use a fixed 20px viewport",
+    )
+
 
 def audit_app(app: str) -> str:
     main_path = f"loom-{app}/crates/loom-{app}-app/src/main.rs"
@@ -220,6 +305,7 @@ def audit_app(app: str) -> str:
 
 audit_design_contract()
 audit_toolkit()
+audit_icons()
 app_text = {app: audit_app(app) for app in APPS}
 
 for app, required in {

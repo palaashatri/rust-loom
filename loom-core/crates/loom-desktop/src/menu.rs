@@ -314,12 +314,12 @@ impl MenuBar {
         let mut json = String::from("{\"menus\":[");
         for (i, menu) in self.menus.iter().enumerate() {
             if i > 0 {
-                json.push_str(",");
+                json.push(',');
             }
             json.push_str(&format!(r#"{{"title":"{}","items":["#, menu.title));
             for (j, item) in menu.items.iter().enumerate() {
                 if j > 0 {
-                    json.push_str(",");
+                    json.push(',');
                 }
                 match item {
                     MenuItem::Action {
@@ -526,7 +526,10 @@ pub fn build_standard_menu_bar(
         menus.push(Menu::new(
             app_name,
             vec![
-                MenuItem::action(format!("{}.about", app_name.to_lowercase()), format!("About {app_name}")),
+                MenuItem::action(
+                    format!("{}.about", app_name.to_lowercase()),
+                    format!("About {app_name}"),
+                ),
                 MenuItem::Separator,
                 MenuItem::action_with_shortcut(
                     format!("{}.preferences", app_name.to_lowercase()),
@@ -560,7 +563,11 @@ pub fn build_standard_menu_bar(
         MenuItem::action_with_shortcut("file.open", "Open...", MenuShortcut::primary("O")),
         MenuItem::Separator,
         MenuItem::action_with_shortcut("file.save", "Save", MenuShortcut::primary("S")),
-        MenuItem::action_with_shortcut("file.save_as", "Save As...", MenuShortcut::primary_shift("S")),
+        MenuItem::action_with_shortcut(
+            "file.save_as",
+            "Save As...",
+            MenuShortcut::primary_shift("S"),
+        ),
     ];
     default_file_items.extend(file_items);
     if !cfg!(target_os = "macos") {
@@ -583,7 +590,11 @@ pub fn build_standard_menu_bar(
         MenuItem::action_with_shortcut("edit.paste", "Paste", MenuShortcut::primary("V")),
         MenuItem::action_with_shortcut("edit.select_all", "Select All", MenuShortcut::primary("A")),
         MenuItem::Separator,
-        MenuItem::action_with_shortcut("app.palette", "Command Palette...", MenuShortcut::primary("K")),
+        MenuItem::action_with_shortcut(
+            "app.palette",
+            "Command Palette...",
+            MenuShortcut::primary("K"),
+        ),
     ];
     default_edit_items.extend(edit_items);
     menus.push(Menu::new("Edit", default_edit_items));
@@ -592,7 +603,11 @@ pub fn build_standard_menu_bar(
     let mut default_view_items = vec![
         MenuItem::action_with_shortcut("view.zoom_in", "Zoom In", MenuShortcut::primary("=")),
         MenuItem::action_with_shortcut("view.zoom_out", "Zoom Out", MenuShortcut::primary("-")),
-        MenuItem::action_with_shortcut("view.zoom_actual", "Actual Size", MenuShortcut::primary("0")),
+        MenuItem::action_with_shortcut(
+            "view.zoom_actual",
+            "Actual Size",
+            MenuShortcut::primary("0"),
+        ),
         MenuItem::Separator,
         MenuItem::check("view.inspector", "Format Inspector", true),
     ];
@@ -606,7 +621,11 @@ pub fn build_standard_menu_bar(
     menus.push(Menu::new(
         "Window",
         vec![
-            MenuItem::action_with_shortcut("window.minimize", "Minimize", MenuShortcut::primary("M")),
+            MenuItem::action_with_shortcut(
+                "window.minimize",
+                "Minimize",
+                MenuShortcut::primary("M"),
+            ),
             MenuItem::action("window.zoom", "Zoom"),
             MenuItem::Separator,
             MenuItem::action("window.bring_all_to_front", "Bring All to Front"),
