@@ -14,8 +14,8 @@ use std::sync::Mutex;
 
 pub mod menu;
 pub use menu::{
-    build_standard_menu_bar, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeMenuBar,
-    ScriptedMenuBar,
+    build_standard_menu_bar, CommandAction, CommandSource, CommandState, CommandStateProjection,
+    Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeMenuBar, ScriptedMenuBar,
 };
 
 /// A display name and extension list presented by a native file dialog.
@@ -373,5 +373,275 @@ mod tests {
             dialogs.save_file(&request),
             Err(DesktopError::InvalidRequest(_))
         ));
+    }
+
+    #[test]
+    fn command_projection_feeds_menu_toolbar_keyboard_and_accessibility() {
+        let projection = CommandStateProjection::new([
+            CommandState::action("file.save", "Save").with_shortcut(MenuShortcut::primary("S"))
+        ]);
+
+        let menu_item = projection.menu_item("file.save").expect("menu state");
+        assert_eq!(menu_item.id(), Some("file.save"));
+        assert_eq!(menu_item.label(), Some("Save"));
+        assert!(menu_item.is_enabled());
+        assert_eq!(
+            projection.toolbar_state("file.save"),
+            projection.get("file.save").cloned()
+        );
+        assert_eq!(
+            projection.keyboard_action("file.save"),
+            Some(CommandAction::new("file.save", CommandSource::Keyboard))
+        );
+        assert_eq!(
+            projection.accessibility_default_action("file.save"),
+            Some(CommandAction::new(
+                "file.save",
+                CommandSource::Accessibility
+            ))
+        );
+
+        let no_shortcut = CommandState::action("file.close", "Close");
+        assert!(no_shortcut.keyboard_action().is_none());
+        assert_eq!(
+            no_shortcut.accessibility_default_action(),
+            Some(CommandAction::new(
+                "file.close",
+                CommandSource::Accessibility
+            ))
+        );
+    }
+
+    #[test]
+    fn standard_document_commands_share_one_projection() {
+        let bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        let projection = bar.command_state_projection();
+        for id in [
+            "file.new",
+            "file.open",
+            "file.save",
+            "file.save_as",
+            "edit.undo",
+            "edit.redo",
+        ] {
+            assert!(
+                projection.get(id).is_some(),
+                "missing projected command {id}"
+            );
+            assert!(bar.find_item(id).is_some(), "missing menu command {id}");
+        }
+
+        let menu_action = bar
+            .dispatch_action("file.save", CommandSource::Menu)
+            .expect("menu command enabled");
+        let keyboard_action = projection
+            .dispatch("file.save", CommandSource::Keyboard)
+            .expect("keyboard command enabled");
+        assert_eq!(menu_action.id, keyboard_action.id);
+        assert_eq!(menu_action.source, CommandSource::Menu);
+        assert_eq!(keyboard_action.source, CommandSource::Keyboard);
+    }
+
+    #[test]
+    fn disabled_projection_and_menu_never_dispatch() {
+        let disabled = CommandState::action("edit.undo", "Undo").with_enabled(false);
+        assert!(disabled.keyboard_action().is_none());
+        assert!(disabled.accessibility_default_action().is_none());
+        let projection = CommandStateProjection::new([disabled]);
+        assert!(projection.keyboard_action("edit.undo").is_none());
+        assert!(projection
+            .accessibility_default_action("edit.undo")
+            .is_none());
+        assert!(matches!(
+            projection.dispatch("edit.undo", CommandSource::Keyboard),
+            Err(DesktopError::InvalidRequest(message)) if message.contains("disabled")
+        ));
+
+        let mut bar = MenuBar::new([Menu::new(
+            "Edit",
+            [MenuItem::Action {
+                id: "edit.undo".into(),
+                label: "Undo".into(),
+                shortcut: None,
+                enabled: false,
+            }],
+        )]);
+        assert!(bar
+            .find_item("edit.undo")
+            .expect("item")
+            .keyboard_action()
+            .is_none());
+        assert!(bar
+            .find_item("edit.undo")
+            .expect("item")
+            .accessibility_default_action()
+            .is_none());
+        assert!(matches!(
+            bar.dispatch_action("edit.undo", CommandSource::Menu),
+            Err(DesktopError::InvalidRequest(message)) if message.contains("disabled")
+        ));
+        projection.apply_to_menu_bar(&mut bar);
+        assert!(!bar.find_item("edit.undo").expect("item").is_enabled());
+    }
+
+    #[test]
+    fn scripted_menu_rejects_disabled_actions_and_records_only_successes() {
+        let service = ScriptedMenuBar::new();
+        let mut bar = MenuBar::new([Menu::new(
+            "File",
+            [MenuItem::Action {
+                id: "file.save".into(),
+                label: "Save".into(),
+                shortcut: None,
+                enabled: false,
+            }],
+        )]);
+        service.install_menu_bar(&bar).expect("install");
+        assert!(service.dispatch_action("file.save").is_err());
+        assert!(service.dispatched_actions().is_empty());
+        bar.update_item_state("file.save", true, None);
+        service.install_menu_bar(&bar).expect("reinstall");
+        service
+            .dispatch_action_from("file.save", CommandSource::Toolbar)
+            .expect("enabled toolbar action");
+        assert_eq!(service.dispatched_actions(), vec!["file.save"]);
+    }
+
+    #[test]
+    fn default_inspector_state_is_closed_and_custom_state_is_not_duplicated() {
+        let default_bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        match default_bar.find_item("view.inspector") {
+            Some(MenuItem::Check { checked, .. }) => assert!(!checked),
+            other => panic!("expected default inspector check item, got {other:?}"),
+        }
+
+        let custom_bar = build_standard_menu_bar(
+            "Loom",
+            vec![],
+            vec![],
+            vec![MenuItem::check("view.inspector", "Inspector", true)],
+            vec![],
+        );
+        let inspector_items = custom_bar
+            .menus
+            .iter()
+            .flat_map(|menu| menu.items.iter())
+            .filter(|item| item.id() == Some("view.inspector"))
+            .count();
+        assert_eq!(inspector_items, 1);
+        match custom_bar.find_item("view.inspector") {
+            Some(MenuItem::Check { checked, .. }) => assert!(*checked),
+            other => panic!("expected custom inspector check item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn menu_sync_updates_dynamic_label_shortcut_and_enabled_state() {
+        let service = ScriptedMenuBar::new();
+        let bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        service.install_menu_bar(&bar).expect("install");
+
+        let projection =
+            CommandStateProjection::new([CommandState::action("edit.undo", "Undo Typing")
+                .with_shortcut(MenuShortcut::primary_shift("Z"))]);
+        service
+            .sync_command_states(&projection)
+            .expect("sync command projection");
+
+        let synchronized = service.installed_bars().pop().expect("installed menu bar");
+        match synchronized.find_item("edit.undo") {
+            Some(MenuItem::Action {
+                label,
+                shortcut: Some(shortcut),
+                enabled,
+                ..
+            }) => {
+                assert_eq!(label, "Undo Typing");
+                assert_eq!(shortcut, &MenuShortcut::primary_shift("Z"));
+                assert!(*enabled);
+            }
+            other => panic!("expected synchronized undo action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn menu_sync_rejects_uninstalled_or_unknown_commands() {
+        let projection = CommandStateProjection::new([CommandState::action("edit.undo", "Undo")]);
+        let service = ScriptedMenuBar::new();
+        assert!(matches!(
+            service.sync_command_states(&projection),
+            Err(DesktopError::InvalidRequest(message))
+                if message.contains("not installed")
+        ));
+
+        let bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        service.install_menu_bar(&bar).expect("install");
+        let unknown =
+            CommandStateProjection::new([CommandState::action("missing.command", "Missing")]);
+        assert!(matches!(
+            service.sync_command_states(&unknown),
+            Err(DesktopError::InvalidRequest(message))
+                if message.contains("not present")
+        ));
+    }
+
+    #[test]
+    fn inspector_deduplication_detects_nested_view_entries() {
+        let nested = MenuItem::Submenu(Menu::new(
+            "More View",
+            [MenuItem::Submenu(Menu::new(
+                "Deep View",
+                [MenuItem::check("view.inspector", "Inspector", true)],
+            ))],
+        ));
+        assert!(nested.contains_id("view.inspector"));
+        let bar = build_standard_menu_bar("Loom", vec![], vec![], vec![nested], vec![]);
+        fn count_id(items: &[MenuItem], id: &str) -> usize {
+            items
+                .iter()
+                .map(|item| match item {
+                    MenuItem::Submenu(submenu) => count_id(&submenu.items, id),
+                    _ => usize::from(item.id() == Some(id)),
+                })
+                .sum()
+        }
+        let inspector_items = bar
+            .menus
+            .iter()
+            .map(|menu| count_id(&menu.items, "view.inspector"))
+            .sum::<usize>();
+        assert_eq!(inspector_items, 1);
+        assert!(matches!(
+            bar.find_item("view.inspector"),
+            Some(MenuItem::Check { checked: true, .. })
+        ));
+    }
+
+    #[test]
+    fn duplicate_ids_are_deduplicated_before_projection() {
+        let bar = build_standard_menu_bar(
+            "Loom",
+            vec![MenuItem::action("file.new", "Custom New")],
+            vec![MenuItem::action("edit.undo", "Custom Undo")],
+            vec![],
+            vec![Menu::new(
+                "Nested",
+                [MenuItem::action("file.new", "Nested New")],
+            )],
+        );
+        let projection = bar.command_state_projection();
+        assert_eq!(projection.len(), projection.iter().count());
+        assert_eq!(projection.get("file.new").expect("file.new").label, "New");
+        assert_eq!(
+            bar.find_item("file.new").expect("file.new").label(),
+            Some("New")
+        );
+        let count = bar
+            .menus
+            .iter()
+            .flat_map(|menu| menu.items.iter())
+            .filter(|item| item.id() == Some("file.new"))
+            .count();
+        assert_eq!(count, 1);
     }
 }

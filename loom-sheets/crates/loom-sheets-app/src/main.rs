@@ -765,7 +765,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             MenuShortcut::primary("E"),
         )],
         vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
+        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
         vec![Menu::new(
             "Table",
             vec![
