@@ -286,6 +286,9 @@ fn configure_responsive_width(app: &PresentApp, width: u32) {
     app.set_show_inspector(width >= 1180);
     app.set_labeled_export(width >= 1320);
     let overflow_toolbar = width < 1180;
+    if !overflow_toolbar && app.get_toolbar_overflow_open() {
+        app.invoke_close_toolbar_overflow();
+    }
     app.set_overflow_toolbar(overflow_toolbar);
     if !overflow_toolbar {
         app.set_toolbar_overflow_open(false);
@@ -1358,6 +1361,36 @@ mod desktop_tests {
 
         assert!(!app.get_overflow_toolbar());
         assert!(!app.get_toolbar_overflow_open());
+    }
+
+    #[test]
+    fn widening_window_preserves_palette_focus() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        configure_responsive_width(&app, 1024);
+        wire_responsive_layout(&app);
+        let _ = snapshot_component(&app, 1024.0, 800.0, 1.0).expect("render compact window");
+
+        app.invoke_open_palette();
+        let _ = snapshot_component(&app, 1024.0, 800.0, 1.0).expect("render open palette");
+        let focused_before =
+            slint::private_unstable_api::re_exports::WindowInner::from_pub(app.window())
+                .focus_item
+                .borrow()
+                .upgrade()
+                .expect("palette should own focus");
+
+        app.window().set_size(PhysicalSize::new(1280, 800));
+        let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render widened window");
+        let focused_after =
+            slint::private_unstable_api::re_exports::WindowInner::from_pub(app.window())
+                .focus_item
+                .borrow()
+                .upgrade()
+                .expect("palette focus should remain present");
+
+        assert_eq!(focused_after, focused_before);
+        assert!(app.get_palette_open());
     }
 
     #[test]

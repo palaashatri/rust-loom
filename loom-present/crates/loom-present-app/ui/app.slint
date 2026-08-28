@@ -188,8 +188,7 @@ export component PresentApp inherits Window {
     changed width => {
         root.window-resized(root.width);
         if (root.width >= 1180px) {
-            root.toolbar-overflow-open = false;
-            app-focus.focus();
+            root.close-toolbar-overflow();
         }
     }
 
@@ -289,15 +288,16 @@ export component PresentApp inherits Window {
         return root.labeled-export ? full-label : "";
     }
 
-    function close-toolbar-overflow() {
-        root.toolbar-overflow-open = false;
-        app-focus.focus();
+    public function close-toolbar-overflow() {
+        if (root.toolbar-overflow-open) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
     }
 
     changed overflow-toolbar => {
         if (!root.overflow-toolbar) {
-            root.toolbar-overflow-open = false;
-            app-focus.focus();
+            root.close-toolbar-overflow();
         }
     }
 
