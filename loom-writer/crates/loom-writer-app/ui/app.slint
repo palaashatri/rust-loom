@@ -1,6 +1,6 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface, InspectorSurface,
+    ToolbarIconButton, ToolbarOverflowButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface, InspectorSurface,
     SectionHeader, TextField, SegmentedControl, PropertyRow
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
@@ -207,6 +207,7 @@ export component WriterApp inherits Window {
 
     in property <bool> wide-toolbar: false;
     in property <bool> labeled-export: false;
+    in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
@@ -287,6 +288,18 @@ export component WriterApp inherits Window {
         return root.wide-toolbar ? full-label : "";
     }
 
+    overflow-menu-focus := FocusScope {
+        enabled: root.toolbar-overflow-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.toolbar-overflow-open = false;
+                app-focus.focus();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
     template-chooser-focus := FocusScope {
         enabled: root.template-chooser-open;
         key-pressed(event) => {
@@ -312,7 +325,7 @@ export component WriterApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open || root.template-chooser-open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open) { return reject; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -364,31 +377,38 @@ export component WriterApp inherits Window {
             Toolbar {
                 // Left group: View, page zoom, Add Page
                 ToolbarGroup {
-                    AppleToolbarItem {
+                    if root.wide-toolbar : AppleToolbarItem {
                         icon: "eye";
                         label: root.compact-label("View");
                         accessible-label: "View";
                         enabled: root.inspector-available;
                         clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
                     }
-                    AppleToolbarItem {
+                    if root.wide-toolbar : AppleToolbarItem {
                         icon: "zoom-in";
                         label: root.compact-label("Page Zoom");
                         accessible-label: "Page zoom unavailable";
                         enabled: false;
                     }
-                    AppleToolbarItem {
+                    if root.wide-toolbar : AppleToolbarItem {
                         icon: "plus";
                         label: root.compact-label("Add Page");
                         accessible-label: "Add Page unavailable";
                         enabled: false;
                     }
+                    if !root.wide-toolbar : ToolbarOverflowButton {
+                        label: "More Writer actions";
+                        clicked => {
+                            root.toolbar-overflow-open = !root.toolbar-overflow-open;
+                            if (root.toolbar-overflow-open) { overflow-menu-focus.focus(); }
+                        }
+                    }
                 }
 
-                ToolbarSpacer { }
+                if root.wide-toolbar : ToolbarSpacer { }
 
                 // Center group: Table, Chart, Text, Shape, Media, Comment
-                ToolbarGroup {
+                if root.wide-toolbar : ToolbarGroup {
                     AppleToolbarItem { icon: "table"; label: root.compact-label("Table"); accessible-label: "Insert table unavailable"; enabled: false; }
                     AppleToolbarItem { icon: "chart"; label: root.compact-label("Chart"); accessible-label: "Insert chart unavailable"; enabled: false; }
                     AppleToolbarItem { icon: "text"; label: root.compact-label("Text"); accessible-label: "Insert text box unavailable"; enabled: false; }
@@ -397,10 +417,10 @@ export component WriterApp inherits Window {
                     AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
-                ToolbarSpacer { }
+                if root.wide-toolbar : ToolbarSpacer { }
 
                 // Right group: Share, Format, Document / Export
-                ToolbarGroup {
+                if root.wide-toolbar : ToolbarGroup {
                     AppleToolbarItem { icon: "share"; label: root.compact-label("Share"); accessible-label: "Share unavailable"; enabled: false; }
                     AppleToolbarItem {
                         icon: "format";
@@ -645,6 +665,62 @@ export component WriterApp inherits Window {
             ToolkitStatusBar {
                 leading: root.status-left;
                 trailing: root.status-right;
+            }
+        }
+    }
+
+    // Compact toolbars keep the primary workspace clear and expose every
+    // currently actionable toolbar command through one real,
+    // keyboard-accessible menu.
+    if root.toolbar-overflow-open && !root.wide-toolbar : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+
+        TouchArea {
+            clicked => { root.toolbar-overflow-open = false; }
+        }
+
+        Rectangle {
+            x: max(8px, root.width - 272px);
+            y: Theme.tokens.metrics.header-height + 8px;
+            width: 256px;
+            height: 148px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: 4px;
+                padding: 8px;
+
+                ToolbarButton {
+                    icon: "eye";
+                    label: "View";
+                    enabled: root.inspector-available;
+                    horizontal-stretch: 1;
+                    clicked => { root.toggle-inspector(); root.toolbar-overflow-open = false; }
+                }
+                ToolbarButton {
+                    icon: "format";
+                    label: "Format";
+                    checked: root.inspector-visible;
+                    enabled: root.inspector-available;
+                    horizontal-stretch: 1;
+                    clicked => { root.toggle-inspector(); root.toolbar-overflow-open = false; }
+                }
+                ToolbarButton {
+                    icon: "export";
+                    label: "Export PDF";
+                    horizontal-stretch: 1;
+                    clicked => { root.export-pdf(); root.toolbar-overflow-open = false; }
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, SidebarSurface, InspectorSurface,
+    ToolbarIconButton, ToolbarOverflowButton, AppleToolbarItem, ToolkitStatusBar, SidebarSurface, InspectorSurface,
     SectionHeader, TextField, SegmentedControl, RangeSlider, PropertyRow,
     TabStrip, CanvasSurface
 } from "toolkit.slint";
@@ -182,6 +182,7 @@ export component PresentApp inherits Window {
 
     in property <bool> show-inspector: false;
     in property <bool> labeled-export: false;
+    in-out property <bool> toolbar-overflow-open: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
 
@@ -281,6 +282,18 @@ export component PresentApp inherits Window {
         return root.labeled-export ? full-label : "";
     }
 
+    overflow-menu-focus := FocusScope {
+        enabled: root.toolbar-overflow-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.toolbar-overflow-open = false;
+                app-focus.focus();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
     theme-chooser-focus := FocusScope {
         enabled: root.theme-chooser-open;
         key-pressed(event) => {
@@ -306,7 +319,7 @@ export component PresentApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open || root.theme-chooser-open) { return reject; }
+            if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open) { return reject; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -346,30 +359,37 @@ export component PresentApp inherits Window {
             if !root.is-preview-mode : Toolbar {
                 // Left group: View, Theme, Add Slide
                 ToolbarGroup {
-                    AppleToolbarItem {
+                    if root.labeled-export : AppleToolbarItem {
                         icon: "eye";
                         label: root.compact-label("View");
                         accessible-label: "View speaker notes";
                         clicked => { root.show-notes-drawer = !root.show-notes-drawer; }
                     }
-                    AppleToolbarItem {
+                    if root.labeled-export : AppleToolbarItem {
                         icon: "format";
                         label: root.compact-label("Theme");
                         accessible-label: "Choose theme";
                         clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
                     }
-                    AppleToolbarItem {
+                    if root.labeled-export : AppleToolbarItem {
                         icon: "plus";
                         label: root.compact-label("Add Slide");
                         accessible-label: "Add slide";
                         clicked => { root.add-slide(); }
                     }
+                    if !root.labeled-export : ToolbarOverflowButton {
+                        label: "More presentation actions";
+                        clicked => {
+                            root.toolbar-overflow-open = !root.toolbar-overflow-open;
+                            if (root.toolbar-overflow-open) { overflow-menu-focus.focus(); }
+                        }
+                    }
                 }
 
-                ToolbarSpacer { }
+                if root.labeled-export : ToolbarSpacer { }
 
                 // Keynote-style center insert group: Table, Chart, Text, Shape, Media, Comment
-                ToolbarGroup {
+                if root.labeled-export : ToolbarGroup {
                     AppleToolbarItem { icon: "table"; label: root.compact-label("Table"); accessible-label: "Insert table unavailable"; enabled: false; }
                     AppleToolbarItem { icon: "chart"; label: root.compact-label("Chart"); accessible-label: "Insert chart unavailable"; enabled: false; }
                     AppleToolbarItem { icon: "text"; label: root.compact-label("Text"); accessible-label: "Add text"; clicked => { root.add-text(); } }
@@ -378,10 +398,10 @@ export component PresentApp inherits Window {
                     AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
-                ToolbarSpacer { }
+                if root.labeled-export : ToolbarSpacer { }
 
                 // Right tools: Present / Format / Share / Export
-                ToolbarGroup {
+                if root.labeled-export : ToolbarGroup {
                     AppleToolbarItem {
                         icon: "play";
                         label: root.compact-label("Play");
@@ -711,6 +731,60 @@ export component PresentApp inherits Window {
     }
 
     // Keynote-Style Theme Chooser Modal
+    if root.toolbar-overflow-open && !root.labeled-export : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+
+        TouchArea { clicked => { root.toolbar-overflow-open = false; } }
+
+        Rectangle {
+            x: max(8px, root.width - 272px);
+            y: Theme.tokens.metrics.header-height + 32px + 8px;
+            width: 256px;
+            height: 196px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: 4px;
+                padding: 8px;
+
+                ToolbarButton {
+                    icon: "eye";
+                    label: "View speaker notes";
+                    horizontal-stretch: 1;
+                    clicked => { root.show-notes-drawer = !root.show-notes-drawer; root.toolbar-overflow-open = false; }
+                }
+                ToolbarButton {
+                    icon: "format";
+                    label: "Choose theme";
+                    horizontal-stretch: 1;
+                    clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; root.toolbar-overflow-open = false; }
+                }
+                ToolbarButton {
+                    icon: "plus";
+                    label: "Add slide";
+                    horizontal-stretch: 1;
+                    clicked => { root.add-slide(); root.toolbar-overflow-open = false; }
+                }
+                ToolbarButton {
+                    icon: "play";
+                    label: "Play presentation";
+                    horizontal-stretch: 1;
+                    clicked => { root.toggle-preview-mode(); root.toolbar-overflow-open = false; }
+                }
+            }
+        }
+    }
+
     if root.theme-chooser-open : Rectangle {
         x: 0px;
         y: 0px;

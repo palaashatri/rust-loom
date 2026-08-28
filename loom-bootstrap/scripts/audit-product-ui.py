@@ -137,7 +137,13 @@ def audit_design_contract() -> None:
         contract = tomllib.load(handle)
     with tokens_path.open("rb") as handle:
         tokens = tomllib.load(handle)
-    theme = theme_path.read_text(encoding="utf-8").lower()
+    theme_source = theme_path.read_text(encoding="utf-8")
+    theme = theme_source.lower()
+    theme_blocks = {
+        "light": next(blocks(theme_source, "export global Theme {"), "").lower(),
+        "dark": next(blocks(theme_source, "export global ThemeDark {"), "").lower(),
+        "high-contrast": next(blocks(theme_source, "export global ThemeHighContrast {"), "").lower(),
+    }
 
     require(contract.get("format-version") == "1.0.0", "design system: unsupported desktop UI contract version")
     require(tokens.get("format-version") == "2.0.0", "design system: unsupported token version")
@@ -263,7 +269,10 @@ def audit_design_contract() -> None:
         token_palette = tokens.get("palette", {}).get(theme_name, {})
         require(contract_palette == token_palette, f"design system: {theme_name} palette contract/token drift")
         for key, value in contract_palette.items():
-            require(f"{key}: {str(value).lower()}" in theme, f"runtime theme: missing {theme_name} {key}={value}")
+            require(
+                f"{key}: {str(value).lower()}" in theme_blocks[theme_name],
+                f"runtime theme: missing {theme_name} {key}={value}",
+            )
 
     # runtime name -> (token key, contract section, contract key)
     metric_pairs = {

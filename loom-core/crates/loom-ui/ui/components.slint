@@ -79,10 +79,11 @@ export component LoomWindow inherits Window {
 }
 
 /// Compatibility spelling for the canonical horizontal toolbar button.
-export component ToolButton inherits ToolbarButton {
-    in property <string> text: "";
-    label: root.text;
-}
+/// `ToolbarButton` owns both the legacy `text` input and the explicit
+/// `label` input. Its resolved label prefers `label`, then `text`, then the
+/// icon name, so icon-only callers remain accessible without preventing
+/// callers from setting the inherited label independently.
+export component ToolButton inherits ToolbarButton { }
 
 
 /// Compatibility spelling for the canonical compact icon button.

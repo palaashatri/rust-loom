@@ -184,11 +184,20 @@ export component OverflowMenuButton inherits ToolbarOverflowButton { }
 
 export component ToolbarButton inherits Rectangle {
     in property <string> icon: "";
-    in property <string> label: "Action";
+    // `text` is the compatibility spelling used by the pre-toolkit apps.
+    // Keep it independent from `label` so callers can provide an explicit
+    // accessible/menu label while older icon-only controls still receive a
+    // useful fallback name.
+    in property <string> text: "";
+    in property <string> label: "";
     in property <bool> enabled: true;
     in property <bool> primary: false;
     in property <bool> checked: false;
     callback clicked;
+    private property <string> resolved-label: root.label != "" ? root.label
+        : root.text != "" ? root.text
+        : root.icon != "" ? root.icon
+        : "Action";
     height: Theme.tokens.metrics.control-height;
     // Keep the label's intrinsic width as the lower bound. Without this, a
     // crowded toolbar can shrink a labelled button to the 28px icon target
@@ -208,7 +217,7 @@ export component ToolbarButton inherits Rectangle {
         : root.checked ? Theme.palette().selection-soft
         : touch.has-hover ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
-    accessible-label: root.label;
+    accessible-label: root.resolved-label;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
     HorizontalLayout {
         spacing: 6px; padding-left: 10px; padding-right: 10px; alignment: center; cross-axis-alignment: center;
@@ -218,7 +227,7 @@ export component ToolbarButton inherits Rectangle {
                 : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary;
         }
         label-content := Text {
-            text: root.label; font-size: Theme.tokens.typography.body; font-weight: 500;
+            text: root.resolved-label; font-size: Theme.tokens.typography.body; font-weight: 500;
             color: !root.enabled ? Theme.palette().ink-disabled : root.primary ? Theme.palette().accent-ink : Theme.palette().ink;
             vertical-alignment: center;
         }
