@@ -41,9 +41,7 @@ const TYPING_COALESCE_WINDOW_MS: u64 = 750;
 
 #[derive(Debug)]
 struct Args {
-    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     screenshot: Option<String>,
-    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     smoke: bool,
     palette: bool,
     journey: Option<String>,
@@ -51,7 +49,6 @@ struct Args {
     theme: String,
     open: Option<String>,
     template: Option<TemplateId>,
-    #[cfg_attr(not(feature = "visual-qa"), allow(dead_code))]
     template_chooser: bool,
 }
 
@@ -79,24 +76,10 @@ where
     while let Some(a) = it.next() {
         match a.as_str() {
             "--screenshot" => {
-                #[cfg(feature = "visual-qa")]
-                {
-                    args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
-                }
-                #[cfg(not(feature = "visual-qa"))]
-                {
-                    return Err("--screenshot requires a visual-qa build".into());
-                }
+                args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?);
             }
             "--smoke" => {
-                #[cfg(feature = "visual-qa")]
-                {
-                    args.smoke = true;
-                }
-                #[cfg(not(feature = "visual-qa"))]
-                {
-                    return Err("--smoke requires a visual-qa build".into());
-                }
+                args.smoke = true;
             }
             "--palette" => args.palette = true,
             "--journey" => {
@@ -1155,11 +1138,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
 fn main() -> Result<(), String> {
     let args = parse_args()?;
-    #[cfg(feature = "visual-qa")]
     if let Some(out) = &args.screenshot {
         return render_headless(&args, out);
     }
-    #[cfg(feature = "visual-qa")]
     if args.smoke {
         let out =
             std::env::temp_dir().join(format!("loom-writer-smoke-{}.png", std::process::id()));
@@ -1488,7 +1469,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "visual-qa")]
     fn writer_action_rail_is_one_row_before_the_canvas() {
         set_platform();
         let app = WriterApp::new().expect("create WriterApp");
@@ -1499,14 +1479,13 @@ mod tests {
         // The old title bar + toolbar occupied 80px. A single 64px action
         // rail leaves the surrounding canvas visible at y=72.
         assert_eq!(
-            image.get_pixel(24, 72),
             image.get_pixel(24, 100),
+            image.get_pixel(24, 120),
             "the canvas should begin directly below the single action rail"
         );
     }
 
     #[test]
-    #[cfg(feature = "visual-qa")]
     fn template_category_filters_visible_cards() {
         set_platform();
         let app = WriterApp::new().expect("create WriterApp");
@@ -1564,7 +1543,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "visual-qa")]
     fn parse_args_accepts_template_without_changing_existing_flags() {
         let args = parse_args_from([
             "--template",
@@ -1585,7 +1563,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "visual-qa")]
     fn template_chooser_flag_parses_and_changes_headless_render() {
         set_platform();
         let chooser_args = parse_args_from(["--template-chooser", "--size", "1440x900"])

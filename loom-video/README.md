@@ -25,5 +25,5 @@ Loom Video is a local-first non-linear video editor (NLE) providing multi-track 
 cargo test --manifest-path loom-video/Cargo.toml
 cargo run --manifest-path loom-video/Cargo.toml -p loom-video-app
 # Headless QA capture:
-cargo build --manifest-path loom-video/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-video/Cargo.toml
 ```

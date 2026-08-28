@@ -25,5 +25,5 @@ Loom Photo is a layer-based raster and image design application built with profe
 cargo test --manifest-path loom-photo/Cargo.toml
 cargo run --manifest-path loom-photo/Cargo.toml -p loom-photo-app
 # Headless QA capture:
-cargo build --manifest-path loom-photo/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-photo/Cargo.toml
 ```

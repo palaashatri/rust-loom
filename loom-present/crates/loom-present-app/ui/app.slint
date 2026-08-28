@@ -18,37 +18,39 @@ component ThemeCard inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    width: root.is-wide ? 220px : 180px;
-    height: 180px;
-    border-radius: Theme.tokens.metrics.radius-large;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
-    background: root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised : Theme.palette().surface;
+    width: root.is-wide ? 200px : 160px;
+    height: 170px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
     accessible-label: root.theme-name + " theme";
     accessible-action-default => { root.clicked(); }
 
     VerticalLayout {
-        spacing: 8px;
-        padding: 10px;
-        alignment: start;
+        spacing: 10px;
+        padding: 6px;
+        alignment: center;
+        cross-axis-alignment: center;
 
         // Slide Thumbnail Box
         Rectangle {
-            height: 108px;
+            width: root.is-wide ? 180px : 144px;
+            height: root.is-wide ? 101px : 108px;
             border-radius: 4px;
-            border-width: 1px;
-            border-color: Theme.palette().border;
+            border-width: root.selected ? 2.5px : 1px;
+            border-color: root.selected ? Theme.palette().content-cool : Theme.palette().paper-line;
             background: root.theme-index == 1 ? Theme.palette().surface-sunken
                 : root.theme-index == 3 ? Theme.palette().accent
                 : Theme.palette().paper;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: Theme.palette().shadow;
             clip: true;
 
             VerticalLayout {
-                padding: 16px;
+                padding: 12px;
                 alignment: center;
-                spacing: 6px;
+                spacing: 4px;
 
                 Text {
                     text: root.theme-name;
@@ -58,7 +60,7 @@ component ThemeCard inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 Rectangle {
-                    width: 48px;
+                    width: 40px;
                     height: 2px;
                     background: Theme.palette().accent;
                 }
@@ -71,23 +73,34 @@ component ThemeCard inherits Rectangle {
             }
         }
 
-        VerticalLayout {
-            spacing: 2px;
-            Text {
-                text: root.theme-name;
-                font-size: Theme.tokens.typography.body;
-                font-weight: 600;
-                color: Theme.palette().ink;
-                vertical-alignment: center;
-                overflow: elide;
+        if root.selected : Rectangle {
+            height: 20px;
+            border-radius: 4px;
+            background: Theme.palette().content-cool;
+            padding-left: 8px;
+            padding-right: 8px;
+            HorizontalLayout {
+                alignment: center;
+                cross-axis-alignment: center;
+                Text {
+                    text: root.theme-name;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: Theme.palette().accent-ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
-            Text {
-                text: root.description;
-                font-size: Theme.tokens.typography.caption;
-                color: Theme.palette().ink-secondary;
-                vertical-alignment: center;
-                overflow: elide;
-            }
+        }
+
+        if !root.selected : Text {
+            text: root.theme-name;
+            font-size: 11px;
+            font-weight: 500;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
         }
     }
 

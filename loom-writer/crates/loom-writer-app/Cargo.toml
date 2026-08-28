@@ -10,9 +10,6 @@ description = "Loom Writer desktop application"
 name = "loom-writer"
 path = "src/main.rs"
 
-[features]
-visual-qa = []
-
 [dependencies]
 loom-writer-core = { path = "../loom-writer-core" }
 loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }

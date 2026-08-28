@@ -24,5 +24,5 @@ Loom Writer is a calm, professional local-first word processor engineered for pr
 cargo test --manifest-path loom-writer/Cargo.toml
 cargo run --manifest-path loom-writer/Cargo.toml -p loom-writer-app
 # Headless QA capture:
-cargo build --manifest-path loom-writer/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-writer/Cargo.toml
 ```

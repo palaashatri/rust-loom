@@ -19,28 +19,30 @@ component TemplateCard inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    width: 176px;
-    height: 248px;
-    border-radius: Theme.tokens.metrics.radius-large;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
-    background: root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised : Theme.palette().surface;
+    width: 160px;
+    height: 230px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
     accessible-label: root.template-name + " template";
     accessible-action-default => { root.clicked(); }
 
     VerticalLayout {
-        spacing: 8px;
-        padding: 10px;
-        alignment: start;
+        spacing: 10px;
+        padding: 6px;
+        alignment: center;
+        cross-axis-alignment: center;
 
         Rectangle {
-            height: 168px;
+            width: 140px;
+            height: 175px;
             border-radius: 4px;
-            border-width: 1px;
-            border-color: Theme.palette().paper-line;
+            border-width: root.selected ? 2.5px : 1px;
+            border-color: root.selected ? Theme.palette().accent : Theme.palette().paper-line;
             background: Theme.palette().paper;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: Theme.palette().shadow;
             clip: true;
 
             // Template 0: Blank
@@ -104,23 +106,34 @@ component TemplateCard inherits Rectangle {
             }
         }
 
-        VerticalLayout {
-            spacing: 2px;
-            Text {
-                text: root.template-name;
-                font-size: Theme.tokens.typography.body;
-                font-weight: 600;
-                color: Theme.palette().ink;
-                vertical-alignment: center;
-                overflow: elide;
+        if root.selected : Rectangle {
+            height: 20px;
+            border-radius: 4px;
+            background: Theme.palette().accent;
+            padding-left: 8px;
+            padding-right: 8px;
+            HorizontalLayout {
+                alignment: center;
+                cross-axis-alignment: center;
+                Text {
+                    text: root.template-name;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: Theme.palette().accent-ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
-            Text {
-                text: root.description;
-                font-size: Theme.tokens.typography.caption;
-                color: Theme.palette().ink-secondary;
-                vertical-alignment: center;
-                overflow: elide;
-            }
+        }
+
+        if !root.selected : Text {
+            text: root.template-name;
+            font-size: 11px;
+            font-weight: 500;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
         }
     }
 
@@ -339,7 +352,7 @@ export component WriterApp inherits Window {
             // Document Chrome Titlebar
             DocumentChrome {
                 title: root.doc-title;
-                trailing-text: root.status-right;
+                trailing-text: "";
             }
 
             // Pages-Style Action Toolbar

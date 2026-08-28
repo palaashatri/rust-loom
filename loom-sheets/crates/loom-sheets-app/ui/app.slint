@@ -16,28 +16,30 @@ component SheetTemplateCard inherits Rectangle {
     in property <bool> selected: false;
     callback clicked;
 
-    width: 200px;
-    height: 190px;
-    border-radius: Theme.tokens.metrics.radius-large;
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
-    background: root.selected ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised : Theme.palette().surface;
+    width: 180px;
+    height: 185px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
     accessible-role: button;
     accessible-label: root.template-name + " template";
     accessible-action-default => { root.clicked(); }
 
     VerticalLayout {
-        spacing: 8px;
-        padding: 10px;
-        alignment: start;
+        spacing: 10px;
+        padding: 6px;
+        alignment: center;
+        cross-axis-alignment: center;
 
         Rectangle {
-            height: 110px;
+            width: 160px;
+            height: 115px;
             border-radius: 4px;
-            border-width: 1px;
-            border-color: Theme.palette().paper-line;
+            border-width: root.selected ? 2.5px : 1px;
+            border-color: root.selected ? Theme.palette().accent : Theme.palette().paper-line;
             background: Theme.palette().paper;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: Theme.palette().shadow;
             clip: true;
 
             // Sheet Template Preview Grid
@@ -46,7 +48,7 @@ component SheetTemplateCard inherits Rectangle {
 
                 // Header row
                 Rectangle {
-                    height: 18px;
+                    height: 20px;
                     background: root.template-index == 1 ? Theme.palette().accent
                         : root.template-index == 2 ? Theme.palette().content-cool
                         : Theme.palette().surface-sunken;
@@ -64,7 +66,7 @@ component SheetTemplateCard inherits Rectangle {
 
                 // Grid rows
                 for idx in 5 : Rectangle {
-                    height: 18px;
+                    height: 19px;
                     background: (Math.mod(idx, 2) == 1 && root.template-index != 0) ? Theme.palette().surface-sunken : Theme.palette().paper;
                     Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.palette().paper-line; }
                     HorizontalLayout {
@@ -81,23 +83,34 @@ component SheetTemplateCard inherits Rectangle {
             }
         }
 
-        VerticalLayout {
-            spacing: 2px;
-            Text {
-                text: root.template-name;
-                font-size: Theme.tokens.typography.body;
-                font-weight: 600;
-                color: Theme.palette().ink;
-                vertical-alignment: center;
-                overflow: elide;
+        if root.selected : Rectangle {
+            height: 20px;
+            border-radius: 4px;
+            background: Theme.palette().accent;
+            padding-left: 8px;
+            padding-right: 8px;
+            HorizontalLayout {
+                alignment: center;
+                cross-axis-alignment: center;
+                Text {
+                    text: root.template-name;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: Theme.palette().accent-ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
-            Text {
-                text: root.description;
-                font-size: Theme.tokens.typography.caption;
-                color: Theme.palette().ink-secondary;
-                vertical-alignment: center;
-                overflow: elide;
-            }
+        }
+
+        if !root.selected : Text {
+            text: root.template-name;
+            font-size: 11px;
+            font-weight: 500;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
         }
     }
 
@@ -254,7 +267,7 @@ export component SheetsApp inherits Window {
             // Document Chrome Header
             DocumentChrome {
                 title: root.sheet-name;
-                trailing-text: root.status-right;
+                trailing-text: "";
             }
 
             // Apple Numbers-style Sheet Tab Bar

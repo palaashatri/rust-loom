@@ -25,5 +25,5 @@ Loom Studio is a local-first digital audio workstation (DAW) featuring multitrac
 cargo test --manifest-path loom-studio/Cargo.toml
 cargo run --manifest-path loom-studio/Cargo.toml -p loom-studio-app
 # Headless QA capture:
-cargo build --manifest-path loom-studio/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-studio/Cargo.toml
 ```

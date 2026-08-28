@@ -26,5 +26,5 @@ Loom Sheets is a fast, local-first analytical spreadsheet application with Apple
 cargo test --manifest-path loom-sheets/Cargo.toml
 cargo run --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app
 # Headless QA capture:
-cargo build --manifest-path loom-sheets/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-sheets/Cargo.toml
 ```

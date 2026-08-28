@@ -25,5 +25,5 @@ Loom Motion is a motion graphics and keyframe animation studio engineered for hi
 cargo test --manifest-path loom-motion/Cargo.toml
 cargo run --manifest-path loom-motion/Cargo.toml -p loom-motion-app
 # Headless QA capture:
-cargo build --manifest-path loom-motion/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-motion/Cargo.toml
 ```

@@ -26,5 +26,5 @@ Loom Present is an elegant, local-first presentation design application engineer
 cargo test --manifest-path loom-present/Cargo.toml
 cargo run --manifest-path loom-present/Cargo.toml -p loom-present-app
 # Headless QA capture:
-cargo build --manifest-path loom-present/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-present/Cargo.toml
 ```

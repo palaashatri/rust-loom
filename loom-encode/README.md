@@ -25,5 +25,5 @@ Loom Encode is a batch media transcoding and delivery powerhouse with determinis
 cargo test --manifest-path loom-encode/Cargo.toml
 cargo run --manifest-path loom-encode/Cargo.toml -p loom-encode-app
 # Headless QA capture:
-cargo build --manifest-path loom-encode/Cargo.toml --features visual-qa
+cargo build --manifest-path loom-encode/Cargo.toml
 ```
