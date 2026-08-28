@@ -182,9 +182,16 @@ export component PresentApp inherits Window {
 
     in property <bool> show-inspector: false;
     in property <bool> labeled-export: false;
+    in property <bool> overflow-toolbar: false;
     in-out property <bool> toolbar-overflow-open: false;
     callback window-resized(length);
-    changed width => { root.window-resized(root.width); }
+    changed width => {
+        root.window-resized(root.width);
+        if (root.width >= 1180px) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
+    }
 
     in property <string> deck-title: "Untitled Deck";
     in property <string> slide-title: "Slide Title";
@@ -282,12 +289,23 @@ export component PresentApp inherits Window {
         return root.labeled-export ? full-label : "";
     }
 
+    function close-toolbar-overflow() {
+        root.toolbar-overflow-open = false;
+        app-focus.focus();
+    }
+
+    changed overflow-toolbar => {
+        if (!root.overflow-toolbar) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
+    }
+
     overflow-menu-focus := FocusScope {
         enabled: root.toolbar-overflow-open;
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                root.toolbar-overflow-open = false;
-                app-focus.focus();
+                root.close-toolbar-overflow();
                 return accept;
             }
             return reject;
@@ -377,16 +395,35 @@ export component PresentApp inherits Window {
                         accessible-label: "Add slide";
                         clicked => { root.add-slide(); }
                     }
-                    if !root.labeled-export : ToolbarOverflowButton {
+                    if !root.labeled-export && !root.overflow-toolbar : ToolbarIconButton {
+                        icon: "eye";
+                        label: "View speaker notes";
+                        clicked => { root.show-notes-drawer = !root.show-notes-drawer; }
+                    }
+                    if !root.labeled-export && !root.overflow-toolbar : ToolbarIconButton {
+                        icon: "format";
+                        label: "Choose theme";
+                        clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
+                    }
+                    if !root.labeled-export && !root.overflow-toolbar : ToolbarIconButton {
+                        icon: "plus";
+                        label: "Add slide";
+                        clicked => { root.add-slide(); }
+                    }
+                    if root.overflow-toolbar : ToolbarOverflowButton {
                         label: "More presentation actions";
                         clicked => {
-                            root.toolbar-overflow-open = !root.toolbar-overflow-open;
-                            if (root.toolbar-overflow-open) { overflow-menu-focus.focus(); }
+                            if (root.toolbar-overflow-open) {
+                                root.close-toolbar-overflow();
+                            } else {
+                                root.toolbar-overflow-open = true;
+                                overflow-menu-focus.focus();
+                            }
                         }
                     }
                 }
 
-                if root.labeled-export : ToolbarSpacer { }
+                if !root.overflow-toolbar : ToolbarSpacer { }
 
                 // Keynote-style center insert group: Table, Chart, Text, Shape, Media, Comment
                 if root.labeled-export : ToolbarGroup {
@@ -398,7 +435,7 @@ export component PresentApp inherits Window {
                     AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
-                if root.labeled-export : ToolbarSpacer { }
+                if !root.overflow-toolbar : ToolbarSpacer { }
 
                 // Right tools: Present / Format / Share / Export
                 if root.labeled-export : ToolbarGroup {
@@ -425,6 +462,24 @@ export component PresentApp inherits Window {
                         icon: "export";
                         label: root.labeled-export ? "Export" : "";
                         accessible-label: "Export PDF";
+                        clicked => { root.export-pdf(); }
+                    }
+                }
+                if !root.labeled-export && !root.overflow-toolbar : ToolbarGroup {
+                    ToolbarIconButton {
+                        icon: "play";
+                        label: "Play presentation";
+                        clicked => { root.toggle-preview-mode(); }
+                    }
+                    ToolbarIconButton {
+                        icon: "format";
+                        label: "Format inspector";
+                        checked: root.show-inspector;
+                        clicked => { root.toggle-inspector(); }
+                    }
+                    ToolbarIconButton {
+                        icon: "export";
+                        label: "Export PDF";
                         clicked => { root.export-pdf(); }
                     }
                 }
@@ -730,21 +785,22 @@ export component PresentApp inherits Window {
         }
     }
 
-    // Keynote-Style Theme Chooser Modal
-    if root.toolbar-overflow-open && !root.labeled-export : Rectangle {
+    // Compact toolbar overflow menu. Every enabled action from the labeled
+    // toolbar remains available below the compact-width breakpoint.
+    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
         background: transparent;
 
-        TouchArea { clicked => { root.toolbar-overflow-open = false; } }
+        TouchArea { clicked => { root.close-toolbar-overflow(); } }
 
         Rectangle {
             x: max(8px, root.width - 272px);
             y: Theme.tokens.metrics.header-height + 32px + 8px;
             width: 256px;
-            height: 196px;
+            height: 272px;
             border-radius: Theme.tokens.metrics.radius-medium;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -761,25 +817,50 @@ export component PresentApp inherits Window {
                     icon: "eye";
                     label: "View speaker notes";
                     horizontal-stretch: 1;
-                    clicked => { root.show-notes-drawer = !root.show-notes-drawer; root.toolbar-overflow-open = false; }
+                    clicked => { root.show-notes-drawer = !root.show-notes-drawer; root.close-toolbar-overflow(); }
                 }
                 ToolbarButton {
                     icon: "format";
                     label: "Choose theme";
                     horizontal-stretch: 1;
-                    clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; root.toolbar-overflow-open = false; }
+                    clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; root.close-toolbar-overflow(); }
                 }
                 ToolbarButton {
                     icon: "plus";
                     label: "Add slide";
                     horizontal-stretch: 1;
-                    clicked => { root.add-slide(); root.toolbar-overflow-open = false; }
+                    clicked => { root.add-slide(); root.close-toolbar-overflow(); }
+                }
+                ToolbarButton {
+                    icon: "text";
+                    label: "Add text";
+                    horizontal-stretch: 1;
+                    clicked => { root.add-text(); root.close-toolbar-overflow(); }
+                }
+                ToolbarButton {
+                    icon: "shape";
+                    label: "Add shape";
+                    horizontal-stretch: 1;
+                    clicked => { root.add-shape(); root.close-toolbar-overflow(); }
                 }
                 ToolbarButton {
                     icon: "play";
                     label: "Play presentation";
                     horizontal-stretch: 1;
-                    clicked => { root.toggle-preview-mode(); root.toolbar-overflow-open = false; }
+                    clicked => { root.toggle-preview-mode(); root.close-toolbar-overflow(); }
+                }
+                ToolbarButton {
+                    icon: "format";
+                    label: "Format inspector";
+                    checked: root.show-inspector;
+                    horizontal-stretch: 1;
+                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
+                }
+                ToolbarButton {
+                    icon: "export";
+                    label: "Export PDF";
+                    horizontal-stretch: 1;
+                    clicked => { root.export-pdf(); root.close-toolbar-overflow(); }
                 }
             }
         }

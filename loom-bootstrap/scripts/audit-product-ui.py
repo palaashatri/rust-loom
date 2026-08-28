@@ -123,6 +123,34 @@ def exported_component_block(text: str, name: str) -> str:
     return ""
 
 
+def slint_object_fields(block: str) -> tuple[dict[str, str], set[str]]:
+    """Parse scalar ``key: value`` entries from one balanced Slint object.
+
+    Palette objects contain several assignments per line, so line-oriented
+    substring checks are not sufficient. Returning duplicate keys lets the
+    audit reject a malformed object instead of silently accepting the last
+    occurrence.
+    """
+    opening = block.find("{")
+    if opening < 0 or not block.endswith("}"):
+        return {}, set()
+    body = block[opening + 1 : -1]
+    fields: dict[str, str] = {}
+    duplicates: set[str] = set()
+    for match in re.finditer(r"([A-Za-z][A-Za-z0-9_-]*)\s*:\s*([^,{}\n]+)", body):
+        key = match.group(1).lower()
+        value = match.group(2).strip().lower()
+        if key in fields:
+            duplicates.add(key)
+        fields[key] = value
+    return fields, duplicates
+
+
+def slint_palette_fields(theme_block: str) -> tuple[dict[str, str], set[str]]:
+    palette_block = next(blocks(theme_block, "palette:"), "")
+    return slint_object_fields(palette_block)
+
+
 def audit_design_contract() -> None:
     contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
     tokens_path = ROOT / "loom-design-bible/tokens/loom.toml"
@@ -140,9 +168,9 @@ def audit_design_contract() -> None:
     theme_source = theme_path.read_text(encoding="utf-8")
     theme = theme_source.lower()
     theme_blocks = {
-        "light": next(blocks(theme_source, "export global Theme {"), "").lower(),
-        "dark": next(blocks(theme_source, "export global ThemeDark {"), "").lower(),
-        "high-contrast": next(blocks(theme_source, "export global ThemeHighContrast {"), "").lower(),
+        "light": next(blocks(theme_source, "export global Theme {"), ""),
+        "dark": next(blocks(theme_source, "export global ThemeDark {"), ""),
+        "high-contrast": next(blocks(theme_source, "export global ThemeHighContrast {"), ""),
     }
 
     require(contract.get("format-version") == "1.0.0", "design system: unsupported desktop UI contract version")
@@ -268,9 +296,12 @@ def audit_design_contract() -> None:
         contract_palette = contract.get("palette", {}).get(theme_name, {})
         token_palette = tokens.get("palette", {}).get(theme_name, {})
         require(contract_palette == token_palette, f"design system: {theme_name} palette contract/token drift")
+        runtime_palette, duplicate_keys = slint_palette_fields(theme_blocks[theme_name])
+        for key in sorted(duplicate_keys):
+            require(False, f"runtime theme: duplicate {theme_name} palette key={key}")
         for key, value in contract_palette.items():
             require(
-                f"{key}: {str(value).lower()}" in theme_blocks[theme_name],
+                runtime_palette.get(key.lower()) == str(value).lower(),
                 f"runtime theme: missing {theme_name} {key}={value}",
             )
 

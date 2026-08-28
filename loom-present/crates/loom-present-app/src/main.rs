@@ -285,6 +285,11 @@ fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) {
 fn configure_responsive_width(app: &PresentApp, width: u32) {
     app.set_show_inspector(width >= 1180);
     app.set_labeled_export(width >= 1320);
+    let overflow_toolbar = width < 1180;
+    app.set_overflow_toolbar(overflow_toolbar);
+    if !overflow_toolbar {
+        app.set_toolbar_overflow_open(false);
+    }
 }
 
 fn wire_responsive_layout(app: &PresentApp) {
@@ -1339,6 +1344,20 @@ mod desktop_tests {
         let app = PresentApp::new().expect("create PresentApp");
         assert!(!app.get_show_inspector());
         assert!(!app.get_show_notes_drawer());
+    }
+
+    #[test]
+    fn expanding_past_overflow_breakpoint_closes_menu() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        configure_responsive_width(&app, 1024);
+        assert!(app.get_overflow_toolbar());
+        app.set_toolbar_overflow_open(true);
+
+        configure_responsive_width(&app, 1180);
+
+        assert!(!app.get_overflow_toolbar());
+        assert!(!app.get_toolbar_overflow_open());
     }
 
     #[test]

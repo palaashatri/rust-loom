@@ -307,6 +307,11 @@ fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     app.set_show_quick_formulas(show_quick_formulas);
     app.set_wide_toolbar(show_quick_formulas);
     app.set_labeled_export(labeled_export);
+    let overflow_toolbar = width < 1180;
+    app.set_overflow_toolbar(overflow_toolbar);
+    if !overflow_toolbar {
+        app.set_toolbar_overflow_open(false);
+    }
     let inspector_available = width >= 1180;
     app.set_inspector_available(inspector_available);
     if !inspector_available {
@@ -1184,5 +1189,19 @@ mod tests {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
         assert!(!app.get_show_inspector());
+    }
+
+    #[test]
+    fn expanding_past_overflow_breakpoint_closes_menu() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        apply_layout_breakpoints(&app, 1024);
+        assert!(app.get_overflow_toolbar());
+        app.set_toolbar_overflow_open(true);
+
+        apply_layout_breakpoints(&app, 1180);
+
+        assert!(!app.get_overflow_toolbar());
+        assert!(!app.get_toolbar_overflow_open());
     }
 }

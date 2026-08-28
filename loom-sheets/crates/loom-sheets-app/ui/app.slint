@@ -130,13 +130,20 @@ export component SheetsApp inherits Window {
     in property <bool> show-quick-formulas: false;
     in property <bool> wide-toolbar: false;
     in property <bool> labeled-export: false;
+    in property <bool> overflow-toolbar: false;
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     in-out property <int> inspector-tab: 0;
     callback window-resized(length);
-    changed width => { root.window-resized(root.width); }
+    changed width => {
+        root.window-resized(root.width);
+        if (root.width >= 1180px) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
+    }
 
     in property <string> sheet-name: "Untitled";
     in property <string> status-left: "";
@@ -216,12 +223,23 @@ export component SheetsApp inherits Window {
         return root.wide-toolbar ? full-label : "";
     }
 
+    function close-toolbar-overflow() {
+        root.toolbar-overflow-open = false;
+        app-focus.focus();
+    }
+
+    changed overflow-toolbar => {
+        if (!root.overflow-toolbar) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
+    }
+
     overflow-menu-focus := FocusScope {
         enabled: root.toolbar-overflow-open;
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                root.toolbar-overflow-open = false;
-                app-focus.focus();
+                root.close-toolbar-overflow();
                 return accept;
             }
             return reject;
@@ -358,16 +376,26 @@ export component SheetsApp inherits Window {
                         accessible-label: "Add category unavailable";
                         enabled: false;
                     }
-                    if !root.wide-toolbar : ToolbarOverflowButton {
+                    if !root.wide-toolbar && !root.overflow-toolbar : ToolbarIconButton {
+                        icon: "eye";
+                        label: "View";
+                        enabled: root.inspector-available;
+                        clicked => { root.toggle-inspector(); }
+                    }
+                    if root.overflow-toolbar : ToolbarOverflowButton {
                         label: "More Sheets actions";
                         clicked => {
-                            root.toolbar-overflow-open = !root.toolbar-overflow-open;
-                            if (root.toolbar-overflow-open) { overflow-menu-focus.focus(); }
+                            if (root.toolbar-overflow-open) {
+                                root.close-toolbar-overflow();
+                            } else {
+                                root.toolbar-overflow-open = true;
+                                overflow-menu-focus.focus();
+                            }
                         }
                     }
                 }
 
-                if root.wide-toolbar : ToolbarSpacer { }
+                if !root.overflow-toolbar : ToolbarSpacer { }
 
                 // Numbers-style center tools: Table, Pivot, Chart, Text, Shape, Media, Comment
                 if root.wide-toolbar : ToolbarGroup {
@@ -380,7 +408,7 @@ export component SheetsApp inherits Window {
                     AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
                 }
 
-                if root.wide-toolbar : ToolbarSpacer { }
+                if !root.overflow-toolbar : ToolbarSpacer { }
 
                 // Right tools: Share, Format, Organize, Export
                 if root.wide-toolbar : ToolbarGroup {
@@ -403,6 +431,20 @@ export component SheetsApp inherits Window {
                         icon: "export";
                         label: root.labeled-export ? "Export" : "";
                         accessible-label: "Export CSV";
+                        clicked => { root.export-csv(); }
+                    }
+                }
+                if !root.wide-toolbar && !root.overflow-toolbar : ToolbarGroup {
+                    ToolbarIconButton {
+                        icon: "format";
+                        label: "Format";
+                        checked: root.inspector-visible;
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+                    }
+                    ToolbarIconButton {
+                        icon: "export";
+                        label: "Export CSV";
                         clicked => { root.export-csv(); }
                     }
                 }
@@ -863,7 +905,7 @@ export component SheetsApp inherits Window {
     // Compact toolbars keep the primary workspace clear and expose every
     // currently actionable toolbar command through one real,
     // keyboard-accessible menu.
-    if root.toolbar-overflow-open && !root.wide-toolbar : Rectangle {
+    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
@@ -871,7 +913,7 @@ export component SheetsApp inherits Window {
         background: transparent;
 
         TouchArea {
-            clicked => { root.toolbar-overflow-open = false; }
+            clicked => { root.close-toolbar-overflow(); }
         }
 
         Rectangle {
@@ -896,7 +938,7 @@ export component SheetsApp inherits Window {
                     label: "View";
                     enabled: root.inspector-available;
                     horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.toolbar-overflow-open = false; }
+                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
                 }
                 ToolbarButton {
                     icon: "format";
@@ -904,13 +946,13 @@ export component SheetsApp inherits Window {
                     checked: root.inspector-visible;
                     enabled: root.inspector-available;
                     horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.toolbar-overflow-open = false; }
+                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
                 }
                 ToolbarButton {
                     icon: "export";
                     label: "Export CSV";
                     horizontal-stretch: 1;
-                    clicked => { root.export-csv(); root.toolbar-overflow-open = false; }
+                    clicked => { root.export-csv(); root.close-toolbar-overflow(); }
                 }
             }
         }

@@ -742,6 +742,11 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     let (wide_toolbar, labeled_export) = layout_breakpoints(width);
     app.set_wide_toolbar(wide_toolbar);
     app.set_labeled_export(labeled_export);
+    let overflow_toolbar = width < 1180;
+    app.set_overflow_toolbar(overflow_toolbar);
+    if !overflow_toolbar {
+        app.set_toolbar_overflow_open(false);
+    }
     // The inspector is optional chrome. Keep the page dominant at compact
     // widths and allow it to be opened only once the contract's minimum
     // primary-surface share can be preserved.
@@ -1466,6 +1471,21 @@ mod tests {
 
         assert!(app.get_wide_toolbar());
         assert!(app.get_labeled_export());
+        assert!(!app.get_overflow_toolbar());
+    }
+
+    #[test]
+    fn expanding_past_overflow_breakpoint_closes_menu() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        apply_layout_breakpoints(&app, 1024);
+        assert!(app.get_overflow_toolbar());
+        app.set_toolbar_overflow_open(true);
+
+        apply_layout_breakpoints(&app, 1180);
+
+        assert!(!app.get_overflow_toolbar());
+        assert!(!app.get_toolbar_overflow_open());
     }
 
     #[test]
