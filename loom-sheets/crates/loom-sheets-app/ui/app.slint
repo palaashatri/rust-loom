@@ -87,9 +87,9 @@ component SheetTemplateCard inherits Rectangle {
             height: 20px;
             border-radius: 4px;
             background: Theme.palette().accent;
-            padding-left: 8px;
-            padding-right: 8px;
             HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
                 alignment: center;
                 cross-axis-alignment: center;
                 Text {
@@ -306,7 +306,8 @@ export component SheetsApp inherits Window {
                     ToolbarIconButton {
                         icon: "plus";
                         label: "Add sheet";
-                        enabled: false;
+                        enabled: true;
+                        clicked => { root.new-sheet(); }
                     }
 
                     ToolbarSpacer { }
@@ -319,13 +320,21 @@ export component SheetsApp inherits Window {
             Toolbar {
                 // Left group: View, Zoom, Add Category
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "eye"; label: "View"; }
+                    AppleToolbarItem {
+                        icon: "eye";
+                        label: "View";
+                        clicked => { root.show-inspector = !root.show-inspector; }
+                    }
                     AppleToolbarItem {
                         icon: "zoom-in";
                         label: Math.round(root.zoom-value) + "%";
                         clicked => { root.zoom-value = (root.zoom-value >= 150 ? 100 : root.zoom-value + 25); }
                     }
-                    AppleToolbarItem { icon: "plus"; label: "Category"; }
+                    AppleToolbarItem {
+                        icon: "plus";
+                        label: "Category";
+                        clicked => { root.new-sheet(); }
+                    }
                 }
 
                 ToolbarSpacer { }
@@ -856,13 +865,15 @@ export component SheetsApp inherits Window {
                             padding-left: 12px;
                             padding-right: 12px;
 
-                            Text {
-                                text: "TEMPLATES";
-                                font-size: 10px;
-                                font-weight: 700;
-                                color: Theme.palette().ink-secondary;
+                            HorizontalLayout {
                                 padding-left: 8px;
                                 padding-bottom: 4px;
+                                Text {
+                                    text: "TEMPLATES";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: Theme.palette().ink-secondary;
+                                }
                             }
 
                             Rectangle {

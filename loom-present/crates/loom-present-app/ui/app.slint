@@ -77,9 +77,9 @@ component ThemeCard inherits Rectangle {
             height: 20px;
             border-radius: 4px;
             background: Theme.palette().content-cool;
-            padding-left: 8px;
-            padding-right: 8px;
             HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
                 alignment: center;
                 cross-axis-alignment: center;
                 Text {
@@ -336,10 +336,18 @@ export component PresentApp inherits Window {
 
             // Keynote-Style Action Toolbar
             if !root.is-preview-mode : Toolbar {
-                // Left group: View, Zoom, Add Slide
+                // Left group: View, Theme, Add Slide
                 ToolbarGroup {
-                    AppleToolbarItem { icon: "eye"; label: "View"; }
-                    AppleToolbarItem { icon: "zoom-in"; label: "100%"; }
+                    AppleToolbarItem {
+                        icon: "eye";
+                        label: "View";
+                        clicked => { root.show-notes-drawer = !root.show-notes-drawer; }
+                    }
+                    AppleToolbarItem {
+                        icon: "format";
+                        label: "Theme";
+                        clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
+                    }
                     AppleToolbarItem {
                         icon: "plus";
                         label: "Add Slide";
@@ -509,14 +517,17 @@ export component PresentApp inherits Window {
                                     border-width: root.active-element-index == 0 ? 2px : 0px;
                                     border-color: Theme.palette().accent;
                                     background: transparent;
-                                    padding: 8px;
 
-                                    Text {
-                                        text: root.slide-title;
-                                        font-size: 28px;
-                                        font-weight: 700;
-                                        color: Theme.palette().paper-ink;
-                                        horizontal-alignment: center;
+                                    HorizontalLayout {
+                                        padding: 8px;
+                                        alignment: center;
+                                        Text {
+                                            text: root.slide-title;
+                                            font-size: 28px;
+                                            font-weight: 700;
+                                            color: Theme.palette().paper-ink;
+                                            horizontal-alignment: center;
+                                        }
                                     }
 
                                     TouchArea { clicked => { root.select-element(0); } }
@@ -528,13 +539,16 @@ export component PresentApp inherits Window {
                                     border-width: root.active-element-index == 1 ? 2px : 0px;
                                     border-color: Theme.palette().accent;
                                     background: transparent;
-                                    padding: 8px;
 
-                                    Text {
-                                        text: root.slide-body;
-                                        font-size: 16px;
-                                        color: Theme.palette().paper-muted;
-                                        horizontal-alignment: center;
+                                    HorizontalLayout {
+                                        padding: 8px;
+                                        alignment: center;
+                                        Text {
+                                            text: root.slide-body;
+                                            font-size: 16px;
+                                            color: Theme.palette().paper-muted;
+                                            horizontal-alignment: center;
+                                        }
                                     }
 
                                     TouchArea { clicked => { root.select-element(1); } }
@@ -723,13 +737,15 @@ export component PresentApp inherits Window {
                             padding-left: 12px;
                             padding-right: 12px;
 
-                            Text {
-                                text: "THEMES";
-                                font-size: 10px;
-                                font-weight: 700;
-                                color: Theme.palette().ink-secondary;
+                            HorizontalLayout {
                                 padding-left: 8px;
                                 padding-bottom: 4px;
+                                Text {
+                                    text: "THEMES";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: Theme.palette().ink-secondary;
+                                }
                             }
 
                             Rectangle {
