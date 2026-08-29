@@ -233,46 +233,53 @@ export component EncodeApp inherits Window {
                 width: root.compact-layout ? 240px : 330px;
                 title: "Job Inspector";
                 detail: root.running ? "Queue locked" : "Editable";
-                PaneTabs { items: ["Source", "Preset", "Activity"]; current <=> root.inspector-tab; }
-                Rectangle { height: 1px; background: Theme.palette().border; }
                 VerticalLayout {
-                    spacing: 12px;
-                    padding: 14px;
-                    if root.inspector-tab == 0 : VerticalLayout {
-                        spacing: 10px;
-                        Text { text: "SOURCE & DESTINATION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        Text { text: "Input path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        Field { label: "Input path"; placeholder: "Choose a source file…"; value <=> root.selected-source; edited(value) => { root.source-changed(value); } }
-                        Text { text: "Output path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        Field { label: "Output path"; placeholder: "Choose an output file…"; value <=> root.selected-output; edited(value) => { root.output-changed(value); } }
-                    }
-                    if root.inspector-tab == 1 : VerticalLayout {
-                        spacing: 10px;
-                        Text { text: "DELIVERY PRESET"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        if !root.compact-layout : SegmentedControl {
-                            items: ["Web 1080p", "ProRes 422", "AV1 High"];
-                            current: root.selected-preset == "ProRes 422" ? 1 : root.selected-preset == "AV1 High" ? 2 : 0;
-                            selected(index) => { root.preset-changed(index == 1 ? "ProRes 422" : index == 2 ? "AV1 High" : "Web 1080p"); }
+                    spacing: 0px;
+                    PaneTabs { items: ["Source", "Preset", "Activity"]; current <=> root.inspector-tab; }
+                    Rectangle { height: 1px; background: Theme.palette().border; }
+                    VerticalLayout {
+                        spacing: Theme.tokens.space.md;
+                        padding: Theme.tokens.space.lg;
+                        vertical-stretch: 1;
+                        if root.inspector-tab == 0 : VerticalLayout {
+                            spacing: Theme.tokens.space.sm;
+                            vertical-stretch: 0;
+                            Text { text: "SOURCE & DESTINATION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                            Text { text: "Input path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                            Field { label: "Input path"; placeholder: "Choose a source file…"; value <=> root.selected-source; edited(value) => { root.source-changed(value); } }
+                            Text { text: "Output path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                            Field { label: "Output path"; placeholder: "Choose an output file…"; value <=> root.selected-output; edited(value) => { root.output-changed(value); } }
                         }
-                        if root.compact-layout : VerticalLayout {
-                            spacing: 4px;
-                            for preset[index] in ["Web 1080p", "ProRes 422", "AV1 High"] : ToolButton {
-                                text: preset;
-                                horizontal-stretch: 1;
-                                checked: root.selected-preset == preset;
-                                clicked => { root.preset-changed(preset); }
+                        if root.inspector-tab == 1 : VerticalLayout {
+                            spacing: Theme.tokens.space.sm;
+                            vertical-stretch: 0;
+                            Text { text: "DELIVERY PRESET"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                            if !root.compact-layout : SegmentedControl {
+                                items: ["Web 1080p", "ProRes 422", "AV1 High"];
+                                current: root.selected-preset == "ProRes 422" ? 1 : root.selected-preset == "AV1 High" ? 2 : 0;
+                                selected(index) => { root.preset-changed(index == 1 ? "ProRes 422" : index == 2 ? "AV1 High" : "Web 1080p"); }
                             }
+                            if root.compact-layout : VerticalLayout {
+                                spacing: Theme.tokens.space.xs;
+                                for preset[index] in ["Web 1080p", "ProRes 422", "AV1 High"] : ToolButton {
+                                    text: preset;
+                                    horizontal-stretch: 1;
+                                    checked: root.selected-preset == preset;
+                                    clicked => { root.preset-changed(preset); }
+                                }
+                            }
+                            Text { text: root.selected-job-details; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; }
                         }
-                        Text { text: root.selected-job-details; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; }
+                        if root.inspector-tab == 2 : VerticalLayout {
+                            spacing: Theme.tokens.space.sm;
+                            vertical-stretch: 0;
+                            Text { text: "QUEUE ACTIVITY"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                            Text { text: root.status-left; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                            ToolButton { icon: "redo"; text: "Retry selected job"; enabled: !root.running; clicked => { root.retry-job(); } }
+                            Text { text: "Progress is parsed from FFmpeg's local -progress stream. Cancellation terminates the active process cooperatively."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        }
+                        Rectangle { vertical-stretch: 1; background: transparent; }
                     }
-                    if root.inspector-tab == 2 : VerticalLayout {
-                        spacing: 10px;
-                        Text { text: "QUEUE ACTIVITY"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                        Text { text: root.status-left; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                        ToolButton { icon: "redo"; text: "Retry selected job"; enabled: !root.running; clicked => { root.retry-job(); } }
-                        Text { text: "Progress is parsed from FFmpeg's local -progress stream. Cancellation terminates the active process cooperatively."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                    }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
         }
