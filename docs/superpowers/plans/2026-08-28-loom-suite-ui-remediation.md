@@ -19,6 +19,98 @@
 - Keep generated screenshots, logs, and status evidence under `.work/`; do not add root-level status files.
 - Every implemented slice must pass changed-workspace tests, `cargo fmt --check`, relevant Clippy, `git diff --check`, and native macOS visual inspection.
 
+## 2026-08-29 Numbers-quality audit and execution priority
+
+The supplied Numbers, Pages, and Keynote captures are quality references only;
+they do not authorize copying Apple branding, assets, icons, or undocumented
+layout. The exact-head audit and findings are recorded in
+`.work/evidence/ui/20260829-numbers-audit/QA.md`.
+
+### Current self-score
+
+The honest suite score remains **28/100**. The current scorecard is:
+
+| Dimension | Score | Evidence-backed interpretation |
+| --- | ---: | --- |
+| Core/backend engineering | 65/100 | Useful models, persistence, history, parsers, exporters, and media helpers exist. |
+| Architecture & persistence | 70/100 | Shared Rust infrastructure and local package/recovery foundations are meaningful strengths. |
+| Functionality reachable through GUI | 30/100 | Too much engine depth is disconnected from professional GUI workflows. |
+| Interaction design | 20/100 | Selection-led editing, direct manipulation, and editor-specific interaction remain incomplete. |
+| Visual design & polish | 18/100 | The severe inspector overlap is fixed, but hierarchy, density, compact context, and truthful content remain below professional-suite quality. |
+| Professional workflow depth | 25/100 | Each app has useful slices; none yet provides its category's complete daily workflow. |
+| **Overall product readiness** | **28/100** | Functional alpha, not Numbers/Pages/Keynote parity. |
+
+The layout repair is a defect reduction, not a score increase. Passing the
+software-rendered theme matrix proves distinct renders and absence of the
+specific overlap in the captured states; it does not prove native macOS chrome,
+keyboard operation, screen-reader semantics, persistence, or professional
+workflow completion.
+
+### What “closer to Numbers” means for Loom
+
+The target is the same product discipline visible in the reference: native
+window ownership, quiet toolbar hierarchy, one dominant editable surface,
+selection-driven context, deliberate width budgets, and a live inspector. Loom
+keeps its own orange accent and design language. The implementation must not
+turn a static screenshot into a Numbers-like facade: every enabled control still
+needs a typed command, selection semantics, undo, persistence, keyboard and
+accessibility access, and recoverable failure behaviour.
+
+### Priority change: prove the Sheets slice first
+
+The existing plan's shared-contract work remains first, but the first
+user-facing vertical slice after those contracts is Sheets because the supplied
+reference is Numbers. This gives the suite one measurable reference surface
+before the same primitives are rolled through Writer, Present, media, and
+production apps.
+
+1. **Shared contract gate.** Stabilize semantic palette/typography/spacing/
+   metrics, toolbar variants, inspector flow, focus, overflow, appearance, and
+   native desktop command projection. Add static guards for zero overlap and
+   zero label clipping at 1024×720, 1280×800, 1440×900, and 1920×1200; keep
+   150% text, high contrast, reduced motion, and RTL in the matrix.
+2. **Sheets/Numbers vertical slice.** In `loom-sheets-core/src/lib.rs`, add a
+   viewport projection and explicit grid selection model. In
+   `loom-sheets/crates/loom-sheets-app/{ui/app.slint,src/main.rs}`, render only
+   visible rows/columns, bind the sheet tab, name box, formula bar, selection
+   outline/fill handle, and Table/Cell inspector to that state, and route
+   keyboard/mouse edits through typed reversible commands. Test scroll, range
+   selection, formula commit/cancel, fill/copy, undo, save/reopen, and
+   coordinate/value/formula announcements.
+3. **Office rollout.** Complete Writer's selection-aware paginated editing and
+   Present's real scene selection/direct manipulation using the same shared
+   command, history, and inspector contracts. Their acceptance journeys must
+   be type/select/format or add/select/transform → undo/redo → save/reopen →
+   export, not palette-only smoke tests.
+4. **Media rollout.** Replace Photo's calibration-like stand-in, Motion's static
+   stage/timeline assumptions, and Video's synthetic/external-player path with
+   real selected content, pan/zoom or clocked playback, direct manipulation,
+   and contextual inspectors. Each slice must include cancellation/error and
+   persistence evidence.
+5. **Production rollout.** Make Studio regions/mixer and Encode queue/source/
+   destination properties directly editable, reorderable, undoable, and
+   recoverable. Native file panels and device/backend failures must be visible
+   and actionable.
+6. **Native release proof.** Rebuild from the exact commit, capture genuine
+   macOS windows (traffic lights, menus, focus, file panels where applicable),
+   inspect compact/reference/large light/dark/high-contrast/large-text/reduced-
+   motion states, run one complete keyboard/mouse/persistence/failure journey
+   per app, and only then reconsider the score.
+
+### Hard acceptance gates for every phase
+
+- No text, field, button, tab, inspector section, or timeline lane overlaps or
+  clips at a required viewport; a safe elision must retain an accessible name.
+- The primary workspace remains the largest region; sidebars/inspectors collapse
+  or overflow before it becomes unusable.
+- A selection change updates visible properties, command enablement, focus,
+  undo labels, persistence, and accessibility output from one source of truth.
+- Theme changes alter semantic tokens throughout the surface; no literal color
+  or one-off padding is introduced to hide a broken layout.
+- A screenshot may support a visual claim only. Product-completion claims also
+  require executable workflow, failure, persistence, undo, and accessibility
+  evidence at the exact SHA.
+
 ---
 
 ## File ownership map
