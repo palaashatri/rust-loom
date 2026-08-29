@@ -6,8 +6,18 @@
 
 use crate::DesktopError;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+/// Callback invoked after a menu adapter has validated and accepted a command
+/// action.  Applications register their controller sink here so native menu,
+/// toolbar, keyboard, and accessibility requests converge on one callback
+/// path.  The callback is `Send + Sync` because the production menu adapter is
+/// shared with platform event bridges; Slint weak handles satisfy those bounds
+/// and still enforce same-thread upgrades at invocation time.
+pub type MenuActionSink =
+    Arc<dyn Fn(CommandAction) -> Result<(), DesktopError> + Send + Sync + 'static>;
 
 /// A keyboard shortcut representation for menu items.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -532,6 +542,20 @@ impl MenuItem {
             _ => false,
         }
     }
+
+    fn disable_if_unlisted(&mut self, supported_ids: &BTreeSet<String>) {
+        match self {
+            Self::Action { id, enabled, .. }
+            | Self::Check { id, enabled, .. }
+            | Self::Radio { id, enabled, .. } => {
+                if !supported_ids.contains(id) {
+                    *enabled = false;
+                }
+            }
+            Self::Submenu(menu) => menu.disable_if_unlisted(supported_ids),
+            Self::Separator => {}
+        }
+    }
 }
 
 /// A named menu holding a list of items.
@@ -641,6 +665,12 @@ impl Menu {
             MenuItem::Separator => true,
         });
     }
+
+    fn disable_if_unlisted(&mut self, supported_ids: &BTreeSet<String>) {
+        for item in &mut self.items {
+            item.disable_if_unlisted(supported_ids);
+        }
+    }
 }
 
 /// The complete application top-level menu bar.
@@ -695,6 +725,26 @@ impl MenuBar {
         let mut seen = BTreeSet::new();
         for menu in &mut self.menus {
             menu.retain_unique_command_ids(&mut seen);
+        }
+    }
+
+    /// Disable every menu item whose identifier is not handled by the current
+    /// application/host command sink. Menu construction is shared by all
+    /// applications, so each app must explicitly opt in to every command it
+    /// can execute; unsupported standard, extra-menu, and platform-labelled
+    /// actions must never be presented as enabled until a real host bridge is
+    /// installed for them.
+    pub fn disable_items_except<I, S>(&mut self, supported_ids: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let supported_ids = supported_ids
+            .into_iter()
+            .map(|id| id.as_ref().to_string())
+            .collect::<BTreeSet<_>>();
+        for menu in &mut self.menus {
+            menu.disable_if_unlisted(&supported_ids);
         }
     }
 
@@ -898,13 +948,25 @@ pub trait MenuBarService: Send + Sync {
         Ok(())
     }
 
+    /// Registers the application-owned controller sink for accepted menu
+    /// actions.  Platform adapters call this sink only after checking that
+    /// the requested item exists and is currently enabled.  Implementations
+    /// that do not support event routing may return an explicit error rather
+    /// than silently presenting an inert menu.
+    fn register_action_sink(&self, _sink: MenuActionSink) -> Result<(), DesktopError> {
+        Err(DesktopError::InvalidRequest(
+            "menu action sinks are unsupported by this adapter".into(),
+        ))
+    }
+
     /// Dispatch an action by item id.
     fn dispatch_action(&self, item_id: &str) -> Result<(), DesktopError>;
 
     /// Dispatches a command while retaining the originating surface.
     ///
     /// Implementations must apply the same enablement guard as
-    /// [`Self::dispatch_action`]. The default delegates to that method so
+    /// [`Self::dispatch_action`]. Registered action sinks are invoked only
+    /// after this guard succeeds. The default delegates to that method so
     /// existing adapters remain source-compatible.
     fn dispatch_action_from(
         &self,
@@ -920,6 +982,7 @@ pub trait MenuBarService: Send + Sync {
 #[derive(Default)]
 pub struct NativeMenuBar {
     current: Mutex<Option<MenuBar>>,
+    action_sink: Mutex<Option<MenuActionSink>>,
     installed: AtomicBool,
 }
 
@@ -932,6 +995,21 @@ impl NativeMenuBar {
     /// Check if native menus are currently installed.
     pub fn is_installed(&self) -> bool {
         self.installed.load(Ordering::SeqCst)
+    }
+
+    /// Returns a snapshot of the currently installed menu bar for diagnostics
+    /// and deterministic adapter tests.  The snapshot is detached from the
+    /// platform object, so callers cannot mutate live menu state accidentally.
+    pub fn installed_menu_bar(&self) -> Option<MenuBar> {
+        self.current.lock().unwrap().clone()
+    }
+
+    fn invoke_sink(&self, action: CommandAction) -> Result<(), DesktopError> {
+        let sink = self.action_sink.lock().unwrap().clone();
+        if let Some(sink) = sink {
+            sink(action)?;
+        }
+        Ok(())
     }
 }
 
@@ -971,6 +1049,11 @@ impl MenuBarService for NativeMenuBar {
         }
     }
 
+    fn register_action_sink(&self, sink: MenuActionSink) -> Result<(), DesktopError> {
+        *self.action_sink.lock().unwrap() = Some(sink);
+        Ok(())
+    }
+
     fn dispatch_action(&self, item_id: &str) -> Result<(), DesktopError> {
         self.dispatch_action_from(item_id, CommandSource::Menu)
             .map(|_| ())
@@ -981,19 +1064,44 @@ impl MenuBarService for NativeMenuBar {
         item_id: &str,
         source: CommandSource,
     ) -> Result<CommandAction, DesktopError> {
-        let current = self.current.lock().unwrap();
-        let menu_bar = current.as_ref().ok_or_else(|| {
-            DesktopError::InvalidRequest("native menu bar is not installed".into())
-        })?;
-        menu_bar.dispatch_action(item_id, source)
+        // Drop the menu-state lock before invoking application code.  A sink
+        // commonly synchronizes the menu after mutating document state and
+        // therefore may need to acquire `current` again.
+        let action = {
+            let current = self.current.lock().unwrap();
+            let menu_bar = current.as_ref().ok_or_else(|| {
+                DesktopError::InvalidRequest("native menu bar is not installed".into())
+            })?;
+            menu_bar.dispatch_action(item_id, source)?
+        };
+        self.invoke_sink(action.clone())?;
+        Ok(action)
     }
 }
 
 /// Scripted menu bar backend for unit tests and headless QA.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct ScriptedMenuBar {
     installed_bars: Mutex<Vec<MenuBar>>,
     dispatched_actions: Mutex<Vec<String>>,
+    action_sink: Mutex<Option<MenuActionSink>>,
+}
+
+impl fmt::Debug for ScriptedMenuBar {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ScriptedMenuBar")
+            .field("installed_bars", &self.installed_bars.lock().unwrap().len())
+            .field(
+                "dispatched_actions",
+                &self.dispatched_actions.lock().unwrap().len(),
+            )
+            .field(
+                "action_sink_registered",
+                &self.action_sink.lock().unwrap().is_some(),
+            )
+            .finish()
+    }
 }
 
 impl ScriptedMenuBar {
@@ -1010,6 +1118,14 @@ impl ScriptedMenuBar {
     /// List of all dispatched action identifiers.
     pub fn dispatched_actions(&self) -> Vec<String> {
         self.dispatched_actions.lock().unwrap().clone()
+    }
+
+    fn invoke_sink(&self, action: CommandAction) -> Result<(), DesktopError> {
+        let sink = self.action_sink.lock().unwrap().clone();
+        if let Some(sink) = sink {
+            sink(action)?;
+        }
+        Ok(())
     }
 }
 
@@ -1046,6 +1162,11 @@ impl MenuBarService for ScriptedMenuBar {
         }
     }
 
+    fn register_action_sink(&self, sink: MenuActionSink) -> Result<(), DesktopError> {
+        *self.action_sink.lock().unwrap() = Some(sink);
+        Ok(())
+    }
+
     fn dispatch_action(&self, item_id: &str) -> Result<(), DesktopError> {
         self.dispatch_action_from(item_id, CommandSource::Menu)
             .map(|_| ())
@@ -1056,11 +1177,14 @@ impl MenuBarService for ScriptedMenuBar {
         item_id: &str,
         source: CommandSource,
     ) -> Result<CommandAction, DesktopError> {
-        let bars = self.installed_bars.lock().unwrap();
-        let bar = bars.last().ok_or_else(|| {
-            DesktopError::InvalidRequest("scripted menu bar is not installed".into())
-        })?;
-        let action = bar.dispatch_action(item_id, source)?;
+        let action = {
+            let bars = self.installed_bars.lock().unwrap();
+            let bar = bars.last().ok_or_else(|| {
+                DesktopError::InvalidRequest("scripted menu bar is not installed".into())
+            })?;
+            bar.dispatch_action(item_id, source)?
+        };
+        self.invoke_sink(action.clone())?;
         self.dispatched_actions
             .lock()
             .unwrap()
@@ -1069,19 +1193,9 @@ impl MenuBarService for ScriptedMenuBar {
     }
 }
 
-/// Builder helper to construct standard suite menu bars.
-pub fn build_standard_menu_bar(
-    app_name: &str,
-    file_items: Vec<MenuItem>,
-    edit_items: Vec<MenuItem>,
-    view_items: Vec<MenuItem>,
-    extra_menus: Vec<Menu>,
-) -> MenuBar {
-    let mut menus = Vec::new();
-    // Keep the standard document commands in one projection.  The menu is
-    // only one adapter; callers can derive toolbar, keyboard, and
-    // accessibility state from this same source via `MenuBar::command_state_projection`.
-    let standard_commands = CommandStateProjection::new([
+/// Return the shared state and labels for standard suite commands.
+pub fn standard_command_state_projection() -> CommandStateProjection {
+    CommandStateProjection::new([
         CommandState::action("file.new", "New").with_shortcut(MenuShortcut::primary("N")),
         CommandState::action("file.open", "Open...").with_shortcut(MenuShortcut::primary("O")),
         CommandState::action("file.save", "Save").with_shortcut(MenuShortcut::primary("S")),
@@ -1100,10 +1214,25 @@ pub fn build_standard_menu_bar(
         CommandState::action("view.zoom_out", "Zoom Out").with_shortcut(MenuShortcut::primary("-")),
         CommandState::action("view.zoom_actual", "Actual Size")
             .with_shortcut(MenuShortcut::primary("0")),
-        // Inspectors are opt-in contextual chrome.  Applications may replace
+        // Inspectors are opt-in contextual chrome. Applications may replace
         // this entry with a live state when their inspector is available.
         CommandState::check("view.inspector", "Format Inspector", false),
-    ]);
+    ])
+}
+
+/// Builder helper to construct standard suite menu bars.
+pub fn build_standard_menu_bar(
+    app_name: &str,
+    file_items: Vec<MenuItem>,
+    edit_items: Vec<MenuItem>,
+    view_items: Vec<MenuItem>,
+    extra_menus: Vec<Menu>,
+) -> MenuBar {
+    let mut menus = Vec::new();
+    // Keep the standard document commands in one projection.  The menu is
+    // only one adapter; callers can derive toolbar, keyboard, and
+    // accessibility state from this same source via `MenuBar::command_state_projection`.
+    let standard_commands = standard_command_state_projection();
 
     // 1. macOS Application Menu (or File on Linux/Windows)
     if cfg!(target_os = "macos") {

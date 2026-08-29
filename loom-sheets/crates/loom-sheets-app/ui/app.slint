@@ -135,6 +135,8 @@ export component SheetsApp inherits Window {
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
     in-out property <int> inspector-tab: 0;
     callback window-resized(length);
     changed width => {

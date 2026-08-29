@@ -14,8 +14,9 @@ use std::sync::Mutex;
 
 pub mod menu;
 pub use menu::{
-    build_standard_menu_bar, CommandAction, CommandSource, CommandState, CommandStateProjection,
-    Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeMenuBar, ScriptedMenuBar,
+    build_standard_menu_bar, standard_command_state_projection, CommandAction, CommandSource,
+    CommandState, CommandStateProjection, Menu, MenuActionSink, MenuBar, MenuBarService, MenuItem,
+    MenuShortcut, NativeMenuBar, ScriptedMenuBar,
 };
 
 /// A display name and extension list presented by a native file dialog.
@@ -443,6 +444,64 @@ mod tests {
     }
 
     #[test]
+    fn controller_allowlist_disables_every_unlisted_command() {
+        let mut bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        bar.disable_items_except(["file.new"]);
+
+        for id in [
+            "file.open",
+            "file.save",
+            "file.save_as",
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "edit.select_all",
+            "app.palette",
+            "view.zoom_in",
+            "view.zoom_out",
+            "view.zoom_actual",
+            "view.inspector",
+        ] {
+            assert!(
+                !bar.find_item(id)
+                    .expect("controller command exists")
+                    .is_enabled(),
+                "unsupported controller command {id} must be disabled"
+            );
+        }
+
+        for id in [
+            "window.minimize",
+            "window.zoom",
+            "window.bring_all_to_front",
+            "help.documentation",
+            "help.shortcuts",
+            "help.feedback",
+        ] {
+            assert!(
+                !bar.find_item(id)
+                    .expect("platform command exists")
+                    .is_enabled(),
+                "unhandled platform-labelled command {id} must be disabled"
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let app_menu = bar
+                .menus
+                .iter()
+                .find(|menu| menu.title == "Loom")
+                .expect("macOS application menu");
+            assert!(app_menu
+                .items
+                .iter()
+                .filter(|item| item.id().is_some())
+                .all(|item| !item.is_enabled()));
+        }
+    }
+
+    #[test]
     fn disabled_projection_and_menu_never_dispatch() {
         let disabled = CommandState::action("edit.undo", "Undo").with_enabled(false);
         assert!(disabled.keyboard_action().is_none());
@@ -505,6 +564,65 @@ mod tests {
             .dispatch_action_from("file.save", CommandSource::Toolbar)
             .expect("enabled toolbar action");
         assert_eq!(service.dispatched_actions(), vec!["file.save"]);
+    }
+
+    #[test]
+    fn registered_scripted_menu_sink_receives_validated_actions_only() {
+        let service = ScriptedMenuBar::new();
+        let mut bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        bar.update_item_state("file.save", false, None);
+        service.install_menu_bar(&bar).expect("install");
+
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received_ref = received.clone();
+        service
+            .register_action_sink(std::sync::Arc::new(move |action| {
+                received_ref.lock().unwrap().push(action);
+                Ok(())
+            }))
+            .expect("register sink");
+
+        assert!(service
+            .dispatch_action_from("file.save", CommandSource::Menu)
+            .is_err());
+        assert!(received.lock().unwrap().is_empty());
+
+        let mut enabled_bar = bar;
+        enabled_bar.update_item_state("file.save", true, None);
+        service.install_menu_bar(&enabled_bar).expect("reinstall");
+        service
+            .dispatch_action_from("file.save", CommandSource::Menu)
+            .expect("enabled action");
+
+        let received = received.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].id, "file.save");
+        assert_eq!(received[0].source, CommandSource::Menu);
+    }
+
+    #[test]
+    fn registered_native_menu_sink_receives_actions_after_state_guard() {
+        let service = NativeMenuBar::new();
+        let bar = build_standard_menu_bar("Loom", vec![], vec![], vec![], vec![]);
+        service.install_menu_bar(&bar).expect("install");
+
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received_ref = received.clone();
+        service
+            .register_action_sink(std::sync::Arc::new(move |action| {
+                received_ref.lock().unwrap().push(action);
+                Ok(())
+            }))
+            .expect("register sink");
+        service
+            .dispatch_action_from("edit.undo", CommandSource::Keyboard)
+            .expect("shortcut action");
+
+        let received = received.lock().unwrap();
+        assert_eq!(
+            received.as_slice(),
+            [CommandAction::new("edit.undo", CommandSource::Keyboard,)]
+        );
     }
 
     #[test]

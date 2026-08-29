@@ -8,10 +8,12 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use loom_desktop::{
-    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
-    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
+    FileDialogService, FileFilter, Menu, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs,
+    NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
@@ -242,6 +244,68 @@ fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
     let _ = record_snapshot_recovery("sheets state", sheet_to_json(sheet).into_bytes());
 }
 
+fn sync_history_controls(app: &SheetsApp, state: &GuiState) {
+    app.set_can_undo(!state.undo_stack.borrow().is_empty());
+    app.set_can_redo(!state.redo_stack.borrow().is_empty());
+}
+
+/// Build the live state consumed by the standard desktop menu.  Undo/redo
+/// enablement is derived from the same stacks that back the visible editor;
+/// inspector check state is derived from the actual window properties.
+fn menu_projection(
+    menu_service: &NativeMenuBar,
+    app: &SheetsApp,
+) -> Result<CommandStateProjection, DesktopError> {
+    let menu_bar = menu_service
+        .installed_menu_bar()
+        .ok_or_else(|| DesktopError::InvalidRequest("Sheets menu bar is not installed".into()))?;
+    let mut projection = menu_bar.command_state_projection();
+
+    let mut undo = projection
+        .get("edit.undo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Sheets menu is missing edit.undo".into()))?;
+    undo.enabled = app.get_can_undo();
+    projection.insert(undo);
+
+    let mut redo = projection
+        .get("edit.redo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Sheets menu is missing edit.redo".into()))?;
+    redo.enabled = app.get_can_redo();
+    projection.insert(redo);
+
+    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Sheets menu is missing view.inspector".into())
+    })?;
+    inspector.enabled = app.get_inspector_available();
+    inspector.checked = Some(app.get_show_inspector());
+    projection.insert(inspector);
+
+    Ok(projection)
+}
+
+/// Push the current command projection to the installed native menu after a
+/// state transition. The adapter performs strict installed/ID validation;
+/// application mutations remain authoritative even if an OS menu backend is
+/// unavailable.
+fn sync_menu_state_result(
+    menu_service: &NativeMenuBar,
+    app: &SheetsApp,
+    state: &GuiState,
+) -> Result<(), DesktopError> {
+    sync_history_controls(app, state);
+    rebuild_palette(app, app.get_palette_query().as_str());
+    let projection = menu_projection(menu_service, app)?;
+    menu_service.sync_command_states(&projection)
+}
+
+fn sync_menu_state(menu_service: &NativeMenuBar, app: &SheetsApp, state: &GuiState) {
+    if let Err(error) = sync_menu_state_result(menu_service, app, state) {
+        app.set_status_right(SharedString::from(format!("Menu update failed: {error}")));
+    }
+}
+
 fn update_selection(
     app: &SheetsApp,
     sheet: &Sheet,
@@ -322,6 +386,7 @@ fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     }
 }
 
+#[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
 fn wire_responsive_layout(app: &SheetsApp) {
     let app_ref = app.as_weak();
     app.on_window_resized(move |width| {
@@ -464,7 +529,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
-    wire_responsive_layout(&app);
 
     let recovered = initialize_snapshot_recovery()?;
     let initial_sheet = match &args.open {
@@ -491,10 +555,26 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         import_filter,
         csv_filter,
     });
+    // One menu adapter owns the application sink for its entire lifetime so
+    // accepted native actions and toolbar/palette callbacks share a route.
+    let menu_service = Arc::new(NativeMenuBar::new());
 
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_window_resized(move |width| {
+            if let Some(app) = app_ref.upgrade() {
+                apply_layout_breakpoints(&app, width.max(0.0) as u32);
+                sync_menu_state(&menu_service, &app, &state);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_new_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
                 *state.current.borrow_mut() = blank_sheet();
@@ -502,6 +582,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 state.undo_stack.borrow_mut().clear();
                 state.redo_stack.borrow_mut().clear();
                 apply_sheet(&app, &state.current.borrow());
+                sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left("Created unsaved workbook".into());
             }
         });
@@ -509,6 +590,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_commit_selected_cell(move |draft| {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
@@ -526,6 +608,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     };
                     if committed {
                         apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
                         app.set_formula_feedback(SharedString::from(format!(
                             "Cell {} updated",
                             cell.to_a1()
@@ -547,6 +630,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_quick_formula(move |func| {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
@@ -559,6 +643,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     };
                     if committed {
                         apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
                         app.set_formula_feedback(SharedString::from(format!(
                             "Inserted {func} formula"
                         )));
@@ -570,6 +655,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_open_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.open_file(&open_request(&state)) {
@@ -577,6 +663,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         Ok(sheet) => {
                             let imported = !is_native_workbook(&path);
                             replace_opened_sheet(&app, &state, path.clone(), sheet);
+                            sync_menu_state(&menu_service, &app, &state);
                             app.set_status_left(SharedString::from(if imported {
                                 format!(
                                     "Imported {}; use Save As for a Loom workbook",
@@ -649,6 +736,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(prev) = state.undo_stack.borrow_mut().pop() {
@@ -659,6 +747,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                             .push(sheet_to_json(&state.current.borrow()));
                         *state.current.borrow_mut() = sheet;
                         apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
                     }
                 }
             }
@@ -667,6 +756,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(next) = state.redo_stack.borrow_mut().pop() {
@@ -677,6 +767,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                             .push(sheet_to_json(&state.current.borrow()));
                         *state.current.borrow_mut() = sheet;
                         apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
                     }
                 }
             }
@@ -693,11 +784,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
 
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
                 if app.get_inspector_available() {
                     app.set_show_inspector(!app.get_show_inspector());
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -705,6 +799,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_create_template(move |idx| {
             if let Some(app) = app_ref.upgrade() {
                 let sheet = match idx {
@@ -743,6 +838,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 state.undo_stack.borrow_mut().clear();
                 state.redo_stack.borrow_mut().clear();
                 apply_sheet(&app, &state.current.borrow());
+                sync_menu_state(&menu_service, &app, &state);
                 app.set_template_chooser_open(false);
                 app.set_status_left("Created template workbook".into());
             }
@@ -757,7 +853,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
 
-    let menu_bar = build_standard_menu_bar(
+    let mut menu_bar = build_standard_menu_bar(
         "Loom Sheets",
         vec![MenuItem::action_with_shortcut(
             "file.export_csv",
@@ -774,10 +870,33 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             ],
         )],
     );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
+    // Only commands with a registered Sheets/controller sink are enabled.
+    // Application/window/help entries remain disabled until a real native
+    // host bridge is installed for them. Table actions and unsupported
+    // standard commands therefore cannot appear executable.
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "file.export_csv",
+        "edit.undo",
+        "edit.redo",
+        "app.palette",
+        "view.inspector",
+    ]);
+    menu_service
+        .install_menu_bar(&menu_bar)
+        .map_err(|error| error.to_string())?;
+    let app_ref = app.as_weak();
+    menu_service
+        .register_action_sink(Arc::new(move |action: CommandAction| {
+            schedule_menu_action(&app_ref, action)
+        }))
+        .map_err(|error| error.to_string())?;
 
     apply_sheet(&app, &state.current.borrow());
+    sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
     app.show().map_err(|e| e.to_string())?;
     slint::run_event_loop().map_err(|e| e.to_string())?;
@@ -864,6 +983,81 @@ enum PaletteAction {
     Redo,
 }
 
+/// Dispatch canonical command IDs through the same Slint callbacks used by
+/// Sheets toolbar and palette controls.  The prefixed aliases keep the
+/// existing palette command IDs stable while native menus use shared desktop
+/// IDs.
+fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
+    match id {
+        "file.new" | "sheets.new" => app.invoke_new_sheet(),
+        "file.open" | "sheets.open" => app.invoke_open_sheet(),
+        "file.save" | "sheets.save" => app.invoke_save_sheet(),
+        "file.save_as" | "sheets.save-as" => app.invoke_save_as_sheet(),
+        "file.export_csv" | "sheets.export-csv" => app.invoke_export_csv(),
+        "edit.undo" | "sheets.undo" => app.invoke_undo(),
+        "edit.redo" | "sheets.redo" => app.invoke_redo(),
+        "app.palette" => app.invoke_open_palette(),
+        "view.inspector" => app.invoke_toggle_inspector(),
+        _ => return false,
+    }
+    true
+}
+
+/// Queue an accepted native-menu action on Slint's event-loop thread. The
+/// menu adapter may receive events from AppKit/DBus worker threads, so it must
+/// not upgrade or mutate a component directly on that caller thread.
+fn schedule_menu_action(
+    app_ref: &slint::Weak<SheetsApp>,
+    action: CommandAction,
+) -> Result<(), DesktopError> {
+    let CommandAction { id, .. } = action;
+    let error_id = id.clone();
+    app_ref
+        .upgrade_in_event_loop(move |app| {
+            if !dispatch_command(&app, &id) {
+                app.set_status_right(SharedString::from(format!(
+                    "Unsupported menu command: {id}"
+                )));
+            }
+        })
+        .map_err(|error| {
+            DesktopError::InvalidRequest(format!(
+                "failed to schedule Sheets menu command {error_id}: {error}"
+            ))
+        })
+}
+
+/// Route a palette action through the canonical command dispatcher.
+fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
+    match action {
+        PaletteAction::NewSheet => dispatch_command(app, "sheets.new"),
+        PaletteAction::OpenSheet => dispatch_command(app, "sheets.open"),
+        PaletteAction::SaveSheet => dispatch_command(app, "sheets.save"),
+        PaletteAction::SaveAsSheet => dispatch_command(app, "sheets.save-as"),
+        PaletteAction::ExportCsv => dispatch_command(app, "sheets.export-csv"),
+        PaletteAction::Undo if app.get_can_undo() => dispatch_command(app, "sheets.undo"),
+        PaletteAction::Redo if app.get_can_redo() => dispatch_command(app, "sheets.redo"),
+        PaletteAction::Undo | PaletteAction::Redo => false,
+    }
+}
+
+/// Resolve a rendered palette row back to the canonical action. Invocation
+/// must use the row model that Slint displayed rather than rebuilding a
+/// potentially different, state-filtered list: history can change between
+/// rendering and Enter/click delivery, and rebuilding would shift indices.
+fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
+    match id {
+        "sheets.new" => Some(PaletteAction::NewSheet),
+        "sheets.open" => Some(PaletteAction::OpenSheet),
+        "sheets.save" => Some(PaletteAction::SaveSheet),
+        "sheets.save-as" => Some(PaletteAction::SaveAsSheet),
+        "sheets.export-csv" => Some(PaletteAction::ExportCsv),
+        "sheets.undo" => Some(PaletteAction::Undo),
+        "sheets.redo" => Some(PaletteAction::Redo),
+        _ => None,
+    }
+}
+
 struct PaletteCommand {
     action: PaletteAction,
     id: &'static str,
@@ -871,7 +1065,7 @@ struct PaletteCommand {
     shortcut: &'static str,
 }
 
-fn master_palette() -> Vec<PaletteCommand> {
+fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     vec![
         PaletteCommand {
             action: PaletteAction::NewSheet,
@@ -916,11 +1110,18 @@ fn master_palette() -> Vec<PaletteCommand> {
             shortcut: "Ctrl+Shift+Z",
         },
     ]
+    .into_iter()
+    .filter(|c| match c.action {
+        PaletteAction::Undo => app.get_can_undo(),
+        PaletteAction::Redo => app.get_can_redo(),
+        _ => true,
+    })
+    .collect()
 }
 
 fn rebuild_palette(app: &SheetsApp, query: &str) {
     let query_lower = query.trim().to_lowercase();
-    let items: Vec<CommandPaletteItem> = master_palette()
+    let items: Vec<CommandPaletteItem> = master_palette(app)
         .into_iter()
         .filter(|c| {
             query_lower.is_empty()
@@ -1005,26 +1206,17 @@ fn wire_palette(app: &SheetsApp) {
         let app_ref = app.as_weak();
         app.on_palette_invoked(move |index| {
             if let Some(app) = app_ref.upgrade() {
-                let query = app.get_palette_query().trim().to_lowercase();
-                let command = master_palette()
-                    .into_iter()
-                    .filter(|c| {
-                        query.is_empty()
-                            || c.label.to_lowercase().contains(&query)
-                            || c.id.to_lowercase().contains(&query)
-                    })
-                    .nth(index as usize);
-                if let Some(command) = command {
+                let Some(item) = app.get_palette_commands().row_data(index as usize) else {
+                    return;
+                };
+                if !item.enabled {
+                    return;
+                }
+                let Some(action) = palette_action_for_id(item.id.as_str()) else {
+                    return;
+                };
+                if dispatch_palette_action(&app, action) {
                     app.set_palette_open(false);
-                    match command.action {
-                        PaletteAction::NewSheet => app.invoke_new_sheet(),
-                        PaletteAction::OpenSheet => app.invoke_open_sheet(),
-                        PaletteAction::SaveSheet => app.invoke_save_sheet(),
-                        PaletteAction::SaveAsSheet => app.invoke_save_as_sheet(),
-                        PaletteAction::ExportCsv => app.invoke_export_csv(),
-                        PaletteAction::Undo => app.invoke_undo(),
-                        PaletteAction::Redo => app.invoke_redo(),
-                    }
                 }
             }
         });
@@ -1192,6 +1384,192 @@ mod tests {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
         assert!(!app.get_show_inspector());
+    }
+
+    #[test]
+    fn native_menu_and_palette_share_sheets_callback_dispatch() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let calls = Rc::new(std::cell::Cell::new(0));
+        let calls_ref = calls.clone();
+        app.on_save_sheet(move || calls_ref.set(calls_ref.get() + 1));
+
+        assert!(dispatch_command(&app, "file.save"));
+        assert!(dispatch_palette_action(&app, PaletteAction::SaveSheet));
+
+        let menu = NativeMenuBar::new();
+        let bar = build_standard_menu_bar("Loom Sheets", vec![], vec![], vec![], vec![]);
+        menu.install_menu_bar(&bar).expect("install menu");
+        let app_ref = app.as_weak();
+        menu.register_action_sink(Arc::new(move |action: CommandAction| {
+            schedule_menu_action(&app_ref, action)
+        }))
+        .expect("register menu sink");
+        let error = menu
+            .dispatch_action("file.save")
+            .expect_err("capture platform has no event loop provider");
+        assert!(error
+            .to_string()
+            .contains("failed to schedule Sheets menu command"));
+
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn sheets_palette_undo_redo_follow_history_and_disabled_guard() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        app.set_can_undo(false);
+        app.set_can_redo(false);
+        rebuild_palette(&app, "undo");
+        assert_eq!(app.get_palette_commands().row_count(), 0);
+        rebuild_palette(&app, "redo");
+        assert_eq!(app.get_palette_commands().row_count(), 0);
+        assert!(!dispatch_palette_action(&app, PaletteAction::Undo));
+        assert!(!dispatch_palette_action(&app, PaletteAction::Redo));
+
+        let undo_calls = Rc::new(std::cell::Cell::new(0));
+        let undo_calls_ref = undo_calls.clone();
+        app.on_undo(move || undo_calls_ref.set(undo_calls_ref.get() + 1));
+        app.set_can_undo(true);
+        rebuild_palette(&app, "undo");
+        assert!(
+            app.get_palette_commands()
+                .row_data(0)
+                .expect("Undo command")
+                .enabled
+        );
+        assert!(dispatch_palette_action(&app, PaletteAction::Undo));
+        assert_eq!(undo_calls.get(), 1);
+    }
+
+    #[test]
+    fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let redo_calls = Rc::new(std::cell::Cell::new(0));
+        let redo_calls_ref = redo_calls.clone();
+        app.on_redo(move || redo_calls_ref.set(redo_calls_ref.get() + 1));
+
+        // Render both history commands, then invalidate Undo before the user
+        // presses Enter. The visible Redo row is still at index 6; resolving
+        // against a freshly filtered master list would incorrectly look at
+        // index 6 (out of range) or shift to the wrong command.
+        app.set_can_undo(true);
+        app.set_can_redo(true);
+        wire_palette(&app);
+        rebuild_palette(&app, "");
+        assert_eq!(app.get_palette_commands().row_count(), 7);
+        assert_eq!(
+            app.get_palette_commands()
+                .row_data(6)
+                .expect("rendered Redo row")
+                .id
+                .as_str(),
+            "sheets.redo"
+        );
+
+        app.set_can_undo(false);
+        app.invoke_palette_invoked(6);
+
+        assert_eq!(redo_calls.get(), 1);
+        assert!(!app.get_palette_open());
+    }
+
+    #[test]
+    fn sheets_menu_disables_unhandled_controller_commands() {
+        set_platform();
+        let mut menu = build_standard_menu_bar(
+            "Loom Sheets",
+            vec![MenuItem::action("file.export_csv", "Export to CSV...")],
+            vec![],
+            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+            vec![Menu::new(
+                "Table",
+                [
+                    MenuItem::action("table.add_row", "Add Row"),
+                    MenuItem::action("table.add_col", "Add Column"),
+                ],
+            )],
+        );
+        menu.disable_items_except([
+            "file.new",
+            "file.open",
+            "file.save",
+            "file.save_as",
+            "file.export_csv",
+            "edit.undo",
+            "edit.redo",
+            "app.palette",
+            "view.inspector",
+        ]);
+        for id in [
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "edit.select_all",
+            "view.zoom_in",
+            "view.zoom_out",
+            "view.zoom_actual",
+            "table.add_row",
+            "table.add_col",
+        ] {
+            assert!(
+                !menu.find_item(id).expect("menu command").is_enabled(),
+                "unhandled Sheets command {id} must be disabled"
+            );
+        }
+    }
+
+    #[test]
+    fn sheets_inspector_menu_check_tracks_live_window_state() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let state = GuiState {
+            current: RefCell::new(sample_sheet()),
+            save_path: RefCell::new(None),
+            undo_stack: RefCell::new(Vec::new()),
+            redo_stack: RefCell::new(Vec::new()),
+            dialogs,
+            workbook_filter: FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+            import_filter: FileFilter::new("CSV", ["csv"]).expect("filter"),
+            csv_filter: FileFilter::new("CSV", ["csv"]).expect("filter"),
+        };
+        let menu = NativeMenuBar::new();
+        let bar = build_standard_menu_bar(
+            "Loom Sheets",
+            vec![],
+            vec![],
+            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+            vec![],
+        );
+        menu.install_menu_bar(&bar).expect("install menu");
+
+        app.set_inspector_available(true);
+        app.set_show_inspector(false);
+        sync_menu_state(&menu, &app, &state);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: false,
+                enabled: true,
+                ..
+            })
+        ));
+
+        app.set_show_inspector(true);
+        sync_menu_state(&menu, &app, &state);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: true,
+                enabled: true,
+                ..
+            })
+        ));
     }
 
     #[test]

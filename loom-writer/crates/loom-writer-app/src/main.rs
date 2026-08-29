@@ -10,6 +10,7 @@ mod document_formatting;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 use document_formatting::{
@@ -17,8 +18,9 @@ use document_formatting::{
     set_document_italic, set_document_underline,
 };
 use loom_desktop::{
-    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
-    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
+    FileDialogService, FileFilter, Menu, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs,
+    NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
@@ -285,6 +287,81 @@ enum PaletteAction {
     ToggleUnderline,
     SetHeading(i32),
     SetAlignment(i32),
+}
+
+/// Dispatch one canonical command identifier through the callbacks shared by
+/// toolbar, command-palette, keyboard, and native-menu surfaces.
+///
+/// The native menu uses the unprefixed desktop IDs while the palette retains
+/// its historical `writer.*` IDs.  Keeping both aliases here lets existing
+/// palette entries remain stable without creating a second mutation path.
+fn dispatch_command(app: &WriterApp, id: &str) -> bool {
+    match id {
+        "file.new" | "writer.new" => app.invoke_new_doc(),
+        "file.open" | "writer.open" => app.invoke_open_doc(),
+        "file.save" | "writer.save" => app.invoke_save_doc(),
+        "file.save_as" | "writer.save-as" => app.invoke_save_as_doc(),
+        "file.export_pdf" | "writer.export-pdf" => app.invoke_export_pdf(),
+        "edit.undo" | "writer.undo" => app.invoke_undo(),
+        "edit.redo" | "writer.redo" => app.invoke_redo(),
+        "app.palette" => app.invoke_open_palette(),
+        "view.inspector" => app.invoke_toggle_inspector(),
+        "format.bold" | "writer.style.bold-all" => app.invoke_toggle_bold(),
+        "format.italic" | "writer.style.italic-all" => app.invoke_toggle_italic(),
+        "format.underline" | "writer.style.underline-all" => app.invoke_toggle_underline(),
+        _ => return false,
+    }
+    true
+}
+
+/// Queue an accepted native-menu action on Slint's event-loop thread. The
+/// menu adapter may receive events from AppKit/DBus worker threads, so it must
+/// not upgrade or mutate a component directly on that caller thread.
+fn schedule_menu_action(
+    app_ref: &slint::Weak<WriterApp>,
+    action: CommandAction,
+) -> Result<(), DesktopError> {
+    let CommandAction { id, .. } = action;
+    let error_id = id.clone();
+    app_ref
+        .upgrade_in_event_loop(move |app| {
+            if !dispatch_command(&app, &id) {
+                app.set_status_right(SharedString::from(format!(
+                    "Unsupported menu command: {id}"
+                )));
+            }
+        })
+        .map_err(|error| {
+            DesktopError::InvalidRequest(format!(
+                "failed to schedule Writer menu command {error_id}: {error}"
+            ))
+        })
+}
+
+/// Dispatch a palette command through [`dispatch_command`] where the action
+/// has a direct command ID.  Parameterized formatting commands still use the
+/// same callback endpoints but carry their value explicitly.
+fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) -> bool {
+    match action {
+        PaletteAction::SetHeading(level) => {
+            app.invoke_select_heading(level);
+            true
+        }
+        PaletteAction::SetAlignment(index) => {
+            app.invoke_select_alignment(index);
+            true
+        }
+        PaletteAction::NewDoc => dispatch_command(app, "writer.new"),
+        PaletteAction::OpenDoc => dispatch_command(app, "writer.open"),
+        PaletteAction::SaveDoc => dispatch_command(app, "writer.save"),
+        PaletteAction::SaveAsDoc => dispatch_command(app, "writer.save-as"),
+        PaletteAction::ExportPdf => dispatch_command(app, "writer.export-pdf"),
+        PaletteAction::Undo => dispatch_command(app, "writer.undo"),
+        PaletteAction::Redo => dispatch_command(app, "writer.redo"),
+        PaletteAction::ToggleBold => dispatch_command(app, "writer.style.bold-all"),
+        PaletteAction::ToggleItalic => dispatch_command(app, "writer.style.italic-all"),
+        PaletteAction::ToggleUnderline => dispatch_command(app, "writer.style.underline-all"),
+    }
 }
 
 struct PaletteCommand {
@@ -701,6 +778,71 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
     state.syncing_editor.set(false);
 }
 
+/// Build the live state consumed by every standard desktop menu item.
+///
+/// This intentionally mirrors only commands installed by the standard menu
+/// bar.  App-specific palette entries remain available through
+/// [`dispatch_command`], while undo/redo and inspector state are projected
+/// from the same controller state that drives the visible toolbar.
+fn menu_projection(
+    menu_service: &NativeMenuBar,
+    app: &WriterApp,
+) -> Result<CommandStateProjection, DesktopError> {
+    let menu_bar = menu_service
+        .installed_menu_bar()
+        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu bar is not installed".into()))?;
+    let mut projection = menu_bar.command_state_projection();
+
+    let mut undo = projection
+        .get("edit.undo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu is missing edit.undo".into()))?;
+    undo.enabled = app.get_can_undo();
+    projection.insert(undo);
+
+    let mut redo = projection
+        .get("edit.redo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Writer menu is missing edit.redo".into()))?;
+    redo.enabled = app.get_can_redo();
+    projection.insert(redo);
+
+    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Writer menu is missing view.inspector".into())
+    })?;
+    inspector.enabled = app.get_inspector_available();
+    inspector.checked = Some(app.get_show_inspector());
+    projection.insert(inspector);
+
+    Ok(projection)
+}
+
+/// Synchronize labels, enablement, shortcuts, and check state after a
+/// controller/UI mutation. The adapter validates installation and command IDs;
+/// document mutation remains authoritative even if a platform menu backend is
+/// unavailable.
+fn sync_menu_state_result(
+    menu_service: &NativeMenuBar,
+    app: &WriterApp,
+    state: &GuiState,
+) -> Result<(), DesktopError> {
+    // Keep palette, toolbar, and menu history flags sourced from the same
+    // controller stacks before projecting the menu state.
+    let history = state.history.borrow();
+    app.set_can_undo(!history.undo.is_empty());
+    app.set_can_redo(!history.redo.is_empty());
+    drop(history);
+    rebuild_palette(app, app.get_palette_query().as_str());
+    let projection = menu_projection(menu_service, app)?;
+    menu_service.sync_command_states(&projection)
+}
+
+fn sync_menu_state(menu_service: &NativeMenuBar, app: &WriterApp, state: &GuiState) {
+    if let Err(error) = sync_menu_state_result(menu_service, app, state) {
+        app.set_status_right(SharedString::from(format!("Menu update failed: {error}")));
+    }
+}
+
 fn history_now_ms(state: &GuiState) -> u64 {
     state
         .history_clock
@@ -760,6 +902,7 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     }
 }
 
+#[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
 fn wire_responsive_layout(app: &WriterApp) {
     let app_ref = app.as_weak();
     app.on_window_resized(move |width| {
@@ -805,7 +948,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
-    wire_responsive_layout(&app);
 
     let recovered = if args.open.is_none() {
         take_snapshot_recovery().and_then(|payload| loom_writer_core::load_document(&payload).ok())
@@ -835,6 +977,22 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         document_filter,
         pdf_filter,
     });
+    // Keep one shared adapter alive for the whole application lifetime.  Its
+    // registered sink below dispatches accepted native menu actions into the
+    // same Slint callbacks used by toolbar and palette controls.
+    let menu_service = Arc::new(NativeMenuBar::new());
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_window_resized(move |width| {
+            if let Some(app) = app_ref.upgrade() {
+                apply_layout_breakpoints(&app, width.max(0.0) as u32);
+                sync_menu_state(&menu_service, &app, &state);
+            }
+        });
+    }
 
     {
         let app_ref = app.as_weak();
@@ -852,6 +1010,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_create_template(move |index| {
             if let Some(app) = app_ref.upgrade() {
                 let template = match index {
@@ -869,6 +1028,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 *state.history.borrow_mut() = EditorHistory::new();
                 app.set_template_chooser_open(false);
                 apply_state(&app, &state);
+                sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left(SharedString::from(format!(
                     "Created {} document",
                     match template {
@@ -891,12 +1051,15 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
                 if app.get_inspector_available() {
                     let visible = app.get_show_inspector();
                     app.set_show_inspector(!visible);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -904,12 +1067,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_open_doc(move || {
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.open_file(&writer_open_request(&state)) {
                     Ok(Some(path)) => match load_file(&path) {
                         Ok(document) => {
                             replace_opened_document(&app, &state, path.clone(), document);
+                            sync_menu_state(&menu_service, &app, &state);
                             app.set_status_left(SharedString::from(format!(
                                 "Opened {}",
                                 path.display()
@@ -978,11 +1143,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(prev) = state.history.borrow_mut().undo() {
                     *state.current.borrow_mut() = prev;
                     apply_state(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -990,11 +1157,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(next) = state.history.borrow_mut().redo() {
                     *state.current.borrow_mut() = next;
                     apply_state(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -1002,6 +1171,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_document_edited(move |text| {
             if let Some(app) = app_ref.upgrade() {
                 if state.syncing_editor.get() {
@@ -1012,11 +1182,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 let current = state.current.borrow().clone();
                 if next != current {
                     apply_with_history(&app, &state, next, HistoryKind::Typing);
+                    sync_menu_state(&menu_service, &app, &state);
                 } else if next.editor_text() != text.as_str() {
                     // Extra blank lines and non-canonical line endings are a
                     // view normalization, not a document edit. Rebind the
                     // visible editor without adding a history transaction.
                     apply_state(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -1024,12 +1196,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_toggle_bold(move || {
             if let Some(app) = app_ref.upgrade() {
                 let enabled = app.get_is_bold();
                 let mut next = state.current.borrow().clone();
                 set_document_bold(&mut next, enabled);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_menu_state(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(if enabled {
                     "Bold applied to all paragraphs"
                 } else {
@@ -1041,12 +1215,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_toggle_italic(move || {
             if let Some(app) = app_ref.upgrade() {
                 let enabled = app.get_is_italic();
                 let mut next = state.current.borrow().clone();
                 set_document_italic(&mut next, enabled);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_menu_state(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(if enabled {
                     "Italic applied to all paragraphs"
                 } else {
@@ -1058,12 +1234,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_toggle_underline(move || {
             if let Some(app) = app_ref.upgrade() {
                 let enabled = app.get_is_underline();
                 let mut next = state.current.borrow().clone();
                 set_document_underline(&mut next, enabled);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_menu_state(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(if enabled {
                     "Underline applied to all paragraphs"
                 } else {
@@ -1075,11 +1253,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_select_heading(move |level| {
             if let Some(app) = app_ref.upgrade() {
                 let mut next = state.current.borrow().clone();
                 set_document_heading(&mut next, level);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_menu_state(&menu_service, &app, &state);
                 let label = match level {
                     1 => "Heading 1",
                     2 => "Heading 2",
@@ -1095,11 +1275,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_select_alignment(move |align| {
             if let Some(app) = app_ref.upgrade() {
                 let mut next = state.current.borrow().clone();
                 set_document_alignment(&mut next, align);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_menu_state(&menu_service, &app, &state);
                 let label = match align {
                     1 => "Center",
                     2 => "Right",
@@ -1113,7 +1295,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
 
-    let menu_bar = build_standard_menu_bar(
+    let mut menu_bar = build_standard_menu_bar(
         "Loom Writer",
         vec![MenuItem::action_with_shortcut(
             "file.export_pdf",
@@ -1139,12 +1321,37 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             ],
         )],
     );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
+    // Only commands with a registered Writer/controller sink are enabled.
+    // Application/window/help entries remain disabled until a real native
+    // host bridge is installed for them.
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "file.export_pdf",
+        "edit.undo",
+        "edit.redo",
+        "app.palette",
+        "view.inspector",
+        "format.bold",
+        "format.italic",
+        "format.underline",
+    ]);
+    menu_service
+        .install_menu_bar(&menu_bar)
+        .map_err(|error| error.to_string())?;
+    let app_ref = app.as_weak();
+    menu_service
+        .register_action_sink(Arc::new(move |action: CommandAction| {
+            schedule_menu_action(&app_ref, action)
+        }))
+        .map_err(|error| error.to_string())?;
 
     wire_palette(&app);
 
     apply_state(&app, &state);
+    sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     app.show().map_err(|e| e.to_string())?;
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
@@ -1300,20 +1507,7 @@ fn wire_palette(app: &WriterApp) {
                     .nth(index as usize);
                 if let Some(command) = command {
                     app.set_palette_open(false);
-                    match command.action {
-                        PaletteAction::NewDoc => app.invoke_new_doc(),
-                        PaletteAction::OpenDoc => app.invoke_open_doc(),
-                        PaletteAction::SaveDoc => app.invoke_save_doc(),
-                        PaletteAction::SaveAsDoc => app.invoke_save_as_doc(),
-                        PaletteAction::ExportPdf => app.invoke_export_pdf(),
-                        PaletteAction::Undo => app.invoke_undo(),
-                        PaletteAction::Redo => app.invoke_redo(),
-                        PaletteAction::ToggleBold => app.invoke_toggle_bold(),
-                        PaletteAction::ToggleItalic => app.invoke_toggle_italic(),
-                        PaletteAction::ToggleUnderline => app.invoke_toggle_underline(),
-                        PaletteAction::SetHeading(level) => app.invoke_select_heading(level),
-                        PaletteAction::SetAlignment(index) => app.invoke_select_alignment(index),
-                    }
+                    let _ = dispatch_palette_action(&app, command.action);
                 }
             }
         });
@@ -1460,6 +1654,135 @@ mod tests {
         set_platform();
         let app = WriterApp::new().expect("create WriterApp");
         assert!(!app.get_show_inspector());
+    }
+
+    #[test]
+    fn native_menu_and_palette_share_writer_callback_dispatch() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let calls = Rc::new(Cell::new(0));
+        let calls_ref = calls.clone();
+        app.on_save_doc(move || calls_ref.set(calls_ref.get() + 1));
+
+        assert!(dispatch_command(&app, "file.save"));
+        assert!(dispatch_palette_action(&app, PaletteAction::SaveDoc));
+
+        let menu = NativeMenuBar::new();
+        let bar = build_standard_menu_bar("Loom Writer", vec![], vec![], vec![], vec![]);
+        menu.install_menu_bar(&bar).expect("install menu");
+        let app_ref = app.as_weak();
+        menu.register_action_sink(Arc::new(move |action: CommandAction| {
+            schedule_menu_action(&app_ref, action)
+        }))
+        .expect("register menu sink");
+        let error = menu
+            .dispatch_action("file.save")
+            .expect_err("capture platform has no event loop provider");
+        assert!(error
+            .to_string()
+            .contains("failed to schedule Writer menu command"));
+
+        // The menu event was queued only when a real event-loop provider was
+        // available; the capture platform must not invoke Slint directly.
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn writer_menu_disables_unhandled_controller_commands() {
+        set_platform();
+        let mut menu = build_standard_menu_bar("Loom Writer", vec![], vec![], vec![], vec![]);
+        menu.disable_items_except([
+            "file.new",
+            "file.open",
+            "file.save",
+            "file.save_as",
+            "file.export_pdf",
+            "edit.undo",
+            "edit.redo",
+            "app.palette",
+            "view.inspector",
+            "format.bold",
+            "format.italic",
+            "format.underline",
+        ]);
+        for id in [
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "edit.select_all",
+            "view.zoom_in",
+            "view.zoom_out",
+            "view.zoom_actual",
+        ] {
+            assert!(
+                !menu.find_item(id).expect("standard command").is_enabled(),
+                "unhandled Writer command {id} must be disabled"
+            );
+        }
+
+        let service = NativeMenuBar::new();
+        service.install_menu_bar(&menu).expect("install menu");
+        let sink_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sink_calls_ref = sink_calls.clone();
+        service
+            .register_action_sink(Arc::new(move |_| {
+                sink_calls_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(())
+            }))
+            .expect("register sink");
+        assert!(service.dispatch_action("edit.cut").is_err());
+        assert_eq!(sink_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn writer_inspector_menu_check_tracks_live_window_state() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let state = GuiState {
+            current: RefCell::new(text_document("menu state")),
+            save_path: RefCell::new(None),
+            history: RefCell::new(EditorHistory::new()),
+            history_clock: Instant::now(),
+            syncing_editor: Cell::new(false),
+            dialogs,
+            document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+        };
+        let menu = NativeMenuBar::new();
+        let bar = build_standard_menu_bar(
+            "Loom Writer",
+            vec![],
+            vec![],
+            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+            vec![],
+        );
+        menu.install_menu_bar(&bar).expect("install menu");
+
+        app.set_inspector_available(true);
+        app.set_show_inspector(false);
+        sync_menu_state(&menu, &app, &state);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: false,
+                enabled: true,
+                ..
+            })
+        ));
+
+        app.set_show_inspector(true);
+        sync_menu_state(&menu, &app, &state);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: true,
+                enabled: true,
+                ..
+            })
+        ));
     }
 
     #[test]
