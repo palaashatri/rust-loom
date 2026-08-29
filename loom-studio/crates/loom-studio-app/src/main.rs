@@ -445,7 +445,10 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         save_path: RefCell::new(save_path),
         dialogs: Rc::new(NativeFileDialogs),
         audio: RefCell::new(None),
-        midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
+        // Keep the compact sidebar status readable at the reference width.
+        // The full headless context is already communicated by the status
+        // bar, while this pill should remain a concise device-state label.
+        midi_status: RefCell::new("MIDI unavailable (headless)".into()),
         metronome_enabled: Cell::new(true),
     };
     refresh(&app, &state);
@@ -475,7 +478,10 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         save_path: RefCell::new(save_path),
         dialogs: Rc::new(NativeFileDialogs),
         audio: RefCell::new(None),
-        midi_status: RefCell::new("MIDI discovery unavailable in headless mode".into()),
+        // Keep the compact sidebar status readable at the reference width.
+        // The full headless context is already communicated by the status
+        // bar, while this pill should remain a concise device-state label.
+        midi_status: RefCell::new("MIDI unavailable (headless)".into()),
         metronome_enabled: Cell::new(true),
     };
     refresh(&app, &state);
