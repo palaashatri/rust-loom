@@ -60,6 +60,71 @@ impl CellRef {
     }
 }
 
+/// The bounded portion of a worksheet currently projected into an editor grid.
+///
+/// The workbook stays sparse and unbounded; this value only records the
+/// scroll offsets and the number of rows and columns a UI is rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SheetViewport {
+    /// Zero-based first visible worksheet row.
+    pub first_row: u32,
+    /// Zero-based first visible worksheet column.
+    pub first_col: u32,
+    /// Number of visible rows. Always at least one.
+    pub visible_rows: u32,
+    /// Number of visible columns. Always at least one.
+    pub visible_cols: u32,
+}
+
+impl SheetViewport {
+    /// Starts at the worksheet origin with a non-empty visible window.
+    pub fn new(visible_rows: u32, visible_cols: u32) -> Self {
+        Self {
+            first_row: 0,
+            first_col: 0,
+            visible_rows: visible_rows.max(1),
+            visible_cols: visible_cols.max(1),
+        }
+    }
+
+    /// Returns whether the cell is currently inside the projected window.
+    pub fn contains(self, cell: CellRef) -> bool {
+        cell.row >= self.first_row
+            && cell.row - self.first_row < self.visible_rows
+            && cell.col >= self.first_col
+            && cell.col - self.first_col < self.visible_cols
+    }
+
+    /// Moves the window only as far as needed to make `cell` visible.
+    pub fn reveal(&mut self, cell: CellRef) {
+        if cell.row < self.first_row {
+            self.first_row = cell.row;
+        } else if cell.row - self.first_row >= self.visible_rows {
+            self.first_row = cell.row.saturating_sub(self.visible_rows - 1);
+        }
+
+        if cell.col < self.first_col {
+            self.first_col = cell.col;
+        } else if cell.col - self.first_col >= self.visible_cols {
+            self.first_col = cell.col.saturating_sub(self.visible_cols - 1);
+        }
+    }
+
+    /// Resolves a local visible-row index to a worksheet row.
+    pub fn row_at(self, index: u32) -> Option<u32> {
+        (index < self.visible_rows)
+            .then(|| self.first_row.checked_add(index))
+            .flatten()
+    }
+
+    /// Resolves a local visible-column index to a worksheet column.
+    pub fn column_at(self, index: u32) -> Option<u32> {
+        (index < self.visible_cols)
+            .then(|| self.first_col.checked_add(index))
+            .flatten()
+    }
+}
+
 /// A cell value produced by evaluation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -5183,5 +5248,18 @@ mod tests {
         // Empty grids export an empty sheet and import back empty.
         let empty = export_xlsx_from_grid(&[]).unwrap();
         assert!(extract_xlsx_grid(&empty).unwrap().is_empty());
+    }
+
+    #[test]
+    fn viewport_reveals_a_selection_outside_its_visible_window() {
+        let mut viewport = SheetViewport::new(15, 8);
+
+        viewport.reveal(CellRef { row: 24, col: 9 });
+
+        assert_eq!(viewport.first_row, 10);
+        assert_eq!(viewport.first_col, 2);
+        assert!(viewport.contains(CellRef { row: 24, col: 9 }));
+        assert_eq!(viewport.row_at(0), Some(10));
+        assert_eq!(viewport.column_at(0), Some(2));
     }
 }

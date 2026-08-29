@@ -19,7 +19,7 @@ use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::{
     evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellEditTransaction, CellRef,
-    Sheet, Value,
+    Sheet, SheetViewport, Value,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -198,39 +198,98 @@ fn cell_value(
     }
 }
 
+/// The small, renderable slice of a sparse worksheet shown by the Slint grid.
+/// Cell coordinates in this structure are local to the viewport; the
+/// `SheetViewport` owns their corresponding worksheet offsets.
+struct ProjectedSheetGrid {
+    rows: Vec<i32>,
+    cols: Vec<i32>,
+    column_headers: Vec<String>,
+    row_headers: Vec<String>,
+    cells: Vec<String>,
+}
+
+fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetGrid {
+    let values = evaluate(sheet);
+    let rows: Vec<i32> = (0..viewport.visible_rows).map(|row| row as i32).collect();
+    let cols: Vec<i32> = (0..viewport.visible_cols).map(|col| col as i32).collect();
+    let column_headers = (0..viewport.visible_cols)
+        .filter_map(|index| viewport.column_at(index))
+        .map(|column| {
+            CellRef {
+                row: 0,
+                col: column,
+            }
+            .to_a1()
+            .trim_end_matches('1')
+            .to_string()
+        })
+        .collect();
+    let row_headers = (0..viewport.visible_rows)
+        .filter_map(|index| viewport.row_at(index))
+        .map(|row| (row + 1).to_string())
+        .collect();
+    let mut cells = Vec::with_capacity((viewport.visible_rows * viewport.visible_cols) as usize);
+    for local_row in 0..viewport.visible_rows {
+        for local_col in 0..viewport.visible_cols {
+            let Some(row) = viewport.row_at(local_row) else {
+                continue;
+            };
+            let Some(col) = viewport.column_at(local_col) else {
+                continue;
+            };
+            cells.push(cell_value(sheet, &values, row, col));
+        }
+    }
+
+    ProjectedSheetGrid {
+        rows,
+        cols,
+        column_headers,
+        row_headers,
+        cells,
+    }
+}
+
+fn viewport_from_app(app: &SheetsApp) -> SheetViewport {
+    SheetViewport {
+        first_row: app.get_view_row_origin().max(0) as u32,
+        first_col: app.get_view_col_origin().max(0) as u32,
+        visible_rows: GRID_ROWS as u32,
+        visible_cols: GRID_COLS as u32,
+    }
+}
+
 fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
     let vals = evaluate(sheet);
     let selected =
         CellRef::parse(app.get_selected_cell().as_str()).unwrap_or(CellRef { row: 0, col: 0 });
-    let cols: Vec<i32> = (0..GRID_COLS as i32).collect();
-    let rows: Vec<i32> = (0..GRID_ROWS as i32).collect();
-    let headers: Vec<SharedString> = (0..GRID_COLS)
-        .map(|c| {
-            SharedString::from(
-                CellRef {
-                    row: 0,
-                    col: c as u32,
-                }
-                .to_a1()
-                .trim_end_matches('1'),
-            )
-        })
-        .collect();
-    let row_headers: Vec<SharedString> = (1..=GRID_ROWS as i32)
-        .map(|r| SharedString::from(r.to_string()))
-        .collect();
-    let mut cells: Vec<SharedString> = Vec::new();
-    for r in 0..GRID_ROWS as u32 {
-        for c in 0..GRID_COLS as u32 {
-            cells.push(SharedString::from(cell_value(sheet, &vals, r, c)));
-        }
-    }
+    let mut viewport = viewport_from_app(app);
+    viewport.reveal(selected);
+    app.set_view_row_origin(viewport.first_row as i32);
+    app.set_view_col_origin(viewport.first_col as i32);
+    let grid = project_sheet_grid(sheet, viewport);
 
-    app.set_cols(ModelRc::new(VecModel::from(cols)));
-    app.set_rows(ModelRc::new(VecModel::from(rows)));
-    app.set_column_headers(ModelRc::new(VecModel::from(headers)));
-    app.set_row_headers(ModelRc::new(VecModel::from(row_headers)));
-    app.set_cells(ModelRc::new(VecModel::from(cells)));
+    app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
+    app.set_rows(ModelRc::new(VecModel::from(grid.rows)));
+    app.set_column_headers(ModelRc::new(VecModel::from(
+        grid.column_headers
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+    app.set_row_headers(ModelRc::new(VecModel::from(
+        grid.row_headers
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
+    app.set_cells(ModelRc::new(VecModel::from(
+        grid.cells
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )));
     update_selection(app, sheet, &vals, selected);
     app.set_sheet_name(sheet.name.as_str().into());
     let formulas = sheet
@@ -352,13 +411,31 @@ fn commit_formula_edit(
 }
 
 fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
-    if r < 0 || c < 0 || r >= GRID_ROWS as i32 || c >= GRID_COLS as i32 {
+    if r < 0 || c < 0 {
         return;
     }
     let (r, c) = (r as u32, c as u32);
     let refr = CellRef { row: r, col: c };
     let vals = evaluate(sheet);
     update_selection(app, sheet, &vals, refr);
+}
+
+fn offset_coordinate(value: u32, delta: i32) -> u32 {
+    if delta < 0 {
+        value.saturating_sub(delta.unsigned_abs())
+    } else {
+        value.saturating_add(delta as u32)
+    }
+}
+
+fn navigate_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
+    let selected =
+        CellRef::parse(app.get_selected_cell().as_str()).unwrap_or(CellRef { row: 0, col: 0 });
+    let next = CellRef {
+        row: offset_coordinate(selected.row, row_delta),
+        col: offset_coordinate(selected.col, col_delta),
+    };
+    update_selection(app, sheet, &evaluate(sheet), next);
 }
 
 fn apply_theme(app: &SheetsApp, theme: &str) {
@@ -782,6 +859,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_cell_clicked(move |r, c| {
             if let Some(app) = app_ref.upgrade() {
                 select_cell(&app, &state.current.borrow(), r, c);
+                apply_sheet(&app, &state.current.borrow());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_navigate_selection(move |row_delta, col_delta| {
+            if let Some(app) = app_ref.upgrade() {
+                navigate_selection(&app, &state.current.borrow(), row_delta, col_delta);
+                apply_sheet(&app, &state.current.borrow());
             }
         });
     }
@@ -902,6 +990,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
     app.show().map_err(|e| e.to_string())?;
+    // A visible selection is not enough to receive keyboard input. Focus the
+    // grid after the native window is shown; winit may replace the focus item
+    // during presentation, so doing this before `show` is not durable.
+    app.invoke_focus_grid();
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1344,6 +1436,49 @@ mod tests {
             &mut sheet, &mut undo, &mut redo, selected, "new",
         ));
         assert_eq!(undo.len(), 1);
+    }
+
+    #[test]
+    fn sheet_grid_projection_uses_viewport_offsets_for_headers_and_cells() {
+        let mut sheet = Sheet::new("test");
+        sheet.set_str("C11", "Bottom right");
+        sheet.set_str("D12", "Tail");
+        let viewport = loom_sheets_core::SheetViewport {
+            first_row: 10,
+            first_col: 2,
+            visible_rows: 2,
+            visible_cols: 2,
+        };
+
+        let projection = project_sheet_grid(&sheet, viewport);
+
+        assert_eq!(projection.column_headers, ["C", "D"]);
+        assert_eq!(projection.row_headers, ["11", "12"]);
+        assert_eq!(projection.cells, ["Bottom right", "", "", "Tail"]);
+    }
+
+    #[test]
+    fn focused_grid_routes_arrow_keys_to_selection_navigation() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let calls = Rc::new(std::cell::Cell::new((0, 0)));
+        let calls_ref = calls.clone();
+        app.on_navigate_selection(move |row_delta, col_delta| {
+            calls_ref.set((row_delta, col_delta));
+        });
+
+        app.invoke_focus_grid();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::DownArrow.into(),
+            });
+        assert_eq!(calls.get(), (1, 0));
+
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::RightArrow.into(),
+            });
+        assert_eq!(calls.get(), (0, 1));
     }
 
     #[test]

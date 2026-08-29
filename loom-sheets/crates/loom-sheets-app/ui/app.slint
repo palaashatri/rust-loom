@@ -154,6 +154,10 @@ export component SheetsApp inherits Window {
     in property <[string]> column-headers: [];
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
+    // The grid renders a bounded slice of the sparse workbook. These are
+    // zero-based worksheet coordinates, not visual row/column indexes.
+    in property <int> view-row-origin: 0;
+    in property <int> view-col-origin: 0;
     in property <string> selected-cell: "A1";
     in property <int> selected-row: 0;
     in property <int> selected-col: 0;
@@ -177,6 +181,7 @@ export component SheetsApp inherits Window {
     callback commit-selected-cell(string);
     callback cancel-selected-cell;
     callback quick-formula(string);
+    callback navigate-selection(int, int);
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -196,6 +201,12 @@ export component SheetsApp inherits Window {
         root.palette-open = true;
         root.palette-query = "";
         palette.grab-focus();
+    }
+
+    // Exposed for the native grid journey and for restoring keyboard focus
+    // after a formula-bar or toolbar interaction.
+    public function focus-grid() {
+        grid-focus.focus();
     }
 
     public function reset-formula-edit-buffer() {
@@ -295,6 +306,22 @@ export component SheetsApp inherits Window {
                     root.export-csv();
                     return accept;
                 }
+            }
+            if (event.text == Key.LeftArrow) {
+                root.navigate-selection(0, -1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.navigate-selection(0, 1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.navigate-selection(-1, 0);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.navigate-selection(1, 0);
+                return accept;
             }
             return reject;
         }
@@ -554,9 +581,35 @@ export component SheetsApp inherits Window {
                 vertical-stretch: 1;
 
                 // Spreadsheet Canvas Area
-                    CanvasSurface {
+                CanvasSurface {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
+
+                    // Keep keyboard navigation attached to the spreadsheet
+                    // rather than whichever toolbar or field was last
+                    // clicked. Cell clicks explicitly focus this scope below
+                    // so arrow keys continue the visible selection journey.
+                    grid-focus := FocusScope {
+                        key-pressed(event) => {
+                            if (event.text == Key.LeftArrow) {
+                                root.navigate-selection(0, -1);
+                                return accept;
+                            }
+                            if (event.text == Key.RightArrow) {
+                                root.navigate-selection(0, 1);
+                                return accept;
+                            }
+                            if (event.text == Key.UpArrow) {
+                                root.navigate-selection(-1, 0);
+                                return accept;
+                            }
+                            if (event.text == Key.DownArrow) {
+                                root.navigate-selection(1, 0);
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
 
                     // Table Sheet Container with drop shadow
                     Rectangle {
@@ -615,15 +668,15 @@ export component SheetsApp inherits Window {
                                         horizontal-stretch: 1;
                                         min-height: 26px;
                                         max-height: 26px;
-                                        background: c == root.selected-col ? Theme.palette().selection-soft : Theme.palette().chrome;
+                                        background: c + root.view-col-origin == root.selected-col ? Theme.palette().selection-soft : Theme.palette().chrome;
                                         border-width: 1px;
-                                        border-color: c == root.selected-col ? Theme.palette().accent : Theme.palette().border;
+                                        border-color: c + root.view-col-origin == root.selected-col ? Theme.palette().accent : Theme.palette().border;
 
                                         Text {
                                             text: root.column-headers[c];
                                             font-size: Theme.tokens.typography.caption;
-                                            font-weight: c == root.selected-col ? 700 : 500;
-                                            color: c == root.selected-col ? Theme.palette().accent : Theme.palette().ink-secondary;
+                                            font-weight: c + root.view-col-origin == root.selected-col ? 700 : 500;
+                                            color: c + root.view-col-origin == root.selected-col ? Theme.palette().accent : Theme.palette().ink-secondary;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
@@ -637,14 +690,14 @@ export component SheetsApp inherits Window {
                                         width: 36px;
                                         min-height: 28px;
                                         max-height: 28px;
-                                        background: r == root.selected-row ? Theme.palette().selection-soft : Theme.palette().chrome;
+                                        background: r + root.view-row-origin == root.selected-row ? Theme.palette().selection-soft : Theme.palette().chrome;
                                         border-width: 1px;
-                                        border-color: r == root.selected-row ? Theme.palette().accent : Theme.palette().border;
+                                        border-color: r + root.view-row-origin == root.selected-row ? Theme.palette().accent : Theme.palette().border;
                                         Text {
                                             text: root.row-headers[r];
                                             font-size: Theme.tokens.typography.caption;
-                                            font-weight: r == root.selected-row ? 700 : 500;
-                                            color: r == root.selected-row ? Theme.palette().accent : Theme.palette().ink-secondary;
+                                            font-weight: r + root.view-row-origin == root.selected-row ? 700 : 500;
+                                            color: r + root.view-row-origin == root.selected-row ? Theme.palette().accent : Theme.palette().ink-secondary;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
@@ -656,10 +709,10 @@ export component SheetsApp inherits Window {
                                         horizontal-stretch: 1;
                                         min-height: 28px;
                                         max-height: 28px;
-                                        background: (r == root.selected-row && c == root.selected-col) ? Theme.palette().selection-soft
+                                        background: (r + root.view-row-origin == root.selected-row && c + root.view-col-origin == root.selected-col) ? Theme.palette().selection-soft
                                             : (Math.mod(r, 2) == 1) ? Theme.palette().surface-sunken : Theme.palette().surface;
-                                        border-width: (r == root.selected-row && c == root.selected-col) ? 2px : 1px;
-                                        border-color: (r == root.selected-row && c == root.selected-col) ? Theme.palette().accent : Theme.palette().border;
+                                        border-width: (r + root.view-row-origin == root.selected-row && c + root.view-col-origin == root.selected-col) ? 2px : 1px;
+                                        border-color: (r + root.view-row-origin == root.selected-row && c + root.view-col-origin == root.selected-col) ? Theme.palette().accent : Theme.palette().border;
 
                                         Text {
                                             x: 8px;
@@ -674,7 +727,7 @@ export component SheetsApp inherits Window {
                                         }
 
                                         // Selection Corner Drag Handle
-                                        if (r == root.selected-row && c == root.selected-col) : Rectangle {
+                                        if (r + root.view-row-origin == root.selected-row && c + root.view-col-origin == root.selected-col) : Rectangle {
                                             x: parent.width - 5px;
                                             y: parent.height - 5px;
                                             width: 6px;
@@ -685,7 +738,8 @@ export component SheetsApp inherits Window {
 
                                         TouchArea {
                                             clicked => {
-                                                root.cell-clicked(r, c);
+                                                grid-focus.focus();
+                                                root.cell-clicked(r + root.view-row-origin, c + root.view-col-origin);
                                             }
                                         }
                                     }
