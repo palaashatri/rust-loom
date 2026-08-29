@@ -450,6 +450,24 @@ export component SheetsApp inherits Window {
                         clicked => { root.export-csv(); }
                     }
                 }
+                // At compact desktop widths leave the working-sheet actions
+                // visible: the inspector and export are real commands, while
+                // overflow holds the lower-frequency actions.
+                if root.overflow-toolbar : ToolbarSpacer { }
+                if root.overflow-toolbar : ToolbarGroup {
+                    ToolbarIconButton {
+                        icon: "format";
+                        label: "Format";
+                        checked: root.inspector-visible;
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+                    }
+                    ToolbarIconButton {
+                        icon: "export";
+                        label: "Export CSV";
+                        clicked => { root.export-csv(); }
+                    }
+                }
             }
 
             // Formula Bar

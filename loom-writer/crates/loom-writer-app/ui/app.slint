@@ -486,6 +486,24 @@ export component WriterApp inherits Window {
                         clicked => { root.export-pdf(); }
                     }
                 }
+                // Compact desktops keep the two document actions users need
+                // during normal editing visible. The overflow remains for
+                // secondary actions, rather than becoming the entire toolbar.
+                if root.overflow-toolbar : ToolbarSpacer { }
+                if root.overflow-toolbar : ToolbarGroup {
+                    ToolbarIconButton {
+                        icon: "format";
+                        label: "Format";
+                        checked: root.inspector-visible;
+                        enabled: root.inspector-available;
+                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+                    }
+                    ToolbarIconButton {
+                        icon: "export";
+                        label: "Export PDF";
+                        clicked => { root.export-pdf(); }
+                    }
+                }
             }
 
             // Main Editor Canvas and Right Inspector
@@ -530,6 +548,8 @@ export component WriterApp inherits Window {
                                 font-size: 22px;
                                 font-weight: 700;
                                 color: Theme.palette().paper-ink;
+                                wrap: word-wrap;
+                                horizontal-stretch: 1;
                             }
                             Text {
                                 text: "Local-first document";
