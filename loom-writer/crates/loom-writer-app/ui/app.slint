@@ -148,12 +148,16 @@ component DocumentPageEditor inherits Rectangle {
     in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
     in property <length> font-size: 14px;
-    callback edited(string);
+    in property <int> selection-anchor: 0;
+    in property <int> selection-focus: 0;
+    in property <string> selection-announcement: "No text selected";
+    callback edited(string, int, int);
+    callback selection-changed(int, int);
     callback key-pressed(event: KeyEvent) -> EventResult;
 
     background: transparent;
     accessible-role: AccessibleRole.text-input;
-    accessible-label: "Document body";
+    accessible-label: "Document body, " + root.selection-announcement;
     accessible-enabled: root.enabled;
     accessible-value <=> root.text;
     accessible-placeholder-text: root.placeholder;
@@ -188,8 +192,25 @@ component DocumentPageEditor inherits Rectangle {
         selection-background-color: Theme.palette().selection;
         selection-foreground-color: Theme.palette().accent-ink;
         accessible-role: none;
-        edited => { root.edited(editor.text); }
+        edited => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte-offset);
+            root.edited(
+                editor.text,
+                editor.anchor-position-byte-offset,
+                editor.cursor-position_byte-offset
+            );
+        }
+        cursor-position-changed(_) => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte-offset);
+        }
         key-pressed(event) => { return root.key-pressed(event); }
+    }
+
+    changed selection-anchor => {
+        editor.set-selection-offsets(root.selection-anchor, root.selection-focus);
+    }
+    changed selection-focus => {
+        editor.set-selection-offsets(root.selection-anchor, root.selection-focus);
     }
 
     TouchArea {
@@ -223,8 +244,11 @@ export component WriterApp inherits Window {
 
     in property <string> doc-title: "Untitled Document";
     in-out property <string> doc-content: "";
+    in-out property <int> selection-anchor: 0;
+    in-out property <int> selection-focus: 0;
     in property <string> status-left: "";
     in property <string> status-right: "";
+    in property <string> selection-announcement: "No text selected";
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
 
@@ -245,7 +269,8 @@ export component WriterApp inherits Window {
     callback export-pdf;
     callback undo;
     callback redo;
-    callback document-edited(string);
+    callback document-edited(string, int, int);
+    callback selection-changed(int, int);
     callback toggle-bold;
     callback toggle-italic;
     callback toggle-underline;
@@ -517,12 +542,16 @@ export component WriterApp inherits Window {
                     vertical-stretch: 1;
 
                     // Centered Document Page
-                    Rectangle {
+                    page := Rectangle {
                         // Keep the editable page recognizably portrait at
                         // every desktop height. Width must follow the paper
                         // height rather than independently consuming a wide
                         // canvas, which produced a landscape "document".
                         private property <length> page-height: min(1080px, max(420px, parent.height - 48px));
+                        // Keep readable margins as the page scales down. A
+                        // fixed 56px inset leaves an unnecessarily narrow
+                        // text column at compact widths (especially 1024px).
+                        private property <length> page-padding: min(56px, max(32px, self.width * 0.1));
                         x: max(24px, (parent.width - self.width) / 2);
                         y: max(24px, (parent.height - self.height) / 2);
                         width: min(820px, max(320px, self.page-height * 0.72));
@@ -539,8 +568,8 @@ export component WriterApp inherits Window {
                         VerticalLayout {
                             padding-top: 48px;
                             padding-bottom: 48px;
-                            padding-left: 56px;
-                            padding-right: 56px;
+                            padding-left: page.page-padding;
+                            padding-right: page.page-padding;
                             spacing: 12px;
 
                             Text {
@@ -559,10 +588,14 @@ export component WriterApp inherits Window {
                             }
                             Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
 
-                            DocumentPageEditor {
+                            document-editor := DocumentPageEditor {
                                 text <=> root.doc-content;
+                                selection-anchor <=> root.selection-anchor;
+                                selection-focus <=> root.selection-focus;
+                                selection-announcement <=> root.selection-announcement;
                                 font-size: 15px;
-                                edited(val) => { root.document-edited(val); }
+                                edited(val, anchor, focus) => { root.document-edited(val, anchor, focus); }
+                                selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
                             }
                         }
                     }

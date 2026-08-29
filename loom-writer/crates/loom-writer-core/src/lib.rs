@@ -4,6 +4,7 @@
 //! and export to Markdown / plain text. It deliberately has no UI dependency;
 //! the Slint interface (a documented follow-on) consumes this engine.
 
+pub use loom_document::{CaretAffinity, TextSelection};
 use loom_document::{Mutation, Offset, Text, TextEdit};
 use loom_package::manifest::{
     json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
@@ -51,6 +52,12 @@ pub struct WriterDocument {
     pub title: String,
     /// Document blocks in order.
     pub blocks: Vec<RichBlock>,
+    /// Active text selection in the canonical [`Self::editor_text`] stream.
+    ///
+    /// The selection is kept with the document so controller state can be
+    /// restored after save/reopen. Offsets are UTF-8 byte offsets and are
+    /// normalized to character boundaries by [`Self::set_selection`].
+    pub selection: TextSelection,
 }
 
 impl WriterDocument {
@@ -60,6 +67,7 @@ impl WriterDocument {
             id: id.into(),
             title: title.into(),
             blocks: Vec::new(),
+            selection: TextSelection::caret(0),
         }
     }
 
@@ -113,6 +121,30 @@ impl WriterDocument {
             .join("\n")
     }
 
+    /// Return the active selection in the canonical editor text stream.
+    pub fn selection(&self) -> TextSelection {
+        self.selection.clone()
+    }
+
+    /// Set the active selection, preserving direction and affinity while
+    /// clamping both endpoints to the current editor text and UTF-8
+    /// character boundaries.
+    pub fn set_selection(&mut self, selection: TextSelection) {
+        let text = self.editor_text();
+        self.selection = normalize_text_selection(&text, selection);
+    }
+
+    /// Return the selected text from the canonical editor stream. Newline
+    /// separators are included when a selection spans multiple blocks.
+    pub fn selected_text(&self) -> String {
+        let text = self.editor_text();
+        let (start, end) = self.selection.normalized_range();
+        if start >= end || start >= text.len() {
+            return String::new();
+        }
+        text[start.min(text.len())..end.min(text.len())].to_string()
+    }
+
     /// Replace the document's blocks from editable plain text paragraphs.
     ///
     /// Paragraphs are separated by single newlines. Empty fields are retained,
@@ -155,6 +187,7 @@ impl WriterDocument {
             })
             .collect();
         self.blocks = blocks;
+        self.selection = normalize_text_selection(&self.editor_text(), self.selection.clone());
     }
 
     /// A many-block Mutation (for undo replay). Returns a single mutation
@@ -213,6 +246,8 @@ impl WriterDocument {
             s.push('}');
         }
         s.push(']');
+        s.push_str(",\"selection\":");
+        s.push_str(&selection_json(&self.selection));
         s.push('}');
         s
     }
@@ -222,6 +257,7 @@ impl WriterDocument {
         let mut id = String::new();
         let mut title = String::new();
         let mut blocks: Vec<RichBlock> = Vec::new();
+        let mut selection = TextSelection::caret(0);
 
         // Minimal safe parse: reuse loom_package's bounded JSON parser on the
         // top-level object, then iterate the entries array.
@@ -240,10 +276,22 @@ impl WriterDocument {
                     };
                     blocks = parse_blocks(raw)?;
                 }
+                "selection" => {
+                    if let JsonValue::Raw(raw) = v {
+                        selection = parse_selection(raw)?;
+                    }
+                }
                 _ => {}
             }
         }
-        Ok(Self { id, title, blocks })
+        let mut document = Self {
+            id,
+            title,
+            blocks,
+            selection,
+        };
+        document.set_selection(document.selection.clone());
+        Ok(document)
     }
 
     /// Render to Markdown.
@@ -745,6 +793,19 @@ fn runs_json(runs: &[loom_text::StyleRun]) -> String {
     out
 }
 
+fn selection_json(selection: &TextSelection) -> String {
+    let affinity = match selection.affinity {
+        loom_document::CaretAffinity::Upstream => "upstream",
+        loom_document::CaretAffinity::Downstream => "downstream",
+    };
+    format!(
+        "{{\"anchor\":{},\"focus\":{},\"affinity\":{}}}",
+        selection.anchor,
+        selection.focus,
+        pkg_json::escape(affinity)
+    )
+}
+
 /// Match exact paragraph text in order, retaining the stable metadata of the
 /// old block. LCS gives insertions and deletions in the middle the same
 /// behavior as edits at the beginning or end, instead of relying on position.
@@ -972,6 +1033,21 @@ fn shift_offset(offset: usize, delta: isize) -> usize {
     }
 }
 
+/// Clamp a text selection to the supplied UTF-8 text while retaining anchor
+/// direction and caret affinity.
+fn normalize_text_selection(text: &str, mut selection: TextSelection) -> TextSelection {
+    let clamp = |offset: usize| {
+        let mut value = offset.min(text.len());
+        while value > 0 && !text.is_char_boundary(value) {
+            value -= 1;
+        }
+        value
+    };
+    selection.anchor = clamp(selection.anchor);
+    selection.focus = clamp(selection.focus);
+    selection
+}
+
 /// Parse error for Writer content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriterError {
@@ -1103,6 +1179,33 @@ fn parse_runs(raw: &str) -> Result<Vec<loom_text::StyleRun>, WriterError> {
         runs.push(loom_text::StyleRun { start, end, style });
     }
     Ok(runs)
+}
+
+fn parse_selection(raw: &str) -> Result<TextSelection, WriterError> {
+    let fields = ContentParser::new(raw).parse()?;
+    let mut selection = TextSelection::caret(0);
+    for (key, value) in &fields {
+        match key.as_str() {
+            "anchor" => {
+                selection.anchor = json_value_text(value)
+                    .parse()
+                    .map_err(|_| WriterError::Invalid("bad selection anchor".into()))?;
+            }
+            "focus" => {
+                selection.focus = json_value_text(value)
+                    .parse()
+                    .map_err(|_| WriterError::Invalid("bad selection focus".into()))?;
+            }
+            "affinity" => {
+                selection.affinity = match json_value_text(value).as_str() {
+                    "downstream" => loom_document::CaretAffinity::Downstream,
+                    _ => loom_document::CaretAffinity::Upstream,
+                };
+            }
+            _ => {}
+        }
+    }
+    Ok(selection)
 }
 
 fn parse_character_style(
@@ -2611,6 +2714,7 @@ impl WriterDocument {
                     id: String::new(),
                     title: String::new(),
                     blocks: vec![block.clone()],
+                    selection: TextSelection::caret(0),
                 }
                 .find_all(query, false);
                 if hits.is_empty() {
@@ -2628,6 +2732,7 @@ impl WriterDocument {
                 block.text = Text::from_str(&after);
             }
         }
+        self.selection = normalize_text_selection(&self.editor_text(), self.selection.clone());
         replacements
     }
 
@@ -3525,6 +3630,7 @@ pub fn writer_document_digest(blocks: &[RichBlock]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loom_document::{CaretAffinity, TextSelection};
 
     #[test]
     fn writer_document_integrity_digest() {
@@ -3645,6 +3751,55 @@ mod tests {
             loaded.blocks[1].text.as_str(),
             "This is an original Loom document."
         );
+    }
+
+    #[test]
+    fn selection_state_is_clamped_and_round_trips_with_rich_document() {
+        let mut d = WriterDocument::new("selection-doc", "Selection");
+        d.replace_paragraphs("AéB\nTail");
+        d.blocks[0].runs.push(loom_text::StyleRun {
+            start: 0,
+            end: 4,
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        });
+        d.set_selection(TextSelection {
+            anchor: 4,
+            focus: 2,
+            affinity: CaretAffinity::Downstream,
+        });
+
+        // Byte offset 2 lands inside `é` and must be floored to its start.
+        assert_eq!(
+            d.selection(),
+            TextSelection {
+                anchor: 4,
+                focus: 1,
+                affinity: CaretAffinity::Downstream,
+            }
+        );
+
+        let bytes = save_document(&d).expect("save selection");
+        let loaded = load_document(&bytes).expect("load selection");
+        assert_eq!(loaded.selection(), d.selection());
+        assert_eq!(loaded.editor_text(), d.editor_text());
+        assert_eq!(loaded.blocks[0].runs, d.blocks[0].runs);
+    }
+
+    #[test]
+    fn replacing_editor_text_keeps_selection_in_document_bounds() {
+        let mut d = WriterDocument::new("selection-edit", "Selection edit");
+        d.replace_paragraphs("before");
+        d.set_selection(TextSelection::range(2, 6));
+        d.replace_paragraphs("é");
+
+        assert_eq!(d.editor_text(), "é");
+        assert_eq!(d.selection().normalized_range(), (2, 2));
+        let (start, end) = d.selection().normalized_range();
+        assert!(d.editor_text().is_char_boundary(start));
+        assert!(d.editor_text().is_char_boundary(end));
     }
 
     #[test]

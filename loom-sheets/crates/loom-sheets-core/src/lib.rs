@@ -60,6 +60,36 @@ impl CellRef {
     }
 }
 
+/// The logical dimensions of a worksheet's addressable grid.
+///
+/// Dimensions are derived from the sparse cells that are present, but are
+/// always non-zero so an empty sheet still has an editable A1 cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SheetDimensions {
+    /// Number of rows in the logical worksheet.
+    pub rows: u32,
+    /// Number of columns in the logical worksheet.
+    pub cols: u32,
+}
+
+impl SheetDimensions {
+    /// Creates dimensions with a one-cell minimum in each axis.
+    pub const fn new(rows: u32, cols: u32) -> Self {
+        Self {
+            rows: if rows == 0 { 1 } else { rows },
+            cols: if cols == 0 { 1 } else { cols },
+        }
+    }
+
+    /// Returns the full content size for fixed row/column extents.
+    pub fn content_size(self, row_height: f32, col_width: f32) -> (f32, f32) {
+        (
+            self.cols as f32 * col_width.max(1.0),
+            self.rows as f32 * row_height.max(1.0),
+        )
+    }
+}
+
 /// The bounded portion of a worksheet currently projected into an editor grid.
 ///
 /// The workbook stays sparse and unbounded; this value only records the
@@ -85,6 +115,79 @@ impl SheetViewport {
             visible_rows: visible_rows.max(1),
             visible_cols: visible_cols.max(1),
         }
+    }
+
+    /// Projects pixel scroll offsets into a bounded worksheet window.
+    ///
+    /// The projection clamps negative/over-large offsets to the workbook
+    /// extent and computes the number of complete visible rows/columns from
+    /// the viewport size. A caller can render just this slice while retaining
+    /// the full sparse workbook in memory.
+    pub fn from_scroll(
+        scroll_x: f32,
+        scroll_y: f32,
+        viewport_width: f32,
+        viewport_height: f32,
+        row_height: f32,
+        col_width: f32,
+        dimensions: SheetDimensions,
+    ) -> Self {
+        let row_height = if row_height.is_finite() && row_height > 0.0 {
+            row_height
+        } else {
+            1.0
+        };
+        let col_width = if col_width.is_finite() && col_width > 0.0 {
+            col_width
+        } else {
+            1.0
+        };
+        let viewport_width = if viewport_width.is_finite() && viewport_width > 0.0 {
+            viewport_width
+        } else {
+            col_width
+        };
+        let viewport_height = if viewport_height.is_finite() && viewport_height > 0.0 {
+            viewport_height
+        } else {
+            row_height
+        };
+        let dimensions = SheetDimensions::new(dimensions.rows, dimensions.cols);
+        let (content_width, content_height) = dimensions.content_size(row_height, col_width);
+        let max_scroll_x = (content_width - viewport_width).max(0.0);
+        let max_scroll_y = (content_height - viewport_height).max(0.0);
+        let scroll_x = if scroll_x.is_finite() {
+            scroll_x.clamp(0.0, max_scroll_x)
+        } else {
+            0.0
+        };
+        let scroll_y = if scroll_y.is_finite() {
+            scroll_y.clamp(0.0, max_scroll_y)
+        } else {
+            0.0
+        };
+        let first_col = ((scroll_x / col_width).floor() as u32).min(dimensions.cols - 1);
+        let first_row = ((scroll_y / row_height).floor() as u32).min(dimensions.rows - 1);
+        let visible_cols = ((viewport_width / col_width).ceil() as u32)
+            .max(1)
+            .min(dimensions.cols - first_col);
+        let visible_rows = ((viewport_height / row_height).ceil() as u32)
+            .max(1)
+            .min(dimensions.rows - first_row);
+        Self {
+            first_row,
+            first_col,
+            visible_rows,
+            visible_cols,
+        }
+    }
+
+    /// Returns the canonical pixel offset represented by this projection.
+    pub fn scroll_offsets(self, row_height: f32, col_width: f32) -> (f32, f32) {
+        (
+            self.first_col as f32 * col_width.max(1.0),
+            self.first_row as f32 * row_height.max(1.0),
+        )
     }
 
     /// Returns whether the cell is currently inside the projected window.
@@ -1230,6 +1333,21 @@ impl Sheet {
             max_row = max_row.max(r.row);
         }
         Some((min_col, min_row, max_col, max_row))
+    }
+
+    /// Return the sparse worksheet's addressable dimensions.
+    ///
+    /// A sheet with no content still exposes one editable cell (`A1`).  The
+    /// dimensions are based on the furthest cell that is present, rather than
+    /// on a fixed UI grid, so a sparse value such as `AZ1000` projects a
+    /// 1,000-row by 52-column workbook without allocating the intervening
+    /// cells.
+    pub fn dimensions(&self) -> SheetDimensions {
+        self.used_range()
+            .map(|(_, _, max_col, max_row)| {
+                SheetDimensions::new(max_row.saturating_add(1), max_col.saturating_add(1))
+            })
+            .unwrap_or_else(|| SheetDimensions::new(1, 1))
     }
 }
 
@@ -2554,6 +2672,199 @@ impl CellRange {
             self.start.to_a1()
         } else {
             format!("{}:{}", self.start.to_a1(), self.end.to_a1())
+        }
+    }
+}
+
+/// A worksheet selection that preserves the cell where the selection started
+/// independently from the current keyboard/mouse focus cell.
+///
+/// Keeping both coordinates is important for Shift+arrow extension: the
+/// normalized rectangle can move in either direction while the anchor remains
+/// stable for the next extension or contraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GridSelection {
+    /// Cell where the selection began.
+    pub anchor: CellRef,
+    /// Cell currently receiving focus.
+    pub focus: CellRef,
+}
+
+impl GridSelection {
+    /// Creates a selection from an anchor and focus cell.
+    pub const fn new(anchor: CellRef, focus: CellRef) -> Self {
+        Self { anchor, focus }
+    }
+
+    /// Returns the normalized rectangular range represented by the selection.
+    pub fn range(self) -> CellRange {
+        CellRange::new(self.anchor, self.focus)
+    }
+
+    /// Returns whether `cell` is inside the selected rectangle.
+    pub fn contains(self, cell: CellRef) -> bool {
+        self.range().contains(cell)
+    }
+
+    /// Returns the A1 label shown in a name box or accessibility announcement.
+    pub fn label(self) -> String {
+        self.range().to_a1()
+    }
+
+    /// Moves focus while retaining the anchor (the Shift+arrow behavior).
+    pub const fn extend(self, focus: CellRef) -> Self {
+        Self {
+            anchor: self.anchor,
+            focus,
+        }
+    }
+
+    /// Collapses the selection to a new active cell and uses it as the anchor.
+    pub const fn collapse(self, cell: CellRef) -> Self {
+        Self {
+            anchor: cell,
+            focus: cell,
+        }
+    }
+}
+
+/// Compatibility alias for callers that describe a grid selection as a range
+/// selection.  Both names intentionally represent the same anchor/focus
+/// semantics.
+pub type RangeSelection = GridSelection;
+
+/// A reversible sparse edit over a rectangular range.
+///
+/// Both the before and after maps retain `None` for absent cells.  That keeps
+/// undo exact: reverting a fill/copy does not turn previously empty cells into
+/// stored empty strings, which would incorrectly expand the worksheet's used
+/// dimensions after reopening.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeEdit {
+    before: BTreeMap<CellRef, Option<String>>,
+    after: BTreeMap<CellRef, Option<String>>,
+}
+
+impl RangeEdit {
+    /// Builds an edit that copies `source` to a destination top-left cell.
+    pub fn copy(sheet: &Sheet, source: CellRange, destination: CellRef) -> Self {
+        let source_values: BTreeMap<CellRef, Option<String>> = source
+            .cells()
+            .into_iter()
+            .map(|cell| (cell, sheet.raw(cell).map(str::to_owned)))
+            .collect();
+        let row_delta = destination.row as i64 - source.start.row as i64;
+        let col_delta = destination.col as i64 - source.start.col as i64;
+        let mut before = BTreeMap::new();
+        let mut after = BTreeMap::new();
+
+        for source_cell in source.cells() {
+            let target = CellRef {
+                row: shifted_coordinate(source_cell.row, row_delta),
+                col: shifted_coordinate(source_cell.col, col_delta),
+            };
+            before.insert(target, sheet.raw(target).map(str::to_owned));
+            after.insert(
+                target,
+                shifted_raw(
+                    source_values.get(&source_cell).cloned().flatten(),
+                    col_delta,
+                    row_delta,
+                ),
+            );
+        }
+
+        Self { before, after }
+    }
+
+    /// Builds an edit that repeats `source` over every cell in `target`.
+    ///
+    /// Source values repeat by row and column.  Relative formula references are
+    /// shifted from the source cell to the destination cell; absolute anchors
+    /// remain fixed, matching spreadsheet copy/fill semantics.
+    pub fn fill(sheet: &Sheet, source: CellRange, target: CellRange) -> Self {
+        let source_rows = source.end.row - source.start.row + 1;
+        let source_cols = source.end.col - source.start.col + 1;
+        let source_values: BTreeMap<CellRef, Option<String>> = source
+            .cells()
+            .into_iter()
+            .map(|cell| (cell, sheet.raw(cell).map(str::to_owned)))
+            .collect();
+        let mut before = BTreeMap::new();
+        let mut after = BTreeMap::new();
+
+        for destination in target.cells() {
+            let source_cell = CellRef {
+                row: source.start.row + (destination.row - target.start.row) % source_rows,
+                col: source.start.col + (destination.col - target.start.col) % source_cols,
+            };
+            let row_delta = destination.row as i64 - source_cell.row as i64;
+            let col_delta = destination.col as i64 - source_cell.col as i64;
+            before.insert(destination, sheet.raw(destination).map(str::to_owned));
+            after.insert(
+                destination,
+                shifted_raw(
+                    source_values.get(&source_cell).cloned().flatten(),
+                    col_delta,
+                    row_delta,
+                ),
+            );
+        }
+
+        Self { before, after }
+    }
+
+    /// Applies the edit to a worksheet.
+    pub fn apply(&self, sheet: &mut Sheet) {
+        apply_sparse_values(sheet, &self.after);
+    }
+
+    /// Reverts the edit to the exact sparse state captured at construction.
+    pub fn revert(&self, sheet: &mut Sheet) {
+        apply_sparse_values(sheet, &self.before);
+    }
+
+    /// Whether every target cell already has its requested value.
+    pub fn is_noop(&self) -> bool {
+        self.before == self.after
+    }
+
+    /// Number of target cells touched by this edit.
+    pub fn len(&self) -> usize {
+        self.after.len()
+    }
+
+    /// Whether no target cells are present.
+    pub fn is_empty(&self) -> bool {
+        self.after.is_empty()
+    }
+}
+
+fn shifted_coordinate(value: u32, delta: i64) -> u32 {
+    if delta.is_negative() {
+        value.saturating_sub(delta.unsigned_abs().min(u32::MAX as u64) as u32)
+    } else {
+        value.saturating_add(delta.min(u32::MAX as i64) as u32)
+    }
+}
+
+fn shifted_raw(raw: Option<String>, col_delta: i64, row_delta: i64) -> Option<String> {
+    raw.map(|value| {
+        shift_formula_references(
+            &value,
+            col_delta.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            row_delta.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+        )
+    })
+}
+
+fn apply_sparse_values(sheet: &mut Sheet, values: &BTreeMap<CellRef, Option<String>>) {
+    for (cell, raw) in values {
+        match raw {
+            Some(raw) => sheet.set_raw(*cell, raw.clone()),
+            None => {
+                sheet.clear_cell(*cell);
+            }
         }
     }
 }
@@ -5261,5 +5572,82 @@ mod tests {
         assert!(viewport.contains(CellRef { row: 24, col: 9 }));
         assert_eq!(viewport.row_at(0), Some(10));
         assert_eq!(viewport.column_at(0), Some(2));
+    }
+
+    #[test]
+    fn viewport_projects_scroll_offsets_against_workbook_dimensions() {
+        let dimensions = SheetDimensions::new(1_000, 52);
+        let viewport =
+            SheetViewport::from_scroll(180.0, 672.0, 360.0, 280.0, 28.0, 90.0, dimensions);
+
+        assert_eq!(viewport.first_row, 24);
+        assert_eq!(viewport.first_col, 2);
+        assert_eq!(viewport.visible_rows, 10);
+        assert_eq!(viewport.visible_cols, 4);
+        assert_eq!(viewport.row_at(0), Some(24));
+        assert_eq!(viewport.column_at(3), Some(5));
+        assert_eq!(dimensions.content_size(28.0, 90.0), (4_680.0, 28_000.0));
+    }
+
+    #[test]
+    fn sheet_dimensions_follow_sparse_used_cells_with_nonempty_minimum() {
+        let mut empty = Sheet::new("empty");
+        assert_eq!(empty.dimensions(), SheetDimensions::new(1, 1));
+
+        empty.set_str("AZ1000", "tail");
+        assert_eq!(empty.dimensions(), SheetDimensions::new(1_000, 52));
+    }
+
+    #[test]
+    fn grid_selection_preserves_anchor_and_normalizes_range() {
+        let anchor = CellRef::parse("D7").unwrap();
+        let focus = CellRef::parse("B3").unwrap();
+        let selection = GridSelection::new(anchor, focus);
+
+        assert_eq!(selection.anchor, anchor);
+        assert_eq!(selection.focus, focus);
+        assert_eq!(selection.range().to_a1(), "B3:D7");
+        assert!(selection.contains(CellRef::parse("C5").unwrap()));
+        assert!(!selection.contains(CellRef::parse("E7").unwrap()));
+        assert_eq!(selection.label(), "B3:D7");
+    }
+
+    #[test]
+    fn range_edit_fills_formulas_and_reverts_without_losing_absent_cells() {
+        let mut sheet = Sheet::new("fill");
+        sheet.set_str("A1", "10");
+        sheet.set_str("B1", "=A1+1");
+        sheet.set_str("A2", "20");
+
+        let copy = RangeEdit::copy(
+            &sheet,
+            CellRange::parse("B1").unwrap(),
+            CellRef::parse("C1").unwrap(),
+        );
+        copy.apply(&mut sheet);
+        assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), Some("=B1+1"));
+        copy.revert(&mut sheet);
+        assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), None);
+
+        let fill = RangeEdit::fill(
+            &sheet,
+            CellRange::parse("A1:A2").unwrap(),
+            CellRange::parse("A3:A6").unwrap(),
+        );
+        fill.apply(&mut sheet);
+        assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), Some("10"));
+        assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), Some("20"));
+        assert_eq!(sheet.raw(CellRef::parse("A5").unwrap()), Some("10"));
+        assert_eq!(sheet.raw(CellRef::parse("A6").unwrap()), Some("20"));
+        fill.revert(&mut sheet);
+        for row in 3..=6 {
+            assert_eq!(
+                sheet.raw(CellRef {
+                    row: row - 1,
+                    col: 0
+                }),
+                None
+            );
+        }
     }
 }

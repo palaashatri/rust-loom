@@ -50,7 +50,7 @@ export component ToolbarGroup inherits Rectangle {
     min-height: 48px;
     max-height: 52px;
     background: transparent;
-    HorizontalLayout { spacing: 2px; padding-left: root.leading-separation ? 10px : 0px; cross-axis-alignment: center; @children }
+    HorizontalLayout { spacing: 2px; padding-left: root.leading-separation ? Theme.tokens.space.lg : 0px; cross-axis-alignment: center; @children }
 }
 
 export component ToolbarSpacer inherits Rectangle { horizontal-stretch: 1; background: transparent; }
@@ -359,6 +359,10 @@ export component TextField inherits Rectangle {
     callback cancelled;
     height: Theme.tokens.metrics.control-height;
     min-width: 120px;
+    // Fields in inspector/property rows should consume the available control
+    // column.  Callers that need a fixed width can still override it; the
+    // minimum keeps compact layouts readable instead of collapsing the field.
+    horizontal-stretch: 1;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: input.has-focus ? 2px : 1px;
     border-color: root.invalid ? Theme.palette().danger : input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
@@ -393,6 +397,7 @@ export component SearchField inherits Rectangle {
     callback edited(string);
     height: Theme.tokens.metrics.control-height;
     min-width: 160px;
+    horizontal-stretch: 1;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: input.has-focus ? 2px : 1px;
     border-color: input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
@@ -570,13 +575,21 @@ export component PropertyRow inherits Rectangle {
     in property <string> label: "Property";
     min-height: Theme.tokens.metrics.control-height;
     HorizontalLayout {
-        spacing: 8px; cross-axis-alignment: center;
+        spacing: Theme.tokens.space.md; cross-axis-alignment: center;
         Text {
-            text: root.label; min-width: 84px; max-width: 112px;
+            text: root.label; preferred-width: 96px; min-width: 84px; max-width: 112px;
             font-size: Theme.tokens.typography.caption; font-weight: 500;
             color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide;
         }
-        Rectangle { horizontal-stretch: 1; @children }
+        // The control column is a layout, not an absolute Rectangle.  The
+        // previous wrapper left controls at their intrinsic width, making
+        // inspector fields look detached and leaving an uneven right edge.
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            min-width: 120px;
+            spacing: 0px;
+            @children
+        }
     }
 }
 

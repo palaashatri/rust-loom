@@ -18,8 +18,8 @@ use loom_desktop::{
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::{
-    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellEditTransaction, CellRef,
-    Sheet, SheetViewport, Value,
+    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellEditTransaction, CellRange,
+    CellRef, GridSelection, RangeEdit, Sheet, SheetDimensions, SheetViewport, Value,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -28,11 +28,10 @@ use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecMode
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const GRID_COLS: usize = 8;
-// Keep a useful, editable default viewport rather than rendering a six-row
-// table above a large empty canvas. This is intentionally bounded; the
-// virtual scrolling grid remains the next Sheets vertical-slice milestone.
-const GRID_ROWS: usize = 15;
+const DEFAULT_VISIBLE_COLS: u32 = 8;
+const DEFAULT_VISIBLE_ROWS: u32 = 15;
+const GRID_ROW_HEIGHT: f32 = 28.0;
+const GRID_COL_WIDTH: f32 = 90.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
 
@@ -209,8 +208,11 @@ struct ProjectedSheetGrid {
     cells: Vec<String>,
 }
 
-fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetGrid {
-    let values = evaluate(sheet);
+fn project_sheet_grid_with_values(
+    sheet: &Sheet,
+    values: &std::collections::HashMap<CellRef, Value>,
+    viewport: SheetViewport,
+) -> ProjectedSheetGrid {
     let rows: Vec<i32> = (0..viewport.visible_rows).map(|row| row as i32).collect();
     let cols: Vec<i32> = (0..viewport.visible_cols).map(|col| col as i32).collect();
     let column_headers = (0..viewport.visible_cols)
@@ -238,7 +240,7 @@ fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetG
             let Some(col) = viewport.column_at(local_col) else {
                 continue;
             };
-            cells.push(cell_value(sheet, &values, row, col));
+            cells.push(cell_value(sheet, values, row, col));
         }
     }
 
@@ -251,24 +253,102 @@ fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetG
     }
 }
 
-fn viewport_from_app(app: &SheetsApp) -> SheetViewport {
-    SheetViewport {
-        first_row: app.get_view_row_origin().max(0) as u32,
-        first_col: app.get_view_col_origin().max(0) as u32,
-        visible_rows: GRID_ROWS as u32,
-        visible_cols: GRID_COLS as u32,
-    }
+#[cfg(test)]
+fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetGrid {
+    let values = evaluate(sheet);
+    project_sheet_grid_with_values(sheet, &values, viewport)
+}
+
+fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
+    let selected = selection_from_app(app).focus;
+    let mut dimensions = sheet.dimensions();
+    let viewport_width = if app.get_grid_viewport_width() > 1.0 {
+        app.get_grid_viewport_width()
+    } else {
+        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32
+    };
+    let viewport_height = if app.get_grid_viewport_height() > 1.0 {
+        app.get_grid_viewport_height()
+    } else {
+        GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32
+    };
+    // Keep an empty/new sheet navigable beyond A1 while retaining sparse
+    // workbook dimensions for populated sheets.
+    dimensions = SheetDimensions::new(
+        dimensions
+            .rows
+            .max(selected.row.saturating_add(1))
+            .max(DEFAULT_VISIBLE_ROWS),
+        dimensions
+            .cols
+            .max(selected.col.saturating_add(1))
+            .max(DEFAULT_VISIBLE_COLS),
+    );
+    let scroll_x = (-app.get_grid_scroll_x()).max(0.0);
+    let scroll_y = (-app.get_grid_scroll_y()).max(0.0);
+    SheetViewport::from_scroll(
+        scroll_x,
+        scroll_y,
+        viewport_width,
+        viewport_height,
+        GRID_ROW_HEIGHT,
+        GRID_COL_WIDTH,
+        dimensions,
+    )
 }
 
 fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
+    apply_sheet_inner(app, sheet, true);
+}
+
+fn apply_sheet_without_reveal(app: &SheetsApp, sheet: &Sheet) {
+    apply_sheet_inner(app, sheet, false);
+}
+
+fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
     let vals = evaluate(sheet);
-    let selected =
-        CellRef::parse(app.get_selected_cell().as_str()).unwrap_or(CellRef { row: 0, col: 0 });
-    let mut viewport = viewport_from_app(app);
-    viewport.reveal(selected);
+    let selection = selection_from_app(app);
+    let selected = selection.focus;
+    let dimensions = sheet.dimensions();
+    let editor_dimensions = SheetDimensions::new(
+        dimensions
+            .rows
+            .max(selected.row.saturating_add(1))
+            .max(DEFAULT_VISIBLE_ROWS),
+        dimensions
+            .cols
+            .max(selected.col.saturating_add(1))
+            .max(DEFAULT_VISIBLE_COLS),
+    );
+    // Set content extents before touching Flickable offsets.  The two-way
+    // viewport binding clamps offsets against these extents, so updating them
+    // first preserves a requested tail scroll on a newly loaded sparse sheet.
+    app.set_workbook_rows(editor_dimensions.rows as i32);
+    app.set_workbook_cols(editor_dimensions.cols as i32);
+    let current_scroll_x = (-app.get_grid_scroll_x()).max(0.0);
+    let current_scroll_y = (-app.get_grid_scroll_y()).max(0.0);
+    let mut viewport = viewport_from_app(app, sheet);
+    let projected_before_reveal = viewport;
+    if reveal_selection {
+        viewport.reveal(selected);
+    }
     app.set_view_row_origin(viewport.first_row as i32);
     app.set_view_col_origin(viewport.first_col as i32);
-    let grid = project_sheet_grid(sheet, viewport);
+    // Flickable coordinates are negative because its content is translated
+    // opposite to the positive worksheet scroll offset. Preserve fractional
+    // wheel/touchpad offsets while snapping only when selection auto-reveal
+    // moved the projected window.
+    if viewport.first_col != projected_before_reveal.first_col {
+        app.set_grid_scroll_x(-(viewport.first_col as f32 * GRID_COL_WIDTH));
+    } else {
+        app.set_grid_scroll_x(-current_scroll_x);
+    }
+    if viewport.first_row != projected_before_reveal.first_row {
+        app.set_grid_scroll_y(-(viewport.first_row as f32 * GRID_ROW_HEIGHT));
+    } else {
+        app.set_grid_scroll_y(-current_scroll_y);
+    }
+    let grid = project_sheet_grid_with_values(sheet, &vals, viewport);
 
     app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
     app.set_rows(ModelRc::new(VecModel::from(grid.rows)));
@@ -290,7 +370,17 @@ fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
             .map(SharedString::from)
             .collect::<Vec<_>>(),
     )));
-    update_selection(app, sheet, &vals, selected);
+    update_selection_range(app, sheet, &vals, selection);
+    app.set_table_rows_label(SharedString::from(dimensions.rows.to_string()));
+    app.set_table_cols_label(SharedString::from(dimensions.cols.to_string()));
+    app.set_selected_row_height(SharedString::from(format!(
+        "{:.0} px",
+        sheet.row_height(selected.row)
+    )));
+    app.set_selected_col_width(SharedString::from(format!(
+        "{:.0} px",
+        sheet.col_width(selected.col)
+    )));
     app.set_sheet_name(sheet.name.as_str().into());
     let formulas = sheet
         .cells
@@ -368,12 +458,35 @@ fn sync_menu_state(menu_service: &NativeMenuBar, app: &SheetsApp, state: &GuiSta
     }
 }
 
+fn selection_from_app(app: &SheetsApp) -> GridSelection {
+    let focus = CellRef::parse(app.get_selected_cell().as_str()).unwrap_or(CellRef {
+        row: app.get_selected_row().max(0) as u32,
+        col: app.get_selected_col().max(0) as u32,
+    });
+    let anchor = CellRef {
+        row: app.get_selection_anchor_row().max(0) as u32,
+        col: app.get_selection_anchor_col().max(0) as u32,
+    };
+    GridSelection::new(anchor, focus)
+}
+
 fn update_selection(
     app: &SheetsApp,
     sheet: &Sheet,
     vals: &std::collections::HashMap<CellRef, Value>,
     selected: CellRef,
 ) {
+    update_selection_range(app, sheet, vals, GridSelection::new(selected, selected));
+}
+
+fn update_selection_range(
+    app: &SheetsApp,
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+    selection: GridSelection,
+) {
+    let selected = selection.focus;
+    let range = selection.range();
     let formula = sheet
         .raw(selected)
         .map(SharedString::from)
@@ -383,6 +496,32 @@ fn update_selection(
     app.set_selected_cell(selected.to_a1().into());
     app.set_selected_row(selected.row as i32);
     app.set_selected_col(selected.col as i32);
+    app.set_selection_anchor_row(selection.anchor.row as i32);
+    app.set_selection_anchor_col(selection.anchor.col as i32);
+    app.set_selection_start_row(range.start.row as i32);
+    app.set_selection_start_col(range.start.col as i32);
+    app.set_selection_end_row(range.end.row as i32);
+    app.set_selection_end_col(range.end.col as i32);
+    app.set_selection_range(range.to_a1().into());
+    app.set_selection_count((range.cells().len() as i32).max(1));
+    let display = cell_value(sheet, vals, selected.row, selected.col);
+    let formula_text = sheet.raw(selected).unwrap_or("");
+    let value_text = if display.is_empty() {
+        "Empty".to_string()
+    } else {
+        display.clone()
+    };
+    let formula_suffix = if formula_text.is_empty() {
+        String::new()
+    } else {
+        format!("; formula: {formula_text}")
+    };
+    app.set_selection_announcement(SharedString::from(format!(
+        "{} selected; value: {}{}",
+        selection.label(),
+        value_text,
+        formula_suffix
+    )));
     app.set_selection_value(SharedString::from(cell_value(
         sheet,
         vals,
@@ -410,6 +549,59 @@ fn commit_formula_edit(
     true
 }
 
+/// Apply a sparse range edit as one undoable transaction.  The serialized
+/// snapshot is deliberately kept at the controller boundary for now so all
+/// existing save/reopen and recovery paths observe the same document state.
+fn commit_range_edit(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<String>,
+    redo_stack: &mut Vec<String>,
+    edit: RangeEdit,
+) -> bool {
+    if edit.is_empty() || edit.is_noop() {
+        return false;
+    }
+    undo_stack.push(sheet_to_json(sheet));
+    redo_stack.clear();
+    edit.apply(sheet);
+    true
+}
+
+/// The Sheets fill handle repeats a selected block into the next block below
+/// it.  A single-cell selection has no fill source and is therefore disabled
+/// in the UI rather than pretending to perform an operation.
+fn fill_selection_down(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<String>,
+    redo_stack: &mut Vec<String>,
+    selection: GridSelection,
+) -> bool {
+    let source = selection.range();
+    let Some(target) = fill_target_range(source) else {
+        return false;
+    };
+    let edit = RangeEdit::fill(sheet, source, target);
+    commit_range_edit(sheet, undo_stack, redo_stack, edit)
+}
+
+fn fill_target_range(source: CellRange) -> Option<CellRange> {
+    if source.start == source.end {
+        return None;
+    }
+    let height = source.end.row - source.start.row + 1;
+    let target_end_row = source.end.row.checked_add(height)?;
+    Some(CellRange::new(
+        CellRef {
+            row: source.end.row.saturating_add(1),
+            col: source.start.col,
+        },
+        CellRef {
+            row: target_end_row,
+            col: source.end.col,
+        },
+    ))
+}
+
 fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
     if r < 0 || c < 0 {
         return;
@@ -429,13 +621,31 @@ fn offset_coordinate(value: u32, delta: i32) -> u32 {
 }
 
 fn navigate_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
-    let selected =
-        CellRef::parse(app.get_selected_cell().as_str()).unwrap_or(CellRef { row: 0, col: 0 });
+    let selection = selection_from_app(app);
+    let selected = selection.focus;
     let next = CellRef {
         row: offset_coordinate(selected.row, row_delta),
         col: offset_coordinate(selected.col, col_delta),
     };
     update_selection(app, sheet, &evaluate(sheet), next);
+}
+
+fn extend_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
+    let selection = selection_from_app(app);
+    let focus = selection.focus;
+    let next = CellRef {
+        row: offset_coordinate(focus.row, row_delta),
+        col: offset_coordinate(focus.col, col_delta),
+    };
+    update_selection_range(app, sheet, &evaluate(sheet), selection.extend(next));
+}
+
+fn inspector_section_visibility(query: &str) -> (bool, bool) {
+    let query = query.trim().to_ascii_lowercase();
+    let table = query.is_empty() || "table name rows columns worksheet".contains(query.as_str());
+    let cell = query.is_empty()
+        || "cell selection value formula row height column width".contains(query.as_str());
+    (table, cell)
 }
 
 fn apply_theme(app: &SheetsApp, theme: &str) {
@@ -873,6 +1083,84 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_extend_selection(move |row_delta, col_delta| {
+            if let Some(app) = app_ref.upgrade() {
+                extend_selection(&app, &state.current.borrow(), row_delta, col_delta);
+                apply_sheet(&app, &state.current.borrow());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_fill_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let changed = {
+                    let selection = selection_from_app(&app);
+                    let mut current = state.current.borrow_mut();
+                    let mut undo = state.undo_stack.borrow_mut();
+                    let mut redo = state.redo_stack.borrow_mut();
+                    fill_selection_down(&mut current, &mut undo, &mut redo, selection)
+                };
+                if changed {
+                    let source = selection_from_app(&app).range();
+                    if let Some(target) = fill_target_range(source) {
+                        let expanded = CellRange::new(source.start, target.end);
+                        update_selection_range(
+                            &app,
+                            &state.current.borrow(),
+                            &evaluate(&state.current.borrow()),
+                            GridSelection::new(source.start, expanded.end),
+                        );
+                    }
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_formula_feedback(SharedString::from(format!(
+                        "Filled {} down",
+                        app.get_selection_range()
+                    )));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_grid_scrolled(move || {
+            if let Some(app) = app_ref.upgrade() {
+                apply_sheet_without_reveal(&app, &state.current.borrow());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_grid_viewport_changed(move |width, height| {
+            if let Some(app) = app_ref.upgrade() {
+                // Ignore the transient zero-size pass during component
+                // construction; subsequent layout changes carry real bounds.
+                if width > 1.0 && height > 1.0 {
+                    app.set_grid_viewport_width(width);
+                    app.set_grid_viewport_height(height);
+                    apply_sheet(&app, &state.current.borrow());
+                }
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_inspector_search_edited(move |query| {
+            if let Some(app) = app_ref.upgrade() {
+                let (table, cell) = inspector_section_visibility(query.as_str());
+                app.set_inspector_show_table(table);
+                app.set_inspector_show_cell(cell);
+            }
+        });
+    }
 
     {
         let state = state.clone();
@@ -1040,7 +1328,141 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     if !report.passed {
         return Err("keyboard journey invariants failed".to_string());
     }
+    run_sparse_edit_journey(args, Path::new(out_dir))?;
     Ok(())
+}
+
+/// Exercise the sparse-workbook path with the same controller helpers used by
+/// the desktop app.  The journey intentionally keeps only a handful of cells
+/// in a 1,000-row worksheet, then records each durable transition so visual
+/// and persistence evidence can be inspected alongside the keyboard journey.
+fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(out_dir).map_err(|error| format!("journey output: {error}"))?;
+    let app = SheetsApp::new().map_err(|error| error.to_string())?;
+    apply_theme(&app, &args.theme);
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    apply_layout_breakpoints(&app, args.size.0);
+    app.set_show_inspector(true);
+
+    let mut sheet = Sheet::new("Sparse 1000");
+    sheet.set_str("A1", "10");
+    sheet.set_str("A2", "20");
+    sheet.set_str("A995", "10");
+    sheet.set_str("A996", "20");
+    sheet.set_str("A1000", "tail");
+    let mut undo = Vec::new();
+    let mut redo = Vec::new();
+
+    apply_sheet(&app, &sheet);
+    capture_journey_frame(&app, out_dir, "01-start", args.size)?;
+
+    // Scroll to the sparse tail.  The negative Flickable viewport coordinate
+    // is the same value that touchpad/mouse wheel gestures update.
+    app.set_grid_scroll_y(-26_600.0);
+    apply_sheet_without_reveal(&app, &sheet);
+    capture_journey_frame(&app, out_dir, "02-scroll", args.size)?;
+
+    let tail_selection = GridSelection::new(
+        CellRef::parse("A995").expect("valid source coordinate"),
+        CellRef::parse("A996").expect("valid source coordinate"),
+    );
+    update_selection_range(&app, &sheet, &evaluate(&sheet), tail_selection);
+    apply_sheet(&app, &sheet);
+    capture_journey_frame(&app, out_dir, "03-range", args.size)?;
+
+    // Enter a formula in the active cell's adjacent column, then restore the
+    // range as the fill source.  Each operation contributes exactly one
+    // snapshot to the existing undo stack.
+    let formula_cell = CellRef::parse("B995").expect("valid formula coordinate");
+    assert!(commit_formula_edit(
+        &mut sheet,
+        &mut undo,
+        &mut redo,
+        formula_cell,
+        "=A995+1",
+    ));
+    update_selection(&app, &sheet, &evaluate(&sheet), formula_cell);
+    apply_sheet(&app, &sheet);
+    capture_journey_frame(&app, out_dir, "04-formula", args.size)?;
+
+    update_selection_range(&app, &sheet, &evaluate(&sheet), tail_selection);
+    assert!(fill_selection_down(
+        &mut sheet,
+        &mut undo,
+        &mut redo,
+        tail_selection
+    ));
+    let filled_range = CellRange::new(
+        tail_selection.range().start,
+        fill_target_range(tail_selection.range())
+            .expect("multi-cell range has a fill target")
+            .end,
+    );
+    update_selection_range(
+        &app,
+        &sheet,
+        &evaluate(&sheet),
+        GridSelection::new(filled_range.start, filled_range.end),
+    );
+    apply_sheet(&app, &sheet);
+    capture_journey_frame(&app, out_dir, "05-fill", args.size)?;
+    if sheet.raw(CellRef::parse("A997").unwrap()) != Some("10")
+        || sheet.raw(CellRef::parse("A998").unwrap()) != Some("20")
+    {
+        return Err("sparse fill journey wrote unexpected values".to_string());
+    }
+
+    let before_undo = sheet_to_json(&sheet);
+    let Some(previous) = undo.pop() else {
+        return Err("sparse fill journey did not record undo".to_string());
+    };
+    redo.push(before_undo);
+    sheet = sheet_from_json(&previous).map_err(|error| format!("journey undo: {error}"))?;
+    apply_sheet(&app, &sheet);
+    capture_journey_frame(&app, out_dir, "06-undo", args.size)?;
+    if sheet.raw(CellRef::parse("A997").unwrap()).is_some()
+        || sheet.raw(CellRef::parse("A998").unwrap()).is_some()
+    {
+        return Err("sparse fill journey undo left filled cells".to_string());
+    }
+
+    let save_path = out_dir.join("sparse-1000.loomtable");
+    save_sheet(&save_path, &sheet)?;
+    let reopened = load_sheet(&save_path)?;
+    if reopened.dimensions().rows != 1_000
+        || reopened.raw(CellRef::parse("B995").unwrap()) != Some("=A995+1")
+    {
+        return Err("sparse save/reopen changed workbook semantics".to_string());
+    }
+    apply_sheet(&app, &reopened);
+    capture_journey_frame(&app, out_dir, "07-save-reopen", args.size)?;
+
+    let evidence = format!(
+        "rows={} cells={} selection={} formula={} undo={} save={}\n",
+        reopened.dimensions().rows,
+        reopened.cells.len(),
+        tail_selection.label(),
+        reopened.raw(formula_cell).unwrap_or(""),
+        sheet.raw(CellRef::parse("A997").unwrap()).is_none(),
+        save_path.display(),
+    );
+    std::fs::write(out_dir.join("sparse-journey.txt"), evidence)
+        .map_err(|error| format!("journey evidence: {error}"))?;
+    println!("sparse workbook journey: PASS ({})", out_dir.display());
+    Ok(())
+}
+
+fn capture_journey_frame(
+    app: &SheetsApp,
+    out_dir: &Path,
+    name: &str,
+    size: (u32, u32),
+) -> Result<(), String> {
+    let image = snapshot_component(app, size.0 as f32, size.1 as f32, 1.0)
+        .map_err(|error| format!("capture {name}: {error}"))?;
+    let path = out_dir.join(format!("{name}.png"));
+    loom_test_support::png::save_png(&path, &image).map_err(|error| error.to_string())
 }
 
 impl PaletteProbe for SheetsApp {
@@ -1455,6 +1877,127 @@ mod tests {
         assert_eq!(projection.column_headers, ["C", "D"]);
         assert_eq!(projection.row_headers, ["11", "12"]);
         assert_eq!(projection.cells, ["Bottom right", "", "", "Tail"]);
+    }
+
+    #[test]
+    fn sparse_viewport_projection_tracks_scroll_and_dimensions() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        app.set_grid_viewport_width(360.0);
+        app.set_grid_viewport_height(280.0);
+        app.set_grid_scroll_x(-180.0);
+        app.set_grid_scroll_y(-672.0);
+
+        let mut sheet = Sheet::new("sparse");
+        sheet.set_str("AZ1000", "tail");
+        let viewport = viewport_from_app(&app, &sheet);
+
+        assert_eq!(sheet.dimensions(), SheetDimensions::new(1_000, 52));
+        assert_eq!(viewport.first_row, 24);
+        assert_eq!(viewport.first_col, 2);
+        assert_eq!(viewport.visible_rows, 10);
+        assert_eq!(viewport.visible_cols, 4);
+        assert!(viewport.contains(CellRef::parse("C25").unwrap()));
+        assert!(!viewport.contains(CellRef::parse("B25").unwrap()));
+    }
+
+    #[test]
+    fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let sheet = sample_sheet();
+        update_selection(
+            &app,
+            &sheet,
+            &evaluate(&sheet),
+            CellRef::parse("C3").unwrap(),
+        );
+
+        extend_selection(&app, &sheet, -1, -1);
+
+        assert_eq!(app.get_selected_cell().as_str(), "B2");
+        assert_eq!(app.get_selection_anchor_row(), 2);
+        assert_eq!(app.get_selection_anchor_col(), 2);
+        assert_eq!(app.get_selection_range().as_str(), "B2:C3");
+        assert_eq!(app.get_selection_count(), 4);
+
+        // Moving back through the anchor contracts the range without
+        // changing which cell was the original anchor.
+        extend_selection(&app, &sheet, 1, 1);
+        assert_eq!(app.get_selected_cell().as_str(), "C3");
+        assert_eq!(app.get_selection_anchor_row(), 2);
+        assert_eq!(app.get_selection_anchor_col(), 2);
+        assert_eq!(app.get_selection_range().as_str(), "C3");
+        assert_eq!(app.get_selection_count(), 1);
+    }
+
+    #[test]
+    fn fill_down_records_one_undo_snapshot_and_restores_sparse_cells() {
+        let mut sheet = Sheet::new("fill");
+        sheet.set_str("A1", "10");
+        sheet.set_str("A2", "20");
+        let mut undo = Vec::new();
+        let mut redo = Vec::new();
+        let selection =
+            GridSelection::new(CellRef::parse("A1").unwrap(), CellRef::parse("A2").unwrap());
+
+        assert!(fill_selection_down(
+            &mut sheet, &mut undo, &mut redo, selection
+        ));
+        assert_eq!(undo.len(), 1);
+        assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), Some("10"));
+        assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), Some("20"));
+
+        let previous = undo.pop().expect("fill undo snapshot");
+        sheet = sheet_from_json(&previous).expect("restore fill snapshot");
+        assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), None);
+        assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), None);
+        assert!(!fill_selection_down(
+            &mut sheet,
+            &mut undo,
+            &mut redo,
+            GridSelection::new(CellRef::parse("A1").unwrap(), CellRef::parse("A1").unwrap()),
+        ));
+    }
+
+    #[test]
+    fn selection_announcement_and_inspector_values_follow_live_cell_state() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let mut sheet = Sheet::new("live");
+        sheet.set_str("A1", "2");
+        sheet.set_str("B1", "=A1+1");
+        let values = evaluate(&sheet);
+
+        update_selection_range(
+            &app,
+            &sheet,
+            &values,
+            GridSelection::new(CellRef::parse("B1").unwrap(), CellRef::parse("B1").unwrap()),
+        );
+        assert_eq!(app.get_selection_value().as_str(), "3");
+        assert_eq!(
+            app.get_selection_announcement().as_str(),
+            "B1 selected; value: 3; formula: =A1+1"
+        );
+        assert_eq!(app.get_selection_formula().as_str(), "=A1+1");
+
+        apply_sheet(&app, &sheet);
+        assert_eq!(app.get_sheet_name().as_str(), "live");
+        assert_eq!(app.get_table_rows_label().as_str(), "1");
+        assert_eq!(app.get_table_cols_label().as_str(), "2");
+        assert_eq!(app.get_selection_value().as_str(), "3");
+    }
+
+    #[test]
+    fn inspector_search_filters_table_and_cell_sections() {
+        assert_eq!(inspector_section_visibility(""), (true, true));
+        assert_eq!(inspector_section_visibility(" rows "), (true, false));
+        assert_eq!(inspector_section_visibility("formula"), (false, true));
+        assert_eq!(
+            inspector_section_visibility("does-not-exist"),
+            (false, false)
+        );
     }
 
     #[test]

@@ -1,10 +1,8 @@
 //! Writer formatting semantics.
 //!
-//! The legacy document-wide operations remain explicit because the current
-//! Slint TextEdit cannot report its live selection offsets. New code below
-//! defines the selection/range semantics the structured editor must use once
-//! its input surface owns the selection model. This keeps UI limitations from
-//! leaking into the document model.
+//! Selection-aware operations are the primary editing path. Legacy
+//! document-wide helpers remain available only for migration/tests; the live
+//! Slint editor sends explicit anchor/focus offsets through the controller.
 
 use std::collections::BTreeSet;
 
@@ -29,38 +27,7 @@ pub struct DocumentFormattingState {
 // range-aware API is intentionally ahead of its caller. Keep the lint
 // exception scoped to these domain helpers rather than hiding dead code in
 // the rest of the formatting module.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DocumentSelection {
-    pub anchor: usize,
-    pub focus: usize,
-}
-
-#[allow(dead_code)]
-impl DocumentSelection {
-    pub fn caret(offset: usize) -> Self {
-        Self {
-            anchor: offset,
-            focus: offset,
-        }
-    }
-
-    pub fn range(anchor: usize, focus: usize) -> Self {
-        Self { anchor, focus }
-    }
-
-    pub fn is_collapsed(self) -> bool {
-        self.anchor == self.focus
-    }
-
-    fn ordered(self) -> (usize, usize) {
-        if self.anchor <= self.focus {
-            (self.anchor, self.focus)
-        } else {
-            (self.focus, self.anchor)
-        }
-    }
-}
+pub type DocumentSelection = loom_writer_core::TextSelection;
 
 #[allow(dead_code)]
 fn floor_char_boundary(text: &str, offset: usize) -> usize {
@@ -74,7 +41,7 @@ fn floor_char_boundary(text: &str, offset: usize) -> usize {
 #[allow(dead_code)]
 fn normalized_selection(document: &WriterDocument, selection: DocumentSelection) -> (usize, usize) {
     let text = document.editor_text();
-    let (start, end) = selection.ordered();
+    let (start, end) = selection.normalized_range();
     (
         floor_char_boundary(&text, start),
         floor_char_boundary(&text, end),
@@ -226,7 +193,7 @@ fn mutate_selection_character_styles(
     selection: DocumentSelection,
     mut operation: impl FnMut(&mut CharacterStyle),
 ) {
-    let spans = selection_text_spans(document, selection);
+    let spans = selection_text_spans(document, selection.clone());
     for (block_index, start, end) in spans {
         mutate_character_range(
             &mut document.blocks[block_index],
@@ -305,10 +272,11 @@ pub fn set_selection_alignment(
 }
 
 // -------------------------------------------------------------------------
-// Explicit legacy document-wide operations. These remain wired only until the
-// structured input surface can provide DocumentSelection to the callbacks.
+// Explicit legacy document-wide operations retained for package migration and
+// older headless callers. The live application does not expose these paths.
 // -------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn mutate_character_styles(
     document: &mut WriterDocument,
     mut operation: impl FnMut(&mut CharacterStyle),
@@ -367,6 +335,7 @@ fn mutate_character_styles(
     }
 }
 
+#[allow(dead_code)]
 pub fn set_document_bold(document: &mut WriterDocument, enabled: bool) {
     mutate_character_styles(document, |style| {
         style.weight = if enabled {
@@ -377,14 +346,17 @@ pub fn set_document_bold(document: &mut WriterDocument, enabled: bool) {
     });
 }
 
+#[allow(dead_code)]
 pub fn set_document_italic(document: &mut WriterDocument, enabled: bool) {
     mutate_character_styles(document, |style| style.italic = enabled);
 }
 
+#[allow(dead_code)]
 pub fn set_document_underline(document: &mut WriterDocument, enabled: bool) {
     mutate_character_styles(document, |style| style.underline = enabled);
 }
 
+#[allow(dead_code)]
 pub fn set_document_heading(document: &mut WriterDocument, level: i32) {
     let kind = match level {
         1 => "heading1",
@@ -397,6 +369,7 @@ pub fn set_document_heading(document: &mut WriterDocument, level: i32) {
     }
 }
 
+#[allow(dead_code)]
 pub fn set_document_alignment(document: &mut WriterDocument, index: i32) {
     let alignment = match index {
         1 => Alignment::Center,
@@ -409,10 +382,12 @@ pub fn set_document_alignment(document: &mut WriterDocument, index: i32) {
     }
 }
 
+#[allow(dead_code)]
 fn block_character_styles(block: &RichBlock) -> impl Iterator<Item = &CharacterStyle> {
     block.runs.iter().map(|run| &run.style)
 }
 
+#[allow(dead_code)]
 fn all_non_empty_blocks_match(
     document: &WriterDocument,
     mut predicate: impl FnMut(&CharacterStyle) -> bool,
@@ -436,6 +411,7 @@ fn all_non_empty_blocks_match(
     saw_style
 }
 
+#[allow(dead_code)]
 fn uniform_heading_level(document: &WriterDocument) -> i32 {
     let mut levels = document
         .blocks
@@ -456,6 +432,7 @@ fn uniform_heading_level(document: &WriterDocument) -> i32 {
     }
 }
 
+#[allow(dead_code)]
 fn uniform_alignment(document: &WriterDocument) -> i32 {
     let mut alignments = document
         .blocks
@@ -476,6 +453,7 @@ fn uniform_alignment(document: &WriterDocument) -> i32 {
     }
 }
 
+#[allow(dead_code)]
 pub fn formatting_state(document: &WriterDocument) -> DocumentFormattingState {
     DocumentFormattingState {
         bold: all_non_empty_blocks_match(document, |style| style.weight == FontWeight::Bold),
@@ -483,6 +461,115 @@ pub fn formatting_state(document: &WriterDocument) -> DocumentFormattingState {
         underline: all_non_empty_blocks_match(document, |style| style.underline),
         heading_level: uniform_heading_level(document),
         alignment: uniform_alignment(document),
+    }
+}
+
+/// Return formatting controls for the active text selection rather than for
+/// the whole document. Inline controls are checked only when every character
+/// covered by the selection has that style; a collapsed caret reflects the
+/// character immediately before it (or the first character at the start of a
+/// block), which is the style a subsequent insertion will inherit.
+pub fn formatting_state_for_selection(
+    document: &WriterDocument,
+    selection: DocumentSelection,
+) -> DocumentFormattingState {
+    let spans = selection_text_spans(document, selection.clone());
+    let style_matches = |predicate: &dyn Fn(&CharacterStyle) -> bool| {
+        if spans.is_empty() {
+            return caret_style(document, selection.clone()).is_some_and(|style| predicate(&style));
+        }
+        let mut saw_style = false;
+        for (block_index, start, end) in &spans {
+            let block = &document.blocks[*block_index];
+            let mut boundaries = BTreeSet::from([*start, *end]);
+            for run in &block.runs {
+                if run.start < *end && run.end > *start {
+                    boundaries.insert(run.start.max(*start).min(*end));
+                    boundaries.insert(run.end.max(*start).min(*end));
+                }
+            }
+            let boundaries: Vec<usize> = boundaries.into_iter().collect();
+            for pair in boundaries.windows(2) {
+                if pair[0] >= pair[1] {
+                    continue;
+                }
+                saw_style = true;
+                if !predicate(&style_at(block, pair[0])) {
+                    return false;
+                }
+            }
+        }
+        saw_style
+    };
+
+    let selected_blocks = selected_block_indices(document, selection.clone());
+    let heading_level = selected_blocks
+        .first()
+        .map(|index| heading_level_for_kind(&document.blocks[*index].kind))
+        .filter(|first| {
+            selected_blocks
+                .iter()
+                .all(|index| heading_level_for_kind(&document.blocks[*index].kind) == *first)
+        })
+        .unwrap_or(0);
+    let alignment = selected_blocks
+        .first()
+        .map(|index| alignment_index(document.blocks[*index].style.alignment))
+        .filter(|first| {
+            selected_blocks
+                .iter()
+                .all(|index| alignment_index(document.blocks[*index].style.alignment) == *first)
+        })
+        .unwrap_or(0);
+
+    DocumentFormattingState {
+        bold: style_matches(&|style| style.weight == FontWeight::Bold),
+        italic: style_matches(&|style| style.italic),
+        underline: style_matches(&|style| style.underline),
+        heading_level,
+        alignment,
+    }
+}
+
+fn heading_level_for_kind(kind: &str) -> i32 {
+    match kind {
+        "heading1" => 1,
+        "heading2" => 2,
+        "heading3" => 3,
+        _ => 0,
+    }
+}
+
+fn alignment_index(alignment: Alignment) -> i32 {
+    match alignment {
+        Alignment::Left => 0,
+        Alignment::Center => 1,
+        Alignment::Right => 2,
+        Alignment::Justify => 3,
+    }
+}
+
+fn caret_style(document: &WriterDocument, selection: DocumentSelection) -> Option<CharacterStyle> {
+    let (start, _) = normalized_selection(document, selection);
+    let block_index = block_at_offset(document, start)?;
+    let block = &document.blocks[block_index];
+    let text = block.text.as_str();
+    if text.is_empty() {
+        return Some(CharacterStyle::default());
+    }
+    let global_start = document.blocks[..block_index]
+        .iter()
+        .map(|block| block.text.as_str().len() + 1)
+        .sum::<usize>();
+    let local = start.saturating_sub(global_start).min(text.len());
+    if local == text.len() {
+        let previous = text[..local]
+            .char_indices()
+            .last()
+            .map(|(offset, _)| offset);
+        previous.map(|offset| style_at(block, offset))
+    } else {
+        Some(style_at(block, local))
     }
 }
 
@@ -568,6 +655,22 @@ mod tests {
             .iter()
             .any(|run| run.start == 0 && run.end == 2 && run.style.italic));
         assert!(document.blocks[2].runs.is_empty());
+    }
+
+    #[test]
+    fn formatting_state_for_selection_reflects_only_the_active_range() {
+        let mut document = WriterDocument::new("selection-state", "Selection state");
+        document.push(RichBlock::new(1, "paragraph", "bold italic"));
+        set_selection_bold(&mut document, DocumentSelection::range(0, 4), true);
+        set_selection_italic(&mut document, DocumentSelection::range(5, 11), true);
+
+        let bold = formatting_state_for_selection(&document, DocumentSelection::range(0, 4));
+        assert!(bold.bold);
+        assert!(!bold.italic);
+
+        let italic = formatting_state_for_selection(&document, DocumentSelection::range(5, 11));
+        assert!(!italic.bold);
+        assert!(italic.italic);
     }
 
     #[test]

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use document_formatting::{
-    formatting_state, set_document_alignment, set_document_bold, set_document_heading,
-    set_document_italic, set_document_underline,
+    formatting_state_for_selection, set_selection_alignment, set_selection_bold,
+    set_selection_heading, set_selection_italic, set_selection_underline, DocumentSelection,
 };
 use loom_desktop::{
     build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
@@ -25,7 +25,7 @@ use loom_desktop::{
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
-use loom_writer_core::{RichBlock, WriterDocument};
+use loom_writer_core::{RichBlock, TextSelection, WriterDocument};
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
@@ -745,10 +745,18 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
     let word_count = text.split_whitespace().count();
     let char_count = text.chars().count();
     let block_count = doc.len();
-    let formatting = formatting_state(doc);
+    let selection = doc.selection();
+    let formatting = formatting_state_for_selection(
+        doc,
+        DocumentSelection::range(selection.anchor, selection.focus),
+    );
+    let announcement = selection_announcement(doc, &selection);
 
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
+    app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
+    app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
+    app.set_selection_announcement(SharedString::from(announcement.clone()));
     app.set_is_bold(formatting.bold);
     app.set_is_italic(formatting.italic);
     app.set_is_underline(formatting.underline);
@@ -758,7 +766,60 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
         "{} words · {} chars · {} blocks",
         word_count, char_count, block_count
     )));
-    app.set_status_right("Offline".into());
+    app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
+}
+
+fn selection_from_app(app: &WriterApp) -> TextSelection {
+    TextSelection::range(
+        app.get_selection_anchor().max(0) as usize,
+        app.get_selection_focus().max(0) as usize,
+    )
+}
+
+fn selection_announcement(doc: &WriterDocument, selection: &TextSelection) -> String {
+    let (start, end) = selection.normalized_range();
+    if start == end {
+        return format!("Caret at {start}");
+    }
+    let text = doc.editor_text();
+    let selected = text
+        .get(start.min(text.len())..end.min(text.len()))
+        .unwrap_or_default();
+    format!("Selected {} characters", selected.chars().count())
+}
+
+/// Project one editor selection event into the authoritative document and all
+/// selection-derived UI state. Keyboard, pointer, and accessibility actions
+/// all arrive through the same callback path.
+fn project_selection_event(
+    app: &WriterApp,
+    document: &mut WriterDocument,
+    anchor: i32,
+    focus: i32,
+) -> bool {
+    let requested = TextSelection::range(anchor.max(0) as usize, focus.max(0) as usize);
+    let previous = document.selection();
+    document.set_selection(requested);
+    let selection = document.selection();
+    if selection == previous {
+        return false;
+    }
+
+    app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
+    app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
+    let formatting = formatting_state_for_selection(
+        document,
+        DocumentSelection::range(selection.anchor, selection.focus),
+    );
+    app.set_is_bold(formatting.bold);
+    app.set_is_italic(formatting.italic);
+    app.set_is_underline(formatting.underline);
+    app.set_heading_level(formatting.heading_level);
+    app.set_text_alignment(formatting.alignment);
+    let announcement = selection_announcement(document, &selection);
+    app.set_selection_announcement(SharedString::from(announcement.clone()));
+    app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
+    true
 }
 
 fn apply_state(app: &WriterApp, state: &GuiState) {
@@ -1171,14 +1232,31 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_selection_changed(move |anchor, focus| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.syncing_editor.get() {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                project_selection_event(&app, &mut current, anchor, focus);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         let menu_service = menu_service.clone();
-        app.on_document_edited(move |text| {
+        app.on_document_edited(move |text, anchor, focus| {
             if let Some(app) = app_ref.upgrade() {
                 if state.syncing_editor.get() {
                     return;
                 }
                 let mut next = state.current.borrow().clone();
                 next.replace_paragraphs(text.as_str());
+                next.set_selection(TextSelection::range(
+                    anchor.max(0) as usize,
+                    focus.max(0) as usize,
+                ));
                 let current = state.current.borrow().clone();
                 if next != current {
                     apply_with_history(&app, &state, next, HistoryKind::Typing);
@@ -1200,14 +1278,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_toggle_bold(move || {
             if let Some(app) = app_ref.upgrade() {
                 let enabled = app.get_is_bold();
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    app.set_status_right("Select text to apply bold".into());
+                    return;
+                }
                 let mut next = state.current.borrow().clone();
-                set_document_bold(&mut next, enabled);
+                set_selection_bold(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    !enabled,
+                );
+                next.set_selection(selection);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(if enabled {
-                    "Bold applied to all paragraphs"
+                    "Bold removed from selection"
                 } else {
-                    "Bold removed from all paragraphs"
+                    "Bold applied to selection"
                 }));
             }
         });
@@ -1219,14 +1307,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_toggle_italic(move || {
             if let Some(app) = app_ref.upgrade() {
                 let enabled = app.get_is_italic();
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    app.set_status_right("Select text to apply italic".into());
+                    return;
+                }
                 let mut next = state.current.borrow().clone();
-                set_document_italic(&mut next, enabled);
+                set_selection_italic(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    !enabled,
+                );
+                next.set_selection(selection);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(if enabled {
-                    "Italic applied to all paragraphs"
+                    "Italic removed from selection"
                 } else {
-                    "Italic removed from all paragraphs"
+                    "Italic applied to selection"
                 }));
             }
         });
@@ -1238,14 +1336,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_toggle_underline(move || {
             if let Some(app) = app_ref.upgrade() {
                 let enabled = app.get_is_underline();
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    app.set_status_right("Select text to apply underline".into());
+                    return;
+                }
                 let mut next = state.current.borrow().clone();
-                set_document_underline(&mut next, enabled);
+                set_selection_underline(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    !enabled,
+                );
+                next.set_selection(selection);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_right(SharedString::from(if enabled {
-                    "Underline applied to all paragraphs"
+                    "Underline removed from selection"
                 } else {
-                    "Underline removed from all paragraphs"
+                    "Underline applied to selection"
                 }));
             }
         });
@@ -1256,8 +1364,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_select_heading(move |level| {
             if let Some(app) = app_ref.upgrade() {
+                let selection = selection_from_app(&app);
                 let mut next = state.current.borrow().clone();
-                set_document_heading(&mut next, level);
+                set_selection_heading(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    level,
+                );
+                next.set_selection(selection);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 sync_menu_state(&menu_service, &app, &state);
                 let label = match level {
@@ -1267,7 +1381,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     _ => "Body Text",
                 };
                 app.set_status_right(SharedString::from(format!(
-                    "{label} applied to all paragraphs"
+                    "{label} applied to selected paragraph(s)"
                 )));
             }
         });
@@ -1278,8 +1392,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_select_alignment(move |align| {
             if let Some(app) = app_ref.upgrade() {
+                let selection = selection_from_app(&app);
                 let mut next = state.current.borrow().clone();
-                set_document_alignment(&mut next, align);
+                set_selection_alignment(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    align,
+                );
+                next.set_selection(selection);
                 apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
                 sync_menu_state(&menu_service, &app, &state);
                 let label = match align {
@@ -1289,7 +1409,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     _ => "Left",
                 };
                 app.set_status_right(SharedString::from(format!(
-                    "{label} alignment applied to all paragraphs"
+                    "{label} alignment applied to selected paragraph(s)"
                 )));
             }
         });
@@ -1634,6 +1754,90 @@ mod tests {
 
         history.record(a, c, HistoryKind::DocumentAction, 1);
         assert_eq!(history.redo_len(), 0);
+    }
+
+    #[test]
+    fn selected_formatting_is_one_undoable_document_action() {
+        let mut before = text_document("first second");
+        before.set_selection(loom_writer_core::TextSelection::range(0, 5));
+        let mut after = before.clone();
+        let selection = after.selection();
+        set_selection_bold(
+            &mut after,
+            DocumentSelection::range(selection.anchor, selection.focus),
+            true,
+        );
+
+        let mut history = EditorHistory::with_budget(16, usize::MAX);
+        history.record(
+            before.clone(),
+            after.clone(),
+            HistoryKind::DocumentAction,
+            0,
+        );
+        assert_eq!(history.undo_len(), 1);
+        let undone = history.undo().expect("formatting undo");
+        assert_eq!(undone, before);
+        assert!(undone.blocks[0].runs.is_empty());
+        assert_eq!(undone.selection(), before.selection());
+        assert_eq!(history.redo(), Some(after));
+    }
+
+    #[test]
+    fn apply_document_projects_selection_formatting_and_accessible_announcement() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let mut document = text_document("first second");
+        document.set_selection(TextSelection::range(0, 5));
+        let selection = document.selection();
+        set_selection_bold(
+            &mut document,
+            DocumentSelection::range(selection.anchor, selection.focus),
+            true,
+        );
+
+        apply_document(&app, &document);
+
+        assert_eq!(app.get_selection_anchor(), 0);
+        assert_eq!(app.get_selection_focus(), 5);
+        assert!(app.get_is_bold());
+        assert_eq!(app.get_selection_announcement(), "Selected 5 characters");
+        assert!(app.get_status_right().contains("Selected 5 characters"));
+    }
+
+    #[test]
+    fn selection_announcement_reports_utf8_character_count_not_byte_count() {
+        let mut document = text_document("AéB");
+        document.set_selection(TextSelection::range(1, 3));
+        assert_eq!(
+            selection_announcement(&document, &document.selection()),
+            "Selected 1 characters"
+        );
+    }
+
+    #[test]
+    fn keyboard_selection_updates_authoritative_state_and_accessible_announcement() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let mut document = text_document("select me");
+
+        // This invokes the same selection callback used by the TextInput's
+        // Shift+Arrow keyboard path; no document mutation is hidden in the UI.
+        assert!(project_selection_event(&app, &mut document, 0, 6));
+        assert_eq!(document.selected_text(), "select");
+        assert_eq!(app.get_selection_anchor(), 0);
+        assert_eq!(app.get_selection_focus(), 6);
+        assert_eq!(app.get_selection_announcement(), "Selected 6 characters");
+
+        let selection = document.selection();
+        set_selection_bold(
+            &mut document,
+            DocumentSelection::range(selection.anchor, selection.focus),
+            true,
+        );
+        document.set_selection(TextSelection::range(0, 6));
+        apply_document(&app, &document);
+        assert!(app.get_is_bold());
     }
 
     #[test]
