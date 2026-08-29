@@ -29,7 +29,10 @@ slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const GRID_COLS: usize = 8;
-const GRID_ROWS: usize = 6;
+// Keep a useful, editable default viewport rather than rendering a six-row
+// table above a large empty canvas. This is intentionally bounded; the
+// virtual scrolling grid remains the next Sheets vertical-slice milestone.
+const GRID_ROWS: usize = 15;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
 
