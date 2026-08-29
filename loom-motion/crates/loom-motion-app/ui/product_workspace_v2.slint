@@ -46,7 +46,10 @@ export component MotionApp inherits Window {
 
     property <bool> show-guides: true;
     property <bool> show-safe-area: true;
-    property <bool> inspector-expanded: true;
+    // Keep the inspector as a compact rail when the host selects the compact
+    // layout; users can still expand it with the rail button. At reference
+    // widths the inspector starts expanded as before.
+    property <bool> inspector-expanded: !root.compact-layout;
 
     callback new-comp;
     callback open-comp;
@@ -526,6 +529,7 @@ export component MotionApp inherits Window {
 
             InspectorSurface {
                 width: root.inspector-expanded ? (root.compact-layout ? 240px : 304px) : 50px;
+                min-panel-width: root.inspector-expanded ? 240px : 50px;
                 title: root.inspector-expanded ? "Inspector" : "";
                 detail: root.inspector-expanded && root.layer-labels.length > 0 ? "Layer " + (root.active-layer-index + 1) : "";
                 animate width {

@@ -278,11 +278,28 @@ export component SidebarSurface inherits Rectangle {
 export component InspectorSurface inherits Rectangle {
     in property <string> title: "Inspector";
     in property <string> detail: "";
-    min-width: 240px; max-width: 360px; background: Theme.palette().panel;
+    // Callers with a collapsed inspector rail can opt into a narrower floor;
+    // the regular inspector remains 240px wide by default for readable fields.
+    in property <length> min-panel-width: 240px;
+    min-width: root.min-panel-width; max-width: 360px; background: Theme.palette().panel;
     VerticalLayout {
         spacing: 0px; padding: 0px;
         PanelHeader { title: root.title; detail: root.detail; }
-        Rectangle { vertical-stretch: 1; background: Theme.palette().panel; @children }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().panel;
+
+            // Inspector callers provide sections, tabs, and controls as
+            // siblings. Keep those children in a real flow layout rather
+            // than the Rectangle's absolute stacking context; otherwise
+            // every child starts at (0, 0) and labels/fields paint over one
+            // another as soon as an inspector has more than one control.
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.lg;
+                @children
+            }
+        }
     }
     Rectangle { x: 0px; width: 1px; height: root.height; background: Theme.palette().border; }
 }
