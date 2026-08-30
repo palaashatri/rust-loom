@@ -217,13 +217,13 @@ export global ResponsivePolicy {
     in-out property <length> labeled-toolbar-min-height: 48px;
     in-out property <length> labeled-toolbar-max-height: 52px;
 
-    pure function priority-1-icon-only(width: length) -> bool {
+    public pure function priority-1-icon-only(width: length) -> bool {
         return width < priority-1-icon-only-below;
     }
-    pure function priority-2-overflow(width: length) -> bool {
+    public pure function priority-2-overflow(width: length) -> bool {
         return width < priority-2-overflow-below;
     }
-    pure function uses-labeled-slot(width: length) -> bool {
+    public pure function uses-labeled-slot(width: length) -> bool {
         return width >= priority-2-overflow-below;
     }
     public pure function toolbar-height(labeled: bool) -> length {

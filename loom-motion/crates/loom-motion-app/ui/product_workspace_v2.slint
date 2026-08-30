@@ -1,5 +1,5 @@
 import {
-    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    DocumentChrome, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
     ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
 } from "toolkit.slint";
 import {
@@ -15,6 +15,8 @@ export component MotionApp inherits Window {
     min-width: 920px;
     min-height: 720px;
     background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
     in property <bool> compact-layout: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
@@ -120,8 +122,8 @@ export component MotionApp inherits Window {
             trailing-text: root.timecode-text;
         }
 
-        Toolbar {
-            ToolbarGroup {
+        LabeledToolbar {
+            ToolbarGroup { labeled-slot: true;
                 if root.compact-layout : ToolbarIconButton { icon: "cursor"; label: "Transform"; checked: true; }
                 if !root.compact-layout : AppleToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
                 if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Add layer"; clicked => { root.add-layer(); } }
@@ -155,7 +157,7 @@ export component MotionApp inherits Window {
             ToolbarSpacer {}
 
             // Center Transport group
-            ToolbarGroup {
+            ToolbarGroup { labeled-slot: true;
                 if root.compact-layout : ToolbarIconButton { icon: "chevron-left"; label: "Step back"; clicked => { root.step-back(); } }
                 if !root.compact-layout : AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
                 if root.compact-layout : ToolbarIconButton {
@@ -201,7 +203,7 @@ export component MotionApp inherits Window {
             ToolbarSpacer {}
 
             // Right Inspector & Export
-            ToolbarGroup {
+            ToolbarGroup { labeled-slot: true;
                 if root.compact-layout : ToolbarIconButton {
                     icon: "timeline";
                     label: "Toggle curves";
@@ -237,7 +239,7 @@ export component MotionApp inherits Window {
             }
         }
 
-        HorizontalLayout {
+        DirectionalLayout {
             spacing: 0px;
             vertical-stretch: 1;
 

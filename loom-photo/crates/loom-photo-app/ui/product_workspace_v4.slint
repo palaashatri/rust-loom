@@ -1,5 +1,5 @@
 import {
-    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    DocumentChrome, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
     ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, InspectorSurface, SectionHeader,
     SegmentedControl, RangeSlider, PropertyRow, TabStrip, CanvasSurface
 } from "toolkit.slint";
@@ -17,6 +17,8 @@ export component PhotoApp inherits Window {
     preferred-width: 1280px;
     preferred-height: 800px;
     background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
     // The host supplies the responsive breakpoint after selecting the window
     // size. Reading root.width from a conditional child makes the optional
     // inspector/export controls feed back into the window's implicit size.
@@ -115,9 +117,9 @@ export component PhotoApp inherits Window {
                 trailing-text: root.dimensions-text;
             }
 
-            Toolbar {
+            LabeledToolbar {
                 // Tool selection group
-                ToolbarGroup {
+                ToolbarGroup { labeled-slot: true;
                     AppleToolbarItem {
                         icon: "cursor";
                         label: "Select";
@@ -141,7 +143,7 @@ export component PhotoApp inherits Window {
                 ToolbarSpacer { }
 
                 // Layer & adjustment operations
-                ToolbarGroup {
+                ToolbarGroup { labeled-slot: true;
                     AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
                     AppleToolbarItem { icon: "slider"; label: "Adjustment"; clicked => { root.add-adjustment(); } }
                     AppleToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-image(); } }
@@ -150,7 +152,7 @@ export component PhotoApp inherits Window {
                 ToolbarSpacer { }
 
                 // View, Inspector, Export
-                ToolbarGroup {
+                ToolbarGroup { labeled-slot: true;
                     AppleToolbarItem {
                         icon: "zoom-in";
                         label: Math.round(root.zoom-value) + "%";
@@ -175,7 +177,7 @@ export component PhotoApp inherits Window {
                 }
             }
 
-            HorizontalLayout {
+            DirectionalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
 

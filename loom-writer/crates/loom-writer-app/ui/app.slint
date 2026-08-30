@@ -1,13 +1,145 @@
 import {
-    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    ToolbarIconButton, ToolbarOverflowButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface, InspectorSurface,
+    TitleChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
+    IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem, StatusBar, CanvasSurface, InspectorSurface,
     SectionHeader, TextField, SegmentedControl, PropertyRow
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
-import { Theme } from "theme.slint";
-export { Theme } from "theme.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
+
+/// Toolbar contents are kept in one component so the slot owner can change
+/// between the explicit context and labeled variants without duplicating the
+/// command surface. The component is instantiated as a child of either host;
+/// its `wide`/`overflow` inputs only select controls, never geometry.
+component WriterToolbarBody inherits DirectionalLayout {
+    in property <bool> wide: false;
+    in property <bool> overflow: false;
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    in property <bool> labeled-export: false;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback overflow-requested;
+
+    spacing: 4px;
+    leading-padding: 0px;
+    trailing-padding: 0px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    // Wide left group: View, page zoom, Add Page.
+    if root.wide : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: "eye";
+            label: "View";
+            accessible-label: "View";
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOverLabelToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            accessible-label: "Page zoom unavailable";
+            enabled: false;
+        }
+        IconOverLabelToolbarItem {
+            icon: "plus";
+            label: "Add Page";
+            accessible-label: "Add Page unavailable";
+            enabled: false;
+        }
+    }
+
+    // Compact left group: keep the view command and, at P2, the overflow
+    // affordance in the 40px context slot.
+    if !root.wide : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "eye";
+            label: "View";
+            enabled: root.inspector-available;
+            clicked => { root.toggle-inspector(); }
+        }
+        if root.overflow : Overflow {
+            label: "More Writer actions";
+            clicked => { root.overflow-requested(); }
+        }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    // Center group: Table, Chart, Text, Shape, Media, Comment
+    if root.wide : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    // Right group: Share, Format, Document / Export
+    if root.wide : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
+        IconOverLabelToolbarItem {
+            icon: "format";
+            label: "Format";
+            accessible-label: "Format inspector";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOverLabelToolbarItem {
+            icon: "document";
+            label: "Document";
+            accessible-label: "Document settings unavailable";
+            checked: false;
+            enabled: false;
+        }
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: "Export";
+            accessible-label: "Export PDF";
+            clicked => { root.export-pdf(); }
+        }
+    }
+
+    if !root.wide && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem {
+            icon: "export";
+            label: "Export PDF";
+            clicked => { root.export-pdf(); }
+        }
+    }
+
+    // Compact desktops keep the two document actions users need during
+    // normal editing visible. The overflow remains for secondary actions.
+    if root.overflow : ToolbarSpacer { }
+    if root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem {
+            icon: "export";
+            label: "Export PDF";
+            clicked => { root.export-pdf(); }
+        }
+    }
+}
 
 /// A Pages-class portrait template card for the New Document chooser.
 /// Uses realistic paper proportions (1:1.414 portrait) with deterministic
@@ -229,15 +361,19 @@ export component WriterApp inherits Window {
     in property <bool> wide-toolbar: false;
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
+    in property <bool> rtl: false;
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     in-out property <int> inspector-tab: 0;
     callback window-resized(length);
+    changed rtl => {
+        Theme.rtl = root.rtl;
+    }
     changed width => {
         root.window-resized(root.width);
-        if (root.width >= 1180px) {
+        if (!ResponsivePolicy.priority-2-overflow(root.width)) {
             root.close-toolbar-overflow();
         }
     }
@@ -411,128 +547,54 @@ export component WriterApp inherits Window {
             padding: 0px;
 
             // Document Chrome Titlebar
-            DocumentChrome {
+            TitleChrome {
                 title: root.doc-title;
                 trailing-text: "";
             }
 
-            // Pages-Style Action Toolbar
-            Toolbar {
-                // Left group: View, page zoom, Add Page
-                ToolbarGroup {
-                    if root.wide-toolbar : AppleToolbarItem {
-                        icon: "eye";
-                        label: root.compact-label("View");
-                        accessible-label: "View";
-                        enabled: root.inspector-available;
-                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-                    }
-                    if root.wide-toolbar : AppleToolbarItem {
-                        icon: "zoom-in";
-                        label: root.compact-label("Page Zoom");
-                        accessible-label: "Page zoom unavailable";
-                        enabled: false;
-                    }
-                    if root.wide-toolbar : AppleToolbarItem {
-                        icon: "plus";
-                        label: root.compact-label("Add Page");
-                        accessible-label: "Add Page unavailable";
-                        enabled: false;
-                    }
-                    if !root.wide-toolbar && !root.overflow-toolbar : ToolbarIconButton {
-                        icon: "eye";
-                        label: "View";
-                        enabled: root.inspector-available;
-                        clicked => { root.toggle-inspector(); }
-                    }
-                    if root.overflow-toolbar : ToolbarOverflowButton {
-                        label: "More Writer actions";
-                        clicked => {
-                            if (root.toolbar-overflow-open) {
-                                root.close-toolbar-overflow();
-                            } else {
-                                root.toolbar-overflow-open = true;
-                                overflow-menu-focus.focus();
-                            }
+            // Pages-style action toolbar. The host and its groups now choose
+            // one slot each; responsive state only selects which host exists.
+            if root.wide-toolbar : LabeledToolbar {
+                WriterToolbarBody {
+                    wide: true;
+                    overflow: root.overflow-toolbar;
+                    inspector-available: root.inspector-available;
+                    inspector-visible: root.inspector-visible;
+                    labeled-export: root.labeled-export;
+                    toggle-inspector => { root.toggle-inspector(); }
+                    export-pdf => { root.export-pdf(); }
+                    overflow-requested => {
+                        if (root.toolbar-overflow-open) {
+                            root.close-toolbar-overflow();
+                        } else {
+                            root.toolbar-overflow-open = true;
+                            overflow-menu-focus.focus();
                         }
                     }
                 }
-
-                if !root.overflow-toolbar : ToolbarSpacer { }
-
-                // Center group: Table, Chart, Text, Shape, Media, Comment
-                if root.wide-toolbar : ToolbarGroup {
-                    AppleToolbarItem { icon: "table"; label: root.compact-label("Table"); accessible-label: "Insert table unavailable"; enabled: false; }
-                    AppleToolbarItem { icon: "chart"; label: root.compact-label("Chart"); accessible-label: "Insert chart unavailable"; enabled: false; }
-                    AppleToolbarItem { icon: "text"; label: root.compact-label("Text"); accessible-label: "Insert text box unavailable"; enabled: false; }
-                    AppleToolbarItem { icon: "shape"; label: root.compact-label("Shape"); accessible-label: "Insert shape unavailable"; enabled: false; }
-                    AppleToolbarItem { icon: "image"; label: root.compact-label("Media"); accessible-label: "Insert media unavailable"; enabled: false; }
-                    AppleToolbarItem { icon: "comment"; label: root.compact-label("Comment"); accessible-label: "Insert comment unavailable"; enabled: false; }
-                }
-
-                if !root.overflow-toolbar : ToolbarSpacer { }
-
-                // Right group: Share, Format, Document / Export
-                if root.wide-toolbar : ToolbarGroup {
-                    AppleToolbarItem { icon: "share"; label: root.compact-label("Share"); accessible-label: "Share unavailable"; enabled: false; }
-                    AppleToolbarItem {
-                        icon: "format";
-                        label: root.compact-label("Format");
-                        accessible-label: "Format inspector";
-                        checked: root.inspector-visible;
-                        enabled: root.inspector-available;
-                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-                    }
-                    AppleToolbarItem {
-                        icon: "document";
-                        label: root.compact-label("Document");
-                        accessible-label: "Document settings unavailable";
-                        checked: false;
-                        enabled: false;
-                    }
-                    AppleToolbarItem {
-                        icon: "export";
-                        label: root.labeled-export ? "Export" : "";
-                        accessible-label: "Export PDF";
-                        clicked => { root.export-pdf(); }
-                    }
-                }
-                if !root.wide-toolbar && !root.overflow-toolbar : ToolbarGroup {
-                    ToolbarIconButton {
-                        icon: "format";
-                        label: "Format";
-                        checked: root.inspector-visible;
-                        enabled: root.inspector-available;
-                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-                    }
-                    ToolbarIconButton {
-                        icon: "export";
-                        label: "Export PDF";
-                        clicked => { root.export-pdf(); }
-                    }
-                }
-                // Compact desktops keep the two document actions users need
-                // during normal editing visible. The overflow remains for
-                // secondary actions, rather than becoming the entire toolbar.
-                if root.overflow-toolbar : ToolbarSpacer { }
-                if root.overflow-toolbar : ToolbarGroup {
-                    ToolbarIconButton {
-                        icon: "format";
-                        label: "Format";
-                        checked: root.inspector-visible;
-                        enabled: root.inspector-available;
-                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-                    }
-                    ToolbarIconButton {
-                        icon: "export";
-                        label: "Export PDF";
-                        clicked => { root.export-pdf(); }
+            }
+            if !root.wide-toolbar : ContextToolbar {
+                WriterToolbarBody {
+                    wide: false;
+                    overflow: root.overflow-toolbar;
+                    inspector-available: root.inspector-available;
+                    inspector-visible: root.inspector-visible;
+                    labeled-export: root.labeled-export;
+                    toggle-inspector => { root.toggle-inspector(); }
+                    export-pdf => { root.export-pdf(); }
+                    overflow-requested => {
+                        if (root.toolbar-overflow-open) {
+                            root.close-toolbar-overflow();
+                        } else {
+                            root.toolbar-overflow-open = true;
+                            overflow-menu-focus.focus();
+                        }
                     }
                 }
             }
 
             // Main Editor Canvas and Right Inspector
-            HorizontalLayout {
+            DirectionalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
 
@@ -647,25 +709,25 @@ export component WriterApp inherits Window {
                             HorizontalLayout {
                                 spacing: 4px;
 
-                                ToolbarIconButton {
+                                IconOnlyToolbarItem {
                                     icon: "bold";
                                     label: "Bold";
                                     checked: root.is-bold;
                                     clicked => { root.toggle-bold(); }
                                 }
-                                ToolbarIconButton {
+                                IconOnlyToolbarItem {
                                     icon: "italic";
                                     label: "Italic";
                                     checked: root.is-italic;
                                     clicked => { root.toggle-italic(); }
                                 }
-                                ToolbarIconButton {
+                                IconOnlyToolbarItem {
                                     icon: "underline";
                                     label: "Underline";
                                     checked: root.is-underline;
                                     clicked => { root.toggle-underline(); }
                                 }
-                                ToolbarIconButton {
+                                IconOnlyToolbarItem {
                                     icon: "strikethrough";
                                     label: "Strikethrough";
                                     checked: false;
@@ -688,12 +750,12 @@ export component WriterApp inherits Window {
                             label: "Indentation";
                             HorizontalLayout {
                                 spacing: 4px;
-                                ToolbarIconButton {
+                                IconOnlyToolbarItem {
                                     icon: "outdent";
                                     label: "Decrease indent";
                                     enabled: false;
                                 }
-                                ToolbarIconButton {
+                                IconOnlyToolbarItem {
                                     icon: "indent";
                                     label: "Increase indent";
                                     enabled: false;
@@ -758,7 +820,7 @@ export component WriterApp inherits Window {
             }
 
             // Standard Status Bar
-            ToolkitStatusBar {
+            StatusBar {
                 leading: root.status-left;
                 trailing: root.status-right;
             }

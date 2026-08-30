@@ -417,12 +417,12 @@ compatibility-module = "loom-core/crates/loom-ui/ui/components.slint"
 toolbar = "Toolbar"
 toolbar-group = "ToolbarGroup"
 toolbar-button = "ToolbarButton"
-toolbar-icon-button = "ToolbarIconButton"
-toolbar-overflow-button = "ToolbarOverflowButton"
+toolbar-icon-button = "IconOnlyToolbarItem"
+toolbar-overflow-button = "Overflow"
 panel-header = "PanelHeader"
 sidebar = "SidebarSurface"
 inspector = "InspectorSurface"
-status = "ToolkitStatusBar"
+status = "StatusBar"
 icon = "Icon"
 title-chrome = "TitleChrome"
 icon-only-toolbar-item = "IconOnlyToolbarItem"
@@ -438,13 +438,14 @@ overflow = "Overflow"
 
 [primitive-ownership.legacy-wrappers]
 ToolButton = "ToolbarButton"
-IconButton = "ToolbarIconButton"
+IconButton = "IconOnlyToolbarItem"
 WorkspaceToolbar = "Toolbar"
 PaneTabs = "TabStrip"
 Slider = "RangeSlider"
 Switch = "Toggle"
 
 [primitive-ownership.legacy-reexports]
+DirectionalLayout = "DirectionalLayout"
 Toolbar = "Toolbar"
 ToolbarGroup = "ToolbarGroup"
 ToolbarSpacer = "ToolbarSpacer"
@@ -475,11 +476,24 @@ Overflow = "Overflow"
 ContextToolbar = "ContextToolbar"
 LabeledToolbar = "LabeledToolbar"
 
+# Compatibility declarations are intentionally one-way: each old spelling
+# inherits the canonical owner in toolkit.slint and may not contain geometry or
+# state of its own.
+[primitive-ownership.compatibility-inherits]
+DocumentChrome = "TitleChrome"
+ToolbarIconButton = "IconOnlyToolbarItem"
+AppleToolbarItem = "IconOverLabelToolbarItem"
+ToolbarOverflowButton = "Overflow"
+OverflowMenuButton = "Overflow"
+ToolkitStatusBar = "StatusBar"
+TextField = "Field"
+TabStrip = "SheetTabStrip"
+
 # Compact mode must preserve the primary canvas/grid/timeline width. P1
 # actions become icon-only and P2 actions move to the one canonical overflow
 # command before any primary workspace minimum is violated.
 [overflow-policy]
-canonical-button = "ToolbarOverflowButton"
+canonical-button = "Overflow"
 compatibility-button = "OverflowMenuButton"
 icon = "more"
 accessible-role = "button"

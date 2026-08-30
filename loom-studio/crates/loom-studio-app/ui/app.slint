@@ -1,5 +1,5 @@
 import {
-    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    DocumentChrome, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
     ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
 } from "toolkit.slint";
 import {
@@ -16,6 +16,8 @@ export component StudioApp inherits Window {
     min-width: 920px;
     min-height: 720px;
     background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
     // Responsive mode comes from the host so width-dependent panes cannot
     // feed back into the breakpoint predicate and create a binding loop.
     in property <bool> compact-layout: false;
@@ -118,8 +120,8 @@ export component StudioApp inherits Window {
             trailing-text: root.tempo-text + " · " + root.workspace-mode;
         }
 
-        Toolbar {
-            ToolbarGroup {
+        LabeledToolbar {
+            ToolbarGroup { labeled-slot: true;
                 AppleToolbarItem {
                     icon: root.is-playing ? "pause" : "play";
                     label: root.is-playing ? "Pause" : "Play";
@@ -151,7 +153,7 @@ export component StudioApp inherits Window {
 
             ToolbarSpacer {}
 
-            ToolbarGroup {
+            ToolbarGroup { labeled-slot: true;
                 AppleToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
                 AppleToolbarItem {
                     icon: "export";
@@ -162,7 +164,7 @@ export component StudioApp inherits Window {
             }
         }
 
-        HorizontalLayout {
+        DirectionalLayout {
             spacing: 0px;
             vertical-stretch: 1;
 

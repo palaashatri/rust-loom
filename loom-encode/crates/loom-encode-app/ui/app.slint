@@ -1,5 +1,5 @@
 import {
-    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
+    DocumentChrome, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
     ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
 } from "toolkit.slint";
 import {
@@ -16,6 +16,8 @@ export component EncodeApp inherits Window {
     min-width: 900px;
     min-height: 680px;
     background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
     // The host supplies this breakpoint after choosing the window size. A
     // width-derived conditional pane can feed back into the window's implicit
     // layout calculation during startup and produce unstable geometry.
@@ -97,13 +99,13 @@ export component EncodeApp inherits Window {
             title: root.queue-name;
             trailing-text: root.job-labels.length == 1 ? "1 job" : root.job-labels.length + " jobs";
         }
-        Toolbar {
-            ToolbarGroup {
+        LabeledToolbar {
+            ToolbarGroup { labeled-slot: true;
                 AppleToolbarItem { icon: "plus"; label: "Add Job"; enabled: !root.running; clicked => { root.add-job(); } }
                 AppleToolbarItem { icon: "trash"; label: "Remove"; enabled: root.job-labels.length > 0 && !root.running; clicked => { root.remove-job(); } }
             }
             ToolbarSpacer {}
-            ToolbarGroup {
+            ToolbarGroup { labeled-slot: true;
                 AppleToolbarItem {
                     icon: root.running ? "stop" : "play";
                     label: root.running ? "Cancel Queue" : "Start Queue";
@@ -116,7 +118,7 @@ export component EncodeApp inherits Window {
             }
         }
 
-        HorizontalLayout {
+        DirectionalLayout {
             spacing: 0px;
             vertical-stretch: 1;
             SidebarSurface {

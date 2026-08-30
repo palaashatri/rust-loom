@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 from pathlib import Path
 from dataclasses import dataclass
+import json
 import re
 import sys
 import tomllib
+import hashlib
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "encode")
 failures: list[str] = []
 emoji = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF]")
 slint_reference = re.compile(r'\bfrom\s+["\']([^"\']+\.slint)["\']')
+GEOMETRY_MANIFEST_PATH = ROOT / "loom-design-bible/contracts/geometry-manifest.toml"
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,176 @@ def rect_overlap(left: GeometryRect, right: GeometryRect) -> tuple[float, float]
     return width, height
 
 
+def balanced_slint_block(source: str, opening: int) -> str:
+    """Return the balanced Slint object beginning at an opening brace."""
+
+    if opening < 0 or opening >= len(source) or source[opening] != "{":
+        return ""
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening : index + 1]
+    return ""
+
+
+def slint_instance_blocks(source: str, name: str) -> list[str]:
+    """Extract instantiated (not declaration/import) Slint component blocks."""
+
+    pattern = re.compile(
+        rf"(?m)^\s*(?:(?:if|for)[^\n{{}}]*:\s*)?{re.escape(name)}\s*\{{"
+    )
+    instances: list[str] = []
+    for match in pattern.finditer(source):
+        opening = source.find("{", match.start(), match.end())
+        block = balanced_slint_block(source, opening)
+        if block:
+            instances.append(source[match.start() : opening] + block)
+    return instances
+
+
+def slint_instance_count(source: str, name: str) -> int:
+    return len(slint_instance_blocks(source, name))
+
+
+def numeric_widths(source: str, component: str) -> list[float]:
+    """Read literal width declarations from actual component instances."""
+
+    widths: list[float] = []
+    for block in slint_instance_blocks(source, component):
+        depth = 0
+        opening = block.find("{")
+        closing = block.rfind("}")
+        for line in block[opening + 1 : closing].splitlines():
+            if depth == 0:
+                match = re.match(r"\s*width:\s*([0-9]+(?:\.[0-9]+)?)px\s*;", line)
+                if match:
+                    widths.append(float(match.group(1)))
+            depth += line.count("{") - line.count("}")
+    return widths
+
+
+def root_component_metadata(source: str) -> dict:
+    match = re.search(r"(?m)^\s*export component (\w+) inherits Window\s*\{", source)
+    if match is None:
+        return {}
+    block = balanced_slint_block(source, source.find("{", match.start(), match.end()))
+    metadata: dict[str, object] = {"root-component": match.group(1)}
+    for prefix in ("min", "preferred"):
+        for axis in ("width", "height"):
+            value = re.search(rf"(?m)^\s*{prefix}-{axis}:\s*([0-9]+(?:\.[0-9]+)?)px\s*;", block)
+            if value:
+                metadata[f"root-{prefix}-{axis}"] = float(value.group(1))
+    return metadata
+
+
+def app_source_files(app: str) -> list[Path]:
+    """Resolve app-local Slint modules plus shared runtime source files."""
+
+    ui_dir = ROOT / f"loom-{app}/crates/loom-{app}-app/ui"
+    entry = ui_dir / "app.slint"
+    visited: set[Path] = set()
+
+    def visit(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved in visited or not path.is_file():
+            return
+        try:
+            resolved.relative_to(ui_dir.resolve())
+        except ValueError:
+            return
+        visited.add(resolved)
+        source = path.read_text(encoding="utf-8")
+        for reference in slint_reference.findall(source):
+            candidate = (path.parent / reference).resolve()
+            if candidate.is_file():
+                visit(candidate)
+
+    visit(entry)
+    shared = [
+        ROOT / "loom-core/crates/loom-ui/ui/toolkit.slint",
+        ROOT / "loom-core/crates/loom-ui/ui/theme.slint",
+    ]
+    return sorted((*visited, *(path.resolve() for path in shared if path.is_file())))
+
+
+def relative_source_path(path: Path) -> str:
+    return path.resolve().relative_to(ROOT.resolve()).as_posix()
+
+
+def source_hashes(paths: list[Path]) -> dict[str, str]:
+    return {
+        relative_source_path(path): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in paths
+    }
+
+
+def toolbar_source_metadata(source: str) -> dict[str, object]:
+    toolbar_names = ("ContextToolbar", "LabeledToolbar", "Toolbar")
+    toolbar_blocks: list[str] = []
+    toolbar_name = ""
+    # Prefer the concrete labeled host when an app has both conditional
+    # variants. This makes the manifest describe the full responsive toolbar
+    # contract rather than whichever branch happens to appear first in source.
+    for name in ("LabeledToolbar", "ContextToolbar", "Toolbar"):
+        blocks_for_name = slint_instance_blocks(source, name)
+        if blocks_for_name:
+            toolbar_name = name
+            toolbar_blocks.extend(blocks_for_name)
+            if name != "Toolbar":
+                break
+    # Componentized app toolbars keep their command groups in a named body
+    # instantiated by each host. Include each body once so source metadata
+    # remains faithful without double-counting the conditional instances.
+    for match in re.finditer(r"(?m)^\s*component\s+(\w+ToolbarBody)\s+inherits\s+[^\{]+\{", source):
+        block = balanced_slint_block(source, source.find("{", match.start(), match.end()))
+        if block:
+            toolbar_blocks.append(source[match.start() : source.find("{", match.start(), match.end())] + block)
+    toolbar_source = "\n".join(toolbar_blocks)
+    labels = re.findall(r'(?m)^\s*label:\s*"([^"]+)"\s*;', toolbar_source)
+    return {
+        "toolbar-component": toolbar_name,
+        "toolbar-groups": slint_instance_count(toolbar_source, "ToolbarGroup"),
+        "toolbar-icon-only-items": slint_instance_count(toolbar_source, "IconOnlyToolbarItem")
+        + slint_instance_count(toolbar_source, "ToolbarIconButton"),
+        "toolbar-icon-over-label-items": slint_instance_count(toolbar_source, "IconOverLabelToolbarItem")
+        + slint_instance_count(toolbar_source, "AppleToolbarItem"),
+        "toolbar-overflow-items": slint_instance_count(toolbar_source, "Overflow")
+        + slint_instance_count(toolbar_source, "ToolbarOverflowButton")
+        + slint_instance_count(toolbar_source, "OverflowMenuButton"),
+        "toolbar-labels": labels,
+        "labeled-slot-bindings": len(re.findall(r"\blabeled-slot\s*:", toolbar_source)),
+    }
+
+
+def app_source_metadata(app: str, source: str) -> dict[str, object]:
+    metadata = root_component_metadata(source)
+    metadata.update(toolbar_source_metadata(source))
+    metadata.update(
+        {
+            "title-component": "TitleChrome" if component_used(source, "TitleChrome") else "DocumentChrome",
+            "status-component": "StatusBar" if component_used(source, "StatusBar") else "ToolkitStatusBar",
+            "sidebar-count": slint_instance_count(source, "SidebarSurface"),
+            "inspector-count": slint_instance_count(source, "InspectorSurface"),
+            "sidebar-width": max(numeric_widths(source, "SidebarSurface"), default=0.0),
+            "inspector-width": max(numeric_widths(source, "InspectorSurface"), default=0.0),
+            "directional-layout-count": slint_instance_count(source, "DirectionalLayout"),
+            "rtl-binding": "Theme.rtl" in source,
+        }
+    )
+    return metadata
+
+
+def runtime_metric(source: str, metric: str) -> float:
+    match = re.search(rf"\b{re.escape(metric)}:\s*([0-9]+(?:\.[0-9]+)?)px\b", source)
+    if match is None:
+        raise ValueError(f"missing runtime metric {metric}")
+    return float(match.group(1))
+
+
 def geometry_manifest(
     width: int,
     height: int,
@@ -39,20 +212,16 @@ def geometry_manifest(
     app_contract: dict,
     responsive: dict,
     geometry_contract: dict,
+    source_metadata: dict[str, object],
+    runtime_metrics: dict[str, float],
 ) -> dict:
-    """Build a deterministic shell manifest independent of rendered pixels.
+    """Build a numeric shell manifest from checked-in Slint source metadata."""
 
-    Optional sidebars collapse before the primary surface can fall below the
-    shared minimum. The toolbar fixture models three groups and the largest
-    icon-over-label captions at the requested text scale; hosts can use the
-    same data to explain why a command moved to overflow.
-    """
-
-    title_height = float(geometry_contract["title-height"])
-    status_height = float(geometry_contract["status-height"])
-    context_toolbar_height = float(geometry_contract["context-toolbar-height"])
-    labeled_min = float(geometry_contract["labeled-toolbar-min-height"])
-    labeled_max = float(geometry_contract["labeled-toolbar-max-height"])
+    title_height = runtime_metrics["title-height"]
+    status_height = runtime_metrics["status-height"]
+    context_toolbar_height = runtime_metrics["context-toolbar-height"]
+    labeled_min = runtime_metrics["labeled-toolbar-min-height"]
+    labeled_max = runtime_metrics["labeled-toolbar-max-height"]
     primary_min_width = float(geometry_contract["primary-surface-min-width"])
     primary_min_height = float(geometry_contract["primary-surface-min-height"])
     p1 = int(responsive["priority-1-icon-only-below"])
@@ -70,11 +239,15 @@ def geometry_manifest(
     ]
     work_y = title_height + toolbar_height
     work_height = max(0.0, float(height) - work_y - status_height)
-    rects.append(GeometryRect("primary-work-surface", 0.0, work_y, float(width), work_height))
-    rects.append(GeometryRect("status", 0.0, work_y + work_height, float(width), status_height))
 
-    left = float(app_contract.get("left-sidebar-default", 0))
-    right = float(app_contract.get("right-inspector-default", 0))
+    left = float(source_metadata.get("sidebar-width", 0.0))
+    right = float(source_metadata.get("inspector-width", 0.0))
+    # Source metadata may omit a literal width for a responsive expression;
+    # the contract remains the durable fallback for that explicit case.
+    if left <= 0:
+        left = float(app_contract.get("left-sidebar-default", 0))
+    if right <= 0:
+        right = float(app_contract.get("right-inspector-default", 0))
     primary_width = float(width) - left - right
     # Collapse optional panels in contract order until the primary surface is
     # usable. A manifest records the resulting geometry, not an aspirational
@@ -86,22 +259,41 @@ def geometry_manifest(
         left = 0.0
         primary_width = float(width)
 
-    # Three logical groups: P0 icon controls, P1 captions/icons, P2 overflow.
-    # Caption width is intentionally conservative so a 150% text-scale probe
-    # catches a host that forgot to move or elide a lower-priority command.
+    if direction == "ltr":
+        left_x, right_x, primary_x = 0.0, float(width) - right, left
+    else:
+        left_x, right_x, primary_x = float(width) - left, 0.0, right
+    if left > 0:
+        rects.append(GeometryRect("left-sidebar", left_x, work_y, left, work_height))
+    if right > 0:
+        rects.append(GeometryRect("right-inspector", right_x, work_y, right, work_height))
+    rects.append(GeometryRect("primary-work-surface", primary_x, work_y, primary_width, work_height))
+    rects.append(GeometryRect("status", 0.0, work_y + work_height, float(width), status_height))
+
+    # Labels and item counts come from the app's real toolbar source. Caption
+    # width is intentionally conservative so a 150% probe catches a host that
+    # forgot to move or elide a lower-priority command.
     caption_widths = [
         max(48.0, 10.0 * len(label) * 0.62 * text_scale + 16.0)
-        for label in ("Transform", "Insert", "Export")
+        for label in source_metadata.get("toolbar-labels", [])
     ]
-    visible_item_widths = [28.0, 28.0, 28.0]
+    icon_count = int(source_metadata.get("toolbar-icon-only-items", 0))
+    labeled_count = int(source_metadata.get("toolbar-icon-over-label-items", 0))
+    overflow_count = int(source_metadata.get("toolbar-overflow-items", 0))
     if labeled:
-        visible_item_widths.extend(caption_widths)
+        # Alternate compact branches are not present in the wide tree; only
+        # labels attached to icon-over-label instances consume the labeled
+        # slot. This avoids counting hidden icon-only fallbacks twice.
+        visible_item_widths = caption_widths[:labeled_count] or [28.0] * max(1, labeled_count)
     elif not overflow:
-        visible_item_widths.extend([28.0, 28.0])
+        visible_item_widths = [28.0] * max(1, icon_count)
     else:
-        # P2 actions are represented by one canonical 28px overflow button.
-        visible_item_widths.append(28.0)
+        # P2 actions are represented by one canonical overflow target even if
+        # the source currently has no explicit Overflow instance.
+        visible_item_widths = [28.0] * max(1, icon_count)
+        visible_item_widths.append(28.0 if overflow_count == 0 else 28.0 * overflow_count)
     toolbar_content_width = sum(visible_item_widths) + 4.0 * (len(visible_item_widths) - 1) + 16.0
+    fits = toolbar_content_width <= float(width)
 
     return {
         "viewport": [width, height],
@@ -112,10 +304,10 @@ def geometry_manifest(
         "primary-surface": {"width": primary_width, "height": work_height},
         "toolbar": {
             "height": toolbar_height,
-            "lines": 1,
-            "groups": 3,
+            "lines": 1 if fits else 2,
+            "groups": int(source_metadata.get("toolbar-groups", 0)),
             "content-width": toolbar_content_width,
-            "fits": toolbar_content_width <= float(width),
+            "fits": fits,
             "overflow": overflow,
             "icon-only": icon_only,
             "labeled": labeled,
@@ -407,12 +599,12 @@ def audit_design_contract() -> None:
         "toolbar": "Toolbar",
         "toolbar-group": "ToolbarGroup",
         "toolbar-button": "ToolbarButton",
-        "toolbar-icon-button": "ToolbarIconButton",
-        "toolbar-overflow-button": "ToolbarOverflowButton",
+        "toolbar-icon-button": "IconOnlyToolbarItem",
+        "toolbar-overflow-button": "Overflow",
         "panel-header": "PanelHeader",
         "sidebar": "SidebarSurface",
         "inspector": "InspectorSurface",
-        "status": "ToolkitStatusBar",
+        "status": "StatusBar",
         "icon": "Icon",
         "title-chrome": "TitleChrome",
         "icon-only-toolbar-item": "IconOnlyToolbarItem",
@@ -431,7 +623,7 @@ def audit_design_contract() -> None:
 
     expected_wrappers = {
         "ToolButton": "ToolbarButton",
-        "IconButton": "ToolbarIconButton",
+        "IconButton": "IconOnlyToolbarItem",
         "WorkspaceToolbar": "Toolbar",
         "PaneTabs": "TabStrip",
         "Slider": "RangeSlider",
@@ -442,6 +634,7 @@ def audit_design_contract() -> None:
         "design system: legacy wrapper map was weakened or changed",
     )
     expected_reexports = {
+        "DirectionalLayout": "DirectionalLayout",
         "Toolbar": "Toolbar",
         "ToolbarGroup": "ToolbarGroup",
         "ToolbarSpacer": "ToolbarSpacer",
@@ -476,10 +669,24 @@ def audit_design_contract() -> None:
         ownership.get("legacy-reexports") == expected_reexports,
         "design system: legacy re-export map was weakened or changed",
     )
+    expected_compatibility = {
+        "DocumentChrome": "TitleChrome",
+        "ToolbarIconButton": "IconOnlyToolbarItem",
+        "AppleToolbarItem": "IconOverLabelToolbarItem",
+        "ToolbarOverflowButton": "Overflow",
+        "OverflowMenuButton": "Overflow",
+        "ToolkitStatusBar": "StatusBar",
+        "TextField": "Field",
+        "TabStrip": "SheetTabStrip",
+    }
+    require(
+        ownership.get("compatibility-inherits") == expected_compatibility,
+        "design system: compatibility inheritance map was weakened or changed",
+    )
 
     overflow = contract.get("overflow-policy", {})
     expected_overflow = {
-        "canonical-button": "ToolbarOverflowButton",
+        "canonical-button": "Overflow",
         "compatibility-button": "OverflowMenuButton",
         "icon": "more",
         "accessible-role": "button",
@@ -541,23 +748,127 @@ def audit_design_contract() -> None:
         require(f"{runtime_name}: {value}px" in theme, f"runtime theme: missing {runtime_name}: {value}px")
 
 
-def audit_geometry_manifest() -> None:
-    """Exercise shared geometry at every boundary, scale, and direction.
+def write_geometry_manifest() -> None:
+    """Generate the checked-in source manifest used by the geometry audit."""
 
-    This is intentionally a numeric assertion over the contract rather than a
-    PNG comparison. It catches regressions that can leave a stable screenshot
-    hash while controls overlap, labels clip, a toolbar wraps, or the primary
-    work surface becomes unusably narrow.
-    """
+    toolkit_path = ROOT / "loom-core/crates/loom-ui/ui/toolkit.slint"
+    theme_path = ROOT / "loom-core/crates/loom-ui/ui/theme.slint"
+    theme_source = theme_path.read_text(encoding="utf-8")
+    metrics = {
+        "title-height": runtime_metric(theme_source, "header-height"),
+        "context-toolbar-height": runtime_metric(theme_source, "context-toolbar-height"),
+        "labeled-toolbar-min-height": runtime_metric(theme_source, "labeled-toolbar-min-height"),
+        "labeled-toolbar-max-height": runtime_metric(theme_source, "labeled-toolbar-max-height"),
+        "status-height": runtime_metric(theme_source, "status-height"),
+    }
+    lines = [
+        "# Generated from the checked-in Slint entry points by",
+        "# audit-product-ui.py --write-geometry-manifest.",
+        "# Do not edit by hand: source hashes make stale geometry evidence fail.",
+        "",
+        "[meta]",
+        'version = "1.0.0"',
+        'generator = "loom-bootstrap/scripts/audit-product-ui.py"',
+        "",
+    ]
+    for app in APPS:
+        source = active_application_ui(app)
+        metadata = app_source_metadata(app, source)
+        paths = app_source_files(app)
+        hashes = source_hashes(paths)
+        lines.append(f"[apps.{app}]")
+        entry_path = ROOT / f"loom-{app}/crates/loom-{app}-app/ui/app.slint"
+        lines.append(f"entry = {json.dumps(relative_source_path(entry_path))}")
+        lines.append(f"source-files = {json.dumps(sorted(hashes))}")
+        inline_hashes = ", ".join(f"{json.dumps(path)} = {json.dumps(value)}" for path, value in sorted(hashes.items()))
+        lines.append(f"source-hashes = {{ {inline_hashes} }}")
+        for key in (
+            "root-component",
+            "title-component",
+            "toolbar-component",
+            "status-component",
+        ):
+            lines.append(f"{key} = {json.dumps(metadata.get(key, ''))}")
+        for key in (
+            "root-min-width",
+            "root-min-height",
+            "root-preferred-width",
+            "root-preferred-height",
+            "sidebar-count",
+            "inspector-count",
+            "sidebar-width",
+            "inspector-width",
+            "toolbar-groups",
+            "toolbar-icon-only-items",
+            "toolbar-icon-over-label-items",
+            "toolbar-overflow-items",
+            "labeled-slot-bindings",
+            "directional-layout-count",
+        ):
+            lines.append(f"{key} = {json.dumps(metadata.get(key, 0))}")
+        lines.append(f"rtl-binding = {str(bool(metadata.get('rtl-binding', False))).lower()}")
+        lines.append(f"toolbar-labels = {json.dumps(metadata.get('toolbar-labels', []))}")
+        lines.append("")
+    GEOMETRY_MANIFEST_PATH.write_text("\n".join(lines), encoding="utf-8")
+
+
+def audit_source_manifest(manifest: dict) -> dict[str, dict[str, object]]:
+    """Validate manifest hashes and return source-derived app metadata."""
+
+    require(manifest.get("meta", {}).get("version") == "1.0.0", "geometry manifest: unsupported source manifest version")
+    apps = manifest.get("apps", {})
+    result: dict[str, dict[str, object]] = {}
+    for app in APPS:
+        entry = apps.get(app)
+        if not isinstance(entry, dict):
+            require(False, f"geometry manifest: missing source entry for {app}")
+            continue
+        source = active_application_ui(app)
+        actual = app_source_metadata(app, source)
+        expected_hashes = entry.get("source-hashes", {})
+        actual_paths = app_source_files(app)
+        actual_hashes = source_hashes(actual_paths)
+        expected_entry = relative_source_path(ROOT / f"loom-{app}/crates/loom-{app}-app/ui/app.slint")
+        require(entry.get("entry") == expected_entry, f"geometry manifest: {app} entry path is stale")
+        require(
+            entry.get("source-files") == sorted(actual_hashes),
+            f"geometry manifest: {app} source file list is stale",
+        )
+        require(
+            expected_hashes == actual_hashes,
+            f"geometry manifest: {app} source hash is stale; regenerate from current Slint",
+        )
+        for key, value in actual.items():
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            require(entry.get(key) == value, f"geometry manifest: {app} metadata drift for {key}")
+        result[app] = actual
+    return result
+
+
+def audit_geometry_manifest() -> None:
+    """Exercise source-derived geometry at every boundary, scale, and direction."""
 
     contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
-    if not contract_path.is_file():
+    if not contract_path.is_file() or not GEOMETRY_MANIFEST_PATH.is_file():
+        require(GEOMETRY_MANIFEST_PATH.is_file(), "geometry manifest: checked-in source manifest is missing")
         return
     with contract_path.open("rb") as handle:
         contract = tomllib.load(handle)
+    with GEOMETRY_MANIFEST_PATH.open("rb") as handle:
+        source_manifest = tomllib.load(handle)
 
     responsive = contract.get("responsive", {})
     geometry = contract.get("geometry-manifest", {})
+    theme_source = read("loom-core/crates/loom-ui/ui/theme.slint")
+    runtime_metrics = {
+        "title-height": runtime_metric(theme_source, "header-height"),
+        "context-toolbar-height": runtime_metric(theme_source, "context-toolbar-height"),
+        "labeled-toolbar-min-height": runtime_metric(theme_source, "labeled-toolbar-min-height"),
+        "labeled-toolbar-max-height": runtime_metric(theme_source, "labeled-toolbar-max-height"),
+        "status-height": runtime_metric(theme_source, "status-height"),
+    }
+    source_metadata = audit_source_manifest(source_manifest)
     probes = responsive.get("transition-probes", [])
     required_probes = [1179, 1180, 1279, 1280, 1319, 1320]
     require(probes == required_probes, "geometry manifest: transition probes must cover both sides of 1180/1320")
@@ -572,15 +883,19 @@ def audit_geometry_manifest() -> None:
         1319: {"icon-only": False, "overflow": True, "labeled": False},
         1320: {"icon-only": False, "overflow": False, "labeled": True},
     }
+    reference_metadata = source_metadata.get("writer", {})
+    reference_contract = contract.get("app", {}).get("writer", {})
     for width in required_probes:
         manifest = geometry_manifest(
             width,
             800,
             1.0,
             "ltr",
-            {"left-sidebar-default": 0, "right-inspector-default": 0},
+            reference_contract,
             responsive,
             geometry,
+            reference_metadata,
+            runtime_metrics,
         )
         for key, value in expected[width].items():
             require(
@@ -590,16 +905,12 @@ def audit_geometry_manifest() -> None:
 
     viewports = [(width, 800) for width in required_probes]
     viewports.extend(tuple(pair) for pair in contract.get("validation", {}).get("required-viewports", []))
-    seen_viewports: set[tuple[int, int]] = set()
     for app in APPS:
         app_contract = contract.get("app", {}).get(app, {})
+        app_metadata = source_metadata.get(app, {})
         for width, height in viewports:
             for text_scale in responsive.get("text-scale-probes", [1.0, 1.5]):
                 for direction in responsive.get("direction-probes", ["ltr", "rtl"]):
-                    key = (int(width), int(height), float(text_scale), direction, app)
-                    if key in seen_viewports:
-                        continue
-                    seen_viewports.add(key)
                     manifest = geometry_manifest(
                         int(width),
                         int(height),
@@ -608,6 +919,8 @@ def audit_geometry_manifest() -> None:
                         app_contract,
                         responsive,
                         geometry,
+                        app_metadata,
+                        runtime_metrics,
                     )
                     issues = assert_geometry_manifest(manifest, geometry)
                     for issue in issues:
@@ -616,12 +929,19 @@ def audit_geometry_manifest() -> None:
                             f"geometry manifest: {app} {width}x{height} scale={text_scale} direction={direction}: {issue}",
                         )
 
+        # The source-derived direction signal must be real and must move the
+        # side-panel geometry, rather than merely echoing a direction string.
+        ltr = geometry_manifest(1280, 800, 1.0, "ltr", app_contract, responsive, geometry, app_metadata, runtime_metrics)
+        rtl = geometry_manifest(1280, 800, 1.0, "rtl", app_contract, responsive, geometry, app_metadata, runtime_metrics)
+        require(ltr["direction"] != rtl["direction"], f"geometry manifest: {app} direction state is not preserved")
+        require(ltr["rects"] != rtl["rects"], f"geometry manifest: {app} RTL geometry does not mirror source panels")
+
 
 def audit_toolkit() -> None:
     toolkit = read("loom-core/crates/loom-ui/ui/toolkit.slint")
     required_components = (
         "DocumentChrome", "TitleChrome", "Toolbar", "ContextToolbar", "LabeledToolbar", "ToolbarGroup", "ToolbarSpacer",
-        "ToolbarButton", "ToolbarIconButton", "IconOnlyToolbarItem", "ToolbarOverflowButton", "Overflow",
+        "DirectionalLayout", "ToolbarButton", "ToolbarIconButton", "IconOnlyToolbarItem", "ToolbarOverflowButton", "Overflow",
         "AppleToolbarItem", "IconOverLabelToolbarItem", "PanelHeader", "SidebarSurface",
         "InspectorSurface", "SectionHeader", "ToolkitStatusBar", "CanvasSurface",
         "ContentSurface", "TextField", "SearchField", "SegmentedControl",
@@ -631,12 +951,12 @@ def audit_toolkit() -> None:
     for component in required_components:
         require(f"export component {component}" in toolkit, f"shared toolkit: missing {component}")
 
-    for component in ("ToolbarButton", "ToolbarIconButton", "Toggle"):
+    for component in ("ToolbarButton", "IconOnlyToolbarItem", "Toggle"):
         block = exported_component_block(toolkit, component)
         for token in ("accessible-role", "accessible-label", "accessible-action-default", "key-pressed(event)"):
             require(token in block, f"shared toolkit: {component} missing {token}")
 
-    for component in ("TextField", "Field", "FormulaBar", "SearchField", "SegmentedControl", "RangeSlider"):
+    for component in ("Field", "FormulaBar", "SearchField", "SegmentedControl", "RangeSlider"):
         block = exported_component_block(toolkit, component)
         require("accessible-role" in block and "accessible-label" in block, f"shared toolkit: {component} lacks accessibility metadata")
 
@@ -646,6 +966,20 @@ def audit_toolkit() -> None:
     require(
         "labeled-slot" in toolbar and "ResponsivePolicy.toolbar-height" in toolbar,
         "shared toolkit: Toolbar must explicitly select context vs labeled slot",
+    )
+    require(
+        re.search(r"(?m)^\s*in property <bool> labeled-slot:\s*false;", toolbar) is not None,
+        "shared toolkit: Toolbar must default to the 40px context slot",
+    )
+
+    directional = exported_component_block(toolkit, "DirectionalLayout")
+    require(
+        "export component DirectionalLayout inherits HorizontalLayout" in directional
+        and "in property <bool> rtl: Theme.rtl;" in directional
+        and "alignment: root.rtl ? end : start;" in directional
+        and "padding-left: root.rtl ? root.trailing-padding : root.leading-padding;" in directional
+        and "padding-right: root.rtl ? root.leading-padding : root.trailing-padding;" in directional,
+        "shared toolkit: DirectionalLayout must bind RTL to stable row geometry",
     )
 
     context = exported_component_block(toolkit, "ContextToolbar")
@@ -667,6 +1001,10 @@ def audit_toolkit() -> None:
         and "ResponsivePolicy.labeled-toolbar-min-height" in group
         and "ResponsivePolicy.context-toolbar-height" in group,
         "shared toolkit: ToolbarGroup must expose explicit slot geometry",
+    )
+    require(
+        re.search(r"(?m)^\s*in property <bool> labeled-slot:\s*false;", group) is not None,
+        "shared toolkit: ToolbarGroup must default to the 40px context slot",
     )
 
     item = exported_component_block(toolkit, "IconOverLabelToolbarItem")
@@ -704,16 +1042,20 @@ def audit_toolkit() -> None:
         and "ResponsivePolicy.labeled-toolbar-min-height" in icon_over_label,
         "shared toolkit: IconOverLabelToolbarItem must declare its labeled slot",
     )
+    require(
+        "root.requires-labeled-slot" in icon_over_label,
+        "shared toolkit: IconOverLabelToolbarItem must consume requires-labeled-slot in its geometry",
+    )
 
-    compact = exported_component_block(toolkit, "ToolbarIconButton")
+    compact = exported_component_block(toolkit, "IconOnlyToolbarItem")
     require(
         "width: Theme.tokens.metrics.control-height;" in compact
         and "height: Theme.tokens.metrics.control-height;" in compact
         and "size: 16px;" in compact,
-        "shared toolkit: ToolbarIconButton must retain tokenized 28px/16px compact geometry",
+        "shared toolkit: IconOnlyToolbarItem must retain tokenized 28px/16px compact geometry",
     )
 
-    overflow = exported_component_block(toolkit, "ToolbarOverflowButton")
+    overflow = exported_component_block(toolkit, "Overflow")
     for token in (
         "accessible-role: button",
         "accessible-label:",
@@ -725,9 +1067,9 @@ def audit_toolkit() -> None:
         'icon: "more"',
         "Theme.tokens.metrics.control-height",
     ):
-        require(token in overflow, f"shared toolkit: ToolbarOverflowButton missing {token}")
+        require(token in overflow, f"shared toolkit: Overflow missing {token}")
 
-    for component in ("PanelHeader", "ToolkitStatusBar"):
+    for component in ("PanelHeader", "StatusBar"):
         block = exported_component_block(toolkit, component)
         require("Theme.tokens" in block and "Theme.palette()" in block, f"shared toolkit: {component} is not tokenized")
     for component in ("SidebarSurface", "InspectorSurface"):
@@ -735,6 +1077,16 @@ def audit_toolkit() -> None:
         # Panel surfaces use fixed min/max widths from the machine contract;
         # their colors and nested header remain semantic/tokenized.
         require("Theme.palette()" in block and "PanelHeader" in block, f"shared toolkit: {component} is not tokenized")
+
+    property_row = exported_component_block(toolkit, "PropertyRow")
+    require(
+        "in property <bool> stacked" in property_row
+        and "GridLayout" in property_row
+        and "row: root.stacked ? 1 : 0;" in property_row
+        and "wrap: word-wrap;" in property_row
+        and "overflow: clip;" in property_row,
+        "shared toolkit: PropertyRow must support non-eliding stacked localization layout",
+    )
 
 
 def audit_shared_primitive_ownership() -> None:
@@ -779,7 +1131,7 @@ def audit_shared_primitive_ownership() -> None:
 
     wrappers = {
         "ToolButton": "ToolbarButton",
-        "IconButton": "ToolbarIconButton",
+        "IconButton": "IconOnlyToolbarItem",
         "WorkspaceToolbar": "Toolbar",
         "PaneTabs": "TabStrip",
         "Slider": "RangeSlider",
@@ -790,6 +1142,49 @@ def audit_shared_primitive_ownership() -> None:
             re.search(rf"(?m)^\s*export component {legacy}\s+inherits\s+{target}\b", components)
             is not None,
             f"shared ownership: {legacy} must wrap {target}",
+        )
+
+    # Canonical declarations own the implementation. Compatibility spellings
+    # are empty one-way inheritance shims; checking the direction prevents a
+    # second geometry/state owner from quietly returning through an old name.
+    canonical_bases = {
+        "TitleChrome": "Rectangle",
+        "IconOnlyToolbarItem": "Rectangle",
+        "IconOverLabelToolbarItem": "Rectangle",
+        "Overflow": "Rectangle",
+        "StatusBar": "Rectangle",
+        "Field": "Rectangle",
+        "SheetTabStrip": "Rectangle",
+    }
+    for name, base in canonical_bases.items():
+        require(
+            re.search(rf"(?m)^\s*export component {name}\s+inherits\s+{base}\b", toolkit)
+            is not None,
+            f"shared ownership: canonical {name} must own its {base} implementation",
+        )
+
+    compatibility = {
+        "DocumentChrome": "TitleChrome",
+        "ToolbarIconButton": "IconOnlyToolbarItem",
+        "AppleToolbarItem": "IconOverLabelToolbarItem",
+        "ToolbarOverflowButton": "Overflow",
+        "OverflowMenuButton": "Overflow",
+        "ToolkitStatusBar": "StatusBar",
+        "TextField": "Field",
+        "TabStrip": "SheetTabStrip",
+    }
+    for legacy, target in compatibility.items():
+        block = exported_component_block(toolkit, legacy)
+        require(
+            re.search(rf"(?m)^\s*export component {legacy}\s+inherits\s+{target}\b", block)
+            is not None,
+            f"shared ownership: compatibility {legacy} must inherit canonical {target}",
+        )
+        body = block[block.find("{") + 1 : block.rfind("}")]
+        body_without_comments = re.sub(r"//[^\n]*|/\*[\s\S]*?\*/", "", body).strip()
+        require(
+            not body_without_comments,
+            f"shared ownership: compatibility {legacy} contains a second implementation",
         )
 
     reexport_start = components.find("// Re-export the canonical shared primitives")
@@ -824,6 +1219,7 @@ def audit_shared_primitive_ownership() -> None:
         "Overflow",
         "ContextToolbar",
         "LabeledToolbar",
+        "DirectionalLayout",
     ):
         require(re.search(rf"\b{re.escape(name)}\b", reexports) is not None, f"shared ownership: missing {name} re-export")
 
@@ -861,10 +1257,26 @@ def audit_app(app: str) -> str:
     migrated = 'from "toolkit.slint"' in text
 
     if migrated:
-        for name in ("DocumentChrome", "Toolbar", "ToolbarGroup", "ToolkitStatusBar"):
-            require(component_used(text, name), f"{app}: toolkit migration missing {name}")
-        for name in ("AppHeader", "WorkspaceToolbar", "StatusBar"):
+        require(
+            component_used(text, "TitleChrome") or component_used(text, "DocumentChrome"),
+            f"{app}: toolkit migration missing title chrome",
+        )
+        require(
+            component_used(text, "Toolbar")
+            or component_used(text, "ContextToolbar")
+            or component_used(text, "LabeledToolbar"),
+            f"{app}: toolkit migration missing toolbar",
+        )
+        require(component_used(text, "ToolbarGroup"), f"{app}: toolkit migration missing ToolbarGroup")
+        require(
+            component_used(text, "StatusBar") or component_used(text, "ToolkitStatusBar"),
+            f"{app}: toolkit migration missing status bar",
+        )
+        for name in ("AppHeader", "WorkspaceToolbar"):
             require(not component_used(text, name), f"{app}: toolkit migration still contains legacy {name}")
+        require("Theme.rtl" in text, f"{app}: RTL root state is not wired to Theme.rtl")
+        require("DirectionalLayout" in text, f"{app}: workspace does not consume DirectionalLayout")
+        audit_toolbar_slot_hosts(app, text)
     else:
         for name in ("AppHeader", "WorkspaceToolbar", "StatusBar"):
             require(component_used(text, name), f"{app}: missing legacy {name} before migration")
@@ -875,6 +1287,17 @@ def audit_app(app: str) -> str:
     require("min-height:" in text, f"{app}: missing minimum responsive height")
     require("horizontal-stretch" in text or "CanvasSurface" in text, f"{app}: missing horizontal adaptive layout")
     require("vertical-stretch" in text or "CanvasSurface" in text, f"{app}: missing vertical adaptive layout")
+
+    if app in {"writer", "sheets", "present"}:
+        require("ResponsivePolicy::get" in main, f"{app}: responsive breakpoints are not read from ResponsivePolicy")
+        require(
+            not any(
+                re.search(r"(?:<|>|==|>=|<=)\s*(?:1180|1320)\b", line)
+                and not line.lstrip().startswith(("assert", "for width"))
+                for line in main.splitlines()
+            ),
+            f"{app}: production breakpoint logic contains a host-local 1180/1320 threshold",
+        )
 
     require(not emoji.search(text), f"{app}: emoji/icon-font glyphs remain")
     require(not re.search(r"#[0-9a-fA-F]{6,8}", text), f"{app}: hard-coded color outside theme")
@@ -887,6 +1310,47 @@ def audit_app(app: str) -> str:
         require("label:" in slider, f"{app}: slider lacks accessibility label")
     return text
 
+
+def audit_toolbar_slot_hosts(app: str, source: str) -> None:
+    """Require toolbar hosts and groups to choose one shared slot explicitly.
+
+    A 40px context row and a 48-52px icon-over-label row are different
+    contracts.  Keeping the check source-based catches the tempting shortcut
+    of binding a host's slot to a responsive boolean or leaving a generic
+    ``Toolbar`` around a labeled control.
+    """
+
+    context_hosts = slint_instance_blocks(source, "ContextToolbar")
+    labeled_hosts = slint_instance_blocks(source, "LabeledToolbar")
+    generic_hosts = slint_instance_blocks(source, "Toolbar")
+
+    for block in context_hosts:
+        require(
+            not re.search(r"(?m)^\s*labeled-slot\s*:\s*root\.", block),
+            f"{app}: ContextToolbar must not bind labeled-slot to responsive state",
+        )
+    for block in labeled_hosts:
+        require(
+            not re.search(r"(?m)^\s*labeled-slot\s*:\s*root\.", block),
+            f"{app}: LabeledToolbar must not bind labeled-slot to responsive state",
+        )
+    for block in generic_hosts:
+        require(
+            not re.search(r"\b(?:AppleToolbarItem|IconOverLabelToolbarItem)\b", block),
+            f"{app}: generic Toolbar cannot host icon-over-label controls",
+        )
+
+    for group in slint_instance_blocks(source, "ToolbarGroup"):
+        require(
+            re.search(r"\blabeled-slot\s*:\s*(?:true|false)\s*;", group) is not None,
+            f"{app}: ToolbarGroup must declare its context/labeled slot",
+        )
+
+
+if "--write-geometry-manifest" in sys.argv:
+    write_geometry_manifest()
+    print(f"wrote {GEOMETRY_MANIFEST_PATH.relative_to(ROOT)}")
+    sys.exit(0)
 
 audit_design_contract()
 audit_geometry_manifest()

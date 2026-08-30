@@ -6,7 +6,7 @@
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 import {
-    Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+    DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
@@ -79,7 +79,7 @@ export component ToolButton inherits ToolbarButton { }
 
 
 /// Compatibility spelling for the canonical compact icon button.
-export component IconButton inherits ToolbarIconButton { }
+export component IconButton inherits IconOnlyToolbarItem { }
 
 
 /// Primary action button (accent background).
@@ -967,7 +967,7 @@ export component CommandPaletteTestWindow inherits Window {
 // components.slint. There is one implementation for each primitive; these
 // exports are compatibility names, not alternate geometry or state logic.
 export {
-    Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+    DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
     AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
     TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,

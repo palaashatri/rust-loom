@@ -1,0 +1,207 @@
+# Generated from the checked-in Slint entry points by
+# audit-product-ui.py --write-geometry-manifest.
+# Do not edit by hand: source hashes make stale geometry evidence fail.
+
+[meta]
+version = "1.0.0"
+generator = "loom-bootstrap/scripts/audit-product-ui.py"
+
+[apps.writer]
+entry = "loom-writer/crates/loom-writer-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-writer/crates/loom-writer-app/ui/app.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-writer/crates/loom-writer-app/ui/app.slint" = "63d9ba0be6b9bf4f8187466a8bfac954b2f414a79841d550c1e806e486d27835" }
+root-component = "WriterApp"
+title-component = "TitleChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "StatusBar"
+root-min-width = 900.0
+root-min-height = 680.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 280.0
+toolbar-groups = 6
+toolbar-icon-only-items = 5
+toolbar-icon-over-label-items = 13
+toolbar-overflow-items = 1
+labeled-slot-bindings = 6
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["View", "Page Zoom", "Add Page", "View", "More Writer actions", "Format", "Document", "Export", "Format", "Export PDF", "Format", "Export PDF"]
+
+[apps.sheets]
+entry = "loom-sheets/crates/loom-sheets-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-sheets/crates/loom-sheets-app/ui/app.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-sheets/crates/loom-sheets-app/ui/app.slint" = "809d0f9aa053b9b491af3cd83c95f544415f2e95fc472f41d1aa05afe58f2bf4" }
+root-component = "SheetsApp"
+title-component = "TitleChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "StatusBar"
+root-min-width = 900.0
+root-min-height = 680.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 280.0
+toolbar-groups = 6
+toolbar-icon-only-items = 4
+toolbar-icon-over-label-items = 14
+toolbar-overflow-items = 1
+labeled-slot-bindings = 6
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["View", "View", "More Sheets actions", "Format", "Export", "Format"]
+
+[apps.present]
+entry = "loom-present/crates/loom-present-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-present/crates/loom-present-app/ui/app.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-present/crates/loom-present-app/ui/app.slint" = "ebb390e9ccc10acd024417079b286cc41b4aaef91a0a04f9d05668a00b1349f5" }
+root-component = "PresentApp"
+title-component = "TitleChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "StatusBar"
+root-min-width = 1024.0
+root-min-height = 720.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 1
+inspector-count = 1
+sidebar-width = 220.0
+inspector-width = 280.0
+toolbar-groups = 5
+toolbar-icon-only-items = 6
+toolbar-icon-over-label-items = 13
+toolbar-overflow-items = 1
+labeled-slot-bindings = 5
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["View", "Theme", "Add Slide", "View speaker notes", "Choose theme", "Add slide", "More presentation actions", "Play", "Format", "Export"]
+
+[apps.photo]
+entry = "loom-photo/crates/loom-photo-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-photo/crates/loom-photo-app/ui/app.slint", "loom-photo/crates/loom-photo-app/ui/product_workspace_v4.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-photo/crates/loom-photo-app/ui/app.slint" = "ac4161dc28bfed814f2208dda739195c4a420972b873620b7cdc907e401f6d14", "loom-photo/crates/loom-photo-app/ui/product_workspace_v4.slint" = "f11f84e27c142536bd35773ea1fbebb1949a9187e91fe676b83dedb622bb5054" }
+root-component = "PhotoApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 1024.0
+root-min-height = 720.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 280.0
+toolbar-groups = 3
+toolbar-icon-only-items = 1
+toolbar-icon-over-label-items = 9
+toolbar-overflow-items = 0
+labeled-slot-bindings = 3
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["Select", "Brush", "Wand", "Inspector", "Export", "Export PNG"]
+
+[apps.motion]
+entry = "loom-motion/crates/loom-motion-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-motion/crates/loom-motion-app/ui/app.slint", "loom-motion/crates/loom-motion-app/ui/product_workspace_v2.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-motion/crates/loom-motion-app/ui/app.slint" = "de37d26ee90a62c291226726aea60129b6429fda340f669e8808636d9d170a06", "loom-motion/crates/loom-motion-app/ui/product_workspace_v2.slint" = "4ac27f47ceaf2cd1a7ffcd8fb98650534729e29c9c516f50e77ab0ddd8254adb" }
+root-component = "MotionApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 920.0
+root-min-height = 720.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 1
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 3
+toolbar-icon-only-items = 12
+toolbar-icon-over-label-items = 11
+toolbar-overflow-items = 0
+labeled-slot-bindings = 3
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["Toggle guides", "Guides", "Toggle safe area", "Safe Area", "Toggle loop", "Loop", "Toggle curves", "Curves", "Export SVG"]
+
+[apps.video]
+entry = "loom-video/crates/loom-video-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-video/crates/loom-video-app/ui/app.slint", "loom-video/crates/loom-video-app/ui/product_workspace_v4.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-video/crates/loom-video-app/ui/app.slint" = "ea83c5f5c12765017c844cc18c551d62117037adfea612929ab1897cf0378b93", "loom-video/crates/loom-video-app/ui/product_workspace_v4.slint" = "ca317d55b3407a17fc04766fa57199da767ec68b2f3fbda059a129ca5b2c3adf" }
+root-component = "VideoApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 920.0
+root-min-height = 700.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 1
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 2
+toolbar-icon-only-items = 0
+toolbar-icon-over-label-items = 6
+toolbar-overflow-items = 0
+labeled-slot-bindings = 2
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["Select", "Blade", "Snap", "Inspector"]
+
+[apps.studio]
+entry = "loom-studio/crates/loom-studio-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-studio/crates/loom-studio-app/ui/app.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-studio/crates/loom-studio-app/ui/app.slint" = "6a4bf3ac44da726c3ce842d38a0c3fed39565e1b302906dba7e224ae0472f938" }
+root-component = "StudioApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 920.0
+root-min-height = 720.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 1
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 2
+toolbar-icon-only-items = 0
+toolbar-icon-over-label-items = 7
+toolbar-overflow-items = 0
+labeled-slot-bindings = 2
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = ["Loop", "Metronome", "Bounce WAV"]
+
+[apps.encode]
+entry = "loom-encode/crates/loom-encode-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-encode/crates/loom-encode-app/ui/app.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "71241453d18f33cc823d25e188657297f01ae0a9b207fa314d8b5061a93b45f8", "loom-encode/crates/loom-encode-app/ui/app.slint" = "63ce1833db7d704bd430b30bbf7248fabd88280204b67d2cd4a8d11c79f9cb09" }
+root-component = "EncodeApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 900.0
+root-min-height = 680.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 1
+inspector-count = 1
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 2
+toolbar-icon-only-items = 0
+toolbar-icon-over-label-items = 3
+toolbar-overflow-items = 0
+labeled-slot-bindings = 2
+directional-layout-count = 1
+rtl-binding = true
+toolbar-labels = []

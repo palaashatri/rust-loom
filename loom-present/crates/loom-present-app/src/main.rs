@@ -349,9 +349,11 @@ fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) {
 }
 
 fn configure_responsive_width(app: &PresentApp, width: u32) {
-    app.set_show_inspector(width >= 1180);
-    app.set_labeled_export(width >= 1320);
-    let overflow_toolbar = width < 1180;
+    let policy = ResponsivePolicy::get(app);
+    let width = width as f32;
+    app.set_show_inspector(width >= policy.get_priority_1_icon_only_below());
+    app.set_labeled_export(width >= policy.get_priority_2_overflow_below());
+    let overflow_toolbar = width < policy.get_priority_2_overflow_below();
     if !overflow_toolbar && app.get_toolbar_overflow_open() {
         app.invoke_close_toolbar_overflow();
     }
@@ -1504,7 +1506,7 @@ mod desktop_tests {
         assert!(app.get_overflow_toolbar());
         app.set_toolbar_overflow_open(true);
 
-        configure_responsive_width(&app, 1180);
+        configure_responsive_width(&app, 1320);
 
         assert!(!app.get_overflow_toolbar());
         assert!(!app.get_toolbar_overflow_open());

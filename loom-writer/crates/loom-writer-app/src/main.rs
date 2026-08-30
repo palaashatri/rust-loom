@@ -934,18 +934,21 @@ fn apply_theme(app: &WriterApp, theme: &str) {
         .set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
 }
 
-fn layout_breakpoints(width: u32) -> (bool, bool) {
-    // Keep the named action rail clear of the centered title until there is
-    // enough room for both rails. The reference-sized 1317px workspace stays
-    // labeled, while medium 1180-1279px windows use the compact icon rail.
-    (width >= 1320, width >= 1280)
+fn layout_breakpoints(app: &WriterApp, width: u32) -> (bool, bool) {
+    let policy = ResponsivePolicy::get(app);
+    let width = width as f32;
+    let labeled = width >= policy.get_priority_2_overflow_below();
+    // Both the labeled rail and its export caption belong to the shared P2
+    // boundary. There is intentionally no host-only 1280px transition.
+    (labeled, labeled)
 }
 
 fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
-    let (wide_toolbar, labeled_export) = layout_breakpoints(width);
+    let policy = ResponsivePolicy::get(app);
+    let (wide_toolbar, labeled_export) = layout_breakpoints(app, width);
     app.set_wide_toolbar(wide_toolbar);
     app.set_labeled_export(labeled_export);
-    let overflow_toolbar = width < 1180;
+    let overflow_toolbar = (width as f32) < policy.get_priority_2_overflow_below();
     if !overflow_toolbar && app.get_toolbar_overflow_open() {
         app.invoke_close_toolbar_overflow();
     }
@@ -956,7 +959,7 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     // The inspector is optional chrome. Keep the page dominant at compact
     // widths and allow it to be opened only once the contract's minimum
     // primary-surface share can be preserved.
-    let inspector_available = width >= 1180;
+    let inspector_available = (width as f32) >= policy.get_priority_1_icon_only_below();
     app.set_inspector_available(inspector_available);
     if !inspector_available {
         app.set_show_inspector(false);
@@ -1842,15 +1845,16 @@ mod tests {
 
     #[test]
     fn layout_breakpoints_match_supported_width_boundaries() {
-        assert_eq!(layout_breakpoints(1024), (false, false));
-        assert_eq!(layout_breakpoints(1179), (false, false));
-        assert_eq!(layout_breakpoints(1180), (false, false));
-        assert_eq!(layout_breakpoints(1240), (false, false));
-        assert_eq!(layout_breakpoints(1279), (false, false));
-        assert_eq!(layout_breakpoints(1280), (false, true));
-        assert_eq!(layout_breakpoints(1319), (false, true));
-        assert_eq!(layout_breakpoints(1320), (true, true));
-        assert_eq!(layout_breakpoints(1440), (true, true));
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let policy = ResponsivePolicy::get(&app);
+        assert_eq!(policy.get_priority_1_icon_only_below(), 1180.0);
+        assert_eq!(policy.get_priority_2_overflow_below(), 1320.0);
+        for width in [1024, 1179, 1180, 1240, 1279, 1280, 1319] {
+            assert_eq!(layout_breakpoints(&app, width), (false, false));
+        }
+        assert_eq!(layout_breakpoints(&app, 1320), (true, true));
+        assert_eq!(layout_breakpoints(&app, 1440), (true, true));
     }
 
     #[test]
