@@ -3,20 +3,15 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Duration;
 
 use loom_desktop::{
     build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
     MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
-use loom_motion_core::{
-    load_motion, save_motion, CompositionClock, CompositionDocument, MotionLayer,
-};
+use loom_motion_core::{load_motion, save_motion, CompositionClock, CompositionDocument, MotionLayer};
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
-use slint::{
-    ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, Timer, TimerMode, VecModel,
-};
+use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -193,6 +188,7 @@ fn format_timecode(frame: u64, fps: f64) -> String {
     format!("{hours:02}:{minutes:02}:{seconds:02}:{frame_in_second:02}")
 }
 
+#[allow(dead_code)]
 fn clock_for_document(doc: &CompositionDocument) -> CompositionClock {
     CompositionClock::new(
         doc.frame_rate as f64,
