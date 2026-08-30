@@ -176,9 +176,12 @@ Required release matrix: all contract viewports at text scale 1.0, plus referenc
 
 Larger text does **not** automatically multiply every chrome dimension. Controls remain coherent desktop controls; when labels no longer fit, responsive composition changes, rows stack where allowed, and lower-priority toolbar actions overflow. Content zoom is independent of UI text scale.
 
-RTL is a first-class direction probe. Horizontal layouts mirror through the
-platform layout direction while preserving command order, focus order, and the
-same geometry budgets; no app-local padding or colour override is permitted.
+RTL is a first-class direction probe. `DirectionalLayout` keeps stable
+`HorizontalLayout` geometry while swapping logical leading/trailing insets;
+applications that need distinct side-panel placement must provide an explicit
+`root.rtl` branch. The shared probe preserves command order, focus order, and
+the same geometry budgets, and no app-local padding or colour override is
+permitted.
 
 ## Alignment
 

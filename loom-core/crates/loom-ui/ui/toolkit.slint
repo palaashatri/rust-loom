@@ -10,17 +10,19 @@ import { Icon } from "icons.slint";
 /// Horizontal flow that follows the product's writing direction.
 ///
 /// Slint 1.17 keeps `FlexboxLayout` experimental, so the production toolkit
-/// uses the stable `HorizontalLayout` primitive instead.  `rtl` is still a
-/// live geometry input: it changes main-axis packing and swaps the semantic
-/// leading/trailing insets supplied by the shared chrome wrappers.  Surfaces
-/// that need to swap distinct panels expose those panels in an explicit RTL
-/// branch; this primitive remains a single-line layout for arbitrary content.
+/// uses the stable `HorizontalLayout` primitive instead. `rtl` changes the
+/// semantic leading/trailing insets; surfaces that need to swap distinct
+/// panels expose those panels in an explicit RTL branch.
 export component DirectionalLayout inherits HorizontalLayout {
     in property <bool> rtl: Theme.rtl;
     in property <length> leading-padding: 0px;
     in property <length> trailing-padding: 0px;
 
-    alignment: root.rtl ? end : start;
+    // Stretch is required for workspace children that declare
+    // `horizontal-stretch: 1`; start/end would fall back to preferred widths
+    // and collapse the primary canvas/grid. Child-order mirroring is owned by
+    // the app's explicit RTL branches, while edge padding remains live here.
+    alignment: stretch;
     padding-left: root.rtl ? root.trailing-padding : root.leading-padding;
     padding-right: root.rtl ? root.leading-padding : root.trailing-padding;
 }
@@ -58,10 +60,11 @@ export component TitleChrome inherits Rectangle {
 export component DocumentChrome inherits TitleChrome { }
 
 export component Toolbar inherits Rectangle {
-    // A toolbar explicitly declares whether it hosts icon-over-label items.
-    // The base and context variants are the compact 40px contract. Hosts
-    // containing icon-over-label controls must opt into `LabeledToolbar`.
-    in property <bool> labeled-slot: false;
+    // A bare Toolbar preserves the historical labeled-slot default for
+    // compatibility hosts. New surfaces must choose ContextToolbar or
+    // LabeledToolbar explicitly so the host contract is visible at the call
+    // site.
+    in property <bool> labeled-slot: true;
     private property <length> slot-min-height: ResponsivePolicy.toolbar-height(root.labeled-slot);
     private property <length> slot-max-height: root.labeled-slot
         ? ResponsivePolicy.labeled-toolbar-max-height
@@ -108,21 +111,15 @@ export component IconOverLabelToolbarItem inherits Rectangle {
     in property <string> label: "";
     in property <bool> enabled: true;
     in property <bool> checked: false;
-    in property <bool> requires-labeled-slot: true;
     callback clicked;
 
     min-width: max(48px, label-text.preferred-width + 16px);
     preferred-width: max(48px, label-text.preferred-width + 16px);
-    // The item owns its slot requirement: hosts that intentionally opt out
-    // receive the same 40px context geometry as the host, while the default
-    // contract reserves the full labeled range. The audit requires every
-    // icon-over-label host to make this choice explicit.
-    min-height: root.requires-labeled-slot
-        ? ResponsivePolicy.labeled-toolbar-min-height
-        : ResponsivePolicy.context-toolbar-height;
-    max-height: root.requires-labeled-slot
-        ? ResponsivePolicy.labeled-toolbar-max-height
-        : ResponsivePolicy.context-toolbar-height;
+    // The host owns the slot contract. Items reserve the labeled range by
+    // default; compact hosts use the icon-only variant instead of clipping a
+    // label into the 40px context row.
+    min-height: ResponsivePolicy.labeled-toolbar-min-height;
+    max-height: ResponsivePolicy.labeled-toolbar-max-height;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
@@ -812,41 +809,55 @@ export component InspectorSection inherits Rectangle {
 export component PropertyRow inherits Rectangle {
     in property <string> label: "Property";
     // Localized labels can opt into a two-line row without truncation. The
-    // default remains the compact horizontal inspector grammar.
+    // automatic branch also stacks when the measured label cannot fit in the
+    // compact inspector column, so a caller cannot accidentally clip a long
+    // translation by leaving `stacked` at its default.
     in property <bool> stacked: false;
-    min-height: Theme.tokens.metrics.control-height;
+    accessible-role: AccessibleRole.none;
+    accessible-label: root.label;
     // GridLayout is available in Slint's stable builtin set and lets the
     // same row switch between a two-column inspector grammar and a stacked
     // localization-safe grammar without duplicating the child placeholder.
     GridLayout {
-        spacing: root.stacked ? Theme.tokens.space.sm : Theme.tokens.space.md;
+        spacing: root.stacked-layout ? Theme.tokens.space.sm : Theme.tokens.space.md;
 
-        Text {
+        label_text := Text {
             row: 0;
             col: 0;
             text: root.label;
-            min-width: root.stacked ? 0px : 84px;
-            max-width: root.stacked ? 10000px : 112px;
-            horizontal-stretch: root.stacked ? 1 : 0;
+            min-width: root.stacked-layout ? 0px : 84px;
+            max-width: root.stacked-layout ? 10000px : 112px;
+            horizontal-stretch: root.stacked-layout ? 1 : 0;
             font-size: Theme.tokens.typography.caption;
             font-weight: 500;
             color: Theme.palette().ink-secondary;
             vertical-alignment: center;
             wrap: word-wrap;
-            overflow: clip;
         }
 
         // The control column is a layout, not an absolute Rectangle.  The
         // previous wrapper left controls at their intrinsic width, making
         // inspector fields look detached and leaving an uneven right edge.
-        Rectangle {
-            row: root.stacked ? 1 : 0;
-            col: root.stacked ? 0 : 1;
-            min-width: root.stacked ? 0px : 120px;
+        control_cell := VerticalLayout {
+            row: root.stacked-layout ? 1 : 0;
+            col: root.stacked-layout ? 0 : 1;
+            min-width: root.stacked-layout ? 0px : 120px;
             horizontal-stretch: 1;
             @children
         }
     }
+
+    // These bindings intentionally follow the child declarations. Slint does
+    // not resolve element ids from expressions declared before the element,
+    // and the measured label/control heights are needed for localization-safe
+    // automatic stacking.
+    private property <bool> auto-stacked: label_text.preferred-width > 112px
+        || (root.width > 0px && label_text.preferred-width + 120px + Theme.tokens.space.md > root.width);
+    private property <bool> stacked-layout: root.stacked || root.auto-stacked;
+    min-height: root.stacked-layout
+        ? label_text.preferred-height + control_cell.preferred-height + Theme.tokens.space.sm
+        : max(Theme.tokens.metrics.control-height, max(label_text.preferred-height, control_cell.preferred-height));
+    preferred-height: root.min-height;
 }
 
 /// Canonical sheet/document tab strip.

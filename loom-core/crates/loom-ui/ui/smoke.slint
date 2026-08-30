@@ -7,7 +7,7 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer,
     ToolbarButton, ToolbarIconButton, SidebarSurface, InspectorSurface,
-    SectionHeader, ToolkitStatusBar, SearchField, TextField,
+    SectionHeader, ToolkitStatusBar, SearchField, TextField, DirectionalLayout,
     SegmentedControl, Toggle, RangeSlider, PropertyRow, TabStrip
 } from "toolkit.slint";
 import { EmptyState, StatusPill, CommandPalette, CommandPaletteItem } from "components.slint";
@@ -152,5 +152,35 @@ export component SmokeWindow inherits Window {
         selected: 0;
         query: "";
         commands: root.palette-commands;
+    }
+}
+
+/// Small executable probe for direction and localization-sensitive geometry.
+/// It is intentionally separate from the visual reference surface so a
+/// regression test can toggle both states without replacing an approved
+/// baseline capture.
+export component DirectionalPropertyProbeWindow inherits Window {
+    title: "Loom UI direction probe";
+    width: 420px;
+    height: 180px;
+    background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+
+    DirectionalLayout {
+        rtl: root.rtl;
+        width: 100%;
+        height: 72px;
+        leading-padding: 8px;
+        trailing-padding: 28px;
+        cross-axis-alignment: center;
+        ToolbarButton { icon: "settings"; label: "Leading action"; }
+        ToolbarButton { icon: "export"; label: "Trailing action"; }
+    }
+
+    PropertyRow {
+        y: 82px;
+        width: 100%;
+        label: "A deliberately long localized property label";
+        ToolbarButton { icon: "check"; label: "Value"; }
     }
 }

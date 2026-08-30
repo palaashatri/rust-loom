@@ -171,7 +171,7 @@ mod tests {
 
 #[cfg(test)]
 mod visual_tests {
-    use super::smoke_window::{SmokeWindow, Theme};
+    use super::smoke_window::{DirectionalPropertyProbeWindow, SmokeWindow, Theme};
     use crate::{CommandPalette, CommandPaletteItem};
     use slint::Global;
 
@@ -297,6 +297,32 @@ mod visual_tests {
         assert!(high_contrast.reduced_motion);
         assert_eq!(high_contrast.motion.standard_ms, 0);
         assert_eq!(high_contrast.metrics.toolbar_height, 40.0);
+    }
+
+    #[test]
+    fn direction_and_long_property_labels_are_observable_and_safe() {
+        loom_test_support::capture::set_platform();
+        let window = DirectionalPropertyProbeWindow::new().expect("create direction probe");
+
+        window.set_rtl(false);
+        let ltr = loom_test_support::capture::snapshot_component(&window, 420.0, 180.0, 1.0)
+            .expect("capture LTR probe");
+        window.set_rtl(true);
+        let rtl = loom_test_support::capture::snapshot_component(&window, 420.0, 180.0, 1.0)
+            .expect("capture RTL probe");
+        assert!(
+            diff_ratio(&ltr, &rtl) > 0.001,
+            "RTL direction must change row geometry"
+        );
+
+        let scaled = loom_test_support::capture::snapshot_component(&window, 420.0, 180.0, 1.5)
+            .expect("capture 150% property-row probe");
+        assert_eq!(scaled.width(), 630);
+        assert_eq!(scaled.height(), 270);
+        assert!(
+            non_canvas_pixels(&scaled) > 1_000,
+            "scaled probe must remain rendered"
+        );
     }
 
     #[test]
