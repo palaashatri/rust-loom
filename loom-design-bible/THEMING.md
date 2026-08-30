@@ -24,6 +24,11 @@ Rules:
   document (the same TOML schema) loaded from user settings with
   validation against the contrast floors; not a plugin API surface yet.
 
+Responsive geometry is theme-independent. `ResponsivePolicy` owns the 1180 px
+P1 and 1320 px P2 transitions, while the selected `Theme` supplies the
+semantic colours and type metrics. The 40 px context-toolbar slot and 48–52 px
+icon-over-label slot remain distinct in every theme and at 150% text scale.
+
 ## 2. Token mapping (identical in all three themes)
 
 Each theme supplies values for the same semantic tokens; names never vary.
@@ -85,6 +90,11 @@ Only palette tokens vary by theme.
   overshoot, spring — replaced per `MOTION.md` §4 (opacity ≤ 120 ms only).
 * Not a theme: there is no separate "reduced motion theme"; the setting
   switches animation behavior globally.
+
+RTL is likewise orthogonal to colour theme. The release matrix exercises both
+directions with the same focus, accessible-name, and geometry assertions; a
+direction change must not introduce app-local padding, colour, or control-size
+overrides.
 
 ## 6. Theme integrity
 

@@ -2,6 +2,14 @@
 
 Toolbars are single-line, contextual command surfaces. Exact dimensions and breakpoints are defined in [`contracts/desktop-ui.toml`](contracts/desktop-ui.toml).
 
+## Explicit toolbar slots
+
+`ContextToolbar` owns the 40 px context row. `LabeledToolbar` owns the
+48–52 px row required by `IconOverLabelToolbarItem`; `IconOnlyToolbarItem`
+remains the 28 px compact target. `Toolbar` keeps a legacy labeled-slot
+default for existing hosts, but new surfaces must choose an explicit slot.
+Content cannot silently increase a context row's height.
+
 ## Structure
 
 A toolbar contains at most three logical groups:
@@ -28,6 +36,12 @@ The implementation applies this order whenever width decreases:
 2. convert eligible P1 actions to icon-only;
 3. remove redundant toolbar exposure while retaining menu/palette access;
 4. never clip, ellipsize, overlap, wrap, scroll, or shrink below control minimums.
+
+The shared `ResponsivePolicy` evaluates these transitions at one canonical
+set of boundaries: P1 icon-only below 1180 px, P2 overflow below 1320 px.
+Validation exercises 1179, 1180, 1279, 1280, 1319, and 1320 px, plus 150%
+text and both LTR/RTL directions. 1279/1280 must produce the same policy
+state; a host-defined 1280 px breakpoint is a contract violation.
 
 If P0 still does not fit, the toolbar contains too many P0 actions and must be redesigned.
 
@@ -93,5 +107,10 @@ A toolbar is accepted only when all required viewports and text scales satisfy:
 - every overflowed action remains reachable;
 - keyboard focus order matches visual order;
 - realistic localized/pseudolocalized labels do not break the layout.
+
+The source audit records a geometry manifest for each state and rejects
+positive-area rectangle overlap, label clipping, a second toolbar line, and a
+primary-surface width below the shared minimum. Screenshot hashes remain useful
+regression evidence but cannot substitute for these assertions.
 
 Replacing a screenshot baseline to hide a toolbar collision is a release-process defect.

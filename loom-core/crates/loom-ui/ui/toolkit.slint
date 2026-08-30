@@ -4,7 +4,7 @@
 // controls. It obeys loom-design-bible/contracts/desktop-ui.toml. Application
 // code supplies state/commands/content; it does not restyle these primitives.
 
-import { Theme } from "theme.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
 import { Icon } from "icons.slint";
 
 export component DocumentChrome inherits Rectangle {
@@ -34,39 +34,65 @@ export component DocumentChrome inherits Rectangle {
     Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
 }
 
+/// Canonical title/document chrome name. `DocumentChrome` remains the
+/// compatibility spelling used by existing applications; both names share
+/// this one title surface and state model.
+export component TitleChrome inherits DocumentChrome {
+    min-height: Theme.tokens.metrics.header-height;
+    max-height: Theme.tokens.metrics.header-height;
+}
+
 export component Toolbar inherits Rectangle {
-    // Labeled (icon-over-label) controls need a taller slot than compact
-    // icon-only chrome; otherwise the label baseline is pressed into the
-    // separator at native/retina scale.
-    min-height: 48px;
-    max-height: 52px;
+    // A toolbar explicitly declares whether it hosts icon-over-label items.
+    // The default preserves existing hosts, while ContextToolbar and
+    // LabeledToolbar make the two contracts unambiguous for new surfaces.
+    in property <bool> labeled-slot: true;
+    private property <length> slot-min-height: ResponsivePolicy.toolbar-height(root.labeled-slot);
+    private property <length> slot-max-height: root.labeled-slot
+        ? ResponsivePolicy.labeled-toolbar-max-height
+        : ResponsivePolicy.context-toolbar-height;
+    min-height: root.slot-min-height;
+    max-height: root.slot-max-height;
     background: Theme.palette().chrome;
     HorizontalLayout { spacing: 4px; padding-left: 8px; padding-right: 8px; cross-axis-alignment: center; @children }
     Rectangle { x: 0px; y: root.height - 1px; width: root.width; height: 1px; background: Theme.palette().border; }
 }
 
+/// Explicit 40px context-toolbar slot. Icon-over-label children are not
+/// silently stretched into this row; use `LabeledToolbar` for those controls.
+export component ContextToolbar inherits Toolbar { labeled-slot: false; }
+
+/// Explicit 48–52px slot for icon-over-label toolbar controls.
+export component LabeledToolbar inherits Toolbar { labeled-slot: true; }
+
 export component ToolbarGroup inherits Rectangle {
     in property <bool> leading-separation: false;
-    min-height: 48px;
-    max-height: 52px;
+    in property <bool> labeled-slot: true;
+    min-height: root.labeled-slot ? ResponsivePolicy.labeled-toolbar-min-height : ResponsivePolicy.context-toolbar-height;
+    max-height: root.labeled-slot ? ResponsivePolicy.labeled-toolbar-max-height : ResponsivePolicy.context-toolbar-height;
     background: transparent;
     HorizontalLayout { spacing: 2px; padding-left: root.leading-separation ? Theme.tokens.space.lg : 0px; cross-axis-alignment: center; @children }
 }
 
 export component ToolbarSpacer inherits Rectangle { horizontal-stretch: 1; background: transparent; }
 
-/// Apple Creator Studio-style toolbar item: icon on top, label below.
-export component AppleToolbarItem inherits Rectangle {
+/// Canonical Loom toolbar item: icon on top, label below.
+///
+/// This neutral primitive is the sole state/geometry implementation. The
+/// historical `AppleToolbarItem` spelling below is compatibility-only so the
+/// product identity is not coupled to a third-party brand.
+export component IconOverLabelToolbarItem inherits Rectangle {
     in property <string> icon: "generic";
     in property <string> label: "";
     in property <bool> enabled: true;
     in property <bool> checked: false;
+    in property <bool> requires-labeled-slot: true;
     callback clicked;
 
     min-width: max(48px, label-text.preferred-width + 16px);
     preferred-width: max(48px, label-text.preferred-width + 16px);
-    min-height: 48px;
-    max-height: 52px;
+    min-height: ResponsivePolicy.labeled-toolbar-min-height;
+    max-height: ResponsivePolicy.labeled-toolbar-max-height;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.checked ? 1px : 0px;
     border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
@@ -108,6 +134,10 @@ export component AppleToolbarItem inherits Rectangle {
     touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
 }
 
+/// Compatibility spelling for the former branded component. Geometry and
+/// behavior remain owned by IconOverLabelToolbarItem above.
+export component AppleToolbarItem inherits IconOverLabelToolbarItem { }
+
 export component ToolbarIconButton inherits Rectangle {
     in property <string> icon: "generic";
     in property <string> label: "";
@@ -139,6 +169,13 @@ export component ToolbarIconButton inherits Rectangle {
         }
     }
     touch := TouchArea { enabled: root.enabled; clicked => { focus.focus(); root.clicked(); } }
+}
+
+/// Canonical neutral name for the compact 28px icon-only toolbar control.
+export component IconOnlyToolbarItem inherits ToolbarIconButton {
+    in property <bool> compact-slot: true;
+    width: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
 }
 
 /// Compact command affordance for actions moved out of a constrained toolbar.
@@ -181,6 +218,12 @@ export component ToolbarOverflowButton inherits Rectangle {
 /// Compatibility spelling for hosts that call this an overflow menu button.
 /// Geometry and behavior remain owned by ToolbarOverflowButton above.
 export component OverflowMenuButton inherits ToolbarOverflowButton { }
+
+/// Canonical short name for the one shared toolbar overflow affordance.
+export component Overflow inherits ToolbarOverflowButton {
+    width: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
+}
 
 export component ToolbarButton inherits Rectangle {
     in property <string> icon: "";
@@ -319,6 +362,10 @@ export component SectionHeader inherits Rectangle {
 export component ToolkitStatusBar inherits Rectangle {
     in property <string> leading: "";
     in property <string> trailing: "";
+    // Compatibility aliases keep legacy hosts on the same canonical status
+    // surface while allowing new callers to use leading/trailing semantics.
+    in property <string> status-left: "";
+    in property <string> status-right: "";
     min-height: Theme.tokens.metrics.status-height;
     max-height: Theme.tokens.metrics.status-height;
     background: Theme.palette().chrome;
@@ -326,15 +373,22 @@ export component ToolkitStatusBar inherits Rectangle {
     HorizontalLayout {
         spacing: 12px; padding-left: 12px; padding-right: 12px; cross-axis-alignment: center;
         Text {
-            text: root.leading; font-size: Theme.tokens.typography.caption; font-weight: 400;
+            text: root.leading != "" ? root.leading : root.status-left; font-size: Theme.tokens.typography.caption; font-weight: 400;
             color: Theme.palette().ink-secondary; horizontal-stretch: 1; vertical-alignment: center; overflow: elide;
         }
         Text {
-            text: root.trailing; font-size: Theme.tokens.typography.caption; font-weight: 500;
+            text: root.trailing != "" ? root.trailing : root.status-right; font-size: Theme.tokens.typography.caption; font-weight: 500;
             color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide;
             max-width: 320px;
         }
     }
+}
+
+/// Canonical status-bar name. `ToolkitStatusBar` remains the historical
+/// spelling used by migrated applications and inherits this exact surface.
+export component StatusBar inherits ToolkitStatusBar {
+    min-height: Theme.tokens.metrics.status-height;
+    max-height: Theme.tokens.metrics.status-height;
 }
 
 export component CanvasSurface inherits Rectangle {
@@ -387,6 +441,92 @@ export component TextField inherits Rectangle {
         vertical-alignment: center; overflow: elide;
     }
     TouchArea { enabled: root.enabled; clicked => { input.focus(); } }
+}
+
+/// Canonical short spelling for a single-line property field. Keeping this as
+/// an inheritance alias means Field and TextField cannot drift in geometry,
+/// focus, validation, or accessibility behavior.
+export component Field inherits TextField {
+    height: Theme.tokens.metrics.control-height;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.label;
+}
+
+/// Shared spreadsheet/document formula bar. The reference cell and editor
+/// stay in one 32px row; hosts own commit semantics through the callbacks.
+export component FormulaBar inherits Rectangle {
+    in property <string> cell-reference: "A1";
+    in property <string> placeholder: "Enter formula";
+    in-out property <string> value: "";
+    in property <bool> enabled: true;
+    in property <bool> invalid: false;
+    callback edited(string);
+    callback accepted(string);
+    callback cancelled;
+
+    height: Theme.tokens.metrics.formula-bar-height;
+    min-width: 0px;
+    background: Theme.palette().chrome;
+    border-width: 1px;
+    border-color: root.invalid ? Theme.palette().danger : Theme.palette().border;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: "Formula bar";
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        Text {
+            text: root.cell-reference;
+            min-width: 72px;
+            preferred-width: 72px;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 600;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+        Rectangle { width: 1px; height: 18px; background: Theme.palette().border; }
+        Rectangle {
+            horizontal-stretch: 1;
+            min-width: 120px;
+            height: Theme.tokens.metrics.control-height;
+            border-radius: Theme.tokens.metrics.radius-small;
+            border-width: formula-input.has-focus ? 2px : 1px;
+            border-color: root.invalid ? Theme.palette().danger : formula-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+            background: root.enabled ? Theme.palette().surface-raised : Theme.palette().surface-sunken;
+            formula-input := TextInput {
+                x: 8px;
+                width: root.width - 16px;
+                height: parent.height;
+                text: root.value;
+                enabled: root.enabled;
+                single-line: true;
+                font-size: Theme.tokens.typography.body;
+                color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                vertical-alignment: center;
+                edited => { root.value = formula-input.text; root.edited(formula-input.text); }
+                accepted => { root.accepted(formula-input.text); }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) { root.cancelled(); return accept; }
+                    return reject;
+                }
+            }
+            if root.value == "" : Text {
+                x: 8px;
+                width: root.width - 16px;
+                height: parent.height;
+                text: root.placeholder;
+                font-size: Theme.tokens.typography.body;
+                color: Theme.palette().ink-disabled;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            TouchArea { enabled: root.enabled; clicked => { formula-input.focus(); } }
+        }
+    }
 }
 
 export component SearchField inherits Rectangle {
@@ -571,6 +711,87 @@ export component RangeSlider inherits Rectangle {
     }
 }
 
+/// Canonical inspector section. The header and body are one flow-owned object
+/// so sibling sections cannot overlap; hosts may collapse the body without
+/// changing the shared header geometry.
+export component InspectorSection inherits Rectangle {
+    in property <string> title: "Section";
+    in-out property <bool> expanded: true;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    min-height: Theme.tokens.metrics.panel-header-height;
+    background: transparent;
+    accessible-role: AccessibleRole.none;
+    accessible-label: root.title;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        header := Rectangle {
+            min-height: Theme.tokens.metrics.panel-header-height;
+            max-height: Theme.tokens.metrics.panel-header-height;
+            background: header-touch.has-hover ? Theme.palette().surface-sunken : transparent;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                padding-left: 0px;
+                padding-right: Theme.tokens.space.sm;
+                cross-axis-alignment: center;
+                Icon {
+                    size: Theme.tokens.metrics.icon-small;
+                    icon: root.expanded ? "chevron-down" : "chevron-right";
+                    tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+                }
+                Text {
+                    text: root.title;
+                    font-size: Theme.tokens.typography.title;
+                    font-weight: 600;
+                    color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+            }
+            header-touch := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    root.expanded = !root.expanded;
+                    root.toggled(root.expanded);
+                    header-focus.focus();
+                }
+            }
+            header-focus := FocusScope {
+                enabled: root.enabled;
+                key-pressed(event) => {
+                    if (event.text == Key.Space || event.text == Key.Return) {
+                        root.expanded = !root.expanded;
+                        root.toggled(root.expanded);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+            accessible-role: button;
+            accessible-label: root.title;
+            accessible-checked: root.expanded;
+            accessible-action-default => {
+                if (root.enabled) {
+                    root.expanded = !root.expanded;
+                    root.toggled(root.expanded);
+                }
+            }
+        }
+        body := VerticalLayout {
+            visible: root.expanded;
+            spacing: Theme.tokens.space.md;
+            padding-left: Theme.tokens.space.lg;
+            padding-right: Theme.tokens.space.lg;
+            padding-bottom: Theme.tokens.space.lg;
+            @children
+        }
+    }
+}
+
 export component PropertyRow inherits Rectangle {
     in property <string> label: "Property";
     min-height: Theme.tokens.metrics.control-height;
@@ -597,7 +818,7 @@ export component TabStrip inherits Rectangle {
     in property <[string]> tabs: [];
     in-out property <int> current: 0;
     callback selected(int);
-    height: 30px;
+    height: Theme.tokens.metrics.sheet-tab-height;
     background: Theme.palette().chrome;
     accessible-role: tab;
     HorizontalLayout {
@@ -624,6 +845,12 @@ export component TabStrip inherits Rectangle {
         }
         Rectangle { horizontal-stretch: 1; }
     }
+}
+
+/// Canonical spreadsheet tab strip name. Generic `TabStrip` remains available
+/// for document/pane tabs; both use the same selection and keyboard semantics.
+export component SheetTabStrip inherits TabStrip {
+    height: Theme.tokens.metrics.sheet-tab-height;
 }
 
 export component NumericStepper inherits Rectangle {

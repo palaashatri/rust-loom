@@ -29,6 +29,7 @@ reference-viewport = [1280, 800]
 required-viewports = [[1024, 720], [1280, 800], [1440, 900], [1920, 1200]]
 required-text-scales = [1.0, 1.25, 1.5]
 accessibility-text-scale = 2.0
+required-directions = ["ltr", "rtl"]
 required-themes = ["light", "dark", "high-contrast"]
 max-unintentional-overlap-px = 0
 max-control-label-clipping-px = 0
@@ -39,6 +40,32 @@ max-toolbar-lines = 1
 max-toolbar-groups = 3
 baseline-diff-mean = 0.012
 baseline-diff-pixel-ratio = 0.035
+
+# One owner for responsive toolbar decisions. The probes are intentionally
+# adjacent to each boundary so a host cannot accidentally treat a transition
+# as a fuzzy range or move it to an app-local magic number.
+[responsive]
+priority-1-icon-only-below = 1180
+priority-2-overflow-below = 1320
+transition-probes = [1179, 1180, 1279, 1280, 1319, 1320]
+text-scale-probes = [1.0, 1.5]
+direction-probes = ["ltr", "rtl"]
+
+# Geometry is validated independently of screenshot hashes. The audit builds
+# a deterministic shell manifest for each responsive probe and rejects
+# overlap, clipping, wrapped toolbars, and starvation of the primary surface.
+[geometry-manifest]
+version = "1.0.0"
+primary-surface-min-width = 480
+primary-surface-min-height = 320
+title-height = 40
+context-toolbar-height = 40
+labeled-toolbar-min-height = 48
+labeled-toolbar-max-height = 52
+status-height = 28
+max-overlap-px = 0
+max-clipping-px = 0
+max-toolbar-lines = 1
 
 # ---------------------------------------------------------------------------
 # Spacing and dimensions.
@@ -91,6 +118,8 @@ popover-radius = 10
 title-height = 40
 toolbar-height = 40
 context-toolbar-height = 40
+labeled-toolbar-min-height = 48
+labeled-toolbar-max-height = 52
 status-height = 28
 panel-header-height = 32
 sheet-tab-height = 30
@@ -305,6 +334,41 @@ label-size = 10
 padding-y = 4
 allow-label-elision = true
 
+[component.title-chrome]
+height = 40
+title-is-user-content = true
+app-name-is-secondary = true
+
+[component.icon-only-toolbar-item]
+width = 28
+height = 28
+icon = 16
+tooltip-required = true
+
+[component.icon-over-label-toolbar-item]
+min-height = 48
+max-height = 52
+icon = 18
+label-size = 10
+padding-y = 4
+allow-label-elision = true
+
+[component.sheet-tab-strip]
+height = 30
+tab-min-width = 72
+label-size = 11
+
+[component.formula-bar]
+height = 32
+reference-min-width = 72
+input-padding-x = 8
+
+[component.field]
+height = 28
+radius = 6
+label-size = 13
+padding-x = 8
+
 [component.segmented]
 height = 28
 radius = 6
@@ -360,9 +424,19 @@ sidebar = "SidebarSurface"
 inspector = "InspectorSurface"
 status = "ToolkitStatusBar"
 icon = "Icon"
+title-chrome = "TitleChrome"
+icon-only-toolbar-item = "IconOnlyToolbarItem"
+icon-over-label-toolbar-item = "IconOverLabelToolbarItem"
+sheet-tab-strip = "SheetTabStrip"
+formula-bar = "FormulaBar"
+inspector-section = "InspectorSection"
+property-row = "PropertyRow"
+field = "Field"
+segmented-control = "SegmentedControl"
+status-bar = "StatusBar"
+overflow = "Overflow"
 
 [primitive-ownership.legacy-wrappers]
-StatusBar = "ToolkitStatusBar"
 ToolButton = "ToolbarButton"
 IconButton = "ToolbarIconButton"
 WorkspaceToolbar = "Toolbar"
@@ -376,6 +450,7 @@ ToolbarGroup = "ToolbarGroup"
 ToolbarSpacer = "ToolbarSpacer"
 ToolbarButton = "ToolbarButton"
 ToolbarIconButton = "ToolbarIconButton"
+AppleToolbarItem = "AppleToolbarItem"
 ToolbarOverflowButton = "ToolbarOverflowButton"
 OverflowMenuButton = "OverflowMenuButton"
 PanelHeader = "PanelHeader"
@@ -387,6 +462,18 @@ Toggle = "Toggle"
 RangeSlider = "RangeSlider"
 TabStrip = "TabStrip"
 ToolkitStatusBar = "ToolkitStatusBar"
+TitleChrome = "TitleChrome"
+IconOnlyToolbarItem = "IconOnlyToolbarItem"
+IconOverLabelToolbarItem = "IconOverLabelToolbarItem"
+SheetTabStrip = "SheetTabStrip"
+FormulaBar = "FormulaBar"
+InspectorSection = "InspectorSection"
+PropertyRow = "PropertyRow"
+Field = "Field"
+StatusBar = "StatusBar"
+Overflow = "Overflow"
+ContextToolbar = "ContextToolbar"
+LabeledToolbar = "LabeledToolbar"
 
 # Compact mode must preserve the primary canvas/grid/timeline width. P1
 # actions become icon-only and P2 actions move to the one canonical overflow

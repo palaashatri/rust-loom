@@ -2,6 +2,20 @@
 
 This file defines component **semantics and ownership**. Exact measurements live in [`contracts/desktop-ui.toml`](contracts/desktop-ui.toml); token values live in [`tokens/loom.toml`](tokens/loom.toml). Do not duplicate or override those values in an application.
 
+## Canonical object kit
+
+The toolkit exports one canonical object for each shared shell role:
+`TitleChrome`, `IconOnlyToolbarItem`, `IconOverLabelToolbarItem`,
+`SheetTabStrip`, `FormulaBar`, `InspectorSection`, `PropertyRow`, `Field`,
+`SegmentedControl`, `StatusBar`, and `Overflow`. `ContextToolbar` and
+`LabeledToolbar` make the two toolbar slot heights explicit. Existing names
+such as `DocumentChrome`, `AppleToolbarItem`, `TabStrip`, `TextField`,
+`ToolkitStatusBar`, and `ToolbarOverflowButton` remain compatibility aliases
+to those owners, not second implementations.
+
+The same kit is exported through `components.slint` for source compatibility.
+An audit checks declaration ownership and rejects duplicate implementations.
+
 ## Ownership rule
 
 `loom-core/crates/loom-ui` owns every generic desktop control and shell primitive. Applications compose them and supply domain state/commands. They do not fork visual implementations.
@@ -89,6 +103,10 @@ Rules:
 
 Implements the algorithm in `TOOLBARS.md` and the machine contract: one line, maximum three groups, deterministic priority collapse, no scrolling, no clipping.
 
+Use `ContextToolbar` for a 40 px context row and `LabeledToolbar` for the
+48–52 px icon-over-label slot. The host must select one explicitly; children
+never stretch the other slot implicitly.
+
 ### Sidebar / Inspector
 
 Flush work surfaces, not card stacks. One body scroll surface. Sections use spacing and headers rather than decorative containers. Property labels do not truncate; rows stack when localization/text scale requires it.
@@ -116,6 +134,14 @@ Motion, Video, and Studio share ruler/playhead/track/clip primitives. Applicatio
 ### Grid/document viewport
 
 Writer and Sheets use specialized editor surfaces built from shared scrolling, selection, keyboard-routing, ruler/header, and inspector primitives. A generic `TextEdit` or fixed demo grid is not a professional editor architecture.
+
+### Geometry evidence
+
+`loom-bootstrap/scripts/audit-product-ui.py` emits and validates a logical
+geometry manifest at the six responsive boundary probes, required viewport
+matrix, 150% text scale, and LTR/RTL directions. The manifest checks bounds,
+overlap, clipping, toolbar line count, and primary-surface starvation; a stable
+PNG hash alone is not component evidence.
 
 ## Component completion gate
 

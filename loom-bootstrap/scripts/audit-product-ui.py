@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from dataclasses import dataclass
 import re
 import sys
 import tomllib
@@ -9,6 +10,159 @@ APPS = ("writer", "sheets", "present", "photo", "motion", "video", "studio", "en
 failures: list[str] = []
 emoji = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF]")
 slint_reference = re.compile(r'\bfrom\s+["\']([^"\']+\.slint)["\']')
+
+
+@dataclass(frozen=True)
+class GeometryRect:
+    """A logical-pixel rectangle in the shared shell manifest."""
+
+    name: str
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+def rect_overlap(left: GeometryRect, right: GeometryRect) -> tuple[float, float]:
+    """Return the positive overlap width/height for two rectangles."""
+
+    width = max(0.0, min(left.x + left.width, right.x + right.width) - max(left.x, right.x))
+    height = max(0.0, min(left.y + left.height, right.y + right.height) - max(left.y, right.y))
+    return width, height
+
+
+def geometry_manifest(
+    width: int,
+    height: int,
+    text_scale: float,
+    direction: str,
+    app_contract: dict,
+    responsive: dict,
+    geometry_contract: dict,
+) -> dict:
+    """Build a deterministic shell manifest independent of rendered pixels.
+
+    Optional sidebars collapse before the primary surface can fall below the
+    shared minimum. The toolbar fixture models three groups and the largest
+    icon-over-label captions at the requested text scale; hosts can use the
+    same data to explain why a command moved to overflow.
+    """
+
+    title_height = float(geometry_contract["title-height"])
+    status_height = float(geometry_contract["status-height"])
+    context_toolbar_height = float(geometry_contract["context-toolbar-height"])
+    labeled_min = float(geometry_contract["labeled-toolbar-min-height"])
+    labeled_max = float(geometry_contract["labeled-toolbar-max-height"])
+    primary_min_width = float(geometry_contract["primary-surface-min-width"])
+    primary_min_height = float(geometry_contract["primary-surface-min-height"])
+    p1 = int(responsive["priority-1-icon-only-below"])
+    p2 = int(responsive["priority-2-overflow-below"])
+    icon_only = width < p1
+    overflow = width < p2
+    labeled = width >= p2
+    toolbar_height = labeled_min if labeled else context_toolbar_height
+
+    # Keep fixed chrome in source order. Adjacent edges are intentional and
+    # do not count as overlap; any positive area overlap is a defect.
+    rects = [
+        GeometryRect("title", 0.0, 0.0, float(width), title_height),
+        GeometryRect("toolbar", 0.0, title_height, float(width), toolbar_height),
+    ]
+    work_y = title_height + toolbar_height
+    work_height = max(0.0, float(height) - work_y - status_height)
+    rects.append(GeometryRect("primary-work-surface", 0.0, work_y, float(width), work_height))
+    rects.append(GeometryRect("status", 0.0, work_y + work_height, float(width), status_height))
+
+    left = float(app_contract.get("left-sidebar-default", 0))
+    right = float(app_contract.get("right-inspector-default", 0))
+    primary_width = float(width) - left - right
+    # Collapse optional panels in contract order until the primary surface is
+    # usable. A manifest records the resulting geometry, not an aspirational
+    # preferred layout that would starve the work area.
+    if primary_width < primary_min_width and right > 0:
+        right = 0.0
+        primary_width = float(width) - left
+    if primary_width < primary_min_width and left > 0:
+        left = 0.0
+        primary_width = float(width)
+
+    # Three logical groups: P0 icon controls, P1 captions/icons, P2 overflow.
+    # Caption width is intentionally conservative so a 150% text-scale probe
+    # catches a host that forgot to move or elide a lower-priority command.
+    caption_widths = [
+        max(48.0, 10.0 * len(label) * 0.62 * text_scale + 16.0)
+        for label in ("Transform", "Insert", "Export")
+    ]
+    visible_item_widths = [28.0, 28.0, 28.0]
+    if labeled:
+        visible_item_widths.extend(caption_widths)
+    elif not overflow:
+        visible_item_widths.extend([28.0, 28.0])
+    else:
+        # P2 actions are represented by one canonical 28px overflow button.
+        visible_item_widths.append(28.0)
+    toolbar_content_width = sum(visible_item_widths) + 4.0 * (len(visible_item_widths) - 1) + 16.0
+
+    return {
+        "viewport": [width, height],
+        "text-scale": text_scale,
+        "direction": direction,
+        "rects": [rect.__dict__ for rect in rects],
+        "optional-panels": {"left": left, "right": right},
+        "primary-surface": {"width": primary_width, "height": work_height},
+        "toolbar": {
+            "height": toolbar_height,
+            "lines": 1,
+            "groups": 3,
+            "content-width": toolbar_content_width,
+            "fits": toolbar_content_width <= float(width),
+            "overflow": overflow,
+            "icon-only": icon_only,
+            "labeled": labeled,
+            "slot": "labeled" if labeled else "context",
+            "slot-range": [labeled_min, labeled_max] if labeled else [context_toolbar_height, context_toolbar_height],
+        },
+    }
+
+
+def assert_geometry_manifest(manifest: dict, geometry_contract: dict) -> list[str]:
+    """Return actionable geometry defects found in one shell manifest."""
+
+    width, height = manifest["viewport"]
+    max_overlap = float(geometry_contract["max-overlap-px"])
+    max_clipping = float(geometry_contract["max-clipping-px"])
+    issues: list[str] = []
+    rects = [GeometryRect(**rect) for rect in manifest["rects"]]
+    for index, rect in enumerate(rects):
+        if rect.x < -max_clipping or rect.y < -max_clipping:
+            issues.append(f"{rect.name} starts outside viewport")
+        if rect.x + rect.width > width + max_clipping or rect.y + rect.height > height + max_clipping:
+            issues.append(f"{rect.name} clips viewport bounds")
+        for other in rects[index + 1 :]:
+            overlap_width, overlap_height = rect_overlap(rect, other)
+            if overlap_width > max_overlap and overlap_height > max_overlap:
+                issues.append(f"{rect.name} overlaps {other.name}")
+
+    toolbar = manifest["toolbar"]
+    if toolbar["lines"] > 1:
+        issues.append("toolbar wraps to more than one line")
+    if not toolbar["fits"]:
+        issues.append("toolbar content exceeds viewport width")
+    if toolbar["slot"] == "labeled":
+        low, high = toolbar["slot-range"]
+        if not low <= toolbar["height"] <= high:
+            issues.append("labeled toolbar leaves its 48-52px slot")
+    else:
+        low, high = toolbar["slot-range"]
+        if toolbar["height"] != low or toolbar["height"] != high:
+            issues.append("context toolbar leaves its 40px slot")
+
+    primary = manifest["primary-surface"]
+    if primary["width"] < float(geometry_contract["primary-surface-min-width"]):
+        issues.append(f"primary surface starved horizontally ({primary['width']:.1f}px)")
+    if primary["height"] < float(geometry_contract["primary-surface-min-height"]):
+        issues.append(f"primary surface starved vertically ({primary['height']:.1f}px)")
+    return issues
 
 
 def require(condition: bool, message: str) -> None:
@@ -182,10 +336,46 @@ def audit_design_contract() -> None:
         "design system: required viewport matrix was weakened or reordered",
     )
     require(validation.get("required-text-scales") == [1.0, 1.25, 1.5], "design system: text-scale matrix was weakened")
+    require(validation.get("required-directions") == ["ltr", "rtl"], "design system: direction matrix must include LTR and RTL")
     require(validation.get("max-unintentional-overlap-px") == 0, "design system: overlap tolerance must remain zero")
     require(validation.get("max-control-label-clipping-px") == 0, "design system: clipping tolerance must remain zero")
     require(contract.get("toolbar", {}).get("max-groups") == 3, "design system: toolbar group maximum must remain three")
     require(contract.get("controls", {}).get("minimum-pointer-target") == 28, "design system: pointer target must remain 28px")
+
+    responsive = contract.get("responsive", {})
+    require(
+        responsive.get("priority-1-icon-only-below") == 1180
+        and responsive.get("priority-2-overflow-below") == 1320,
+        "design system: responsive breakpoints must remain centrally owned at 1180/1320",
+    )
+    require(
+        responsive.get("transition-probes") == [1179, 1180, 1279, 1280, 1319, 1320],
+        "design system: responsive transition probe matrix was weakened or reordered",
+    )
+    require(
+        responsive.get("text-scale-probes") == [1.0, 1.5],
+        "design system: responsive text-scale probes must include 150%",
+    )
+    require(
+        responsive.get("direction-probes") == ["ltr", "rtl"],
+        "design system: responsive direction probes must include LTR and RTL",
+    )
+
+    geometry = contract.get("geometry-manifest", {})
+    require(geometry.get("version") == "1.0.0", "design system: geometry manifest version is missing or unsupported")
+    for key, expected in {
+        "primary-surface-min-width": 480,
+        "primary-surface-min-height": 320,
+        "title-height": 40,
+        "context-toolbar-height": 40,
+        "labeled-toolbar-min-height": 48,
+        "labeled-toolbar-max-height": 52,
+        "status-height": 28,
+        "max-overlap-px": 0,
+        "max-clipping-px": 0,
+        "max-toolbar-lines": 1,
+    }.items():
+        require(geometry.get(key) == expected, f"design system: geometry manifest drift for {key}")
 
     labeled_toolbar = contract.get("component", {}).get("labeled-toolbar-item", {})
     require(
@@ -224,12 +414,22 @@ def audit_design_contract() -> None:
         "inspector": "InspectorSurface",
         "status": "ToolkitStatusBar",
         "icon": "Icon",
+        "title-chrome": "TitleChrome",
+        "icon-only-toolbar-item": "IconOnlyToolbarItem",
+        "icon-over-label-toolbar-item": "IconOverLabelToolbarItem",
+        "sheet-tab-strip": "SheetTabStrip",
+        "formula-bar": "FormulaBar",
+        "inspector-section": "InspectorSection",
+        "property-row": "PropertyRow",
+        "field": "Field",
+        "segmented-control": "SegmentedControl",
+        "status-bar": "StatusBar",
+        "overflow": "Overflow",
     }
     for key, expected in expected_ownership.items():
         require(ownership.get(key) == expected, f"design system: primitive ownership drift for {key}")
 
     expected_wrappers = {
-        "StatusBar": "ToolkitStatusBar",
         "ToolButton": "ToolbarButton",
         "IconButton": "ToolbarIconButton",
         "WorkspaceToolbar": "Toolbar",
@@ -247,6 +447,7 @@ def audit_design_contract() -> None:
         "ToolbarSpacer": "ToolbarSpacer",
         "ToolbarButton": "ToolbarButton",
         "ToolbarIconButton": "ToolbarIconButton",
+        "AppleToolbarItem": "AppleToolbarItem",
         "ToolbarOverflowButton": "ToolbarOverflowButton",
         "OverflowMenuButton": "OverflowMenuButton",
         "PanelHeader": "PanelHeader",
@@ -258,6 +459,18 @@ def audit_design_contract() -> None:
         "RangeSlider": "RangeSlider",
         "TabStrip": "TabStrip",
         "ToolkitStatusBar": "ToolkitStatusBar",
+        "TitleChrome": "TitleChrome",
+        "IconOnlyToolbarItem": "IconOnlyToolbarItem",
+        "IconOverLabelToolbarItem": "IconOverLabelToolbarItem",
+        "SheetTabStrip": "SheetTabStrip",
+        "FormulaBar": "FormulaBar",
+        "InspectorSection": "InspectorSection",
+        "PropertyRow": "PropertyRow",
+        "Field": "Field",
+        "StatusBar": "StatusBar",
+        "Overflow": "Overflow",
+        "ContextToolbar": "ContextToolbar",
+        "LabeledToolbar": "LabeledToolbar",
     }
     require(
         ownership.get("legacy-reexports") == expected_reexports,
@@ -310,9 +523,14 @@ def audit_design_contract() -> None:
         "control-height": ("control-height", "controls", "standard-height"),
         "compact-control-height": ("compact-control-height", "controls", "compact-height"),
         "toolbar-height": ("toolbar-height", "chrome", "toolbar-height"),
+        "context-toolbar-height": ("context-toolbar-height", "chrome", "context-toolbar-height"),
+        "labeled-toolbar-min-height": ("labeled-toolbar-min-height", "chrome", "labeled-toolbar-min-height"),
+        "labeled-toolbar-max-height": ("labeled-toolbar-max-height", "chrome", "labeled-toolbar-max-height"),
         "header-height": ("header-height", "chrome", "title-height"),
         "panel-header-height": ("panel-header-height", "chrome", "panel-header-height"),
         "status-height": ("status-height", "chrome", "status-height"),
+        "sheet-tab-height": ("sheet-tab-height", "chrome", "sheet-tab-height"),
+        "formula-bar-height": ("formula-bar-height", "chrome", "formula-bar-height"),
         "icon-size": ("icon-standard", "controls", "icon-standard"),
         "icon-small": ("icon-small", "controls", "icon-small"),
     }
@@ -323,14 +541,92 @@ def audit_design_contract() -> None:
         require(f"{runtime_name}: {value}px" in theme, f"runtime theme: missing {runtime_name}: {value}px")
 
 
+def audit_geometry_manifest() -> None:
+    """Exercise shared geometry at every boundary, scale, and direction.
+
+    This is intentionally a numeric assertion over the contract rather than a
+    PNG comparison. It catches regressions that can leave a stable screenshot
+    hash while controls overlap, labels clip, a toolbar wraps, or the primary
+    work surface becomes unusably narrow.
+    """
+
+    contract_path = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
+    if not contract_path.is_file():
+        return
+    with contract_path.open("rb") as handle:
+        contract = tomllib.load(handle)
+
+    responsive = contract.get("responsive", {})
+    geometry = contract.get("geometry-manifest", {})
+    probes = responsive.get("transition-probes", [])
+    required_probes = [1179, 1180, 1279, 1280, 1319, 1320]
+    require(probes == required_probes, "geometry manifest: transition probes must cover both sides of 1180/1320")
+
+    # Assert the policy at each exact boundary.  1279/1280 are intentional
+    # stability probes: no undocumented third breakpoint may appear there.
+    expected = {
+        1179: {"icon-only": True, "overflow": True, "labeled": False},
+        1180: {"icon-only": False, "overflow": True, "labeled": False},
+        1279: {"icon-only": False, "overflow": True, "labeled": False},
+        1280: {"icon-only": False, "overflow": True, "labeled": False},
+        1319: {"icon-only": False, "overflow": True, "labeled": False},
+        1320: {"icon-only": False, "overflow": False, "labeled": True},
+    }
+    for width in required_probes:
+        manifest = geometry_manifest(
+            width,
+            800,
+            1.0,
+            "ltr",
+            {"left-sidebar-default": 0, "right-inspector-default": 0},
+            responsive,
+            geometry,
+        )
+        for key, value in expected[width].items():
+            require(
+                manifest["toolbar"][key] == value,
+                f"geometry manifest: {width}px responsive state drift for {key}",
+            )
+
+    viewports = [(width, 800) for width in required_probes]
+    viewports.extend(tuple(pair) for pair in contract.get("validation", {}).get("required-viewports", []))
+    seen_viewports: set[tuple[int, int]] = set()
+    for app in APPS:
+        app_contract = contract.get("app", {}).get(app, {})
+        for width, height in viewports:
+            for text_scale in responsive.get("text-scale-probes", [1.0, 1.5]):
+                for direction in responsive.get("direction-probes", ["ltr", "rtl"]):
+                    key = (int(width), int(height), float(text_scale), direction, app)
+                    if key in seen_viewports:
+                        continue
+                    seen_viewports.add(key)
+                    manifest = geometry_manifest(
+                        int(width),
+                        int(height),
+                        float(text_scale),
+                        direction,
+                        app_contract,
+                        responsive,
+                        geometry,
+                    )
+                    issues = assert_geometry_manifest(manifest, geometry)
+                    for issue in issues:
+                        require(
+                            False,
+                            f"geometry manifest: {app} {width}x{height} scale={text_scale} direction={direction}: {issue}",
+                        )
+
+
 def audit_toolkit() -> None:
     toolkit = read("loom-core/crates/loom-ui/ui/toolkit.slint")
     required_components = (
-        "DocumentChrome", "Toolbar", "ToolbarGroup", "ToolbarSpacer",
-        "ToolbarButton", "ToolbarIconButton", "ToolbarOverflowButton", "PanelHeader", "SidebarSurface",
+        "DocumentChrome", "TitleChrome", "Toolbar", "ContextToolbar", "LabeledToolbar", "ToolbarGroup", "ToolbarSpacer",
+        "ToolbarButton", "ToolbarIconButton", "IconOnlyToolbarItem", "ToolbarOverflowButton", "Overflow",
+        "AppleToolbarItem", "IconOverLabelToolbarItem", "PanelHeader", "SidebarSurface",
         "InspectorSurface", "SectionHeader", "ToolkitStatusBar", "CanvasSurface",
         "ContentSurface", "TextField", "SearchField", "SegmentedControl",
-        "Toggle", "RangeSlider", "PropertyRow", "TabStrip",
+        "Toggle", "RangeSlider", "Field", "FormulaBar", "InspectorSection", "PropertyRow", "TabStrip", "SheetTabStrip",
+        "StatusBar",
     )
     for component in required_components:
         require(f"export component {component}" in toolkit, f"shared toolkit: missing {component}")
@@ -340,7 +636,7 @@ def audit_toolkit() -> None:
         for token in ("accessible-role", "accessible-label", "accessible-action-default", "key-pressed(event)"):
             require(token in block, f"shared toolkit: {component} missing {token}")
 
-    for component in ("TextField", "SearchField", "SegmentedControl", "RangeSlider"):
+    for component in ("TextField", "Field", "FormulaBar", "SearchField", "SegmentedControl", "RangeSlider"):
         block = exported_component_block(toolkit, component)
         require("accessible-role" in block and "accessible-label" in block, f"shared toolkit: {component} lacks accessibility metadata")
 
@@ -348,36 +644,65 @@ def audit_toolkit() -> None:
 
     toolbar = exported_component_block(toolkit, "Toolbar")
     require(
-        "min-height: 48px;" in toolbar and "max-height: 52px;" in toolbar,
-        "shared toolkit: Toolbar must reserve a 48–52px labeled-control slot",
+        "labeled-slot" in toolbar and "ResponsivePolicy.toolbar-height" in toolbar,
+        "shared toolkit: Toolbar must explicitly select context vs labeled slot",
+    )
+
+    context = exported_component_block(toolkit, "ContextToolbar")
+    require(
+        "labeled-slot: false" in context
+        and "export component ContextToolbar" in context,
+        "shared toolkit: ContextToolbar must opt into the 40px context slot",
+    )
+    labeled_toolbar = exported_component_block(toolkit, "LabeledToolbar")
+    require(
+        "labeled-slot: true" in labeled_toolbar
+        and "export component LabeledToolbar" in labeled_toolbar,
+        "shared toolkit: LabeledToolbar must opt into the 48–52px slot",
     )
 
     group = exported_component_block(toolkit, "ToolbarGroup")
     require(
-        "min-height: 48px;" in group and "max-height: 52px;" in group,
-        "shared toolkit: ToolbarGroup must reserve a 48–52px labeled-control slot",
+        "labeled-slot" in group
+        and "ResponsivePolicy.labeled-toolbar-min-height" in group
+        and "ResponsivePolicy.context-toolbar-height" in group,
+        "shared toolkit: ToolbarGroup must expose explicit slot geometry",
     )
 
-    item = exported_component_block(toolkit, "AppleToolbarItem")
+    item = exported_component_block(toolkit, "IconOverLabelToolbarItem")
     require(
-        "min-height: 48px;" in item and "max-height: 52px;" in item,
-        "shared toolkit: AppleToolbarItem must reserve a 48–52px labeled-control slot",
+        "ResponsivePolicy.labeled-toolbar-min-height" in item
+        and "ResponsivePolicy.labeled-toolbar-max-height" in item,
+        "shared toolkit: IconOverLabelToolbarItem must reserve a 48–52px labeled-control slot",
     )
     require(
         "font-size: 10px;" in item,
-        "shared toolkit: AppleToolbarItem labels must use 10px text",
+        "shared toolkit: IconOverLabelToolbarItem labels must use 10px text",
     )
     require(
         "size: 18px;" in item,
-        "shared toolkit: AppleToolbarItem icons must use the labeled-toolbar size",
+        "shared toolkit: IconOverLabelToolbarItem icons must use the labeled-toolbar size",
     )
     require(
         "padding-top: 4px;" in item and "padding-bottom: 4px;" in item,
-        "shared toolkit: AppleToolbarItem must preserve 4px vertical padding",
+        "shared toolkit: IconOverLabelToolbarItem must preserve 4px vertical padding",
     )
     require(
         "overflow: elide;" in item,
-        "shared toolkit: AppleToolbarItem labels must allow elision within their slot",
+        "shared toolkit: IconOverLabelToolbarItem labels must allow elision within their slot",
+    )
+
+    icon_only = exported_component_block(toolkit, "IconOnlyToolbarItem")
+    require(
+        "width: Theme.tokens.metrics.control-height;" in icon_only
+        and "height: Theme.tokens.metrics.control-height;" in icon_only,
+        "shared toolkit: IconOnlyToolbarItem must retain compact token geometry",
+    )
+    icon_over_label = exported_component_block(toolkit, "IconOverLabelToolbarItem")
+    require(
+        "requires-labeled-slot" in icon_over_label
+        and "ResponsivePolicy.labeled-toolbar-min-height" in icon_over_label,
+        "shared toolkit: IconOverLabelToolbarItem must declare its labeled slot",
     )
 
     compact = exported_component_block(toolkit, "ToolbarIconButton")
@@ -418,15 +743,28 @@ def audit_shared_primitive_ownership() -> None:
     components = read("loom-core/crates/loom-ui/ui/components.slint")
 
     canonical = (
+        "TitleChrome",
         "Toolbar",
+        "ContextToolbar",
+        "LabeledToolbar",
         "ToolbarGroup",
         "ToolbarButton",
         "ToolbarIconButton",
+        "IconOnlyToolbarItem",
+        "IconOverLabelToolbarItem",
         "ToolbarOverflowButton",
+        "Overflow",
         "PanelHeader",
         "SidebarSurface",
         "InspectorSurface",
         "ToolkitStatusBar",
+        "StatusBar",
+        "FormulaBar",
+        "InspectorSection",
+        "PropertyRow",
+        "Field",
+        "SegmentedControl",
+        "SheetTabStrip",
     )
     for name in canonical:
         require(exported_component_count(toolkit, name) == 1, f"shared ownership: toolkit must define exactly one {name}")
@@ -440,7 +778,6 @@ def audit_shared_primitive_ownership() -> None:
     require(exported_component_count(components, "Icon") == 0, "shared ownership: components.slint must not define Icon")
 
     wrappers = {
-        "StatusBar": "ToolkitStatusBar",
         "ToolButton": "ToolbarButton",
         "IconButton": "ToolbarIconButton",
         "WorkspaceToolbar": "Toolbar",
@@ -475,6 +812,18 @@ def audit_shared_primitive_ownership() -> None:
         "RangeSlider",
         "TabStrip",
         "ToolkitStatusBar",
+        "TitleChrome",
+        "IconOnlyToolbarItem",
+        "IconOverLabelToolbarItem",
+        "SheetTabStrip",
+        "FormulaBar",
+        "InspectorSection",
+        "PropertyRow",
+        "Field",
+        "StatusBar",
+        "Overflow",
+        "ContextToolbar",
+        "LabeledToolbar",
     ):
         require(re.search(rf"\b{re.escape(name)}\b", reexports) is not None, f"shared ownership: missing {name} re-export")
 
@@ -540,6 +889,7 @@ def audit_app(app: str) -> str:
 
 
 audit_design_contract()
+audit_geometry_manifest()
 audit_toolkit()
 audit_icons()
 audit_shared_primitive_ownership()

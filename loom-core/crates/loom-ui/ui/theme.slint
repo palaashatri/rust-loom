@@ -37,9 +37,14 @@ struct Metrics {
     control-height: length,
     compact-control-height: length,
     toolbar-height: length,
+    context-toolbar-height: length,
+    labeled-toolbar-min-height: length,
+    labeled-toolbar-max-height: length,
     header-height: length,
     panel-header-height: length,
     status-height: length,
+    sheet-tab-height: length,
+    formula-bar-height: length,
     icon-size: length,
     icon-small: length,
     radius-small: length,
@@ -88,8 +93,11 @@ export global Theme {
         },
         metrics: {
             control-height: 28px, compact-control-height: 24px,
-            toolbar-height: 40px, header-height: 40px, panel-header-height: 32px,
-            status-height: 28px, icon-size: 16px, icon-small: 14px,
+            toolbar-height: 40px, context-toolbar-height: 40px,
+            labeled-toolbar-min-height: 48px, labeled-toolbar-max-height: 52px,
+            header-height: 40px, panel-header-height: 32px,
+            status-height: 28px, sheet-tab-height: 30px,
+            formula-bar-height: 32px, icon-size: 16px, icon-small: 14px,
             radius-small: 4px, radius-medium: 6px, radius-large: 10px,
         },
         reduced-motion: false,
@@ -101,6 +109,10 @@ export global Theme {
     // the selected theme instead of only the palette function changing.
     in-out property <ThemeTokens> tokens: light-tokens;
     in-out property <string> active-theme: "light";
+    // Direction is orthogonal to colour theme. Hosts set it from the
+    // platform/document locale; primitives consume it without introducing
+    // app-local palette or spacing overrides.
+    in-out property <bool> rtl: false;
     changed active-theme => {
         tokens = active-theme == "dark" ? ThemeDark.tokens
             : active-theme == "high-contrast" ? ThemeHighContrast.tokens
@@ -143,8 +155,11 @@ export global ThemeDark {
         },
         metrics: {
             control-height: 28px, compact-control-height: 24px,
-            toolbar-height: 40px, header-height: 40px, panel-header-height: 32px,
-            status-height: 28px, icon-size: 16px, icon-small: 14px,
+            toolbar-height: 40px, context-toolbar-height: 40px,
+            labeled-toolbar-min-height: 48px, labeled-toolbar-max-height: 52px,
+            header-height: 40px, panel-header-height: 32px,
+            status-height: 28px, sheet-tab-height: 30px,
+            formula-bar-height: 32px, icon-size: 16px, icon-small: 14px,
             radius-small: 4px, radius-medium: 6px, radius-large: 10px,
         },
         reduced-motion: false,
@@ -180,10 +195,38 @@ export global ThemeHighContrast {
         },
         metrics: {
             control-height: 28px, compact-control-height: 24px,
-            toolbar-height: 40px, header-height: 40px, panel-header-height: 32px,
-            status-height: 28px, icon-size: 16px, icon-small: 14px,
+            toolbar-height: 40px, context-toolbar-height: 40px,
+            labeled-toolbar-min-height: 48px, labeled-toolbar-max-height: 52px,
+            header-height: 40px, panel-header-height: 32px,
+            status-height: 28px, sheet-tab-height: 30px,
+            formula-bar-height: 32px, icon-size: 16px, icon-small: 14px,
             radius-small: 4px, radius-medium: 6px, radius-large: 10px,
         },
         reduced-motion: true,
     };
+}
+
+// Responsive geometry has one owner. Apps may project the resulting booleans
+// into their controllers, but they must not invent a second 1180/1320 policy.
+// The two toolbar slot sizes are deliberately explicit: a 40px context row
+// cannot silently host a 48–52px icon-over-label control.
+export global ResponsivePolicy {
+    in-out property <length> priority-1-icon-only-below: 1180px;
+    in-out property <length> priority-2-overflow-below: 1320px;
+    in-out property <length> context-toolbar-height: 40px;
+    in-out property <length> labeled-toolbar-min-height: 48px;
+    in-out property <length> labeled-toolbar-max-height: 52px;
+
+    pure function priority-1-icon-only(width: length) -> bool {
+        return width < priority-1-icon-only-below;
+    }
+    pure function priority-2-overflow(width: length) -> bool {
+        return width < priority-2-overflow-below;
+    }
+    pure function uses-labeled-slot(width: length) -> bool {
+        return width >= priority-2-overflow-below;
+    }
+    public pure function toolbar-height(labeled: bool) -> length {
+        return labeled ? labeled-toolbar-min-height : context-toolbar-height;
+    }
 }

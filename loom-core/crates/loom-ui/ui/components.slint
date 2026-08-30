@@ -7,25 +7,17 @@ import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 import {
     Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
-    ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+    AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
-    TabStrip, ToolkitStatusBar
+    TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+    IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+    PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
 } from "toolkit.slint";
 
 // Canonical primitive implementations live in toolkit.slint. The exports at
 // the end of this file keep the legacy module path source-compatible while
 // ensuring applications do not silently fork toolbar, panel, field, tab, or
 // status geometry.
-
-/// Compatibility status bar. Rendering and geometry are owned by the
-/// tokenized ToolkitStatusBar primitive.
-export component StatusBar inherits ToolkitStatusBar {
-    in property <string> status-left: "";
-    in property <string> status-right: "";
-    leading: root.status-left;
-    trailing: root.status-right;
-}
-
 
 export component LoomWindow inherits Window {
     in property <string> app-name: "Loom";
@@ -110,49 +102,6 @@ export component PrimaryButton inherits Rectangle {
     touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
 }
 
-
-/// Labeled text field.
-export component Field inherits Rectangle {
-    in property <string> label: "";
-    in property <string> placeholder: "";
-    in-out property <string> value: "";
-    in property <bool> enabled: true;
-    callback edited(string);
-    height: 28px;
-    min-width: 140px;
-    horizontal-stretch: 1;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: text-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
-    background: Theme.palette().surface;
-
-    text-input := TextInput {
-        x: 8px;
-        width: parent.width - 16px;
-        vertical-alignment: center;
-        font-size: Theme.tokens.typography.body;
-        color: Theme.palette().ink;
-        text: root.value;
-        enabled: root.enabled;
-        edited => {
-            root.value = text-input.text;
-            root.edited(text-input.text);
-        }
-    }
-    if root.value == "" : Text {
-        x: 8px;
-        width: parent.width - 16px;
-        vertical-alignment: center;
-        font-size: Theme.tokens.typography.body;
-        color: Theme.palette().ink-disabled;
-        text: root.placeholder;
-    }
-
-    focus-scope := FocusScope { }
-
-    accessible-role: AccessibleRole.text-input;
-    accessible-label: root.label;
-}
 
 /// Compatibility spelling for the canonical range slider.
 export component Slider inherits RangeSlider { }
@@ -537,32 +486,6 @@ export component Panel inherits Rectangle {
                     }
                 }
             }
-        }
-    }
-}
-
-/// Inspector section header.
-export component InspectorSection inherits Rectangle {
-    in property <string> title: "";
-    background: transparent;
-    min-height: 26px;
-    max-height: 26px;
-
-    HorizontalLayout {
-        spacing: 8px;
-        padding-left: 0px;
-        padding-right: 8px;
-        Text {
-            text: root.title;
-            font-size: Theme.tokens.typography.caption;
-            font-weight: 700;
-            color: Theme.palette().ink-secondary;
-            vertical-alignment: center;
-        }
-        Rectangle {
-            height: 1px;
-            horizontal-stretch: 1;
-            background: Theme.palette().border;
         }
     }
 }
@@ -1045,7 +968,9 @@ export component CommandPaletteTestWindow inherits Window {
 // exports are compatibility names, not alternate geometry or state logic.
 export {
     Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
-    ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+    AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
     InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
-    TabStrip, ToolkitStatusBar
+    TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+    IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+    PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
 } from "toolkit.slint";
