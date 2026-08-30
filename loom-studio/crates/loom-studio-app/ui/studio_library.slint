@@ -1,5 +1,5 @@
-import { SidebarSurface } from "components.slint";
-import { ToolButton, IconButton, Slider, SegmentedControl, Field, StatusPill } from "components.slint";
+import { SidebarSurface, Slider, SegmentedControl, Field, StatusPill } from "components.slint";
+import { ToolbarButton, IconOnlyToolbarItem } from "toolkit.slint";
 import { Theme } from "theme.slint";
 
 /// Library/device rail for Studio.  All controls stay in a vertical flow so
@@ -37,7 +37,7 @@ export component StudioLibrary inherits SidebarSurface {
             placeholder: "Choose a WAV file…";
             value <=> root.import-path;
         }
-        ToolButton {
+        ToolbarButton {
             icon: "import";
             text: "Import WAV";
             horizontal-stretch: 1;
@@ -70,7 +70,7 @@ export component StudioLibrary inherits SidebarSurface {
                 spacing: Theme.tokens.space.xs;
                 padding-left: Theme.tokens.space.xs;
                 padding-right: Theme.tokens.space.xs;
-                IconButton {
+                IconOnlyToolbarItem {
                     icon: "chevron-left";
                     label: "Previous MIDI input";
                     clicked => {
@@ -88,7 +88,7 @@ export component StudioLibrary inherits SidebarSurface {
                     vertical-alignment: center;
                     overflow: elide;
                 }
-                IconButton {
+                IconOnlyToolbarItem {
                     icon: "chevron-right";
                     label: "Next MIDI input";
                     clicked => {
@@ -99,7 +99,7 @@ export component StudioLibrary inherits SidebarSurface {
             accessible-role: button;
             accessible-label: "MIDI input " + root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
         }
-        ToolButton {
+        ToolbarButton {
             icon: "keyboard";
             text: "Connect MIDI";
             horizontal-stretch: 1;
@@ -135,7 +135,7 @@ export component StudioLibrary inherits SidebarSurface {
         }
 
         Rectangle { vertical-stretch: 1; background: transparent; }
-        ToolButton {
+        ToolbarButton {
             icon: "plus";
             text: "Add Track";
             horizontal-stretch: 1;

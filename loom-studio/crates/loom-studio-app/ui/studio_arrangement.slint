@@ -1,5 +1,5 @@
-import { DirectionalLayout } from "toolkit.slint";
-import { WorkspaceRow, ToolButton } from "components.slint";
+import { DirectionalLayout, ToolbarButton } from "toolkit.slint";
+import { WorkspaceRow } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 
@@ -43,19 +43,19 @@ export component StudioTrackRow inherits WorkspaceRow {
                 padding-left: Theme.tokens.space.sm;
                 padding-right: Theme.tokens.space.sm;
                 cross-axis-alignment: center;
-                ToolButton {
+                ToolbarButton {
                     text: "M";
                     checked: root.mute;
                     accessible-label: "Mute " + root.track-label;
                     clicked => { root.mute-toggled(); }
                 }
-                ToolButton {
+                ToolbarButton {
                     text: "S";
                     checked: root.solo;
                     accessible-label: "Solo " + root.track-label;
                     clicked => { root.solo-toggled(); }
                 }
-                ToolButton {
+                ToolbarButton {
                     text: "R";
                     checked: root.record-arm;
                     enabled: root.input-available;

@@ -2,10 +2,12 @@
 // remain owned by loom-ui; these components keep Video's timeline state and
 // command callbacks local to the application.
 import {
-    ToolButton, IconButton, PrimaryButton,
-    SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
+    PrimaryButton, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
     Field, CanvasBackdrop, TransportButton
 } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import {
+    ToolbarButton, IconOnlyToolbarItem
+} from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
 import {
     LabeledToolbar, ToolbarGroup, ToolbarSpacer, AppleToolbarItem,
     ToolkitStatusBar
@@ -98,14 +100,14 @@ export component VideoMediaBin inherits SidebarSurface {
     detail: root.media-bin-items.length + " imported · " + root.clip-count + " clips";
 
     VerticalLayout {
-        spacing: 8px;
-        padding: 10px;
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
         Field {
             label: "Media path";
             placeholder: "Choose a media file…";
             value <=> root.import-path;
         }
-        ToolButton {
+        ToolbarButton {
             icon: "import";
             text: "Import Local Media";
             enabled: root.backend-available;
@@ -116,19 +118,19 @@ export component VideoMediaBin inherits SidebarSurface {
             label: item;
             height: 58px;
             HorizontalLayout {
-                spacing: 8px;
-                padding: 7px;
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.md;
                 Rectangle {
                     width: 58px;
                     height: 42px;
-                    border-radius: 7px;
+                    border-radius: Theme.tokens.metrics.radius-medium;
                     background: Theme.palette().surface-sunken;
                     border-width: 1px;
                     border-color: Theme.palette().border;
                     Icon { icon: "video"; size: 18px; tint: Theme.palette().accent; }
                 }
                 VerticalLayout {
-                    spacing: 3px;
+                    spacing: Theme.tokens.space.xs;
                     Text {
                         text: item;
                         font-size: Theme.tokens.typography.body;
@@ -146,13 +148,13 @@ export component VideoMediaBin inherits SidebarSurface {
         Rectangle { vertical-stretch: 1; background: transparent; }
         Rectangle {
             min-height: 70px;
-            border-radius: 8px;
+            border-radius: Theme.tokens.metrics.radius-medium;
             background: Theme.palette().surface-sunken;
             border-width: 1px;
             border-color: Theme.palette().border;
             VerticalLayout {
-                padding: 9px;
-                spacing: 4px;
+                padding: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.sm;
                 Text {
                     text: root.backend-available ? "FFmpeg / FFprobe / FFplay" : "Install FFmpeg tools";
                     font-size: Theme.tokens.typography.body;
@@ -185,12 +187,12 @@ export component VideoPreviewStage inherits CanvasBackdrop {
         width: parent.width;
         height: parent.height;
         spacing: 0px;
-        padding: root.compact-layout ? 12px : 24px;
+        padding: root.compact-layout ? Theme.tokens.space.lg : Theme.tokens.space.xxl;
 
         stage := Rectangle {
             horizontal-stretch: 1;
             vertical-stretch: 1;
-            border-radius: 9px;
+            border-radius: Theme.tokens.metrics.radius-large;
             background: Theme.palette().media-stage;
             clip: true;
             border-width: 1px;
@@ -204,7 +206,7 @@ export component VideoPreviewStage inherits CanvasBackdrop {
             }
             if !root.has-preview : VerticalLayout {
                 alignment: center;
-                spacing: 10px;
+                spacing: Theme.tokens.space.md;
                 Icon { icon: "video"; size: 44px; tint: Theme.palette().ink-disabled; }
                 Text {
                     text: "Import media to decode a real preview frame";
@@ -237,9 +239,9 @@ export component VideoTransport inherits Rectangle {
     background: Theme.palette().surface;
 
     HorizontalLayout {
-        spacing: 9px;
-        padding-left: 14px;
-        padding-right: 14px;
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.xl;
+        padding-right: Theme.tokens.space.xl;
         alignment: center;
         TransportButton {
             icon: "chevron-left";
@@ -296,7 +298,7 @@ export component VideoTransport inherits Rectangle {
             value <=> root.playhead-seconds;
             changed(value) => { root.seek(value); }
         }
-        IconButton {
+        IconOnlyToolbarItem {
             icon: "plus-circle";
             label: "Add marker";
             clicked => { root.add-marker(); }
@@ -444,16 +446,16 @@ export component VideoTimeline inherits Rectangle {
                     width: root.track-header-width;
                     background: Theme.palette().surface;
                     HorizontalLayout {
-                        padding-left: 8px;
-                        padding-right: 7px;
-                        spacing: 5px;
-                        IconButton {
+                        padding-left: Theme.tokens.space.md;
+                        padding-right: Theme.tokens.space.md;
+                        spacing: Theme.tokens.space.sm;
+                        IconOnlyToolbarItem {
                             icon: "audio";
                             label: "Mute track";
                             checked: root.track-mutes[index];
                             clicked => { root.toggle-track-mute(index); }
                         }
-                        ToolButton {
+                        ToolbarButton {
                             text: "S";
                             checked: root.track-solos[index];
                             clicked => { root.toggle-track-solo(index); }
@@ -480,17 +482,17 @@ export component VideoTimeline inherits Rectangle {
                         width: self.clip-render-width;
                         y: 6px;
                         height: 52px;
-                        border-radius: 7px;
+                        border-radius: Theme.tokens.metrics.radius-medium;
                         background: clip-index == root.active-clip-index ? Theme.palette().content-accent : clip-touch.has-hover ? Theme.palette().content-accent-soft : Theme.palette().content-cool;
                         border-width: clip-index == root.active-clip-index || clip-touch.has-hover ? 2px : 1px;
                         border-color: clip-index == root.active-clip-index ? Theme.palette().focus : clip-touch.has-hover ? Theme.palette().accent : Theme.palette().content-cool;
                         animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
                         VerticalLayout {
-                            padding: 6px;
-                            spacing: 3px;
+                            padding: Theme.tokens.space.sm;
+                            spacing: Theme.tokens.space.xs;
                             Text { text: clip; color: Theme.palette().paper; font-size: 11px; font-weight: 650; overflow: elide; }
                             HorizontalLayout {
-                                spacing: 5px;
+                                spacing: Theme.tokens.space.sm;
                                 Icon { icon: "waveform"; size: 16px; tint: Theme.palette().paper-line; }
                                 Text {
                                     text: Math.round(root.clip-durations[clip-index] * 100) / 100 + "s";
@@ -544,10 +546,10 @@ export component VideoInspector inherits InspectorSurface {
     }
     Rectangle { height: 1px; background: Theme.palette().border; }
     VerticalLayout {
-        spacing: 12px;
+        spacing: Theme.tokens.space.lg;
         padding: 0px;
         if root.inspector-tab == 0 : VerticalLayout {
-            spacing: 10px;
+            spacing: Theme.tokens.space.md;
             Text {
                 text: "CLIP";
                 font-size: Theme.tokens.typography.caption;
@@ -569,32 +571,32 @@ export component VideoInspector inherits InspectorSurface {
             }
         }
         if root.inspector-tab == 1 : VerticalLayout {
-            spacing: 8px;
+            spacing: Theme.tokens.space.md;
             Text {
                 text: "TIMELINE EDIT";
                 font-size: Theme.tokens.typography.caption;
                 font-weight: 700;
                 color: Theme.palette().ink-secondary;
             }
-            ToolButton {
+            ToolbarButton {
                 icon: "scissors";
                 text: "Split at Playhead";
                 enabled: root.clip-labels.length > 0;
                 clicked => { root.split-clip(); }
             }
-            ToolButton {
+            ToolbarButton {
                 icon: "chevron-right";
                 text: "Trim In +0.25s";
                 enabled: root.clip-labels.length > 0;
                 clicked => { root.trim-selected(0.25, 0); }
             }
-            ToolButton {
+            ToolbarButton {
                 icon: "chevron-left";
                 text: "Trim Out -0.25s";
                 enabled: root.clip-labels.length > 0;
                 clicked => { root.trim-selected(0, -0.25); }
             }
-            ToolButton {
+            ToolbarButton {
                 icon: "trash";
                 text: "Remove Clip (Ripple)";
                 enabled: root.clip-labels.length > 0;
@@ -602,7 +604,7 @@ export component VideoInspector inherits InspectorSurface {
             }
         }
         if root.inspector-tab == 2 : VerticalLayout {
-            spacing: 10px;
+            spacing: Theme.tokens.space.md;
             Text {
                 text: "LOCAL TIMELINE EXPORT";
                 font-size: Theme.tokens.typography.caption;

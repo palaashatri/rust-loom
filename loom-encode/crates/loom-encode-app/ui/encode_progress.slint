@@ -79,12 +79,12 @@ export component EncodeProgress inherits Rectangle {
             min-height: 10px;
             preferred-height: 10px;
             max-height: 10px;
-            border-radius: 5px;
+            border-radius: Theme.tokens.metrics.radius-small;
             background: Theme.palette().surface-sunken;
             Rectangle {
                 width: parent.width * root.active-job-progress / 100;
                 height: parent.height;
-                border-radius: 5px;
+                border-radius: Theme.tokens.metrics.radius-small;
                 background: Theme.palette().accent;
             }
         }

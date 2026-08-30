@@ -1004,27 +1004,39 @@ export component TemplateCard inherits Rectangle {
     in property <string> subtitle: "";
     in property <bool> selected: false;
     in property <bool> enabled: true;
+    in property <length> preview-width: 120px;
+    in property <length> preview-height: 110px;
+    in property <color> preview-background: Theme.palette().paper;
+    in property <bool> show-selected-badge: false;
     callback clicked;
     width: 140px; height: 160px;
     border-radius: Theme.tokens.metrics.radius-medium;
-    background: touch.has-hover ? Theme.palette().surface-raised : transparent;
-    border-width: root.selected ? 2px : 0px;
-    border-color: root.selected ? Theme.palette().accent : transparent;
+    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
     VerticalLayout {
         spacing: 6px; padding: 8px; alignment: center; cross-axis-alignment: center;
         Rectangle {
-            width: 120px; height: 110px; border-radius: Theme.tokens.metrics.radius-small;
-            background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().border;
+            width: root.preview-width; height: root.preview-height; border-radius: Theme.tokens.metrics.radius-small;
+            background: root.preview-background; border-width: root.selected ? 2px : 1px; border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
+            drop-shadow-blur: 10px; drop-shadow-offset-y: 3px; drop-shadow-color: Theme.palette().shadow; clip: true;
             @children
         }
-        Text {
-            text: root.title; font-size: Theme.tokens.typography.body; font-weight: root.selected ? 600 : 500;
+        if root.show-selected-badge && root.selected : Rectangle {
+            height: 20px; border-radius: Theme.tokens.metrics.radius-small; background: Theme.palette().accent;
+            HorizontalLayout { padding-left: 8px; padding-right: 8px; alignment: center; cross-axis-alignment: center;
+                Text { text: root.title; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().accent-ink; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+        if !(root.show-selected-badge && root.selected) : Text {
+            text: root.title; font-size: Theme.tokens.typography.caption; font-weight: root.selected ? 600 : 500;
             color: root.selected ? Theme.palette().accent : Theme.palette().ink; horizontal-alignment: center;
-            overflow: elide; max-width: 130px;
+            overflow: elide; max-width: root.width - 12px;
         }
         if root.subtitle != "" : Text {
             text: root.subtitle; font-size: Theme.tokens.typography.micro; color: Theme.palette().ink-secondary;
-            horizontal-alignment: center; overflow: elide; max-width: 130px;
+            horizontal-alignment: center; overflow: elide; max-width: root.width - 12px;
         }
     }
     touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }

@@ -2,7 +2,7 @@ import {
     TitleChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
     IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem, StatusBar, SidebarSurface, InspectorSurface,
     SectionHeader, Field, SegmentedControl, RangeSlider, PropertyRow,
-    CanvasSurface
+    CanvasSurface, TemplateCard
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
@@ -14,113 +14,6 @@ import {
 export { Theme, ResponsivePolicy } from "theme.slint";
 
 
-
-/// Keynote-style slide theme preview card
-component ThemeCard inherits Rectangle {
-    in property <int> theme-index: 0;
-    in property <string> theme-name: "Basic White";
-    in property <string> description: "Standard white background";
-    in property <bool> is-wide: true;
-    in property <bool> selected: false;
-    callback clicked;
-
-    width: root.is-wide ? 200px : 160px;
-    height: 170px;
-    border-radius: Theme.tokens.metrics.radius-medium;
-    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
-    accessible-role: button;
-    accessible-label: root.theme-name + " theme";
-    accessible-action-default => { root.clicked(); }
-
-    VerticalLayout {
-        spacing: 10px;
-        padding: 6px;
-        alignment: center;
-        cross-axis-alignment: center;
-
-        // Slide Thumbnail Box
-        Rectangle {
-            width: root.is-wide ? 180px : 144px;
-            height: root.is-wide ? 101px : 108px;
-            border-radius: 4px;
-            border-width: root.selected ? 2.5px : 1px;
-            // Selection uses the same semantic accent as the editor chrome.
-            // The previous cool-blue treatment made the chooser look like a
-            // different product in light/dark/high-contrast captures.
-            border-color: root.selected ? Theme.palette().accent : Theme.palette().paper-line;
-            background: root.theme-index == 1 ? Theme.palette().surface-sunken
-                : root.theme-index == 3 ? Theme.palette().accent
-                : Theme.palette().paper;
-            drop-shadow-blur: 10px;
-            drop-shadow-offset-y: 3px;
-            drop-shadow-color: Theme.palette().shadow;
-            clip: true;
-
-            VerticalLayout {
-                padding: 12px;
-                alignment: center;
-                spacing: 4px;
-
-                Text {
-                    text: root.theme-name;
-                    font-size: 11px;
-                    font-weight: 700;
-                    color: root.theme-index == 1 ? Theme.palette().ink
-                        : root.theme-index == 3 ? Theme.palette().accent-ink
-                        : Theme.palette().paper-ink;
-                    horizontal-alignment: center;
-                }
-                Rectangle {
-                    width: 40px;
-                    height: 2px;
-                    background: Theme.palette().accent;
-                }
-                Text {
-                    text: "Presentation Title";
-                    font-size: 8px;
-                    color: root.theme-index == 1 ? Theme.palette().ink-secondary
-                        : root.theme-index == 3 ? Theme.palette().accent-ink
-                        : Theme.palette().paper-muted;
-                    horizontal-alignment: center;
-                }
-            }
-        }
-
-        if root.selected : Rectangle {
-            height: 20px;
-            border-radius: 4px;
-            background: Theme.palette().accent;
-            HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
-                alignment: center;
-                cross-axis-alignment: center;
-                Text {
-                    text: root.theme-name;
-                    font-size: 11px;
-                    font-weight: 700;
-                    color: Theme.palette().accent-ink;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
-        if !root.selected : Text {
-            text: root.theme-name;
-            font-size: 11px;
-            font-weight: 500;
-            color: Theme.palette().ink;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
 
 export component PresentApp inherits Window {
     title: "Loom Present";
@@ -558,15 +451,15 @@ export component PresentApp inherits Window {
                         background: Theme.palette().panel;
 
                         VerticalLayout {
-                            spacing: 4px;
-                            padding-top: 16px;
-                            padding-bottom: 16px;
-                            padding-left: 12px;
-                            padding-right: 12px;
+                            spacing: Theme.tokens.space.sm;
+                            padding-top: Theme.tokens.space.xl;
+                            padding-bottom: Theme.tokens.space.xl;
+                            padding-left: Theme.tokens.space.lg;
+                            padding-right: Theme.tokens.space.lg;
 
                             HorizontalLayout {
-                                padding-left: 8px;
-                                padding-bottom: 4px;
+                                padding-left: Theme.tokens.space.md;
+                                padding-bottom: Theme.tokens.space.sm;
                                 Text {
                                     text: "THEMES";
                                     font-size: 10px;
@@ -580,7 +473,7 @@ export component PresentApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.theme-category == 0 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "grid"; tint: root.theme-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "All Themes";
@@ -598,7 +491,7 @@ export component PresentApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.theme-category == 1 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "slide"; tint: root.theme-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "Basic";
@@ -616,7 +509,7 @@ export component PresentApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.theme-category == 2 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "wand"; tint: root.theme-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "Dynamic";
@@ -634,7 +527,7 @@ export component PresentApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.theme-category == 3 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "brush"; tint: root.theme-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "Minimal";
@@ -650,7 +543,7 @@ export component PresentApp inherits Window {
                             Rectangle { vertical-stretch: 1; background: transparent; }
 
                             HorizontalLayout {
-                                spacing: 6px; padding: 8px;
+                                spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
                                 Text {
                                     text: "English (US)";
                                     font-size: Theme.tokens.typography.caption;
@@ -667,11 +560,11 @@ export component PresentApp inherits Window {
                     // Content Area
                     VerticalLayout {
                         horizontal-stretch: 1;
-                        padding-top: 24px;
-                        padding-bottom: 20px;
-                        padding-left: 28px;
-                        padding-right: 28px;
-                        spacing: 16px;
+                        padding-top: Theme.tokens.space.xxl;
+                        padding-bottom: Theme.tokens.space.xl;
+                        padding-left: Theme.tokens.space.xxl;
+                        padding-right: Theme.tokens.space.xxl;
+                        spacing: Theme.tokens.space.xl;
 
                         HorizontalLayout {
                             Text {
@@ -697,49 +590,137 @@ export component PresentApp inherits Window {
                         // widescreen card inside that column instead of
                         // clipping the fourth card at the right edge.
                         VerticalLayout {
-                            spacing: 16px;
+                            spacing: Theme.tokens.space.xl;
 
                             HorizontalLayout {
-                                spacing: 16px;
+                                spacing: Theme.tokens.space.xl;
 
-                                if root.theme-visible(0) : ThemeCard {
-                                    theme-index: 0;
-                                    theme-name: "Basic White";
-                                    description: "Clean white presentation";
-                                    is-wide: root.aspect-ratio-wide;
+                                if root.theme-visible(0) : TemplateCard {
+                                    title: "Basic White";
                                     selected: root.theme-selected == 0;
+                                    width: root.aspect-ratio-wide ? 200px : 160px;
+                                    height: 170px;
+                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                    preview-background: Theme.palette().paper;
+                                    show-selected-badge: true;
                                     clicked => { root.theme-selected = 0; }
+                                    VerticalLayout {
+                                        padding: 12px;
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Basic White";
+                                            font-size: Theme.tokens.typography.caption;
+                                            font-weight: 700;
+                                            color: Theme.palette().paper-ink;
+                                            horizontal-alignment: center;
+                                        }
+                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                        Text {
+                                            text: "Presentation Title";
+                                            font-size: Theme.tokens.typography.micro;
+                                            color: Theme.palette().paper-muted;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
                                 }
 
-                                if root.theme-visible(1) : ThemeCard {
-                                    theme-index: 1;
-                                    theme-name: "Basic Black";
-                                    description: "Sleek dark presentation";
-                                    is-wide: root.aspect-ratio-wide;
+                                if root.theme-visible(1) : TemplateCard {
+                                    title: "Basic Black";
                                     selected: root.theme-selected == 1;
+                                    width: root.aspect-ratio-wide ? 200px : 160px;
+                                    height: 170px;
+                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                    preview-background: Theme.palette().surface-sunken;
+                                    show-selected-badge: true;
                                     clicked => { root.theme-selected = 1; }
+                                    VerticalLayout {
+                                        padding: 12px;
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Basic Black";
+                                            font-size: Theme.tokens.typography.caption;
+                                            font-weight: 700;
+                                            color: Theme.palette().ink;
+                                            horizontal-alignment: center;
+                                        }
+                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                        Text {
+                                            text: "Presentation Title";
+                                            font-size: Theme.tokens.typography.micro;
+                                            color: Theme.palette().ink-secondary;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
                                 }
                             }
 
                             HorizontalLayout {
-                                spacing: 16px;
+                                spacing: Theme.tokens.space.xl;
 
-                                if root.theme-visible(2) : ThemeCard {
-                                    theme-index: 2;
-                                    theme-name: "Classic Editorial";
-                                    description: "Refined typographic layout";
-                                    is-wide: root.aspect-ratio-wide;
+                                if root.theme-visible(2) : TemplateCard {
+                                    title: "Classic Editorial";
                                     selected: root.theme-selected == 2;
+                                    width: root.aspect-ratio-wide ? 200px : 160px;
+                                    height: 170px;
+                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                    preview-background: Theme.palette().paper;
+                                    show-selected-badge: true;
                                     clicked => { root.theme-selected = 2; }
+                                    VerticalLayout {
+                                        padding: 12px;
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Classic Editorial";
+                                            font-size: Theme.tokens.typography.caption;
+                                            font-weight: 700;
+                                            color: Theme.palette().paper-ink;
+                                            horizontal-alignment: center;
+                                        }
+                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                        Text {
+                                            text: "Presentation Title";
+                                            font-size: Theme.tokens.typography.micro;
+                                            color: Theme.palette().paper-muted;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
                                 }
 
-                                if root.theme-visible(3) : ThemeCard {
-                                    theme-index: 3;
-                                    theme-name: "Dynamic Accent";
-                                    description: "Bold gradient styling";
-                                    is-wide: root.aspect-ratio-wide;
+                                if root.theme-visible(3) : TemplateCard {
+                                    title: "Dynamic Accent";
                                     selected: root.theme-selected == 3;
+                                    width: root.aspect-ratio-wide ? 200px : 160px;
+                                    height: 170px;
+                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                    preview-background: Theme.palette().accent;
+                                    show-selected-badge: true;
                                     clicked => { root.theme-selected = 3; }
+                                    VerticalLayout {
+                                        padding: 12px;
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Dynamic Accent";
+                                            font-size: Theme.tokens.typography.caption;
+                                            font-weight: 700;
+                                            color: Theme.palette().accent-ink;
+                                            horizontal-alignment: center;
+                                        }
+                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                        Text {
+                                            text: "Presentation Title";
+                                            font-size: Theme.tokens.typography.micro;
+                                            color: Theme.palette().accent-ink;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -756,9 +737,9 @@ export component PresentApp inherits Window {
                     Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
 
                     HorizontalLayout {
-                        spacing: 12px;
-                        padding-left: 20px;
-                        padding-right: 20px;
+                        spacing: Theme.tokens.space.lg;
+                        padding-left: Theme.tokens.space.xl;
+                        padding-right: Theme.tokens.space.xl;
                         cross-axis-alignment: center;
 
                         Text {

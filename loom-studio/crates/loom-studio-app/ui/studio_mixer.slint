@@ -1,5 +1,5 @@
-import { DirectionalLayout } from "toolkit.slint";
-import { InspectorSurface, ToolButton, Slider, Field, PrimaryButton } from "components.slint";
+import { DirectionalLayout, ToolbarButton } from "toolkit.slint";
+import { InspectorSurface, Slider, Field, PrimaryButton } from "components.slint";
 import { Theme } from "theme.slint";
 
 /// Selection-aware mixer inspector.  Channel controls and bounce settings are
@@ -65,19 +65,19 @@ export component StudioMixer inherits InspectorSurface {
             }
             DirectionalLayout {
                 spacing: Theme.tokens.space.xs;
-                ToolButton {
+                ToolbarButton {
                     text: "Mute";
                     horizontal-stretch: 1;
                     checked: root.track-mutes[root.active-track-index];
                     clicked => { root.mute-toggled(root.active-track-index); }
                 }
-                ToolButton {
+                ToolbarButton {
                     text: "Solo";
                     horizontal-stretch: 1;
                     checked: root.track-solos[root.active-track-index];
                     clicked => { root.solo-toggled(root.active-track-index); }
                 }
-                ToolButton {
+                ToolbarButton {
                     text: "Arm";
                     horizontal-stretch: 1;
                     checked: root.track-arms[root.active-track-index];

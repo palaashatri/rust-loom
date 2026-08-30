@@ -98,7 +98,7 @@ export component PhotoCanvas inherits CanvasSurface {
         width: parent.width;
         height: parent.height;
         spacing: 0px;
-        padding: 24px;
+        padding: Theme.tokens.space.xxl;
 
         stage := Rectangle {
             horizontal-stretch: 1;
@@ -137,7 +137,7 @@ export component PhotoCanvas inherits CanvasSurface {
                     y: corner >= 2 ? parent.height - 4px : -4px;
                     width: 8px;
                     height: 8px;
-                    border-radius: 4px;
+                    border-radius: Theme.tokens.metrics.radius-small;
                     background: Theme.palette().paper;
                     border-width: 1px;
                     border-color: Theme.palette().accent;
@@ -148,7 +148,7 @@ export component PhotoCanvas inherits CanvasSurface {
                 width: parent.width;
                 height: parent.height;
                 alignment: center;
-                spacing: 12px;
+                spacing: Theme.tokens.space.lg;
                 Icon { icon: "image"; size: 40px; tint: Theme.palette().ink-disabled; }
                 Text {
                     text: "Import an image to begin";
@@ -206,7 +206,7 @@ component PhotoAdjustmentRow inherits Rectangle {
     callback changed(float);
     height: 56px;
     VerticalLayout {
-        spacing: 4px;
+        spacing: Theme.tokens.space.sm;
         HorizontalLayout {
             height: 20px;
             Text { text: root.label; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; }
@@ -233,9 +233,9 @@ component PhotoLayerRow inherits Rectangle {
     row-touch := TouchArea { clicked => { root.selected-layer(); } }
 
     HorizontalLayout {
-        spacing: 8px;
-        padding-left: 6px;
-        padding-right: 8px;
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.sm;
+        padding-right: Theme.tokens.space.md;
         cross-axis-alignment: center;
         ToolbarIconButton { icon: root.layer-visible ? "eye" : "eye-off"; label: "Toggle layer visibility"; clicked => { root.toggle-visibility(); } }
         Text { text: root.label; font-size: Theme.tokens.typography.body; font-weight: root.selected ? 600 : 400; color: Theme.palette().ink; horizontal-stretch: 1; overflow: elide; }
@@ -279,7 +279,7 @@ export component PhotoInspector inherits InspectorSurface {
     title: "Inspector";
 
     VerticalLayout {
-        spacing: 12px;
+        spacing: Theme.tokens.space.lg;
         padding: 0px;
 
         TabStrip {
@@ -288,7 +288,7 @@ export component PhotoInspector inherits InspectorSurface {
         }
 
         if root.inspector-tab == 0 : VerticalLayout {
-            spacing: 12px;
+            spacing: Theme.tokens.space.lg;
             SectionHeader { title: "Color adjustments"; }
             PhotoAdjustmentRow { label: "Brightness"; value: root.brightness-value; changed(value) => { root.brightness-changed(value); } }
             PhotoAdjustmentRow { label: "Contrast"; value: root.contrast-value; changed(value) => { root.contrast-changed(value); } }
@@ -296,7 +296,7 @@ export component PhotoInspector inherits InspectorSurface {
         }
 
         if root.inspector-tab == 1 : VerticalLayout {
-            spacing: 10px;
+            spacing: Theme.tokens.space.md;
             SectionHeader { title: "Layers"; }
             for label[index] in root.layer-labels : PhotoLayerRow {
                 label: label;
@@ -307,7 +307,7 @@ export component PhotoInspector inherits InspectorSurface {
                 toggle-visibility => { root.toggle-layer-visibility(index); }
             }
             HorizontalLayout {
-                spacing: 4px;
+                spacing: Theme.tokens.space.sm;
                 ToolbarIconButton { icon: "plus"; label: "Add pixel layer"; clicked => { root.add-layer(); } }
                 ToolbarIconButton { icon: "wand"; label: "Add adjustment"; clicked => { root.add-adjustment(); } }
                 ToolbarIconButton { icon: "chevron-left"; label: "Move layer down"; clicked => { root.move-layer(-1); } }
@@ -329,7 +329,7 @@ export component PhotoInspector inherits InspectorSurface {
         }
 
         if root.inspector-tab == 2 : VerticalLayout {
-            spacing: 12px;
+            spacing: Theme.tokens.space.lg;
             SectionHeader { title: "Import"; }
             Text {
                 text: "Choose a PNG or JPEG with the native picker. Imported images remain separate from Loom Photo project files.";

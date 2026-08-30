@@ -82,28 +82,28 @@ export component MotionLayersPanel inherits SidebarSurface {
     detail: root.layer-labels.length + " items";
 
     VerticalLayout {
-        spacing: 7px;
-        padding: 10px;
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.lg;
         for label[idx] in root.layer-labels : WorkspaceRow {
             label: label;
             height: 50px;
             selected: idx == root.active-layer-index;
             clicked => { root.select-layer(idx); }
             HorizontalLayout {
-                spacing: 9px;
-                padding-left: 9px;
-                padding-right: 9px;
+                spacing: Theme.tokens.space.md;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
                 Rectangle {
                     width: 32px;
                     height: 32px;
-                    border-radius: 9px;
+                    border-radius: Theme.tokens.metrics.radius-large;
                     background: idx == root.active-layer-index ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
                     border-width: 1px;
                     border-color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().border;
                     Icon { icon: "layers"; size: 15px; tint: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-secondary; }
                 }
                 VerticalLayout {
-                    spacing: 2px;
+                    spacing: Theme.tokens.space.xs;
                     Text { text: label; font-size: Theme.tokens.typography.body; font-weight: idx == root.active-layer-index ? 650 : 500; color: Theme.palette().ink; overflow: elide; }
                     Text { text: idx == root.active-layer-index ? "Selected · Direct transform" : "Motion layer"; font-size: Theme.tokens.typography.caption; color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-disabled; overflow: elide; }
                 }
@@ -145,7 +145,7 @@ export component MotionStage inherits CanvasBackdrop {
         vertical-stretch: 1;
         max-width: 860px;
         max-height: 484px;
-        border-radius: 9px;
+        border-radius: Theme.tokens.metrics.radius-large;
         background: Theme.palette().paper-ink;
         border-width: 1px;
         border-color: Theme.palette().border-strong;
@@ -176,7 +176,7 @@ export component MotionStage inherits CanvasBackdrop {
                 y: clamp(root.pos-y / 1080.0 * parent.height - self.height / 2, 0px, parent.height - self.height);
                 width: clamp(parent.width * 0.46 * root.scale-val / 100.0, 88px, parent.width * 0.78);
                 height: clamp(parent.height * 0.28 * root.scale-val / 100.0, 58px, parent.height * 0.64);
-                border-radius: 11px;
+                border-radius: Theme.tokens.metrics.radius-large;
                 border-width: root.layer-labels.length > 0 ? 2px : 1px;
                 border-color: drag.has-hover || transform-focus.has-focus ? Theme.palette().focus : root.layer-labels.length > 0 ? Theme.palette().accent : Theme.palette().border-strong;
                 background: Theme.palette().content-accent-soft;
@@ -186,8 +186,8 @@ export component MotionStage inherits CanvasBackdrop {
 
                 VerticalLayout {
                     alignment: center;
-                    spacing: 8px;
-                    padding: 18px;
+                    spacing: Theme.tokens.space.md;
+                    padding: Theme.tokens.space.xl;
                     Text { text: root.comp-name; color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink; font-size: Theme.tokens.typography.heading; font-weight: 700; horizontal-alignment: center; overflow: elide; }
                     Text { text: root.layer-labels.length > 0 ? root.layer-labels[root.active-layer-index] : "Add a layer to begin"; color: Theme.palette().content-accent; font-size: Theme.tokens.typography.body-large; font-weight: 650; horizontal-alignment: center; overflow: elide; }
                     Text { text: "X " + Math.round(root.pos-x) + "   Y " + Math.round(root.pos-y) + "   ·   " + Math.round(root.scale-val) + "%   ·   " + Math.round(root.rotation-val) + "°"; color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-muted : Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; horizontal-alignment: center; overflow: elide; }
@@ -231,19 +231,19 @@ export component MotionStage inherits CanvasBackdrop {
             if drag.pressed : Rectangle { x: selected-object.x + selected-object.width / 2; width: 1px; height: parent.height; background: Theme.palette().focus; }
             if drag.pressed : Rectangle { y: selected-object.y + selected-object.height / 2; width: parent.width; height: 1px; background: Theme.palette().focus; }
             if drag.pressed : Rectangle {
-                x: 12px;
-                y: 12px;
+                x: Theme.tokens.space.lg;
+                y: Theme.tokens.space.lg;
                 height: 26px;
                 min-width: 178px;
-                max-width: parent.width - 24px;
-                border-radius: 8px;
+                max-width: parent.width - Theme.tokens.space.xxl;
+                border-radius: Theme.tokens.metrics.radius-medium;
                 background: Theme.palette().overlay;
                 border-width: 1px;
                 border-color: Theme.palette().border;
                 HorizontalLayout {
-                    spacing: 7px;
-                    padding-left: 8px;
-                    padding-right: 8px;
+                    spacing: Theme.tokens.space.md;
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
                     Icon { icon: "cursor"; size: 13px; tint: Theme.palette().accent; }
                     Text { text: "Dragging layer · release to commit"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide; }
                 }
@@ -274,7 +274,7 @@ export component MotionCurveDrawer inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 alignment: center;
-                spacing: 5px;
+                spacing: Theme.tokens.space.sm;
                 Text { text: "No keyed property selected"; font-size: Theme.tokens.typography.body; font-weight: 650; color: Theme.palette().ink; horizontal-alignment: center; }
                 Text { text: "Choose a keyed property to edit its interpolation curve."; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; overflow: elide; }
             }
@@ -305,8 +305,8 @@ export component MotionInspector inherits InspectorSurface {
     animate width { duration: Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
 
     if !root.expanded : VerticalLayout {
-        spacing: 10px;
-        padding-top: 10px;
+        spacing: Theme.tokens.space.md;
+        padding-top: Theme.tokens.space.md;
         IconButton { icon: "chevron-left"; label: "Expand inspector"; clicked => { root.toggle-expanded(); } }
         Icon { icon: "settings"; size: 17px; tint: Theme.palette().ink-disabled; }
     }
@@ -316,17 +316,17 @@ export component MotionInspector inherits InspectorSurface {
         Rectangle {
             height: 36px;
             HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
                 PaneTabs { items: ["Transform", "Timing"]; current <=> root.inspector-tab; horizontal-stretch: 1; }
                 IconButton { icon: "chevron-right"; label: "Collapse inspector"; clicked => { root.toggle-expanded(); } }
             }
         }
         VerticalLayout {
-            spacing: 12px;
+            spacing: Theme.tokens.space.lg;
             padding: 0px;
             if root.inspector-tab == 0 : VerticalLayout {
-                spacing: 12px;
+                spacing: Theme.tokens.space.lg;
                 Text { text: "POSITION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                 Text { text: "X   " + Math.round(root.pos-x) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
                 Slider { label: "X position"; value: root.pos-x; minimum: 0.0; maximum: 1920.0; changed(val) => { root.pos-x = val; root.transform-changed("pos-x", val); } }
@@ -342,7 +342,7 @@ export component MotionInspector inherits InspectorSurface {
                 Slider { label: "Opacity"; value: root.opacity-val; minimum: 0.0; maximum: 100.0; changed(val) => { root.opacity-val = val; root.transform-changed("opacity", val); } }
             }
             if root.inspector-tab == 1 : VerticalLayout {
-                spacing: 12px;
+                spacing: Theme.tokens.space.lg;
                 Text { text: "COMPOSITION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
                 MetricChip { label: "Time"; value: root.timecode-display; }
                 MetricChip { label: "Rate"; value: root.timecode-text; }
@@ -389,9 +389,9 @@ export component MotionTimeline inherits Rectangle {
             background: Theme.palette().canvas-alt;
             clip: true;
             VerticalLayout {
-                spacing: 3px;
-                padding-top: 5px;
-                padding-bottom: 5px;
+                spacing: Theme.tokens.space.xs;
+                padding-top: Theme.tokens.space.sm;
+                padding-bottom: Theme.tokens.space.sm;
                 for label[idx] in root.layer-labels : WorkspaceRow {
                     label: label;
                     height: 44px;
@@ -403,9 +403,9 @@ export component MotionTimeline inherits Rectangle {
                             width: root.layer-column-width;
                             background: Theme.palette().panel;
                             HorizontalLayout {
-                                spacing: 7px;
-                                padding-left: 11px;
-                                padding-right: 9px;
+                                spacing: Theme.tokens.space.md;
+                                padding-left: Theme.tokens.space.lg;
+                                padding-right: Theme.tokens.space.md;
                                 Icon { icon: "layers"; size: 14px; tint: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                 Text { text: label; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; overflow: elide; }
                             }
@@ -418,7 +418,7 @@ export component MotionTimeline inherits Rectangle {
                                 y: 6px;
                                 width: max(120px, parent.width * 0.62 - idx * 18px);
                                 height: parent.height - 12px;
-                                border-radius: 7px;
+                                border-radius: Theme.tokens.metrics.radius-medium;
                                 background: idx == root.active-layer-index ? Theme.palette().selection-soft : Theme.palette().surface-raised;
                                 border-width: 1px;
                                 border-color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().border;
@@ -430,7 +430,7 @@ export component MotionTimeline inherits Rectangle {
                 }
             }
             Rectangle { x: root.layer-column-width; y: 0px; width: 1px; height: parent.height; background: Theme.palette().accent; }
-            Rectangle { x: root.layer-column-width - 4px; y: 0px; width: 9px; height: 9px; border-radius: 3px; background: Theme.palette().accent; }
+            Rectangle { x: root.layer-column-width - Theme.tokens.space.sm; y: 0px; width: Theme.tokens.space.md; height: Theme.tokens.space.md; border-radius: Theme.tokens.metrics.radius-small; background: Theme.palette().accent; }
         }
     }
 }

@@ -1,7 +1,7 @@
 import {
     TitleChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
     IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem, StatusBar, CanvasSurface, InspectorSurface,
-    SectionHeader, TextField, SegmentedControl, PropertyRow
+    SectionHeader, TextField, SegmentedControl, PropertyRow, TemplateCard
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
@@ -12,139 +12,6 @@ import {
 } from "writer_components.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
-
-/// A Pages-class portrait template card for the New Document chooser.
-/// Uses realistic paper proportions (1:1.414 portrait) with deterministic
-/// Slint geometry to represent document templates.
-component TemplateCard inherits Rectangle {
-    in property <int> template-index: 0;
-    in property <string> template-name: "Blank";
-    in property <string> description: "Start from an empty page";
-    in property <bool> selected: false;
-    callback clicked;
-
-    width: 160px;
-    height: 230px;
-    border-radius: Theme.tokens.metrics.radius-medium;
-    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
-    accessible-role: button;
-    accessible-label: root.template-name + " template";
-    accessible-action-default => { root.clicked(); }
-
-    VerticalLayout {
-        spacing: 10px;
-        padding: 6px;
-        alignment: center;
-        cross-axis-alignment: center;
-
-        Rectangle {
-            width: 140px;
-            height: 175px;
-            border-radius: 4px;
-            border-width: root.selected ? 2.5px : 1px;
-            border-color: root.selected ? Theme.palette().accent : Theme.palette().paper-line;
-            background: Theme.palette().paper;
-            drop-shadow-blur: 10px;
-            drop-shadow-offset-y: 3px;
-            drop-shadow-color: Theme.palette().shadow;
-            clip: true;
-
-            // Template 0: Blank
-            if root.template-index == 0 : VerticalLayout {
-                spacing: 8px;
-                padding: 16px;
-                Text {
-                    text: "Aa";
-                    font-size: 32px;
-                    font-weight: 700;
-                    color: Theme.palette().paper-ink;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    vertical-stretch: 1;
-                }
-                Rectangle { height: 1px; background: Theme.palette().paper-line; }
-            }
-
-            // Template 1: Report
-            if root.template-index == 1 : VerticalLayout {
-                spacing: 6px;
-                padding: 14px;
-                Text { text: "REPORT TITLE"; font-size: 10px; font-weight: 700; color: Theme.palette().paper-ink; }
-                Rectangle { height: 2px; background: Theme.palette().accent; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; width: 75%; background: Theme.palette().paper-line; }
-                Rectangle { height: 8px; background: transparent; }
-                Text { text: "Executive Summary"; font-size: 8px; font-weight: 600; color: Theme.palette().paper-muted; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; width: 85%; background: Theme.palette().paper-line; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-
-            // Template 2: Letter
-            if root.template-index == 2 : VerticalLayout {
-                spacing: 6px;
-                padding: 14px;
-                Text { text: "Your Name"; font-size: 11px; font-weight: 600; color: Theme.palette().paper-ink; }
-                Text { text: "October 24, 2026"; font-size: 8px; color: Theme.palette().paper-muted; }
-                Rectangle { height: 1px; background: Theme.palette().paper-line; }
-                Text { text: "Dear Recipient,"; font-size: 8px; color: Theme.palette().paper-ink; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; width: 60%; background: Theme.palette().paper-line; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-
-            // Template 3: CV / Resume
-            if root.template-index == 3 : VerticalLayout {
-                spacing: 5px;
-                padding: 12px;
-                Text { text: "YOUR NAME"; font-size: 11px; font-weight: 700; color: Theme.palette().paper-ink; }
-                Rectangle { height: 2px; background: Theme.palette().content-cool; }
-                Text { text: "EXPERIENCE"; font-size: 8px; font-weight: 600; color: Theme.palette().paper-muted; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { height: 3px; width: 80%; background: Theme.palette().paper-line; }
-                Text { text: "EDUCATION"; font-size: 8px; font-weight: 600; color: Theme.palette().paper-muted; }
-                Rectangle { height: 3px; background: Theme.palette().paper-line; }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-        }
-
-        if root.selected : Rectangle {
-            height: 20px;
-            border-radius: 4px;
-            background: Theme.palette().accent;
-            HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
-                alignment: center;
-                cross-axis-alignment: center;
-                Text {
-                    text: root.template-name;
-                    font-size: 11px;
-                    font-weight: 700;
-                    color: Theme.palette().accent-ink;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
-        if !root.selected : Text {
-            text: root.template-name;
-            font-size: 11px;
-            font-weight: 500;
-            color: Theme.palette().ink;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
 
 export component WriterApp inherits Window {
     title: "Loom Writer";
@@ -528,12 +395,12 @@ export component WriterApp inherits Window {
                         background: Theme.palette().panel;
 
                         VerticalLayout {
-                            spacing: 4px;
-                            padding-top: 16px; padding-bottom: 16px; padding-left: 12px; padding-right: 12px;
+                            spacing: Theme.tokens.space.sm;
+                            padding-top: Theme.tokens.space.xl; padding-bottom: Theme.tokens.space.xl; padding-left: Theme.tokens.space.lg; padding-right: Theme.tokens.space.lg;
 
                             HorizontalLayout {
-                                padding-left: 8px;
-                                padding-bottom: 4px;
+                                padding-left: Theme.tokens.space.md;
+                                padding-bottom: Theme.tokens.space.sm;
                                 Text {
                                     text: "TEMPLATES";
                                     font-size: 10px;
@@ -548,7 +415,7 @@ export component WriterApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.template-category == 0 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "grid"; tint: root.template-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "All Templates";
@@ -566,7 +433,7 @@ export component WriterApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.template-category == 1 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "document"; tint: root.template-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "Basic";
@@ -584,7 +451,7 @@ export component WriterApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.template-category == 2 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "folder"; tint: root.template-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "Letters";
@@ -602,7 +469,7 @@ export component WriterApp inherits Window {
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: root.template-category == 3 ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: 8px; padding-left: 10px; padding-right: 10px; cross-axis-alignment: center;
+                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
                                     Icon { size: 16px; icon: "layers"; tint: root.template-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
                                         text: "Curricula Vitae";
@@ -619,7 +486,7 @@ export component WriterApp inherits Window {
 
                             // Bottom Language indicator
                             HorizontalLayout {
-                                spacing: 6px; padding: 8px;
+                                spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
                                 Text {
                                     text: "English (US)";
                                     font-size: Theme.tokens.typography.caption;
@@ -636,8 +503,8 @@ export component WriterApp inherits Window {
                     // Right Content Area
                     VerticalLayout {
                         horizontal-stretch: 1;
-                        padding-top: 24px; padding-bottom: 20px; padding-left: 28px; padding-right: 28px;
-                        spacing: 16px;
+                        padding-top: Theme.tokens.space.xxl; padding-bottom: Theme.tokens.space.xl; padding-left: Theme.tokens.space.xxl; padding-right: Theme.tokens.space.xxl;
+                        spacing: Theme.tokens.space.xl;
 
                         Text {
                             text: "Choose a Template";
@@ -649,45 +516,109 @@ export component WriterApp inherits Window {
                         // Two rows keep the fixed paper preview cards inside
                         // the content column at the 900px contract minimum.
                         VerticalLayout {
-                            spacing: 16px;
+                            spacing: Theme.tokens.space.xl;
 
                             HorizontalLayout {
-                                spacing: 16px;
+                                spacing: Theme.tokens.space.xl;
 
                                 if root.template-visible(0) : TemplateCard {
-                                    template-index: 0;
-                                    template-name: "Blank";
-                                    description: "A clean page for any idea";
+                                    title: "Blank";
                                     selected: root.template-selected == 0;
+                                    preview-width: 140px;
+                                    preview-height: 175px;
+                                    width: 160px;
+                                    height: 230px;
+                                    show-selected-badge: true;
                                     clicked => { root.template-selected = 0; }
+                                    VerticalLayout {
+                                        spacing: 8px;
+                                        padding: 16px;
+                                        Text {
+                                            text: "Aa";
+                                            font-size: Theme.tokens.typography.display-large;
+                                            font-weight: 700;
+                                            color: Theme.palette().paper-ink;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            vertical-stretch: 1;
+                                        }
+                                        Rectangle { height: 1px; background: Theme.palette().paper-line; }
+                                    }
                                 }
 
                                 if root.template-visible(1) : TemplateCard {
-                                    template-index: 1;
-                                    template-name: "Report";
-                                    description: "A structured document";
+                                    title: "Report";
                                     selected: root.template-selected == 1;
+                                    preview-width: 140px;
+                                    preview-height: 175px;
+                                    width: 160px;
+                                    height: 230px;
+                                    show-selected-badge: true;
                                     clicked => { root.template-selected = 1; }
+                                    VerticalLayout {
+                                        spacing: 6px;
+                                        padding: 14px;
+                                        Text { text: "REPORT TITLE"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().paper-ink; }
+                                        Rectangle { height: 2px; background: Theme.palette().accent; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 3px; width: 75%; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 8px; background: transparent; }
+                                        Text { text: "Executive Summary"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 3px; width: 85%; background: Theme.palette().paper-line; }
+                                        Rectangle { vertical-stretch: 1; background: transparent; }
+                                    }
                                 }
                             }
 
                             HorizontalLayout {
-                                spacing: 16px;
+                                spacing: Theme.tokens.space.xl;
 
                                 if root.template-visible(2) : TemplateCard {
-                                    template-index: 2;
-                                    template-name: "Letter";
-                                    description: "Formal correspondence";
+                                    title: "Letter";
                                     selected: root.template-selected == 2;
+                                    preview-width: 140px;
+                                    preview-height: 175px;
+                                    width: 160px;
+                                    height: 230px;
+                                    show-selected-badge: true;
                                     clicked => { root.template-selected = 2; }
+                                    VerticalLayout {
+                                        spacing: 6px;
+                                        padding: 14px;
+                                        Text { text: "Your Name"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().paper-ink; }
+                                        Text { text: "October 24, 2026"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-muted; }
+                                        Rectangle { height: 1px; background: Theme.palette().paper-line; }
+                                        Text { text: "Dear Recipient,"; font-size: Theme.tokens.typography.micro; color: Theme.palette().paper-ink; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 3px; width: 60%; background: Theme.palette().paper-line; }
+                                        Rectangle { vertical-stretch: 1; background: transparent; }
+                                    }
                                 }
 
                                 if root.template-visible(3) : TemplateCard {
-                                    template-index: 3;
-                                    template-name: "CV";
-                                    description: "Professional resume";
+                                    title: "CV";
                                     selected: root.template-selected == 3;
+                                    preview-width: 140px;
+                                    preview-height: 175px;
+                                    width: 160px;
+                                    height: 230px;
+                                    show-selected-badge: true;
                                     clicked => { root.template-selected = 3; }
+                                    VerticalLayout {
+                                        spacing: 5px;
+                                        padding: 12px;
+                                        Text { text: "YOUR NAME"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().paper-ink; }
+                                        Rectangle { height: 2px; background: Theme.palette().content-cool; }
+                                        Text { text: "EXPERIENCE"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { height: 3px; width: 80%; background: Theme.palette().paper-line; }
+                                        Text { text: "EDUCATION"; font-size: Theme.tokens.typography.micro; font-weight: 600; color: Theme.palette().paper-muted; }
+                                        Rectangle { height: 3px; background: Theme.palette().paper-line; }
+                                        Rectangle { vertical-stretch: 1; background: transparent; }
+                                    }
                                 }
                             }
                         }
@@ -704,9 +635,9 @@ export component WriterApp inherits Window {
                     Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
 
                     HorizontalLayout {
-                        spacing: 12px;
-                        padding-left: 20px;
-                        padding-right: 20px;
+                        spacing: Theme.tokens.space.lg;
+                        padding-left: Theme.tokens.space.xl;
+                        padding-right: Theme.tokens.space.xl;
                         cross-axis-alignment: center;
 
                         Text {

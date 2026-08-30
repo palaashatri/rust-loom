@@ -22,9 +22,9 @@ export component SheetTabs inherits Rectangle {
     background: Theme.palette().chrome;
 
     HorizontalLayout {
-        spacing: 4px;
-        padding-left: 12px;
-        padding-right: 12px;
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
         cross-axis-alignment: center;
 
         Rectangle {
@@ -37,7 +37,7 @@ export component SheetTabs inherits Rectangle {
 
             HorizontalLayout {
                 alignment: center;
-                spacing: 6px;
+                spacing: Theme.tokens.space.sm;
                 Icon { size: 14px; icon: "table"; tint: Theme.palette().accent-ink; }
                 sheet-label := Text {
                     text: root.sheet-name;
@@ -83,7 +83,7 @@ export component SheetActionToolbar inherits DirectionalLayout {
     callback export-csv;
     callback overflow-requested;
 
-    spacing: 4px;
+    spacing: Theme.tokens.space.sm;
     leading-padding: 0px;
     trailing-padding: 0px;
     horizontal-stretch: 1;
@@ -183,9 +183,9 @@ export component FormulaNameBar inherits Rectangle {
     background: Theme.palette().chrome;
 
     HorizontalLayout {
-        spacing: 6px;
-        padding-left: 12px;
-        padding-right: 12px;
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
         cross-axis-alignment: center;
 
         Rectangle {
@@ -229,7 +229,7 @@ export component FormulaNameBar inherits Rectangle {
         }
 
         if root.show-quick-formulas : HorizontalLayout {
-            spacing: 2px;
+            spacing: Theme.tokens.space.xs;
             ToolbarButton { label: "SUM"; clicked => { root.quick-formula("SUM"); } }
             ToolbarButton { label: "AVG"; clicked => { root.quick-formula("AVERAGE"); } }
             ToolbarButton { label: "COUNT"; clicked => { root.quick-formula("COUNT"); } }
@@ -306,8 +306,8 @@ component SheetScrollBar inherits Rectangle {
         ? max(24px, (root.horizontal ? root.width : root.height) * root.page-size / (root.maximum + root.page-size))
         : (root.horizontal ? root.width : root.height);
 
-    width: 9px;
-    height: 9px;
+    width: Theme.tokens.space.md;
+    height: Theme.tokens.space.md;
     background: Theme.palette().surface-sunken;
     accessible-role: slider;
     accessible-label: root.horizontal ? "Horizontal sheet scroll" : "Vertical sheet scroll";
@@ -342,7 +342,7 @@ component SheetScrollBar inherits Rectangle {
                 : 0px;
         width: root.horizontal ? root.handle-length : parent.width;
         height: root.horizontal ? parent.height : root.handle-length;
-        border-radius: 4px;
+        border-radius: Theme.tokens.metrics.radius-small;
         background: scroll-track.pressed || scroll-track.has-hover
             ? Theme.palette().accent
             : Theme.palette().border-strong;
@@ -406,9 +406,9 @@ export component SheetScrollbars inherits Rectangle {
     in-out property <length> scroll-y: 0px;
 
     if root.vertical-visible : SheetScrollBar {
-        x: parent.width - 9px;
+        x: parent.width - Theme.tokens.space.md;
         y: 0px;
-        width: 9px;
+        width: Theme.tokens.space.md;
         height: parent.height;
         maximum: root.vertical-maximum;
         page-size: root.vertical-page-size;
@@ -416,9 +416,9 @@ export component SheetScrollbars inherits Rectangle {
     }
     if root.horizontal-visible : SheetScrollBar {
         x: 0px;
-        y: parent.height - 9px;
+        y: parent.height - Theme.tokens.space.md;
         width: parent.width;
-        height: 9px;
+        height: Theme.tokens.space.md;
         horizontal: true;
         maximum: root.horizontal-maximum;
         page-size: root.horizontal-page-size;
@@ -460,7 +460,7 @@ export component SheetTable inherits Rectangle {
     callback grid-scrolled;
     callback grid-viewport-changed(length, length);
 
-    border-radius: 4px;
+    border-radius: Theme.tokens.metrics.radius-small;
     border-width: 1px;
     border-color: Theme.palette().border;
     background: Theme.palette().surface;
@@ -772,10 +772,10 @@ export component SheetInspector inherits InspectorSurface {
 
             VerticalLayout {
                 width: parent.width;
-                spacing: 12px;
+                spacing: Theme.tokens.space.lg;
 
                 if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
-                    spacing: 8px;
+                    spacing: Theme.tokens.space.md;
                     SectionHeader { title: "Table"; }
                     PropertyRow {
                         label: "Name";
@@ -792,7 +792,7 @@ export component SheetInspector inherits InspectorSurface {
                 }
 
                 if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
-                    spacing: 8px;
+                    spacing: Theme.tokens.space.md;
                     SectionHeader { title: "Cell"; }
                     PropertyRow {
                         label: "Selection";

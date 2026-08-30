@@ -1,4 +1,5 @@
-import { InspectorSurface, PaneTabs, ToolButton, Field, SegmentedControl } from "components.slint";
+import { InspectorSurface, PaneTabs, Field, SegmentedControl } from "components.slint";
+import { ToolbarButton } from "toolkit.slint";
 import { Theme } from "theme.slint";
 
 /// Source/preset/activity inspector.  Tabs are kept in the same flow as their
@@ -74,7 +75,7 @@ export component EncodeInspector inherits InspectorSurface {
                 }
                 if root.compact-layout : VerticalLayout {
                     spacing: Theme.tokens.space.xs;
-                    for preset[index] in ["Web 1080p", "ProRes 422", "AV1 High"] : ToolButton {
+                    for preset[index] in ["Web 1080p", "ProRes 422", "AV1 High"] : ToolbarButton {
                         text: preset;
                         horizontal-stretch: 1;
                         checked: root.selected-preset == preset;
@@ -103,7 +104,7 @@ export component EncodeInspector inherits InspectorSurface {
                     font-size: Theme.tokens.typography.body;
                     color: Theme.palette().ink;
                 }
-                ToolButton {
+                ToolbarButton {
                     icon: "redo";
                     text: "Retry selected job";
                     horizontal-stretch: 1;
