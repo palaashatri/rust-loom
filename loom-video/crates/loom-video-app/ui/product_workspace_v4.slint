@@ -429,7 +429,8 @@ export component VideoApp inherits Window {
                 Rectangle { height: 1px; background: Theme.palette().border; }
                 VerticalLayout {
                     spacing: 12px;
-                    padding: 14px;
+                    // InspectorSurface supplies the shared 12px content inset.
+                    padding: 0px;
                     if root.inspector-tab == 0 : VerticalLayout {
                         spacing: 10px;
                         Text { text: "CLIP"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }

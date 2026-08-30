@@ -208,6 +208,20 @@ fn active_body(session: &PresentationSession) -> String {
         .unwrap_or_else(|| "Add supporting content from the toolbar.".into())
 }
 
+/// Stable scene-type ids consumed by the Slint canvas projection. Keep this
+/// mapping local to the view model so the domain enum remains independent of
+/// UI rendering details.
+fn element_type_index(element_type: &ElementType) -> i32 {
+    match element_type {
+        ElementType::Title => 0,
+        ElementType::Subtitle => 1,
+        ElementType::BodyText => 2,
+        ElementType::ShapeRectangle => 3,
+        ElementType::ShapeCircle => 4,
+        ElementType::StatCard => 5,
+    }
+}
+
 fn refresh(app: &PresentApp, state: &GuiState) {
     let session = state.session.borrow();
     let document = &session.document;
@@ -235,6 +249,48 @@ fn refresh(app: &PresentApp, state: &GuiState) {
             })
             .collect::<Vec<_>>();
         app.set_element_labels(ModelRc::new(VecModel::from(labels)));
+        app.set_element_contents(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| SharedString::from(element.content.as_str()))
+                .collect::<Vec<_>>(),
+        )));
+        app.set_element_xs(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| element.x)
+                .collect::<Vec<_>>(),
+        )));
+        app.set_element_ys(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| element.y)
+                .collect::<Vec<_>>(),
+        )));
+        app.set_element_widths(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| element.width)
+                .collect::<Vec<_>>(),
+        )));
+        app.set_element_heights(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| element.height)
+                .collect::<Vec<_>>(),
+        )));
+        app.set_element_types(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| element_type_index(&element.element_type))
+                .collect::<Vec<_>>(),
+        )));
         let selected = state
             .selected_element
             .get()
@@ -242,13 +298,23 @@ fn refresh(app: &PresentApp, state: &GuiState) {
         state.selected_element.set(selected);
         app.set_active_element_index(selected as i32);
         if let Some(element) = slide.elements.get(selected) {
+            app.set_active_element_label(format!("{:?}", element.element_type).into());
             app.set_active_element_content(element.content.as_str().into());
             app.set_element_x(element.x);
             app.set_element_y(element.y);
             app.set_element_width(element.width);
             app.set_element_height(element.height);
+            app.set_element_x_text(format!("{:.0} pt", element.x).into());
+            app.set_element_y_text(format!("{:.0} pt", element.y).into());
+            app.set_element_width_text(format!("{:.0} pt", element.width).into());
+            app.set_element_height_text(format!("{:.0} pt", element.height).into());
         } else {
+            app.set_active_element_label("No element selected".into());
             app.set_active_element_content("".into());
+            app.set_element_x_text("—".into());
+            app.set_element_y_text("—".into());
+            app.set_element_width_text("—".into());
+            app.set_element_height_text("—".into());
         }
         app.set_transition_index(match session.transition_for(&slide.id) {
             TransitionKind::None => 0,
@@ -1347,6 +1413,87 @@ mod desktop_tests {
         let app = PresentApp::new().expect("create PresentApp");
         assert!(!app.get_show_inspector());
         assert!(!app.get_show_notes_drawer());
+    }
+
+    #[test]
+    fn refresh_projects_selected_element_into_canvas_and_inspector() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = GuiState {
+            session: RefCell::new(sample_session()),
+            selected_element: Cell::new(0),
+            save_path: RefCell::new(None),
+            dialogs: Rc::new(ScriptedFileDialogs::default()),
+            deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+        };
+
+        refresh(&app, &state);
+        assert_eq!(app.get_active_element_label().as_str(), "Title");
+        assert_eq!(
+            app.get_active_element_content().as_str(),
+            "Create without compromise"
+        );
+        assert_eq!(app.get_element_x_text().as_str(), "90 pt");
+        assert_eq!(app.get_element_width_text().as_str(), "820 pt");
+        assert_eq!(app.get_element_contents().row_count(), 2);
+        assert_eq!(app.get_element_types().row_count(), 2);
+
+        state.selected_element.set(1);
+        refresh(&app, &state);
+        assert_eq!(app.get_active_element_label().as_str(), "BodyText");
+        assert_eq!(
+            app.get_active_element_content().as_str(),
+            "A private, native creative studio designed for Linux."
+        );
+        assert_eq!(app.get_element_y_text().as_str(), "230 pt");
+        assert_eq!(app.get_element_height_text().as_str(), "120 pt");
+    }
+
+    #[test]
+    fn empty_slide_keeps_inspector_truthful() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = test_state();
+        state
+            .session
+            .borrow_mut()
+            .document
+            .active_slide_mut()
+            .expect("empty session slide")
+            .elements
+            .clear();
+
+        configure_responsive_width(&app, 1280);
+        refresh(&app, &state);
+
+        assert_eq!(
+            app.get_active_element_label().as_str(),
+            "No element selected"
+        );
+        assert_eq!(app.get_element_contents().row_count(), 0);
+        assert_eq!(app.get_element_x_text().as_str(), "—");
+        let image = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render empty slide");
+        assert_eq!((image.width(), image.height()), (1280, 800));
+    }
+
+    #[test]
+    fn compact_stage_render_is_safe_for_short_windows() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = GuiState {
+            session: RefCell::new(sample_session()),
+            selected_element: Cell::new(0),
+            save_path: RefCell::new(None),
+            dialogs: Rc::new(ScriptedFileDialogs::default()),
+            deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+        };
+        configure_responsive_width(&app, 900);
+        refresh(&app, &state);
+        let image = snapshot_component(&app, 900.0, 480.0, 1.0).expect("render short window");
+        assert_eq!(image.width(), 900);
+        assert_eq!(image.height(), 480);
     }
 
     #[test]

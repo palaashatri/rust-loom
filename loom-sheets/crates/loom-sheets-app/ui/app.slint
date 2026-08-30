@@ -1,7 +1,7 @@
 import {
     DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
     ToolbarIconButton, ToolbarOverflowButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface, InspectorSurface,
-    SectionHeader, TextField, SearchField, PropertyRow
+    SectionHeader, TextField, SearchField, PropertyRow, TabStrip
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
@@ -237,7 +237,10 @@ export component SheetsApp inherits Window {
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in-out property <bool> toolbar-overflow-open: false;
-    in-out property <bool> show-inspector: false;
+    // Wide/reference windows open the contextual inspector by default. The
+    // controller closes it below the compact breakpoint and restores it when
+    // returning to a wide window unless the user has explicitly hidden it.
+    in-out property <bool> show-inspector: true;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     in property <bool> can-undo: false;
@@ -267,6 +270,16 @@ export component SheetsApp inherits Window {
     in property <int> view-col-origin: 0;
     in property <int> workbook-rows: 1;
     in property <int> workbook-cols: 1;
+    in property <length> grid-col-width: 80px;
+    in property <length> grid-row-height: 24px;
+    in property <length> grid-col-offset: 0px;
+    in property <length> grid-row-offset: 0px;
+    in property <length> grid-visible-width: 640px;
+    in property <length> grid-visible-height: 360px;
+    in property <length> grid-content-width: 640px;
+    in property <length> grid-content-height: 360px;
+    in property <[length]> grid-column-widths: [];
+    in property <[length]> grid-row-heights: [];
     in-out property <length> grid-scroll-x: 0px;
     in-out property <length> grid-scroll-y: 0px;
     in-out property <length> grid-viewport-width: 720px;
@@ -288,8 +301,8 @@ export component SheetsApp inherits Window {
     in property <string> selection-announcement: "A1 selected; value: Empty";
     in property <string> table-rows-label: "1";
     in property <string> table-cols-label: "1";
-    in property <string> selected-row-height: "28 px";
-    in property <string> selected-col-width: "90 px";
+    in property <string> selected-row-height: "24 px";
+    in property <string> selected-col-width: "80 px";
     in-out property <string> inspector-search: "";
     in-out property <string> formula-feedback: "Ready";
 
@@ -314,6 +327,7 @@ export component SheetsApp inherits Window {
     callback grid-scrolled;
     callback grid-viewport-changed(length, length);
     callback inspector-search-edited(string);
+    callback inspector-context-changed(int);
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -608,18 +622,12 @@ export component SheetsApp inherits Window {
                         clicked => { root.export-csv(); }
                     }
                 }
-                // At compact desktop widths leave the working-sheet actions
-                // visible: the inspector and export are real commands, while
-                // overflow holds the lower-frequency actions.
+                // At compact desktop widths leave export visible. The
+                // contextual inspector is intentionally unavailable below
+                // the reference breakpoint, so no disabled inspector control
+                // is presented as an overflow action.
                 if root.overflow-toolbar : ToolbarSpacer { }
                 if root.overflow-toolbar : ToolbarGroup {
-                    ToolbarIconButton {
-                        icon: "format";
-                        label: "Format";
-                        checked: root.inspector-visible;
-                        enabled: root.inspector-available;
-                        clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-                    }
                     ToolbarIconButton {
                         icon: "export";
                         label: "Export CSV";
@@ -789,6 +797,13 @@ export component SheetsApp inherits Window {
                             grid-viewport := Rectangle {
                                 horizontal-stretch: 1;
                                 vertical-stretch: 1;
+                                // Keep the materialized window large enough
+                                // for the default 15-row editing surface
+                                // during the initial layout pass. Without a
+                                // floor the nested Flickable/GridLayout can
+                                // collapse to its two-row intrinsic height
+                                // before the viewport callback runs.
+                                min-height: 386px;
                                 clip: true;
                                 accessible-role: table;
                                 accessible-label: root.selection-announcement;
@@ -798,17 +813,17 @@ export component SheetsApp inherits Window {
                                 grid-flick := Flickable {
                                     width: parent.width;
                                     height: parent.height;
-                                    viewport-width: max(parent.width, 36px + root.workbook-cols * 90px);
-                                    viewport-height: max(parent.height, 26px + root.workbook-rows * 28px);
+                                    viewport-width: max(parent.width, 36px + root.grid-content-width);
+                                    viewport-height: max(parent.height, 26px + root.grid-content-height);
                                     viewport-x <=> root.grid-scroll-x;
                                     viewport-y <=> root.grid-scroll-y;
                                     flicked => { root.grid-scrolled(); }
 
                                     projected-grid := GridLayout {
-                                        x: root.view-col-origin * 90px;
-                                        y: root.view-row-origin * 28px;
-                                        width: 36px + root.cols.length * 90px;
-                                        height: 26px + root.rows.length * 28px;
+                                        x: root.grid-col-offset;
+                                        y: root.grid-row-offset;
+                                        width: 36px + root.grid-visible-width;
+                                        height: 26px + root.grid-visible-height;
                                         spacing: 0px;
 
                                         // Column Headers Row
@@ -822,13 +837,13 @@ export component SheetsApp inherits Window {
                                                 border-color: Theme.palette().border;
                                             }
                                             for c in root.cols : Rectangle {
-                                                min-width: 90px;
-                                                max-width: 90px;
+                                                min-width: root.grid-column-widths[c];
+                                                max-width: root.grid-column-widths[c];
                                                 min-height: 26px;
                                                 max-height: 26px;
                                                 background: c + root.view-col-origin >= root.selection-start-col && c + root.view-col-origin <= root.selection-end-col ? Theme.palette().selection-soft : Theme.palette().chrome;
                                                 border-width: c + root.view-col-origin == root.selected-col ? 2px : 1px;
-                                                border-color: c + root.view-col-origin == root.selected-col ? Theme.palette().accent : Theme.palette().border;
+                                                border-color: c + root.view-col-origin == root.selected-col ? Theme.palette().accent : Theme.palette().grid-major;
 
                                                 Text {
                                                     text: root.column-headers[c];
@@ -845,11 +860,11 @@ export component SheetsApp inherits Window {
                                         for r in root.rows : Row {
                                             Rectangle {
                                                 width: 36px;
-                                                min-height: 28px;
-                                                max-height: 28px;
+                                                min-height: root.grid-row-heights[r];
+                                                max-height: root.grid-row-heights[r];
                                                 background: r + root.view-row-origin >= root.selection-start-row && r + root.view-row-origin <= root.selection-end-row ? Theme.palette().selection-soft : Theme.palette().chrome;
                                                 border-width: r + root.view-row-origin == root.selected-row ? 2px : 1px;
-                                                border-color: r + root.view-row-origin == root.selected-row ? Theme.palette().accent : Theme.palette().border;
+                                                border-color: r + root.view-row-origin == root.selected-row ? Theme.palette().accent : Theme.palette().grid-major;
                                                 Text {
                                                     text: root.row-headers[r];
                                                     font-size: Theme.tokens.typography.caption;
@@ -862,10 +877,10 @@ export component SheetsApp inherits Window {
 
                                             // Cells
                                             for c in root.cols : Rectangle {
-                                                min-width: 90px;
-                                                max-width: 90px;
-                                                min-height: 28px;
-                                                max-height: 28px;
+                                                min-width: root.grid-column-widths[c];
+                                                max-width: root.grid-column-widths[c];
+                                                min-height: root.grid-row-heights[r];
+                                                max-height: root.grid-row-heights[r];
                                                 property <int> global-row: r + root.view-row-origin;
                                                 property <int> global-col: c + root.view-col-origin;
                                                 property <bool> in-selection: global-row >= root.selection-start-row
@@ -877,7 +892,7 @@ export component SheetsApp inherits Window {
                                                     : in-selection ? Theme.palette().selection-soft
                                                     : (Math.mod(global-row, 2) == 1) ? Theme.palette().surface-sunken : Theme.palette().surface;
                                                 border-width: is-active ? 2px : in-selection ? 1px : 1px;
-                                                border-color: is-active || in-selection ? Theme.palette().accent : Theme.palette().border;
+                                                border-color: is-active || in-selection ? Theme.palette().accent : Theme.palette().grid-minor;
 
                                                 Text {
                                                     x: 8px;
@@ -922,24 +937,24 @@ export component SheetsApp inherits Window {
                                 // bar stayed hidden for a nearly-full view and
                                 // the last rows could be reached only through
                                 // wheel gestures.
-                                if 26px + root.workbook-rows * 28px > grid-viewport.height : SheetScrollBar {
+                                if 26px + root.grid-content-height > grid-viewport.height : SheetScrollBar {
                                     x: grid-viewport.width - 9px;
                                     y: 0px;
                                     width: 9px;
                                     height: grid-viewport.height;
-                                    maximum: max(0px, 26px + root.workbook-rows * 28px - grid-viewport.height);
+                                    maximum: max(0px, 26px + root.grid-content-height - grid-viewport.height);
                                     page-size: grid-viewport.height;
                                     value <=> root.grid-scroll-y;
                                 }
                                 // Likewise account for the frozen column
                                 // header before deciding whether horizontal
                                 // scrolling needs an explicit affordance.
-                                if 36px + root.workbook-cols * 90px > grid-viewport.width : SheetScrollBar {
+                                if 36px + root.grid-content-width > grid-viewport.width : SheetScrollBar {
                                     x: 0px;
                                     y: grid-viewport.height - 9px;
                                     width: grid-viewport.width;
                                     height: 9px;
-                                    maximum: max(0px, 36px + root.workbook-cols * 90px - grid-viewport.width);
+                                    maximum: max(0px, 36px + root.grid-content-width - grid-viewport.width);
                                     page-size: grid-viewport.width;
                                     value <=> root.grid-scroll-x;
                                 }
@@ -971,6 +986,17 @@ export component SheetsApp inherits Window {
                             edited(text) => { root.inspector-search-edited(text); }
                         }
 
+                        // Keep the context explicit, like a professional
+                        // spreadsheet inspector: table-level options and
+                        // selection-level options are separate views.  The
+                        // same `inspector-tab` state drives the visible
+                        // section and the accessibility-selected tab.
+                        TabStrip {
+                            tabs: ["Table", "Cell"];
+                            current <=> root.inspector-tab;
+                            selected(index) => { root.inspector-context-changed(index); }
+                        }
+
                         Flickable {
                             horizontal-stretch: 1;
                             vertical-stretch: 1;
@@ -981,7 +1007,7 @@ export component SheetsApp inherits Window {
                                 width: parent.width;
                                 spacing: 12px;
 
-                                if root.inspector-show-table : VerticalLayout {
+                                if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
                                     spacing: 8px;
                                     SectionHeader { title: "Table"; }
                                     PropertyRow {
@@ -998,7 +1024,7 @@ export component SheetsApp inherits Window {
                                     }
                                 }
 
-                                if root.inspector-show-cell : VerticalLayout {
+                                if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
                                     spacing: 8px;
                                     SectionHeader { title: "Cell"; }
                                     PropertyRow {
@@ -1023,7 +1049,8 @@ export component SheetsApp inherits Window {
                                     }
                                 }
 
-                                if !root.inspector-show-table && !root.inspector-show-cell : Rectangle {
+                                if (root.inspector-tab == 0 && !root.inspector-show-table)
+                                    || (root.inspector-tab == 1 && !root.inspector-show-cell) : Rectangle {
                                     height: 72px;
                                     Text {
                                         text: "No matching properties";
@@ -1065,7 +1092,7 @@ export component SheetsApp inherits Window {
             x: max(8px, root.width - 272px);
             y: Theme.tokens.metrics.header-height + 32px + 8px;
             width: 256px;
-            height: 148px;
+            height: 76px;
             border-radius: Theme.tokens.metrics.radius-medium;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -1078,21 +1105,6 @@ export component SheetsApp inherits Window {
                 spacing: 4px;
                 padding: 8px;
 
-                ToolbarButton {
-                    icon: "eye";
-                    label: "View";
-                    enabled: root.inspector-available;
-                    horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "format";
-                    label: "Format";
-                    checked: root.inspector-visible;
-                    enabled: root.inspector-available;
-                    horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
-                }
                 ToolbarButton {
                     icon: "export";
                     label: "Export CSV";

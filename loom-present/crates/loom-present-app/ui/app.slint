@@ -38,7 +38,10 @@ component ThemeCard inherits Rectangle {
             height: root.is-wide ? 101px : 108px;
             border-radius: 4px;
             border-width: root.selected ? 2.5px : 1px;
-            border-color: root.selected ? Theme.palette().content-cool : Theme.palette().paper-line;
+            // Selection uses the same semantic accent as the editor chrome.
+            // The previous cool-blue treatment made the chooser look like a
+            // different product in light/dark/high-contrast captures.
+            border-color: root.selected ? Theme.palette().accent : Theme.palette().paper-line;
             background: root.theme-index == 1 ? Theme.palette().surface-sunken
                 : root.theme-index == 3 ? Theme.palette().accent
                 : Theme.palette().paper;
@@ -80,7 +83,7 @@ component ThemeCard inherits Rectangle {
         if root.selected : Rectangle {
             height: 20px;
             border-radius: 4px;
-            background: Theme.palette().content-cool;
+            background: Theme.palette().accent;
             HorizontalLayout {
                 padding-left: 8px;
                 padding-right: 8px;
@@ -200,11 +203,22 @@ export component PresentApp inherits Window {
     in property <int> active-slide-index: 0;
     in property <[string]> element-labels: [];
     in property <int> active-element-index: 0;
+    in property <string> active-element-label: "No element selected";
     in property <string> active-element-content: "";
+    in property <[string]> element-contents: [];
+    in property <[float]> element-xs: [];
+    in property <[float]> element-ys: [];
+    in property <[float]> element-widths: [];
+    in property <[float]> element-heights: [];
+    in property <[int]> element-types: [];
     in property <float> element-x: 100;
     in property <float> element-y: 100;
     in property <float> element-width: 400;
     in property <float> element-height: 100;
+    in property <string> element-x-text: "100";
+    in property <string> element-y-text: "100";
+    in property <string> element-width-text: "400";
+    in property <string> element-height-text: "100";
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
@@ -578,12 +592,19 @@ export component PresentApp inherits Window {
                         horizontal-stretch: 1;
                         vertical-stretch: 1;
 
-                        // 16:9 Centered Slide Surface
+                        // Center the slide in the available stage while
+                        // constraining both axes.  Width-only sizing let a
+                        // short window push the slide below the canvas,
+                        // clipping the bottom edge and selection affordances.
                         Rectangle {
+                            property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
                             x: max(24px, (parent.width - self.width) / 2);
                             y: max(24px, (parent.height - self.height) / 2);
-                            width: min(840px, parent.width - 48px);
-                            height: self.width * (root.aspect-ratio-wide ? 0.5625 : 0.75);
+                            width: min(
+                                min(840px, max(1px, parent.width - 48px)),
+                                max(1px, (parent.height - 48px) / self.slide-ratio)
+                            );
+                            height: self.width * self.slide-ratio;
                             border-radius: 4px;
                             border-width: 1px;
                             border-color: Theme.palette().border;
@@ -593,55 +614,52 @@ export component PresentApp inherits Window {
                             drop-shadow-color: Theme.palette().shadow;
                             clip: true;
 
-                            VerticalLayout {
-                                padding-top: 48px;
-                                padding-bottom: 48px;
-                                padding-left: 64px;
-                                padding-right: 64px;
-                                spacing: 16px;
-                                alignment: center;
+                            // Render the domain scene model in slide
+                            // coordinates (960×540 points), rather than
+                            // painting a fixed title/body mockup.  Every
+                            // rendered node shares the selected-element index
+                            // consumed by the inspector and the thumbnail
+                            // strip, so selection cannot drift visually.
+                            for element_x[idx] in root.element-xs : Rectangle {
+                                property <length> render-x: clamp(element_x * parent.width / 960.0, 0px, max(0px, parent.width - 2px));
+                                property <length> render-y: clamp(root.element-ys[idx] * parent.height / 540.0, 0px, max(0px, parent.height - 2px));
+                                property <length> render-width: max(1px, min(root.element-widths[idx] * parent.width / 960.0, max(1px, parent.width - self.render-x - 2px)));
+                                property <length> render-height: max(1px, min(root.element-heights[idx] * parent.height / 540.0, max(1px, parent.height - self.render-y - 2px)));
+                                x: self.render-x;
+                                y: self.render-y;
+                                width: self.render-width;
+                                height: self.render-height;
+                                border-radius: root.element-types[idx] == 4 ? self.width / 2 : 4px;
+                                border-width: idx == root.active-element-index ? 2px : 0px;
+                                border-color: Theme.palette().accent;
+                                background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
+                                    : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
+                                    : root.element-types[idx] == 5 ? Theme.palette().content-accent
+                                    : transparent;
+                                accessible-role: button;
+                                accessible-label: root.element-labels[idx];
+                                accessible-action-default => { root.select-element(idx); }
 
-                                // Slide Title Box
-                                Rectangle {
-                                    border-radius: 4px;
-                                    border-width: root.active-element-index == 0 ? 2px : 0px;
-                                    border-color: Theme.palette().accent;
-                                    background: transparent;
-
-                                    HorizontalLayout {
-                                        padding: 8px;
-                                        alignment: center;
-                                        Text {
-                                            text: root.slide-title;
-                                            font-size: 28px;
-                                            font-weight: 700;
-                                            color: Theme.palette().paper-ink;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea { clicked => { root.select-element(0); } }
+                                Text {
+                                    x: 8px;
+                                    y: 6px;
+                                    width: max(1px, parent.width - 16px);
+                                    height: max(1px, parent.height - 12px);
+                                    text: root.element-contents[idx];
+                                    font-size: root.element-types[idx] == 0 ? 28px
+                                        : root.element-types[idx] == 5 ? 24px : 16px;
+                                    font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
+                                    color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
+                                        : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
+                                        : Theme.palette().paper-ink;
+                                    horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
+                                    vertical-alignment: center;
+                                    wrap: word-wrap;
+                                    overflow: elide;
                                 }
 
-                                // Slide Body Box
-                                if root.slide-body != "" : Rectangle {
-                                    border-radius: 4px;
-                                    border-width: root.active-element-index == 1 ? 2px : 0px;
-                                    border-color: Theme.palette().accent;
-                                    background: transparent;
-
-                                    HorizontalLayout {
-                                        padding: 8px;
-                                        alignment: center;
-                                        Text {
-                                            text: root.slide-body;
-                                            font-size: 16px;
-                                            color: Theme.palette().paper-muted;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea { clicked => { root.select-element(1); } }
+                                TouchArea {
+                                    clicked => { root.select-element(idx); }
                                 }
                             }
                         }
@@ -725,10 +743,61 @@ export component PresentApp inherits Window {
 
                             SectionHeader { title: "Selected Element"; }
 
+                            Rectangle {
+                                min-height: 40px;
+                                border-radius: Theme.tokens.metrics.radius-small;
+                                border-width: 1px;
+                                border-color: Theme.palette().border;
+                                background: Theme.palette().selection-soft;
+
+                                VerticalLayout {
+                                    padding: 8px;
+                                    spacing: 2px;
+                                    Text {
+                                        text: root.active-element-label;
+                                        font-size: Theme.tokens.typography.body;
+                                        font-weight: 600;
+                                        color: Theme.palette().ink;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: root.element-labels.length > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-labels.length : "No element selected";
+                                        font-size: Theme.tokens.typography.micro;
+                                        color: Theme.palette().ink-secondary;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+
                             TextField {
                                 label: "Element text";
                                 value: root.active-element-content;
+                                enabled: root.active-element-label != "No element selected";
                                 edited(t) => { root.update-element-content(t); }
+                            }
+
+                            SectionHeader { title: "Geometry"; }
+
+                            PropertyRow {
+                                label: "Position";
+                                Text {
+                                    text: root.element-x-text + " × " + root.element-y-text;
+                                    font-size: Theme.tokens.typography.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+
+                            PropertyRow {
+                                label: "Size";
+                                Text {
+                                    text: root.element-width-text + " × " + root.element-height-text;
+                                    font-size: Theme.tokens.typography.body;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
                             }
                         }
 

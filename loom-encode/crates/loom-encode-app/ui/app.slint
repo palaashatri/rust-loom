@@ -239,7 +239,8 @@ export component EncodeApp inherits Window {
                     Rectangle { height: 1px; background: Theme.palette().border; }
                     VerticalLayout {
                         spacing: Theme.tokens.space.md;
-                        padding: Theme.tokens.space.lg;
+                        // InspectorSurface supplies the shared 12px content inset.
+                        padding: 0px;
                         vertical-stretch: 1;
                         if root.inspector-tab == 0 : VerticalLayout {
                             spacing: Theme.tokens.space.sm;

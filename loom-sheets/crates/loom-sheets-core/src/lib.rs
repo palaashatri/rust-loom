@@ -10,6 +10,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use loom_package::zip::PackageArchive;
 use serde::{Deserialize, Serialize};
 
+/// Default width of a worksheet column in the desktop editor, in pixels.
+///
+/// Keeping this value in the core model gives the headless engine and the
+/// Slint editor one source of truth for their initial grid geometry.
+pub const DEFAULT_COL_WIDTH: f32 = 80.0;
+/// Default height of a worksheet row in the desktop editor, in pixels.
+pub const DEFAULT_ROW_HEIGHT: f32 = 24.0;
+
 /// A cell coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CellRef {
@@ -408,30 +416,36 @@ impl Sheet {
 
     /// Sets custom column width for column index.
     pub fn set_col_width(&mut self, col: u32, width: f32) {
-        if width > 0.0 {
+        if width.is_finite() && width > 0.0 {
             self.col_widths.insert(col, width);
         } else {
             self.col_widths.remove(&col);
         }
     }
 
-    /// Gets column width for column index (defaulting to 80.0 px).
+    /// Gets column width for column index (defaulting to [`DEFAULT_COL_WIDTH`]).
     pub fn col_width(&self, col: u32) -> f32 {
-        self.col_widths.get(&col).copied().unwrap_or(80.0)
+        self.col_widths
+            .get(&col)
+            .copied()
+            .unwrap_or(DEFAULT_COL_WIDTH)
     }
 
     /// Sets custom row height for row index.
     pub fn set_row_height(&mut self, row: u32, height: f32) {
-        if height > 0.0 {
+        if height.is_finite() && height > 0.0 {
             self.row_heights.insert(row, height);
         } else {
             self.row_heights.remove(&row);
         }
     }
 
-    /// Gets row height for row index (defaulting to 24.0 px).
+    /// Gets row height for row index (defaulting to [`DEFAULT_ROW_HEIGHT`]).
     pub fn row_height(&self, row: u32) -> f32 {
-        self.row_heights.get(&row).copied().unwrap_or(24.0)
+        self.row_heights
+            .get(&row)
+            .copied()
+            .unwrap_or(DEFAULT_ROW_HEIGHT)
     }
 
     /// Sets text alignment for a single cell.
@@ -2573,6 +2587,31 @@ pub fn sheet_to_json(sheet: &Sheet) -> String {
         s.push_str("\"}");
     }
     s.push(']');
+    s.push_str(",\"col_widths\":{");
+    let mut first_width = true;
+    for (col, width) in &sheet.col_widths {
+        if !first_width {
+            s.push(',');
+        }
+        first_width = false;
+        s.push('"');
+        s.push_str(&col.to_string());
+        s.push_str("\":");
+        s.push_str(&width.to_string());
+    }
+    s.push_str("},\"row_heights\":{");
+    let mut first_height = true;
+    for (row, height) in &sheet.row_heights {
+        if !first_height {
+            s.push(',');
+        }
+        first_height = false;
+        s.push('"');
+        s.push_str(&row.to_string());
+        s.push_str("\":");
+        s.push_str(&height.to_string());
+    }
+    s.push('}');
     s.push('}');
     s
 }
@@ -2610,7 +2649,37 @@ pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
             .replace("\\n", "\n");
         sheet.set_str(a1, &raw);
     }
+    for (index, width) in parse_dimension_map(s, "col_widths") {
+        sheet.set_col_width(index, width);
+    }
+    for (index, height) in parse_dimension_map(s, "row_heights") {
+        sheet.set_row_height(index, height);
+    }
     Ok(sheet)
+}
+
+/// Parse the optional numeric dimension maps emitted by [`sheet_to_json`].
+///
+/// Older workbook packages do not contain these fields, so a missing or
+/// malformed map simply yields an empty result and leaves the model defaults
+/// in place.  This intentionally small parser matches the hand-rolled sheet
+/// serializer above while keeping backwards compatibility with existing
+/// `.loomtable` content.
+fn parse_dimension_map(s: &str, key: &str) -> BTreeMap<u32, f32> {
+    let marker = format!("\"{key}\":{{");
+    let Some(start) = s.find(&marker).map(|index| index + marker.len()) else {
+        return BTreeMap::new();
+    };
+    let rest = &s[start..];
+    let body = rest.split('}').next().unwrap_or_default();
+    body.split(',')
+        .filter_map(|entry| {
+            let (raw_index, raw_value) = entry.split_once(':')?;
+            let index = raw_index.trim().trim_matches('"').parse::<u32>().ok()?;
+            let value = raw_value.trim().parse::<f32>().ok()?;
+            value.is_finite().then_some((index, value))
+        })
+        .collect()
 }
 
 /// Inclusive rectangular cell range.
@@ -4494,10 +4563,14 @@ mod tests {
         let mut sheet = Sheet::new("t");
         sheet.set_str("A1", "1");
         sheet.set_str("B2", "=A1+1");
+        sheet.set_col_width(1, 140.0);
+        sheet.set_row_height(1, 32.0);
         let json = sheet_to_json(&sheet);
         let back = sheet_from_json(&json).unwrap();
         assert_eq!(back.name, "t");
         assert_eq!(back.raw(CellRef::parse("B2").unwrap()), Some("=A1+1"));
+        assert_eq!(back.col_width(1), 140.0);
+        assert_eq!(back.row_height(1), 32.0);
         let vals = evaluate(&back);
         assert_eq!(
             vals.get(&CellRef::parse("B2").unwrap()),
@@ -5596,6 +5669,24 @@ mod tests {
 
         empty.set_str("AZ1000", "tail");
         assert_eq!(empty.dimensions(), SheetDimensions::new(1_000, 52));
+    }
+
+    #[test]
+    fn sheet_grid_defaults_are_shared_and_invalid_dimensions_fall_back() {
+        let mut sheet = Sheet::new("defaults");
+        assert_eq!(DEFAULT_COL_WIDTH, 80.0);
+        assert_eq!(DEFAULT_ROW_HEIGHT, 24.0);
+        assert_eq!(sheet.col_width(0), DEFAULT_COL_WIDTH);
+        assert_eq!(sheet.row_height(0), DEFAULT_ROW_HEIGHT);
+
+        sheet.set_col_width(0, f32::NAN);
+        sheet.set_col_width(1, f32::INFINITY);
+        sheet.set_row_height(0, f32::NAN);
+        sheet.set_row_height(1, f32::INFINITY);
+        assert_eq!(sheet.col_width(0), DEFAULT_COL_WIDTH);
+        assert_eq!(sheet.col_width(1), DEFAULT_COL_WIDTH);
+        assert_eq!(sheet.row_height(0), DEFAULT_ROW_HEIGHT);
+        assert_eq!(sheet.row_height(1), DEFAULT_ROW_HEIGHT);
     }
 
     #[test]

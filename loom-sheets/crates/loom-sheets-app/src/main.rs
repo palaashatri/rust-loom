@@ -20,6 +20,7 @@ use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::{
     evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellEditTransaction, CellRange,
     CellRef, GridSelection, RangeEdit, Sheet, SheetDimensions, SheetViewport, Value,
+    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -30,8 +31,14 @@ slint::include_modules!();
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const DEFAULT_VISIBLE_COLS: u32 = 8;
 const DEFAULT_VISIBLE_ROWS: u32 = 15;
-const GRID_ROW_HEIGHT: f32 = 28.0;
-const GRID_COL_WIDTH: f32 = 90.0;
+const GRID_ROW_HEIGHT: f32 = DEFAULT_ROW_HEIGHT;
+const GRID_COL_WIDTH: f32 = DEFAULT_COL_WIDTH;
+const GRID_ROW_HEADER_WIDTH: f32 = 36.0;
+const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
+const FIT_COLUMN_MAX_WIDTH: f32 = 160.0;
+const INSPECTOR_WIDTH: f32 = 280.0;
+const TABLE_HORIZONTAL_MARGIN: f32 = 48.0;
+const SHELL_VERTICAL_CHROME: f32 = 252.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
 
@@ -259,22 +266,11 @@ fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetG
     project_sheet_grid_with_values(sheet, &values, viewport)
 }
 
-fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
-    let selected = selection_from_app(app).focus;
-    let mut dimensions = sheet.dimensions();
-    let viewport_width = if app.get_grid_viewport_width() > 1.0 {
-        app.get_grid_viewport_width()
-    } else {
-        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32
-    };
-    let viewport_height = if app.get_grid_viewport_height() > 1.0 {
-        app.get_grid_viewport_height()
-    } else {
-        GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32
-    };
+fn editor_dimensions(sheet: &Sheet, selected: CellRef) -> SheetDimensions {
+    let dimensions = sheet.dimensions();
     // Keep an empty/new sheet navigable beyond A1 while retaining sparse
     // workbook dimensions for populated sheets.
-    dimensions = SheetDimensions::new(
+    SheetDimensions::new(
         dimensions
             .rows
             .max(selected.row.saturating_add(1))
@@ -283,16 +279,150 @@ fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
             .cols
             .max(selected.col.saturating_add(1))
             .max(DEFAULT_VISIBLE_COLS),
-    );
+    )
+}
+
+/// Return the default width used by the projected grid. Small workbooks use
+/// the available table width (up to a comfortable cap); larger/sparse sheets
+/// retain the persisted 80px default so horizontal scrolling remains useful.
+fn grid_default_col_width(sheet: &Sheet, dimensions: SheetDimensions, viewport_width: f32) -> f32 {
+    if !sheet.col_widths.is_empty() || dimensions.cols > DEFAULT_VISIBLE_COLS {
+        return GRID_COL_WIDTH;
+    }
+    let available = (viewport_width - GRID_ROW_HEADER_WIDTH).max(0.0);
+    let fitted = available / dimensions.cols.max(1) as f32;
+    fitted.clamp(GRID_COL_WIDTH, FIT_COLUMN_MAX_WIDTH)
+}
+
+fn valid_dimension(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
+}
+
+fn column_width(sheet: &Sheet, col: u32, default_width: f32) -> f32 {
+    valid_dimension(
+        sheet.col_widths.get(&col).copied().unwrap_or(default_width),
+        default_width,
+    )
+}
+
+fn row_height(sheet: &Sheet, row: u32) -> f32 {
+    valid_dimension(
+        sheet
+            .row_heights
+            .get(&row)
+            .copied()
+            .unwrap_or(GRID_ROW_HEIGHT),
+        GRID_ROW_HEIGHT,
+    )
+}
+
+fn dimension_extent(
+    count: u32,
+    default_size: f32,
+    custom: &std::collections::BTreeMap<u32, f32>,
+) -> f32 {
+    let mut extent = count as f32 * default_size;
+    for (&index, &size) in custom {
+        if index < count && size.is_finite() && size > 0.0 {
+            extent += size - default_size;
+        }
+    }
+    extent.max(default_size)
+}
+
+fn dimension_offset(
+    first: u32,
+    default_size: f32,
+    custom: &std::collections::BTreeMap<u32, f32>,
+) -> f32 {
+    let mut offset = first as f32 * default_size;
+    for &size in custom.range(..first).map(|(_, size)| size) {
+        if size.is_finite() && size > 0.0 {
+            offset += size - default_size;
+        }
+    }
+    offset.max(0.0)
+}
+
+/// Concrete dimensions/offsets consumed by the Slint projection. Persisted
+/// row and column sizes are retained for materialized cells and for the full
+/// scroll extents, while the core viewport still computes the sparse window
+/// from one stable default metric.
+struct GridGeometry {
+    default_col_width: f32,
+    column_widths: Vec<f32>,
+    row_heights: Vec<f32>,
+    col_offset: f32,
+    row_offset: f32,
+    visible_width: f32,
+    visible_height: f32,
+    content_width: f32,
+    content_height: f32,
+}
+
+fn grid_geometry(
+    sheet: &Sheet,
+    dimensions: SheetDimensions,
+    viewport: SheetViewport,
+    viewport_width: f32,
+) -> GridGeometry {
+    let default_col_width = grid_default_col_width(sheet, dimensions, viewport_width);
+    let column_widths: Vec<f32> = (0..viewport.visible_cols)
+        .filter_map(|index| viewport.column_at(index))
+        .map(|col| column_width(sheet, col, default_col_width))
+        .collect();
+    let row_heights: Vec<f32> = (0..viewport.visible_rows)
+        .filter_map(|index| viewport.row_at(index))
+        .map(|row| row_height(sheet, row))
+        .collect();
+    let visible_width = column_widths.iter().sum();
+    let visible_height = row_heights.iter().sum();
+    let content_width = if sheet.col_widths.is_empty() {
+        dimensions.cols as f32 * default_col_width
+    } else {
+        dimension_extent(dimensions.cols, default_col_width, &sheet.col_widths)
+    };
+    let content_height = dimension_extent(dimensions.rows, GRID_ROW_HEIGHT, &sheet.row_heights);
+    GridGeometry {
+        default_col_width,
+        column_widths,
+        row_heights,
+        col_offset: dimension_offset(viewport.first_col, default_col_width, &sheet.col_widths),
+        row_offset: dimension_offset(viewport.first_row, GRID_ROW_HEIGHT, &sheet.row_heights),
+        visible_width,
+        visible_height,
+        content_width,
+        content_height,
+    }
+}
+
+fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
+    let selected = selection_from_app(app).focus;
+    let dimensions = editor_dimensions(sheet, selected);
+    let viewport_width = if app.get_grid_viewport_width() > 1.0 {
+        app.get_grid_viewport_width()
+    } else {
+        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
+    };
+    let viewport_height = if app.get_grid_viewport_height() > 1.0 {
+        app.get_grid_viewport_height()
+    } else {
+        GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
+    };
+    let default_col_width = grid_default_col_width(sheet, dimensions, viewport_width);
     let scroll_x = (-app.get_grid_scroll_x()).max(0.0);
     let scroll_y = (-app.get_grid_scroll_y()).max(0.0);
     SheetViewport::from_scroll(
         scroll_x,
         scroll_y,
-        viewport_width,
-        viewport_height,
+        (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
+        (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(GRID_ROW_HEIGHT),
         GRID_ROW_HEIGHT,
-        GRID_COL_WIDTH,
+        default_col_width,
         dimensions,
     )
 }
@@ -310,16 +440,7 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
     let selection = selection_from_app(app);
     let selected = selection.focus;
     let dimensions = sheet.dimensions();
-    let editor_dimensions = SheetDimensions::new(
-        dimensions
-            .rows
-            .max(selected.row.saturating_add(1))
-            .max(DEFAULT_VISIBLE_ROWS),
-        dimensions
-            .cols
-            .max(selected.col.saturating_add(1))
-            .max(DEFAULT_VISIBLE_COLS),
-    );
+    let editor_dimensions = editor_dimensions(sheet, selected);
     // Set content extents before touching Flickable offsets.  The two-way
     // viewport binding clamps offsets against these extents, so updating them
     // first preserves a requested tail scroll on a newly loaded sparse sheet.
@@ -339,15 +460,33 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
     // wheel/touchpad offsets while snapping only when selection auto-reveal
     // moved the projected window.
     if viewport.first_col != projected_before_reveal.first_col {
-        app.set_grid_scroll_x(-(viewport.first_col as f32 * GRID_COL_WIDTH));
+        let geometry = grid_geometry(
+            sheet,
+            editor_dimensions,
+            viewport,
+            app.get_grid_viewport_width(),
+        );
+        app.set_grid_scroll_x(-geometry.col_offset);
     } else {
         app.set_grid_scroll_x(-current_scroll_x);
     }
     if viewport.first_row != projected_before_reveal.first_row {
-        app.set_grid_scroll_y(-(viewport.first_row as f32 * GRID_ROW_HEIGHT));
+        let geometry = grid_geometry(
+            sheet,
+            editor_dimensions,
+            viewport,
+            app.get_grid_viewport_width(),
+        );
+        app.set_grid_scroll_y(-geometry.row_offset);
     } else {
         app.set_grid_scroll_y(-current_scroll_y);
     }
+    let geometry = grid_geometry(
+        sheet,
+        editor_dimensions,
+        viewport,
+        app.get_grid_viewport_width(),
+    );
     let grid = project_sheet_grid_with_values(sheet, &vals, viewport);
 
     app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
@@ -370,6 +509,16 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
             .map(SharedString::from)
             .collect::<Vec<_>>(),
     )));
+    app.set_grid_col_width(geometry.default_col_width);
+    app.set_grid_row_height(GRID_ROW_HEIGHT);
+    app.set_grid_col_offset(geometry.col_offset);
+    app.set_grid_row_offset(geometry.row_offset);
+    app.set_grid_visible_width(geometry.visible_width);
+    app.set_grid_visible_height(geometry.visible_height);
+    app.set_grid_content_width(geometry.content_width);
+    app.set_grid_content_height(geometry.content_height);
+    app.set_grid_column_widths(ModelRc::new(VecModel::from(geometry.column_widths)));
+    app.set_grid_row_heights(ModelRc::new(VecModel::from(geometry.row_heights)));
     update_selection_range(app, sheet, &vals, selection);
     app.set_table_rows_label(SharedString::from(dimensions.rows.to_string()));
     app.set_table_cols_label(SharedString::from(dimensions.cols.to_string()));
@@ -648,6 +797,19 @@ fn inspector_section_visibility(query: &str) -> (bool, bool) {
     (table, cell)
 }
 
+fn inspector_tab_index(index: i32) -> i32 {
+    index.clamp(0, 1)
+}
+
+#[cfg(test)]
+fn inspector_context_matches(index: i32, query: &str) -> bool {
+    let (table, cell) = inspector_section_visibility(query);
+    match inspector_tab_index(index) {
+        0 => table,
+        _ => cell,
+    }
+}
+
 fn apply_theme(app: &SheetsApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
@@ -670,10 +832,32 @@ fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
         app.set_toolbar_overflow_open(false);
     }
     let inspector_available = width >= 1180;
+    let was_inspector_available = app.get_inspector_available();
     app.set_inspector_available(inspector_available);
     if !inspector_available {
         app.set_show_inspector(false);
+    } else if !was_inspector_available {
+        // Re-entering a reference/wide window restores the contextual panel
+        // after compact mode hid it to preserve editing width. A user toggle
+        // made while already wide remains authoritative.
+        app.set_show_inspector(true);
     }
+}
+
+/// Size the headless grid viewport to the same canvas geometry used by the
+/// native layout. `snapshot_component` resizes and renders immediately,
+/// without running a native resize event through the Slint loop, so relying
+/// only on `grid-viewport-changed` would leave the projection at its
+/// construction-time fallback size.
+fn apply_headless_viewport_size(app: &SheetsApp, width: u32, height: u32) {
+    let inspector_width = if width >= 1180 { INSPECTOR_WIDTH } else { 0.0 };
+    app.set_grid_viewport_width(
+        (width as f32 - inspector_width - TABLE_HORIZONTAL_MARGIN).max(GRID_COL_WIDTH),
+    );
+    app.set_grid_viewport_height(
+        (height as f32 - SHELL_VERTICAL_CHROME)
+            .max(GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT),
+    );
 }
 
 #[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
@@ -690,6 +874,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     apply_theme(&app, &args.theme);
+    let (w, h) = args.size;
+    app.window().set_size(PhysicalSize::new(w, h));
+    apply_layout_breakpoints(&app, w);
+    apply_headless_viewport_size(&app, w, h);
     let sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,
         None => sample_sheet(),
@@ -707,8 +895,6 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     if args.template_chooser {
         app.set_template_chooser_open(true);
     }
-    let (w, h) = args.size;
-    apply_layout_breakpoints(&app, w);
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
     loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
     Ok(())
@@ -1158,6 +1344,30 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 let (table, cell) = inspector_section_visibility(query.as_str());
                 app.set_inspector_show_table(table);
                 app.set_inspector_show_cell(cell);
+                // Search is also a context switch when only one inspector
+                // section matches. This keeps a query such as "formula"
+                // useful even when the Table tab was previously selected.
+                if table && !cell {
+                    app.set_inspector_tab(0);
+                } else if cell && !table {
+                    app.set_inspector_tab(1);
+                }
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_inspector_context_changed(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                // TabStrip owns the visual selection; clamp the mirrored
+                // state so keyboard/programmatic activation cannot address a
+                // context that has no inspector section.
+                app.set_inspector_tab(inspector_tab_index(index));
+                let (table, cell) =
+                    inspector_section_visibility(app.get_inspector_search().as_str());
+                app.set_inspector_show_table(table);
+                app.set_inspector_show_cell(cell);
             }
         });
     }
@@ -1312,12 +1522,13 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         Some(p) => load_sheet(Path::new(p))?,
         None => sample_sheet(),
     };
-    apply_sheet(&app, &sheet);
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
+    apply_headless_viewport_size(&app, args.size.0, args.size.1);
+    apply_sheet(&app, &sheet);
     let report = record_keyboard_palette_journey(&app, "sheets", Path::new(out_dir), "save")
         .map_err(|e| format!("journey failed: {e}"))?;
     println!(
@@ -1343,6 +1554,7 @@ fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
+    apply_headless_viewport_size(&app, args.size.0, args.size.1);
     app.set_show_inspector(true);
 
     let mut sheet = Sheet::new("Sparse 1000");
@@ -1893,12 +2105,12 @@ mod tests {
         let viewport = viewport_from_app(&app, &sheet);
 
         assert_eq!(sheet.dimensions(), SheetDimensions::new(1_000, 52));
-        assert_eq!(viewport.first_row, 24);
+        assert_eq!(viewport.first_row, 28);
         assert_eq!(viewport.first_col, 2);
-        assert_eq!(viewport.visible_rows, 10);
-        assert_eq!(viewport.visible_cols, 4);
-        assert!(viewport.contains(CellRef::parse("C25").unwrap()));
-        assert!(!viewport.contains(CellRef::parse("B25").unwrap()));
+        assert_eq!(viewport.visible_rows, 11);
+        assert_eq!(viewport.visible_cols, 5);
+        assert!(viewport.contains(CellRef::parse("C29").unwrap()));
+        assert!(!viewport.contains(CellRef::parse("B29").unwrap()));
     }
 
     #[test]
@@ -2001,6 +2213,20 @@ mod tests {
     }
 
     #[test]
+    fn inspector_context_switch_only_exposes_the_selected_context() {
+        assert_eq!(inspector_tab_index(-1), 0);
+        assert_eq!(inspector_tab_index(0), 0);
+        assert_eq!(inspector_tab_index(1), 1);
+        assert_eq!(inspector_tab_index(4), 1);
+
+        assert!(inspector_context_matches(0, "rows"));
+        assert!(!inspector_context_matches(1, "rows"));
+        assert!(!inspector_context_matches(0, "formula"));
+        assert!(inspector_context_matches(1, "formula"));
+        assert!(!inspector_context_matches(1, "unknown"));
+    }
+
+    #[test]
     fn focused_grid_routes_arrow_keys_to_selection_navigation() {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
@@ -2061,10 +2287,71 @@ mod tests {
     }
 
     #[test]
-    fn sheets_inspector_is_closed_by_default() {
+    fn sheets_inspector_is_open_by_default_for_reference_windows() {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
+        assert!(app.get_show_inspector());
+        apply_layout_breakpoints(&app, 1024);
+        assert!(app.get_overflow_toolbar());
+        assert!(!app.get_inspector_available());
         assert!(!app.get_show_inspector());
+        apply_layout_breakpoints(&app, 1180);
+        assert!(!app.get_overflow_toolbar());
+        assert!(app.get_inspector_available());
+        assert!(app.get_show_inspector());
+        apply_layout_breakpoints(&app, 1280);
+        assert!(app.get_inspector_available() && app.get_show_inspector());
+        app.set_show_inspector(false);
+        apply_layout_breakpoints(&app, 1280);
+        assert!(!app.get_show_inspector());
+    }
+
+    #[test]
+    fn grid_geometry_uses_core_defaults_and_fits_small_workbooks() {
+        assert_eq!(GRID_COL_WIDTH, DEFAULT_COL_WIDTH);
+        assert_eq!(GRID_ROW_HEIGHT, DEFAULT_ROW_HEIGHT);
+
+        let mut small = Sheet::new("small");
+        small.set_str("C3", "value");
+        let dimensions = editor_dimensions(&small, CellRef::parse("A1").unwrap());
+        assert_eq!(dimensions, SheetDimensions::new(15, 8));
+
+        let fitted = grid_default_col_width(&small, dimensions, 1_000.0);
+        assert_eq!(fitted, 120.5);
+        let viewport = SheetViewport::new(4, 8);
+        let geometry = grid_geometry(&small, dimensions, viewport, 1_000.0);
+        assert_eq!(geometry.column_widths.len(), 8);
+        assert!(geometry.column_widths.iter().all(|width| *width == fitted));
+        assert_eq!(geometry.content_width, 8.0 * fitted);
+
+        let mut sparse = Sheet::new("sparse");
+        sparse.set_str("AZ1000", "tail");
+        let sparse_dimensions = editor_dimensions(&sparse, CellRef::parse("A1").unwrap());
+        assert_eq!(sparse_dimensions, SheetDimensions::new(1_000, 52));
+        assert_eq!(
+            grid_default_col_width(&sparse, sparse_dimensions, 1_000.0),
+            GRID_COL_WIDTH
+        );
+    }
+
+    #[test]
+    fn grid_geometry_retains_persisted_row_and_column_dimensions() {
+        let mut sheet = Sheet::new("custom");
+        sheet.set_str("B3", "value");
+        sheet.set_col_width(1, 140.0);
+        sheet.set_row_height(2, 40.0);
+        let dimensions = editor_dimensions(&sheet, CellRef::parse("A1").unwrap());
+        let viewport = SheetViewport::new(4, 3);
+        let geometry = grid_geometry(&sheet, dimensions, viewport, 640.0);
+        assert_eq!(geometry.column_widths, vec![80.0, 140.0, 80.0]);
+        assert_eq!(geometry.row_heights, vec![24.0, 24.0, 40.0, 24.0]);
+        assert_eq!(geometry.content_width, 8.0 * 80.0 + 60.0);
+        assert_eq!(geometry.content_height, 15.0 * 24.0 + 16.0);
+
+        let json = sheet_to_json(&sheet);
+        let reopened = sheet_from_json(&json).expect("dimension metadata round-trips");
+        assert_eq!(reopened.col_width(1), 140.0);
+        assert_eq!(reopened.row_height(2), 40.0);
     }
 
     #[test]

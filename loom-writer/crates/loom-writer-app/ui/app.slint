@@ -608,7 +608,8 @@ export component WriterApp inherits Window {
 
                     VerticalLayout {
                         spacing: 12px;
-                        padding: 12px;
+                        // InspectorSurface supplies the shared 12px content inset.
+                        padding: 0px;
                         alignment: start;
 
                         // Tab selector: Style | Layout | More

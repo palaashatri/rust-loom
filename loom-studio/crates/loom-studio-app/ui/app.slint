@@ -334,7 +334,8 @@ export component StudioApp inherits Window {
                 detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
                 VerticalLayout {
                     spacing: 12px;
-                    padding: 12px;
+                    // InspectorSurface supplies the shared 12px content inset.
+                    padding: 0px;
                     Text {
                         text: "CHANNEL STRIP";
                         font-size: Theme.tokens.typography.caption;
