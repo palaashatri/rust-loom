@@ -352,6 +352,7 @@ export component WriterApp inherits Window {
             // one slot each; responsive state only selects which host exists.
             if root.wide-toolbar : LabeledToolbar {
                 WriterToolbarBody {
+                    rtl: root.rtl;
                     wide: true;
                     overflow: root.overflow-toolbar;
                     inspector-available: root.inspector-available;
@@ -371,6 +372,7 @@ export component WriterApp inherits Window {
             }
             if !root.wide-toolbar : ContextToolbar {
                 WriterToolbarBody {
+                    rtl: root.rtl;
                     wide: false;
                     overflow: root.overflow-toolbar;
                     inspector-available: root.inspector-available;
@@ -391,12 +393,15 @@ export component WriterApp inherits Window {
 
             // Main editor work area. The canvas and inspector own their
             // internal flow; this row only assigns the primary/secondary
-            // workspace roles and remains direction-aware at the shell edge.
+            // workspace roles. The explicit branches mirror the secondary
+            // inspector around the primary page because Slint's stable
+            // HorizontalLayout does not reorder children for RTL.
             DirectionalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
+                rtl: root.rtl;
 
-                WriterPageCanvas {
+                if !root.rtl : WriterPageCanvas {
                     doc-title: root.doc-title;
                     doc-content <=> root.doc-content;
                     selection-anchor <=> root.selection-anchor;
@@ -407,7 +412,7 @@ export component WriterApp inherits Window {
                     key-pressed(event) => { return reject; }
                 }
 
-                if root.inspector-visible : WriterInspector {
+                if !root.rtl && root.inspector-visible : WriterInspector {
                     preferred-width: 280px;
                     inspector-tab <=> root.inspector-tab;
                     is-bold <=> root.is-bold;
@@ -421,6 +426,33 @@ export component WriterApp inherits Window {
                     toggle-underline => { root.toggle-underline(); }
                     select-heading(idx) => { root.select-heading(idx); }
                     select-alignment(idx) => { root.select-alignment(idx); }
+                }
+
+                if root.rtl && root.inspector-visible : WriterInspector {
+                    preferred-width: 280px;
+                    inspector-tab <=> root.inspector-tab;
+                    is-bold <=> root.is-bold;
+                    is-italic <=> root.is-italic;
+                    is-underline <=> root.is-underline;
+                    heading-level <=> root.heading-level;
+                    text-alignment <=> root.text-alignment;
+                    status-left: root.status-left;
+                    toggle-bold => { root.toggle-bold(); }
+                    toggle-italic => { root.toggle-italic(); }
+                    toggle-underline => { root.toggle-underline(); }
+                    select-heading(idx) => { root.select-heading(idx); }
+                    select-alignment(idx) => { root.select-alignment(idx); }
+                }
+
+                if root.rtl : WriterPageCanvas {
+                    doc-title: root.doc-title;
+                    doc-content <=> root.doc-content;
+                    selection-anchor <=> root.selection-anchor;
+                    selection-focus <=> root.selection-focus;
+                    selection-announcement: root.selection-announcement;
+                    document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    key-pressed(event) => { return reject; }
                 }
             }
 

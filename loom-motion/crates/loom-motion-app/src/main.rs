@@ -3,15 +3,20 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 use loom_desktop::{
     build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
     MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
-use loom_motion_core::{load_motion, save_motion, CompositionDocument, MotionLayer};
+use loom_motion_core::{
+    load_motion, save_motion, CompositionClock, CompositionDocument, MotionLayer,
+};
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
-use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{
+    ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, Timer, TimerMode, VecModel,
+};
 
 slint::include_modules!();
 
@@ -178,13 +183,30 @@ fn write_svg_frame(doc: &CompositionDocument, path: impl AsRef<Path>) -> Result<
     loom_storage::atomic_write(path.as_ref(), svg.as_bytes()).map_err(|error| error.to_string())
 }
 
-fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
+fn format_timecode(frame: u64, fps: f64) -> String {
+    let frames_per_second = fps.round().max(1.0) as u64;
+    let total_seconds = frame / frames_per_second;
+    let frame_in_second = frame % frames_per_second;
+    let seconds = total_seconds % 60;
+    let minutes = (total_seconds / 60) % 60;
+    let hours = total_seconds / 3_600;
+    format!("{hours:02}:{minutes:02}:{seconds:02}:{frame_in_second:02}")
+}
+
+fn clock_for_document(doc: &CompositionDocument) -> CompositionClock {
+    CompositionClock::new(
+        doc.frame_rate as f64,
+        (doc.duration_secs.max(0.0) * doc.frame_rate.max(1.0)).round() as u64,
+    )
+}
+
+fn apply_motion_at(app: &MotionApp, doc: &CompositionDocument, time_secs: f32, frame: u64) {
     app.set_comp_name(doc.name.as_str().into());
     app.set_timecode_text(SharedString::from(format!(
         "00:00:00:00 ({} fps • {:.0}s)",
         doc.frame_rate, doc.duration_secs
     )));
-    app.set_timecode_display("00:00:00:00".into());
+    app.set_timecode_display(format_timecode(frame, doc.frame_rate as f64).into());
     let layer_labels: Vec<SharedString> = doc
         .layers
         .iter()
@@ -198,7 +220,7 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
         .unwrap_or("No layer selected");
     app.set_active_layer_index(doc.active_layer_index as i32);
     if let Some(layer) = doc.layers.get(doc.active_layer_index) {
-        let sample = layer.sample(0.0);
+        let sample = layer.sample(time_secs);
         app.set_pos_x(sample.x);
         app.set_pos_y(sample.y);
         app.set_scale_val(sample.scale * 100.0);
@@ -213,6 +235,10 @@ fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
     if let Ok(bytes) = save_motion(doc) {
         let _ = record_snapshot_recovery("motion state", bytes);
     }
+}
+
+fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
+    apply_motion_at(app, doc, 0.0, 0);
 }
 
 fn apply_theme(app: &MotionApp, theme: &str) {
@@ -1113,6 +1139,13 @@ mod product_tests {
         let document = empty_motion();
         assert_eq!(document.name, "Untitled Composition");
         assert!(document.layers.is_empty());
+    }
+
+    #[test]
+    fn timecode_uses_the_clock_frame_and_frame_rate() {
+        assert_eq!(format_timecode(0, 60.0), "00:00:00:00");
+        assert_eq!(format_timecode(61, 60.0), "00:00:01:01");
+        assert_eq!(format_timecode(3_723, 24.0), "00:02:35:03");
     }
 
     #[test]

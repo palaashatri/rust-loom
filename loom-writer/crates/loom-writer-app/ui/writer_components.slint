@@ -27,7 +27,11 @@ export component WriterToolbarBody inherits DirectionalLayout {
     horizontal-stretch: 1;
     vertical-stretch: 1;
 
-    if root.wide : ToolbarGroup {
+    // The command groups are explicitly mirrored instead of relying on the
+    // stable HorizontalLayout primitive to infer child order. This keeps the
+    // LTR branch unchanged while giving RTL users the same leading/middle/
+    // trailing command hierarchy on the opposite side of the window.
+    if !root.rtl && root.wide : ToolbarGroup {
         labeled-slot: true;
         IconOverLabelToolbarItem {
             icon: "eye";
@@ -50,7 +54,7 @@ export component WriterToolbarBody inherits DirectionalLayout {
         }
     }
 
-    if !root.wide : ToolbarGroup {
+    if !root.rtl && !root.wide : ToolbarGroup {
         labeled-slot: false;
         IconOnlyToolbarItem {
             icon: "eye";
@@ -64,9 +68,9 @@ export component WriterToolbarBody inherits DirectionalLayout {
         }
     }
 
-    if !root.overflow : ToolbarSpacer { }
+    if !root.rtl && !root.overflow : ToolbarSpacer { }
 
-    if root.wide : ToolbarGroup {
+    if !root.rtl && root.wide : ToolbarGroup {
         labeled-slot: true;
         IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
         IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
@@ -76,9 +80,9 @@ export component WriterToolbarBody inherits DirectionalLayout {
         IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
     }
 
-    if !root.overflow : ToolbarSpacer { }
+    if !root.rtl && !root.overflow : ToolbarSpacer { }
 
-    if root.wide : ToolbarGroup {
+    if !root.rtl && root.wide : ToolbarGroup {
         labeled-slot: true;
         IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
         IconOverLabelToolbarItem {
@@ -98,7 +102,7 @@ export component WriterToolbarBody inherits DirectionalLayout {
         }
     }
 
-    if !root.wide && !root.overflow : ToolbarGroup {
+    if !root.rtl && !root.wide && !root.overflow : ToolbarGroup {
         labeled-slot: false;
         IconOnlyToolbarItem {
             icon: "format";
@@ -110,8 +114,8 @@ export component WriterToolbarBody inherits DirectionalLayout {
         IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
     }
 
-    if root.overflow : ToolbarSpacer { }
-    if root.overflow : ToolbarGroup {
+    if !root.rtl && root.overflow : ToolbarSpacer { }
+    if !root.rtl && root.overflow : ToolbarGroup {
         labeled-slot: false;
         IconOnlyToolbarItem {
             icon: "format";
@@ -121,6 +125,103 @@ export component WriterToolbarBody inherits DirectionalLayout {
             clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
         }
         IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+    }
+
+    // RTL order: trailing actions, insertion actions, then leading actions.
+    if root.rtl && root.overflow : ToolbarGroup {
+        labeled-slot: false;
+        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+    }
+    if root.rtl && root.overflow : ToolbarSpacer { }
+
+    if root.rtl && !root.wide && !root.overflow : ToolbarGroup {
+        labeled-slot: false;
+        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+    }
+
+    if root.rtl && root.wide : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: "Export";
+            accessible-label: "Export PDF";
+            clicked => { root.export-pdf(); }
+        }
+        IconOverLabelToolbarItem { icon: "document"; label: "Document"; accessible-label: "Document settings unavailable"; enabled: false; }
+        IconOverLabelToolbarItem {
+            icon: "format";
+            label: "Format";
+            accessible-label: "Format inspector";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
+    }
+
+    if root.rtl && !root.overflow : ToolbarSpacer { }
+
+    if root.rtl && root.wide : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
+    }
+
+    if root.rtl && !root.overflow : ToolbarSpacer { }
+
+    if root.rtl && root.wide : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: "plus";
+            label: "Add Page";
+            accessible-label: "Add Page unavailable";
+            enabled: false;
+        }
+        IconOverLabelToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            accessible-label: "Page zoom unavailable";
+            enabled: false;
+        }
+        IconOverLabelToolbarItem {
+            icon: "eye";
+            label: "View";
+            accessible-label: "View";
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+    }
+
+    if root.rtl && !root.wide : ToolbarGroup {
+        labeled-slot: false;
+        if root.overflow : Overflow {
+            label: "More Writer actions";
+            clicked => { root.overflow-requested(); }
+        }
+        if !root.overflow : IconOnlyToolbarItem {
+            icon: "eye";
+            label: "View";
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
     }
 }
 
@@ -151,6 +252,11 @@ component WriterDocumentEditor inherits Rectangle {
     accessible-placeholder-text: root.placeholder;
     accessible-action-default => { editor.focus(); }
     forward-focus: editor;
+
+    // This focus helper must stay behind the editor. Slint dispatches pointer
+    // events front-to-back (last child first); keeping the full-surface target
+    // first lets TextInput own caret placement, selection, and text editing.
+    focus-touch := TouchArea { clicked => { editor.focus(); } }
 
     if root.text == "" : Text {
         x: 0px;
@@ -192,7 +298,6 @@ component WriterDocumentEditor inherits Rectangle {
 
     changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
     changed selection-focus => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
-    TouchArea { clicked => { editor.focus(); } }
 }
 
 /// The editable paper surface. Canvas centering is expressed through nested

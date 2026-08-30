@@ -226,6 +226,12 @@ component PhotoLayerRow inherits Rectangle {
     border-radius: Theme.tokens.metrics.radius-medium;
     background: root.selected ? Theme.palette().selection-soft : row-touch.has-hover ? Theme.palette().surface-raised : transparent;
 
+    // Keep the row hit target behind the layout. Slint dispatches pointer
+    // events front-to-back (last child first); placing this full-row target
+    // first lets the nested visibility button receive its own click while
+    // the remaining row area still selects the layer.
+    row-touch := TouchArea { clicked => { root.selected-layer(); } }
+
     HorizontalLayout {
         spacing: 8px;
         padding-left: 6px;
@@ -235,7 +241,6 @@ component PhotoLayerRow inherits Rectangle {
         Text { text: root.label; font-size: Theme.tokens.typography.body; font-weight: root.selected ? 600 : 400; color: Theme.palette().ink; horizontal-stretch: 1; overflow: elide; }
     }
 
-    row-touch := TouchArea { clicked => { root.selected-layer(); } }
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.selected-layer(); }
