@@ -207,6 +207,23 @@ def app_shell_sequence(source: str) -> list[str]:
         "StatusBar",
         "ToolkitStatusBar",
     )
+    # Domain-owned wrappers keep state and callbacks beside their surface
+    # (for example ``VideoToolbar`` or ``PhotoInspector``). Follow their
+    # inheritance chain so the geometry manifest records the canonical shell
+    # owner even when the Window intentionally instantiates the wrapper.
+    inheritance = component_inheritance_map(source)
+
+    def canonical_names(component: str) -> set[str]:
+        names: set[str] = set()
+        current = component
+        seen: set[str] = set()
+        while current and current not in seen:
+            seen.add(current)
+            if current in candidates:
+                names.add(current)
+            current = inheritance.get(current, "")
+        return names
+
     found: list[tuple[int, str]] = []
     for name in candidates:
         for match in re.finditer(
@@ -214,6 +231,18 @@ def app_shell_sequence(source: str) -> list[str]:
             block,
         ):
             found.append((match.start(), name))
+    for component in inheritance:
+        names = canonical_names(component)
+        if not names:
+            continue
+        for match in re.finditer(
+            rf"(?m)^\s*(?:if\s+[^\n{{}}]+:\s*)?(?:\w+\s*:=\s*)?{re.escape(component)}\s*\{{",
+            block,
+        ):
+            # A wrapper can only occupy one place in the root tree. Record
+            # every canonical owner in its chain at that source position; the
+            # metadata consumers deduplicate where a surface has aliases.
+            found.extend((match.start(), name) for name in sorted(names))
     return [name for _, name in sorted(found)]
 
 
@@ -308,6 +337,29 @@ def source_hashes(paths: list[Path]) -> dict[str, str]:
 def toolbar_source_metadata(source: str) -> dict[str, object]:
     toolbar_blocks: list[str] = []
     toolbar_name = ""
+    inheritance = component_inheritance_map(source)
+
+    def declaration_block(component: str) -> str:
+        match = re.search(
+            rf"(?m)^\s*(?:export\s+)?component\s+{re.escape(component)}\s+inherits\s+[^\{{]+\{{",
+            source,
+        )
+        if match is None:
+            return ""
+        opening = source.find("{", match.start(), match.end())
+        block = balanced_slint_block(source, opening)
+        return source[match.start() : opening] + block if block else ""
+
+    def host_for(component: str) -> str:
+        current = component
+        seen: set[str] = set()
+        while current and current not in seen:
+            seen.add(current)
+            if current in {"LabeledToolbar", "ContextToolbar", "Toolbar"}:
+                return current
+            current = inheritance.get(current, "")
+        return ""
+
     # Prefer the concrete labeled host when an app has both conditional
     # variants. This makes the manifest describe the full responsive toolbar
     # contract rather than whichever branch happens to appear first in source.
@@ -318,16 +370,21 @@ def toolbar_source_metadata(source: str) -> dict[str, object]:
             toolbar_blocks.extend(blocks_for_name)
             if name != "Toolbar":
                 break
-    # Componentized app toolbars keep their command groups in a named body
-    # instantiated by each host. Include each body once so source metadata
-    # remains faithful without double-counting the conditional instances.
-    for match in re.finditer(
-        r"(?m)^\s*(?:export\s+)?component\s+(\w+(?:ToolbarBody|ActionToolbar))\s+inherits\s+[^\{]+\{",
-        source,
-    ):
-        block = balanced_slint_block(source, source.find("{", match.start(), match.end()))
-        if block:
-            toolbar_blocks.append(source[match.start() : source.find("{", match.start(), match.end())] + block)
+    # Componentized app toolbars keep their command groups in a named wrapper
+    # (``PhotoToolbar``) or body (``PresentToolbarBody``). Include each
+    # declaration once. Wrapper inheritance identifies the canonical slot;
+    # the suffix fallback covers body components that own a DirectionalLayout
+    # rather than inheriting the host directly.
+    for component in inheritance:
+        canonical_host = host_for(component)
+        if not canonical_host and not re.search(r"(?:ToolbarBody|ActionToolbar)$", component):
+            continue
+        block = declaration_block(component)
+        if not block:
+            continue
+        toolbar_blocks.append(block)
+        if not toolbar_name:
+            toolbar_name = canonical_host or "Toolbar"
     toolbar_source = "\n".join(toolbar_blocks)
     visible_groups, group_declarations = max_visible_toolbar_groups(toolbar_source)
     item_names = (
@@ -694,6 +751,47 @@ def component_used(text: str, name: str) -> bool:
         )
         is not None
     )
+
+
+def component_inheritance_map(text: str) -> dict[str, str]:
+    """Return app-local component inheritance without treating declarations as uses."""
+
+    return {
+        child: parent
+        for child, parent in re.findall(
+            r"(?m)^\s*(?:export\s+)?component\s+(\w+)\s+inherits\s+(\w+)\s*\{",
+            text,
+        )
+    }
+
+
+def component_used_or_inherits(text: str, name: str) -> bool:
+    """Recognize a canonical primitive consumed through a local wrapper.
+
+    Applications keep domain-owned components such as ``PhotoToolbar`` and
+    ``PhotoStatusBar`` so the state boundary travels with the workspace. The
+    source-backed audit must follow those wrappers to ``LabeledToolbar`` or
+    ``ToolkitStatusBar`` instead of requiring every app to duplicate the
+    shared primitive at the Window call site.
+    """
+
+    if component_used(text, name):
+        return True
+    inheritance = component_inheritance_map(text)
+    used_components = {
+        component
+        for component in inheritance
+        if component_used(text, component)
+    }
+    for component in used_components:
+        current = component
+        seen: set[str] = set()
+        while current in inheritance and current not in seen:
+            seen.add(current)
+            current = inheritance[current]
+            if current == name:
+                return True
+    return False
 
 
 def exported_component_count(text: str, name: str) -> int:
@@ -1543,14 +1641,15 @@ def audit_app(app: str) -> str:
             f"{app}: toolkit migration missing title chrome",
         )
         require(
-            component_used(text, "Toolbar")
-            or component_used(text, "ContextToolbar")
-            or component_used(text, "LabeledToolbar"),
+            component_used_or_inherits(text, "Toolbar")
+            or component_used_or_inherits(text, "ContextToolbar")
+            or component_used_or_inherits(text, "LabeledToolbar"),
             f"{app}: toolkit migration missing toolbar",
         )
         require(component_used(text, "ToolbarGroup"), f"{app}: toolkit migration missing ToolbarGroup")
         require(
-            component_used(text, "StatusBar") or component_used(text, "ToolkitStatusBar"),
+            component_used_or_inherits(text, "StatusBar")
+            or component_used_or_inherits(text, "ToolkitStatusBar"),
             f"{app}: toolkit migration missing status bar",
         )
         for name in ("AppHeader", "WorkspaceToolbar"):

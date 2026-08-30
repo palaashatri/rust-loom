@@ -49,6 +49,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
     template: Option<TemplateId>,
     template_chooser: bool,
@@ -70,6 +71,7 @@ where
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
+        rtl: false,
         open: None,
         template: None,
         template_chooser: false,
@@ -102,6 +104,7 @@ where
                 }
                 args.theme = t;
             }
+            "--rtl" => args.rtl = true,
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
             }
@@ -934,6 +937,10 @@ fn apply_theme(app: &WriterApp, theme: &str) {
         .set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
 }
 
+fn configure_direction(app: &WriterApp, rtl: bool) {
+    app.set_rtl(rtl);
+}
+
 fn layout_breakpoints(app: &WriterApp, width: u32) -> (bool, bool) {
     let policy = ResponsivePolicy::get(app);
     let width = width as f32;
@@ -979,6 +986,7 @@ fn wire_responsive_layout(app: &WriterApp) {
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
@@ -1008,6 +1016,7 @@ fn run_gui(args: &Args) -> Result<(), String> {
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -1501,6 +1510,7 @@ fn main() -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
@@ -2016,7 +2026,7 @@ mod tests {
         assert!(app.get_overflow_toolbar());
         app.set_toolbar_overflow_open(true);
 
-        apply_layout_breakpoints(&app, 1180);
+        apply_layout_breakpoints(&app, 1320);
 
         assert!(!app.get_overflow_toolbar());
         assert!(!app.get_toolbar_overflow_open());

@@ -1,0 +1,92 @@
+import { WorkspaceRow, StatusPill } from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+/// Queue card with a stable content hierarchy.  The progress track consumes
+/// the card width through a flow layout and never overlays the metadata row.
+export component EncodeJobCard inherits WorkspaceRow {
+    in property <string> job-label: "Untitled source";
+    in property <string> job-detail: "Queued";
+    in property <string> job-status: "QUEUED";
+    in property <float> progress: 0.0;
+    in property <int> tone: 0;
+    in property <bool> running: false;
+    in property <bool> compact-layout: false;
+
+    label: root.job-label;
+    emphasized: root.running;
+    min-height: 86px;
+    preferred-height: 94px;
+    max-height: 112px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        padding: Theme.tokens.space.sm;
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            cross-axis-alignment: center;
+            Rectangle {
+                min-width: 42px;
+                preferred-width: 46px;
+                max-width: 54px;
+                min-height: 42px;
+                preferred-height: 46px;
+                max-height: 54px;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: Theme.palette().surface-sunken;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                Icon { icon: "video"; size: 20px; tint: Theme.palette().accent; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: root.job-label;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 650;
+                    color: Theme.palette().ink;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.job-detail;
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    overflow: elide;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    StatusPill {
+                        text: root.job-status;
+                        tone: root.tone;
+                        max-content-width: root.compact-layout ? 152px : 220px;
+                        available-width: root.compact-layout ? 152px : 220px;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Text {
+                        text: Math.round(root.progress) + "%";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            min-height: 4px;
+            preferred-height: 4px;
+            max-height: 4px;
+            border-radius: 2px;
+            background: Theme.palette().surface-sunken;
+            Rectangle {
+                width: parent.width * root.progress / 100;
+                height: parent.height;
+                border-radius: 2px;
+                background: Theme.palette().accent;
+            }
+        }
+    }
+}

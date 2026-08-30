@@ -1,0 +1,63 @@
+import { DirectionalLayout } from "toolkit.slint";
+import { Slider } from "components.slint";
+import { Theme } from "theme.slint";
+
+/// The Studio transport is a bounded, single-row surface.  Time readouts use
+/// intrinsic bounds while the scrubber consumes the remaining width, so a
+/// larger text scale cannot push controls into one another.
+export component StudioTransport inherits Rectangle {
+    in-out property <float> playhead-seconds: 0.0;
+    in property <float> duration-seconds: 10.0;
+    callback seek(float);
+
+    min-height: 50px;
+    max-height: 50px;
+    background: Theme.palette().surface;
+
+    VerticalLayout {
+        spacing: 0px;
+        DirectionalLayout {
+            vertical-stretch: 1;
+            spacing: Theme.tokens.space.sm;
+            leading-padding: Theme.tokens.space.md;
+            trailing-padding: Theme.tokens.space.md;
+            cross-axis-alignment: center;
+
+            Text {
+                text: format-time(root.playhead-seconds);
+                min-width: 48px;
+                preferred-width: 64px;
+                max-width: 76px;
+                font-size: Theme.tokens.typography.body;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Slider {
+                label: "Playhead";
+                horizontal-stretch: 1;
+                minimum: 0;
+                maximum: Math.max(0.01, root.duration-seconds);
+                value <=> root.playhead-seconds;
+                changed(value) => { root.seek(value); }
+            }
+            Text {
+                text: format-time(root.duration-seconds);
+                min-width: 48px;
+                preferred-width: 64px;
+                max-width: 76px;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        Rectangle { height: 1px; background: Theme.palette().border; }
+    }
+
+    pure function format-time(seconds: float) -> string {
+        return Math.floor(seconds / 60) + ":" + (Math.mod(Math.floor(seconds), 60) < 10 ? "0" : "") + (Math.mod(Math.floor(seconds), 60));
+    }
+}

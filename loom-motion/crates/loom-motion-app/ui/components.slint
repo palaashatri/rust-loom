@@ -1,0 +1,438 @@
+// Motion-specific workspace objects. Shared shell primitives remain in
+// loom-ui; these components own the composition's stage, layer, timeline,
+// inspector, and transport state wiring.
+import {
+    LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarIconButton,
+    AppleToolbarItem, DirectionalLayout, InspectorSurface, SidebarSurface,
+    CanvasSurface, ToolkitStatusBar, PanelHeader
+} from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
+import {
+    IconButton, Slider, WorkspaceRow, MetricChip, CanvasBackdrop,
+    TransportButton, EmptyState, PaneTabs
+} from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import { Icon } from "../../../../loom-core/crates/loom-ui/ui/icons.slint";
+import { Theme } from "../../../../loom-core/crates/loom-ui/ui/theme.slint";
+
+/// Motion's responsive context toolbar. State changes are emitted through the
+/// existing callbacks, so toolbar controls remain real commands after the
+/// shell is extracted from the Window.
+export component MotionToolbar inherits LabeledToolbar {
+    in property <bool> compact-layout: false;
+    in-out property <bool> show-guides: true;
+    in-out property <bool> show-safe-area: true;
+    in-out property <bool> is-playing: false;
+    in-out property <bool> is-looping: false;
+    in-out property <bool> curve-drawer-open: false;
+    in-out property <float> zoom-value: 68.0;
+    callback add-layer;
+    callback play-pause;
+    callback step-back;
+    callback step-forward;
+    callback toggle-loop;
+    callback toggle-curve-drawer;
+    callback export-frame;
+
+    ToolbarGroup { labeled-slot: true;
+        if root.compact-layout : ToolbarIconButton { icon: "cursor"; label: "Transform"; checked: true; }
+        if !root.compact-layout : AppleToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
+        if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Add layer"; clicked => { root.add-layer(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "grid"; label: "Toggle guides"; checked: root.show-guides; clicked => { root.show-guides = !root.show-guides; } }
+        if !root.compact-layout : AppleToolbarItem { icon: "grid"; label: "Guides"; checked: root.show-guides; clicked => { root.show-guides = !root.show-guides; } }
+        if root.compact-layout : ToolbarIconButton { icon: "eye"; label: "Toggle safe area"; checked: root.show-safe-area; clicked => { root.show-safe-area = !root.show-safe-area; } }
+        if !root.compact-layout : AppleToolbarItem { icon: "eye"; label: "Safe Area"; checked: root.show-safe-area; clicked => { root.show-safe-area = !root.show-safe-area; } }
+    }
+
+    ToolbarSpacer { }
+
+    ToolbarGroup { labeled-slot: true;
+        if root.compact-layout : ToolbarIconButton { icon: "chevron-left"; label: "Step back"; clicked => { root.step-back(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
+        if root.compact-layout : ToolbarIconButton { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.is-playing = !root.is-playing; root.play-pause(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.is-playing = !root.is-playing; root.play-pause(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "chevron-right"; label: "Step forward"; clicked => { root.step-forward(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "redo"; label: "Toggle loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "redo"; label: "Loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+    }
+
+    ToolbarSpacer { }
+
+    ToolbarGroup { labeled-slot: true;
+        if root.compact-layout : ToolbarIconButton { icon: "timeline"; label: "Toggle curves"; checked: root.curve-drawer-open; clicked => { root.curve-drawer-open = !root.curve-drawer-open; root.toggle-curve-drawer(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "timeline"; label: "Curves"; checked: root.curve-drawer-open; clicked => { root.curve-drawer-open = !root.curve-drawer-open; root.toggle-curve-drawer(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
+        if root.compact-layout : Slider { label: "Zoom"; minimum: 10; maximum: 200; value <=> root.zoom-value; width: 120px; }
+        if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "zoom-in"; label: Math.round(root.zoom-value) + "%"; clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; } }
+    }
+}
+
+/// Layer list and add-layer affordance.
+export component MotionLayersPanel inherits SidebarSurface {
+    in property <[string]> layer-labels: [];
+    in property <int> active-layer-index: 0;
+    in property <length> panel-width: 246px;
+    callback select-layer(int);
+    callback add-layer;
+    width: root.panel-width;
+    title: "Layers";
+    detail: root.layer-labels.length + " items";
+
+    VerticalLayout {
+        spacing: 7px;
+        padding: 10px;
+        for label[idx] in root.layer-labels : WorkspaceRow {
+            label: label;
+            height: 50px;
+            selected: idx == root.active-layer-index;
+            clicked => { root.select-layer(idx); }
+            HorizontalLayout {
+                spacing: 9px;
+                padding-left: 9px;
+                padding-right: 9px;
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 9px;
+                    background: idx == root.active-layer-index ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                    border-width: 1px;
+                    border-color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().border;
+                    Icon { icon: "layers"; size: 15px; tint: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: label; font-size: Theme.tokens.typography.body; font-weight: idx == root.active-layer-index ? 650 : 500; color: Theme.palette().ink; overflow: elide; }
+                    Text { text: idx == root.active-layer-index ? "Selected · Direct transform" : "Motion layer"; font-size: Theme.tokens.typography.caption; color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-disabled; overflow: elide; }
+                }
+            }
+        }
+        if root.layer-labels.length == 0 : EmptyState {
+            icon: "layers";
+            title: "No layers";
+            description: "Add a text, image, or vector layer to start the composition.";
+            action-text: "Add Layer";
+            action => { root.add-layer(); }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        IconButton { icon: "plus"; label: "Add Motion Layer"; clicked => { root.add-layer(); } }
+    }
+}
+
+/// Live composition stage. Stage-shell sizing is layout-based; only the
+/// selected object's transform and guides use content-relative coordinates.
+export component MotionStage inherits CanvasBackdrop {
+    in property <string> comp-name: "Untitled Composition";
+    in property <[string]> layer-labels: [];
+    in property <int> active-layer-index: 0;
+    in-out property <float> pos-x: 960.0;
+    in-out property <float> pos-y: 540.0;
+    in-out property <float> scale-val: 100.0;
+    in-out property <float> rotation-val: 0.0;
+    in-out property <float> opacity-val: 100.0;
+    in property <bool> show-guides: true;
+    in property <bool> show-safe-area: true;
+    in property <bool> compact-layout: false;
+    callback transform-changed(string, float);
+
+    vertical-stretch: 1;
+    stage-color: Theme.palette().media-stage;
+
+    stage-shell := Rectangle {
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+        max-width: 860px;
+        max-height: 484px;
+        border-radius: 9px;
+        background: Theme.palette().paper-ink;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+        clip: true;
+
+        stage := Rectangle {
+            x: 18px;
+            y: 18px;
+            width: parent.width - 36px;
+            height: parent.height - 36px;
+            border-width: 1px;
+            border-color: Theme.palette().grid-major;
+            background: Theme.palette().media-stage;
+            clip: true;
+
+            if root.show-guides : Rectangle { x: parent.width / 2; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { y: parent.height / 2; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { y: parent.height / 3; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { y: parent.height * 2 / 3; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+            if root.show-safe-area : Rectangle { x: parent.width * 0.05; y: parent.height * 0.05; width: parent.width * 0.90; height: parent.height * 0.90; border-width: 1px; border-color: Theme.palette().border-strong; background: transparent; }
+            if root.show-safe-area : Rectangle { x: parent.width * 0.10; y: parent.height * 0.10; width: parent.width * 0.80; height: parent.height * 0.80; border-width: 1px; border-color: Theme.palette().grid-minor; background: transparent; }
+
+            selected-object := Rectangle {
+                x: clamp(root.pos-x / 1920.0 * parent.width - self.width / 2, 0px, parent.width - self.width);
+                y: clamp(root.pos-y / 1080.0 * parent.height - self.height / 2, 0px, parent.height - self.height);
+                width: clamp(parent.width * 0.46 * root.scale-val / 100.0, 88px, parent.width * 0.78);
+                height: clamp(parent.height * 0.28 * root.scale-val / 100.0, 58px, parent.height * 0.64);
+                border-radius: 11px;
+                border-width: root.layer-labels.length > 0 ? 2px : 1px;
+                border-color: drag.has-hover || transform-focus.has-focus ? Theme.palette().focus : root.layer-labels.length > 0 ? Theme.palette().accent : Theme.palette().border-strong;
+                background: Theme.palette().content-accent-soft;
+                opacity: root.opacity-val / 100.0;
+                animate x, y, width, height { duration: drag.pressed || Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+                animate border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    padding: 18px;
+                    Text { text: root.comp-name; color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink; font-size: Theme.tokens.typography.heading; font-weight: 700; horizontal-alignment: center; overflow: elide; }
+                    Text { text: root.layer-labels.length > 0 ? root.layer-labels[root.active-layer-index] : "Add a layer to begin"; color: Theme.palette().content-accent; font-size: Theme.tokens.typography.body-large; font-weight: 650; horizontal-alignment: center; overflow: elide; }
+                    Text { text: "X " + Math.round(root.pos-x) + "   Y " + Math.round(root.pos-y) + "   ·   " + Math.round(root.scale-val) + "%   ·   " + Math.round(root.rotation-val) + "°"; color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-muted : Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; horizontal-alignment: center; overflow: elide; }
+                }
+
+                if root.layer-labels.length > 0 : Rectangle { x: -5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                if root.layer-labels.length > 0 : Rectangle { x: parent.width - 5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                if root.layer-labels.length > 0 : Rectangle { x: -5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                if root.layer-labels.length > 0 : Rectangle { x: parent.width - 5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+
+                transform-focus := FocusScope {
+                    enabled: root.layer-labels.length > 0;
+                    key-pressed(event) => {
+                        if (event.text == Key.LeftArrow) { root.pos-x = max(0.0, root.pos-x - 1.0); root.transform-changed("pos-x", root.pos-x); return accept; }
+                        if (event.text == Key.RightArrow) { root.pos-x = min(1920.0, root.pos-x + 1.0); root.transform-changed("pos-x", root.pos-x); return accept; }
+                        if (event.text == Key.UpArrow) { root.pos-y = max(0.0, root.pos-y - 1.0); root.transform-changed("pos-y", root.pos-y); return accept; }
+                        if (event.text == Key.DownArrow) { root.pos-y = min(1080.0, root.pos-y + 1.0); root.transform-changed("pos-y", root.pos-y); return accept; }
+                        return reject;
+                    }
+                }
+
+                drag := TouchArea {
+                    enabled: root.layer-labels.length > 0;
+                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                    property <float> start-pos-x: 0.0;
+                    property <float> start-pos-y: 0.0;
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { self.start-pos-x = root.pos-x; self.start-pos-y = root.pos-y; transform-focus.focus(); }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.pos-x = clamp(self.start-pos-x + (self.mouse-x - self.pressed-x) / stage.width * 1920.0, 0.0, 1920.0);
+                            root.pos-y = clamp(self.start-pos-y + (self.mouse-y - self.pressed-y) / stage.height * 1080.0, 0.0, 1080.0);
+                            root.transform-changed("pos-x", root.pos-x);
+                            root.transform-changed("pos-y", root.pos-y);
+                        }
+                    }
+                }
+            }
+
+            if drag.pressed : Rectangle { x: selected-object.x + selected-object.width / 2; width: 1px; height: parent.height; background: Theme.palette().focus; }
+            if drag.pressed : Rectangle { y: selected-object.y + selected-object.height / 2; width: parent.width; height: 1px; background: Theme.palette().focus; }
+            if drag.pressed : Rectangle {
+                x: 12px;
+                y: 12px;
+                height: 26px;
+                min-width: 178px;
+                max-width: parent.width - 24px;
+                border-radius: 8px;
+                background: Theme.palette().overlay;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                HorizontalLayout {
+                    spacing: 7px;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    Icon { icon: "cursor"; size: 13px; tint: Theme.palette().accent; }
+                    Text { text: "Dragging layer · release to commit"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide; }
+                }
+            }
+        }
+    }
+}
+
+/// Optional keyframe graph drawer.
+export component MotionCurveDrawer inherits Rectangle {
+    in property <bool> open: false;
+    height: root.open ? 176px : 0px;
+    clip: true;
+    background: Theme.palette().panel;
+    animate height { duration: Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    VerticalLayout {
+        spacing: 0px;
+        PanelHeader { title: "Keyframe Graph"; detail: "Selected property"; }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().canvas-alt;
+            Rectangle { x: parent.width * 0.25; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            Rectangle { x: parent.width * 0.50; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
+            Rectangle { x: parent.width * 0.75; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            Rectangle { y: parent.height * 0.33; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            Rectangle { y: parent.height * 0.66; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            VerticalLayout {
+                width: parent.width;
+                height: parent.height;
+                alignment: center;
+                spacing: 5px;
+                Text { text: "No keyed property selected"; font-size: Theme.tokens.typography.body; font-weight: 650; color: Theme.palette().ink; horizontal-alignment: center; }
+                Text { text: "Choose a keyed property to edit its interpolation curve."; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; overflow: elide; }
+            }
+        }
+    }
+}
+
+/// Transform/timing inspector with a 56px compact rail.
+export component MotionInspector inherits InspectorSurface {
+    in property <bool> expanded: true;
+    in property <bool> compact-layout: false;
+    in-out property <int> inspector-tab: 0;
+    in property <string> layer-detail: "";
+    in-out property <float> pos-x: 960.0;
+    in-out property <float> pos-y: 540.0;
+    in-out property <float> scale-val: 100.0;
+    in-out property <float> rotation-val: 0.0;
+    in-out property <float> opacity-val: 100.0;
+    in property <string> timecode-display: "00:00:00:00";
+    in property <string> timecode-text: "00:00:00:00 (60 fps)";
+    callback toggle-expanded;
+    callback transform-changed(string, float);
+
+    width: root.expanded ? (root.compact-layout ? 240px : 304px) : 56px;
+    min-panel-width: root.expanded ? 240px : 56px;
+    title: root.expanded ? "Inspector" : "";
+    detail: root.layer-detail;
+    animate width { duration: Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+
+    if !root.expanded : VerticalLayout {
+        spacing: 10px;
+        padding-top: 10px;
+        IconButton { icon: "chevron-left"; label: "Expand inspector"; clicked => { root.toggle-expanded(); } }
+        Icon { icon: "settings"; size: 17px; tint: Theme.palette().ink-disabled; }
+    }
+
+    if root.expanded : VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 36px;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                PaneTabs { items: ["Transform", "Timing"]; current <=> root.inspector-tab; horizontal-stretch: 1; }
+                IconButton { icon: "chevron-right"; label: "Collapse inspector"; clicked => { root.toggle-expanded(); } }
+            }
+        }
+        VerticalLayout {
+            spacing: 12px;
+            padding: 0px;
+            if root.inspector-tab == 0 : VerticalLayout {
+                spacing: 12px;
+                Text { text: "POSITION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                Text { text: "X   " + Math.round(root.pos-x) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                Slider { label: "X position"; value: root.pos-x; minimum: 0.0; maximum: 1920.0; changed(val) => { root.pos-x = val; root.transform-changed("pos-x", val); } }
+                Text { text: "Y   " + Math.round(root.pos-y) + " px"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                Slider { label: "Y position"; value: root.pos-y; minimum: 0.0; maximum: 1080.0; changed(val) => { root.pos-y = val; root.transform-changed("pos-y", val); } }
+                Rectangle { height: 1px; background: Theme.palette().border; }
+                Text { text: "APPEARANCE"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                Text { text: "Scale   " + Math.round(root.scale-val) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                Slider { label: "Scale"; value: root.scale-val; minimum: 10.0; maximum: 200.0; changed(val) => { root.scale-val = val; root.transform-changed("scale", val); } }
+                Text { text: "Rotation   " + Math.round(root.rotation-val) + "°"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                Slider { label: "Rotation"; value: root.rotation-val; minimum: -180.0; maximum: 180.0; changed(val) => { root.rotation-val = val; root.transform-changed("rotation", val); } }
+                Text { text: "Opacity   " + Math.round(root.opacity-val) + "%"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                Slider { label: "Opacity"; value: root.opacity-val; minimum: 0.0; maximum: 100.0; changed(val) => { root.opacity-val = val; root.transform-changed("opacity", val); } }
+            }
+            if root.inspector-tab == 1 : VerticalLayout {
+                spacing: 12px;
+                Text { text: "COMPOSITION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                MetricChip { label: "Time"; value: root.timecode-display; }
+                MetricChip { label: "Rate"; value: root.timecode-text; }
+                Rectangle { height: 1px; background: Theme.palette().border; }
+                Text { text: "The property graph remains empty until keyed data is selected. Loom does not synthesize curves."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+            }
+            Rectangle { vertical-stretch: 1; background: transparent; }
+        }
+    }
+}
+
+/// Motion timeline with a ruler and content-relative layer clips.
+export component MotionTimeline inherits Rectangle {
+    in property <[string]> layer-labels: [];
+    in property <int> active-layer-index: 0;
+    in property <length> layer-column-width: 246px;
+    in property <string> timecode-display: "00:00:00:00";
+    callback select-layer(int);
+    height: 220px;
+    background: Theme.palette().panel;
+
+    VerticalLayout {
+        spacing: 0px;
+        PanelHeader { title: "Timeline"; detail: root.timecode-display; }
+        Rectangle {
+            height: 24px;
+            background: Theme.palette().chrome;
+            HorizontalLayout {
+                spacing: 0px;
+                Rectangle {
+                    width: root.layer-column-width;
+                    background: Theme.palette().surface-sunken;
+                    Text { x: 12px; text: "LAYER"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().ink-disabled; vertical-alignment: center; }
+                }
+                for marker in ["0s", "2s", "4s", "6s", "8s", "10s"] : Rectangle {
+                    horizontal-stretch: 1;
+                    Text { text: marker; font-size: Theme.tokens.typography.micro; color: Theme.palette().ink-disabled; horizontal-alignment: start; vertical-alignment: center; }
+                    Rectangle { x: 0px; y: parent.height - 8px; width: 1px; height: 8px; background: Theme.palette().grid-major; }
+                }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().canvas-alt;
+            clip: true;
+            VerticalLayout {
+                spacing: 3px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                for label[idx] in root.layer-labels : WorkspaceRow {
+                    label: label;
+                    height: 44px;
+                    selected: idx == root.active-layer-index;
+                    clicked => { root.select-layer(idx); }
+                    HorizontalLayout {
+                        spacing: 0px;
+                        Rectangle {
+                            width: root.layer-column-width;
+                            background: Theme.palette().panel;
+                            HorizontalLayout {
+                                spacing: 7px;
+                                padding-left: 11px;
+                                padding-right: 9px;
+                                Icon { icon: "layers"; size: 14px; tint: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Text { text: label; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; overflow: elide; }
+                            }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: Theme.palette().canvas-alt;
+                            Rectangle {
+                                x: 10px + idx * 14px;
+                                y: 6px;
+                                width: max(120px, parent.width * 0.62 - idx * 18px);
+                                height: parent.height - 12px;
+                                border-radius: 7px;
+                                background: idx == root.active-layer-index ? Theme.palette().selection-soft : Theme.palette().surface-raised;
+                                border-width: 1px;
+                                border-color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().border;
+                                Text { x: 22px; width: parent.width - 30px; text: label; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; vertical-alignment: center; overflow: elide; }
+                                Rectangle { x: 9px; y: parent.height / 2 - 4px; width: 8px; height: 8px; border-radius: 2px; background: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().border-strong; }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { x: root.layer-column-width; y: 0px; width: 1px; height: parent.height; background: Theme.palette().accent; }
+            Rectangle { x: root.layer-column-width - 4px; y: 0px; width: 9px; height: 9px; border-radius: 3px; background: Theme.palette().accent; }
+        }
+    }
+}
+
+export component MotionStatusBar inherits ToolkitStatusBar { }

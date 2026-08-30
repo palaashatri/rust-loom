@@ -7,113 +7,13 @@ import {
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
+import {
+    PresentToolbarBody, PresentSlideStrip, PresentSlideCanvas, PresentNotesEditor,
+    PresentInspector, PresentStatusBar, PresentToolbarOverflow
+} from "present_components.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 
-/// Toolbar contents are shared by both explicit slot hosts. The host owns
-/// the 40px/48-52px geometry; this body only switches command visibility.
-component PresentToolbarBody inherits DirectionalLayout {
-    in property <bool> labeled: false;
-    in property <bool> overflow: false;
-    callback toggle-notes;
-    callback open-theme-chooser;
-    callback add-slide;
-    callback add-text;
-    callback add-shape;
-    callback toggle-preview;
-    callback toggle-inspector;
-    callback export-pdf;
-    callback overflow-requested;
 
-    spacing: 4px;
-    leading-padding: 0px;
-    trailing-padding: 0px;
-    horizontal-stretch: 1;
-    vertical-stretch: 1;
-
-    if root.labeled : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "eye";
-            label: "View";
-            accessible-label: "View speaker notes";
-            clicked => { root.toggle-notes(); }
-        }
-        IconOverLabelToolbarItem {
-            icon: "format";
-            label: "Theme";
-            accessible-label: "Choose theme";
-            clicked => { root.open-theme-chooser(); }
-        }
-        IconOverLabelToolbarItem {
-            icon: "plus";
-            label: "Add Slide";
-            accessible-label: "Add slide";
-            clicked => { root.add-slide(); }
-        }
-    }
-
-    if !root.labeled : ToolbarGroup { labeled-slot: false;
-        if !root.overflow : IconOnlyToolbarItem {
-            icon: "eye";
-            label: "View speaker notes";
-            clicked => { root.toggle-notes(); }
-        }
-        if !root.overflow : IconOnlyToolbarItem {
-            icon: "format";
-            label: "Choose theme";
-            clicked => { root.open-theme-chooser(); }
-        }
-        if !root.overflow : IconOnlyToolbarItem {
-            icon: "plus";
-            label: "Add slide";
-            clicked => { root.add-slide(); }
-        }
-        if root.overflow : Overflow {
-            label: "More presentation actions";
-            clicked => { root.overflow-requested(); }
-        }
-    }
-
-    if !root.overflow : ToolbarSpacer { }
-
-    if root.labeled : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Add text"; clicked => { root.add-text(); } }
-        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Add shape"; clicked => { root.add-shape(); } }
-        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
-    }
-
-    if !root.overflow : ToolbarSpacer { }
-
-    if root.labeled : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "play";
-            label: "Play";
-            accessible-label: "Play presentation";
-            clicked => { root.toggle-preview(); }
-        }
-        IconOverLabelToolbarItem {
-            icon: "format";
-            label: "Format";
-            accessible-label: "Format inspector";
-            clicked => { root.toggle-inspector(); }
-        }
-        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "export";
-            label: "Export";
-            accessible-label: "Export PDF";
-            clicked => { root.export-pdf(); }
-        }
-    }
-
-    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
-        IconOnlyToolbarItem { icon: "play"; label: "Play presentation"; clicked => { root.toggle-preview(); } }
-        IconOnlyToolbarItem { icon: "format"; label: "Format inspector"; clicked => { root.toggle-inspector(); } }
-        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-    }
-}
 
 /// Keynote-style slide theme preview card
 component ThemeCard inherits Rectangle {
@@ -219,65 +119,6 @@ component ThemeCard inherits Rectangle {
 
     touch := TouchArea {
         clicked => { root.clicked(); }
-    }
-}
-
-/// A notes editor following Loom palette
-component SpeakerNotesEditor inherits Rectangle {
-    in-out property <string> text: "";
-    in property <string> placeholder-text: "";
-    in property <bool> enabled: true;
-    in property <length> font-size: Theme.tokens.typography.body;
-    callback edited(string);
-    callback key-pressed(event: KeyEvent) -> EventResult;
-    callback key-released(event: KeyEvent) -> EventResult;
-
-    border-radius: Theme.tokens.metrics.radius-small;
-    border-width: notes-input.has-focus ? 2px : 1px;
-    border-color: notes-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
-    background: root.enabled ? Theme.palette().surface-raised : Theme.palette().surface-sunken;
-    clip: true;
-
-    accessible-role: AccessibleRole.text-input;
-    accessible-label: "Speaker Notes";
-    accessible-enabled: root.enabled;
-    accessible-value <=> root.text;
-    accessible-placeholder-text: root.placeholder-text;
-    accessible-read-only: false;
-    accessible-action-default => { notes-input.focus(); }
-    forward-focus: notes-input;
-
-    if root.text == "" : Text {
-        x: 10px;
-        y: 8px;
-        width: max(1px, root.width - 20px);
-        height: max(1px, root.height - 16px);
-        text: root.placeholder-text;
-        font-size: root.font-size;
-        color: Theme.palette().ink-disabled;
-        vertical-alignment: top;
-        wrap: word-wrap;
-        accessible-role: none;
-    }
-
-    notes-input := TextInput {
-        x: 10px;
-        y: 8px;
-        width: max(1px, root.width - 20px);
-        height: max(1px, root.height - 16px);
-        text <=> root.text;
-        enabled: root.enabled;
-        single-line: false;
-        wrap: word-wrap;
-        vertical-alignment: top;
-        font-size: root.font-size;
-        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-        selection-background-color: Theme.palette().selection;
-        selection-foreground-color: Theme.palette().accent-ink;
-        accessible-role: none;
-        edited => { root.edited(notes-input.text); }
-        key-pressed(event) => { root.key-pressed(event); }
-        key-released(event) => { root.key-released(event); }
     }
 }
 
@@ -557,83 +398,15 @@ export component PresentApp inherits Window {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                // Left Slide Miniature Strip
-                if !root.is-preview-mode : SidebarSurface {
-                    title: "Slides";
-                    width: 220px;
-
-                    VerticalLayout {
-                        spacing: 8px;
-                        padding-top: 10px;
-                        padding-bottom: 10px;
-                        padding-left: 8px;
-                        padding-right: 8px;
-                        alignment: start;
-
-                        for title[idx] in root.slide-titles : Rectangle {
-                            height: 100px;
-                            border-radius: Theme.tokens.metrics.radius-medium;
-                            border-width: idx == root.active-slide-index ? 2px : 1px;
-                            border-color: idx == root.active-slide-index ? Theme.palette().accent : Theme.palette().border;
-                            background: idx == root.active-slide-index ? Theme.palette().selection-soft : Theme.palette().surface;
-
-                            HorizontalLayout {
-                                spacing: 6px;
-                                padding: 6px;
-
-                                // Slide Number
-                                Text {
-                                    text: (idx + 1) + "";
-                                    font-size: Theme.tokens.typography.micro;
-                                    font-weight: 700;
-                                    color: Theme.palette().ink-secondary;
-                                    width: 12px;
-                                    vertical-alignment: top;
-                                }
-
-                                // Mini Slide Layout Preview
-                                Rectangle {
-                                    horizontal-stretch: 1;
-                                    border-radius: 2px;
-                                    border-width: 1px;
-                                    border-color: Theme.palette().paper-line;
-                                    background: Theme.palette().paper;
-
-                                    VerticalLayout {
-                                        padding: 8px;
-                                        spacing: 4px;
-                                        alignment: center;
-
-                                        Text {
-                                            text: title;
-                                            font-size: 8px;
-                                            font-weight: 700;
-                                            color: Theme.palette().paper-ink;
-                                            horizontal-alignment: center;
-                                            overflow: elide;
-                                        }
-                                        Rectangle { height: 1px; width: 60%; background: Theme.palette().accent; }
-                                        Rectangle { height: 2px; width: 80%; background: Theme.palette().paper-line; }
-                                        Rectangle { height: 2px; width: 70%; background: Theme.palette().paper-line; }
-                                    }
-                                }
-                            }
-
-                            TouchArea {
-                                clicked => { root.select-slide(idx); }
-                            }
-                        }
-
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-
-                        // Slide Strip Action Bar
-                        HorizontalLayout {
-                            spacing: 4px;
-                            IconOnlyToolbarItem { icon: "plus"; label: "Add Slide"; clicked => { root.add-slide(); } }
-                            IconOnlyToolbarItem { icon: "trash-2"; label: "Delete Slide"; clicked => { root.delete-slide(); } }
-                            ToolbarSpacer { }
-                        }
-                    }
+                // Slide strip owns thumbnail geometry and actions. The
+                // primary canvas remains the stretchable sibling.
+                if !root.is-preview-mode : PresentSlideStrip {
+                    preferred-width: 220px;
+                    titles: root.slide-titles;
+                    active-index: root.active-slide-index;
+                    select-slide(idx) => { root.select-slide(idx); }
+                    add-slide => { root.add-slide(); }
+                    delete-slide => { root.delete-slide(); }
                 }
 
                 // Center Canvas & Notes
@@ -641,81 +414,17 @@ export component PresentApp inherits Window {
                     horizontal-stretch: 1;
                     spacing: 0px;
 
-                    CanvasSurface {
-                        horizontal-stretch: 1;
-                        vertical-stretch: 1;
-
-                        // Center the slide in the available stage while
-                        // constraining both axes.  Width-only sizing let a
-                        // short window push the slide below the canvas,
-                        // clipping the bottom edge and selection affordances.
-                        Rectangle {
-                            property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
-                            x: max(24px, (parent.width - self.width) / 2);
-                            y: max(24px, (parent.height - self.height) / 2);
-                            width: min(
-                                min(840px, max(1px, parent.width - 48px)),
-                                max(1px, (parent.height - 48px) / self.slide-ratio)
-                            );
-                            height: self.width * self.slide-ratio;
-                            border-radius: 4px;
-                            border-width: 1px;
-                            border-color: Theme.palette().border;
-                            background: Theme.palette().paper;
-                            drop-shadow-blur: 16px;
-                            drop-shadow-offset-y: 6px;
-                            drop-shadow-color: Theme.palette().shadow;
-                            clip: true;
-
-                            // Render the domain scene model in slide
-                            // coordinates (960×540 points), rather than
-                            // painting a fixed title/body mockup.  Every
-                            // rendered node shares the selected-element index
-                            // consumed by the inspector and the thumbnail
-                            // strip, so selection cannot drift visually.
-                            for element_x[idx] in root.element-xs : Rectangle {
-                                property <length> render-x: clamp(element_x * parent.width / 960.0, 0px, max(0px, parent.width - 2px));
-                                property <length> render-y: clamp(root.element-ys[idx] * parent.height / 540.0, 0px, max(0px, parent.height - 2px));
-                                property <length> render-width: max(1px, min(root.element-widths[idx] * parent.width / 960.0, max(1px, parent.width - self.render-x - 2px)));
-                                property <length> render-height: max(1px, min(root.element-heights[idx] * parent.height / 540.0, max(1px, parent.height - self.render-y - 2px)));
-                                x: self.render-x;
-                                y: self.render-y;
-                                width: self.render-width;
-                                height: self.render-height;
-                                border-radius: root.element-types[idx] == 4 ? self.width / 2 : 4px;
-                                border-width: idx == root.active-element-index ? 2px : 0px;
-                                border-color: Theme.palette().accent;
-                                background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
-                                    : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
-                                    : root.element-types[idx] == 5 ? Theme.palette().content-accent
-                                    : transparent;
-                                accessible-role: button;
-                                accessible-label: root.element-labels[idx];
-                                accessible-action-default => { root.select-element(idx); }
-
-                                Text {
-                                    x: 8px;
-                                    y: 6px;
-                                    width: max(1px, parent.width - 16px);
-                                    height: max(1px, parent.height - 12px);
-                                    text: root.element-contents[idx];
-                                    font-size: root.element-types[idx] == 0 ? 28px
-                                        : root.element-types[idx] == 5 ? 24px : 16px;
-                                    font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
-                                    color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
-                                        : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
-                                        : Theme.palette().paper-ink;
-                                    horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
-                                    vertical-alignment: center;
-                                    wrap: word-wrap;
-                                    overflow: elide;
-                                }
-
-                                TouchArea {
-                                    clicked => { root.select-element(idx); }
-                                }
-                            }
-                        }
+                    PresentSlideCanvas {
+                        aspect-ratio-wide: root.aspect-ratio-wide;
+                        element-labels: root.element-labels;
+                        element-contents: root.element-contents;
+                        element-xs: root.element-xs;
+                        element-ys: root.element-ys;
+                        element-widths: root.element-widths;
+                        element-heights: root.element-heights;
+                        element-types: root.element-types;
+                        active-element-index: root.active-element-index;
+                        select-element(idx) => { root.select-element(idx); }
                     }
 
                     // Speaker Notes Collapsible Drawer
@@ -744,7 +453,7 @@ export component PresentApp inherits Window {
                                 }
                             }
 
-                            SpeakerNotesEditor {
+                            PresentNotesEditor {
                                 text <=> root.slide-notes;
                                 placeholder-text: "Add presenter notes for this slide...";
                                 edited(t) => { root.notes-edited(t); }
@@ -753,237 +462,60 @@ export component PresentApp inherits Window {
                     }
                 }
 
-                // Apple Keynote-Style Right Inspector
-                if root.show-inspector && !root.is-preview-mode : InspectorSurface {
-                    title: "Format";
-                    width: 280px;
-
-                    VerticalLayout {
-                        spacing: 12px;
-                        padding: 12px;
-                        alignment: start;
-
-                        // Tabs: Format | Animate | Document
-                        SegmentedControl {
-                            items: ["Format", "Animate", "Document"];
-                            current <=> root.inspector-tab;
-                            label: "Inspector Tabs";
-                        }
-
-                        // Tab 0: Format
-                        if root.inspector-tab == 0 : VerticalLayout {
-                            spacing: 10px;
-
-                            SectionHeader { title: "Slide Layout"; }
-
-                            SegmentedControl {
-                                items: ["Title", "Content", "2 Col", "Image"];
-                                current <=> root.active-template-index;
-                                label: "Layout Template";
-                                selected(idx) => { root.apply-template(idx); }
-                            }
-
-                            SectionHeader { title: "Background"; }
-
-                            PropertyRow {
-                                label: "Color Fill";
-                                Rectangle {
-                                    height: 24px; border-radius: 4px;
-                                    background: Theme.palette().paper;
-                                    border-width: 1px; border-color: Theme.palette().border;
-                                }
-                            }
-
-                            SectionHeader { title: "Selected Element"; }
-
-                            Rectangle {
-                                min-height: 40px;
-                                border-radius: Theme.tokens.metrics.radius-small;
-                                border-width: 1px;
-                                border-color: Theme.palette().border;
-                                background: Theme.palette().selection-soft;
-
-                                VerticalLayout {
-                                    padding: 8px;
-                                    spacing: 2px;
-                                    Text {
-                                        text: root.active-element-label;
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: 600;
-                                        color: Theme.palette().ink;
-                                        overflow: elide;
-                                    }
-                                    Text {
-                                        text: root.element-labels.length > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-labels.length : "No element selected";
-                                        font-size: Theme.tokens.typography.micro;
-                                        color: Theme.palette().ink-secondary;
-                                        overflow: elide;
-                                    }
-                                }
-                            }
-
-                            Field {
-                                label: "Element text";
-                                value: root.active-element-content;
-                                enabled: root.active-element-label != "No element selected";
-                                edited(t) => { root.update-element-content(t); }
-                            }
-
-                            SectionHeader { title: "Geometry"; }
-
-                            PropertyRow {
-                                label: "Position";
-                                Text {
-                                    text: root.element-x-text + " × " + root.element-y-text;
-                                    font-size: Theme.tokens.typography.body;
-                                    color: Theme.palette().ink;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
-                            }
-
-                            PropertyRow {
-                                label: "Size";
-                                Text {
-                                    text: root.element-width-text + " × " + root.element-height-text;
-                                    font-size: Theme.tokens.typography.body;
-                                    color: Theme.palette().ink;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
-                            }
-                        }
-
-                        // Tab 1: Animate
-                        if root.inspector-tab == 1 : VerticalLayout {
-                            spacing: 10px;
-
-                            SectionHeader { title: "Slide Transition"; }
-
-                            SegmentedControl {
-                                items: ["None", "Dissolve", "Push", "Wipe"];
-                                current <=> root.transition-index;
-                                label: "Transition Type";
-                                selected(idx) => { root.set-transition(idx); }
-                            }
-
-                            PropertyRow {
-                                label: "Duration";
-                                Field { label: "Duration"; value: "1.00 s"; enabled: false; }
-                            }
-                        }
-
-                        // Tab 2: Document
-                        if root.inspector-tab == 2 : VerticalLayout {
-                            spacing: 10px;
-
-                            SectionHeader { title: "Slide Size"; }
-
-                            SegmentedControl {
-                                items: ["16:9 Wide", "4:3 Standard"];
-                                current: root.aspect-ratio-wide ? 0 : 1;
-                                label: "Slide Aspect Ratio";
-                                selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
-                            }
-
-                            SectionHeader { title: "Deck Information"; }
-
-                            PropertyRow {
-                                label: "Slides";
-                                Text { text: root.slide-count-text; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; }
-                            }
-                        }
-
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-                    }
+                // Format inspector follows the selected slide element and
+                // uses stacked local property rows for translation safety.
+                if root.show-inspector && !root.is-preview-mode : PresentInspector {
+                    preferred-width: 280px;
+                    inspector-tab <=> root.inspector-tab;
+                    active-template-index <=> root.active-template-index;
+                    transition-index <=> root.transition-index;
+                    slide-count-text: root.slide-count-text;
+                    aspect-ratio-wide: root.aspect-ratio-wide;
+                    active-element-label: root.active-element-label;
+                    active-element-content: root.active-element-content;
+                    active-element-index: root.active-element-index;
+                    element-count: root.element-labels.length;
+                    element-x-text: root.element-x-text;
+                    element-y-text: root.element-y-text;
+                    element-width-text: root.element-width-text;
+                    element-height-text: root.element-height-text;
+                    apply-template(idx) => { root.apply-template(idx); }
+                    update-element-content(value) => { root.update-element-content(value); }
+                    set-transition(idx) => { root.set-transition(idx); }
                 }
             }
 
             // Standard Status Bar
-            StatusBar {
-                leading: root.status-left;
-                trailing: root.status-right;
+            PresentStatusBar {
+                leading-text: root.status-left;
+                trailing-text: root.status-right;
             }
         }
     }
 
-    // Compact toolbar overflow menu. Every enabled action from the labeled
-    // toolbar remains available below the compact-width breakpoint.
+    // Compact toolbar overflow menu. The command list is an app-local
+    // component so its vertical spacing remains stable at large text sizes.
     if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
-        x: 0px;
-        y: 0px;
         width: root.width;
         height: root.height;
         background: transparent;
-
         TouchArea { clicked => { root.close-toolbar-overflow(); } }
-
-        Rectangle {
-            x: max(8px, root.width - 272px);
-            y: Theme.tokens.metrics.header-height + 32px + 8px;
-            width: 256px;
-            height: 272px;
-            border-radius: Theme.tokens.metrics.radius-medium;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface;
-            drop-shadow-blur: 16px;
-            drop-shadow-offset-y: 4px;
-            drop-shadow-color: Theme.palette().shadow;
-
-            VerticalLayout {
-                spacing: 4px;
-                padding: 8px;
-
-                ToolbarButton {
-                    icon: "eye";
-                    label: "View speaker notes";
-                    horizontal-stretch: 1;
-                    clicked => { root.show-notes-drawer = !root.show-notes-drawer; root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "format";
-                    label: "Choose theme";
-                    horizontal-stretch: 1;
-                    clicked => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "plus";
-                    label: "Add slide";
-                    horizontal-stretch: 1;
-                    clicked => { root.add-slide(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "text";
-                    label: "Add text";
-                    horizontal-stretch: 1;
-                    clicked => { root.add-text(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "shape";
-                    label: "Add shape";
-                    horizontal-stretch: 1;
-                    clicked => { root.add-shape(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "play";
-                    label: "Play presentation";
-                    horizontal-stretch: 1;
-                    clicked => { root.toggle-preview-mode(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "format";
-                    label: "Format inspector";
-                    checked: root.show-inspector;
-                    horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "export";
-                    label: "Export PDF";
-                    horizontal-stretch: 1;
-                    clicked => { root.export-pdf(); root.close-toolbar-overflow(); }
-                }
+        VerticalLayout {
+            padding-top: Theme.tokens.metrics.header-height + Theme.tokens.metrics.context-toolbar-height + Theme.tokens.space.sm;
+            padding-left: Theme.tokens.space.lg;
+            padding-right: Theme.tokens.space.lg;
+            cross-axis-alignment: end;
+            PresentToolbarOverflow {
+                inspector-visible: root.show-inspector;
+                toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
+                open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
+                add-slide => { root.add-slide(); }
+                add-text => { root.add-text(); }
+                add-shape => { root.add-shape(); }
+                toggle-preview => { root.toggle-preview-mode(); }
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                close-requested => { root.close-toolbar-overflow(); }
             }
         }
     }

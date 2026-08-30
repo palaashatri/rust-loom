@@ -31,6 +31,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
     theme_chooser: bool,
 }
@@ -43,6 +44,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".into(),
+        rtl: false,
         open: None,
         theme_chooser: false,
     };
@@ -70,6 +72,7 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--rtl" => args.rtl = true,
             "--theme-chooser" => args.theme_chooser = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
@@ -344,6 +347,10 @@ fn apply_theme(app: &PresentApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
+fn configure_direction(app: &PresentApp, rtl: bool) {
+    app.set_rtl(rtl);
+}
+
 fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) {
     configure_responsive_width(app, size.0);
 }
@@ -375,6 +382,7 @@ fn wire_responsive_layout(app: &PresentApp) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let state = GuiState {
@@ -497,6 +505,7 @@ fn save_current_deck(
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let state = GuiState {
@@ -591,6 +600,7 @@ fn main() -> Result<(), String> {
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));

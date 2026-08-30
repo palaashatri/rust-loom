@@ -1,0 +1,130 @@
+import { Icon } from "icons.slint";
+import { MetricChip } from "components.slint";
+import { Theme } from "theme.slint";
+
+/// Central active-job summary.  Each block participates in one vertical flow,
+/// leaving the remaining space between progress and backend diagnostics rather
+/// than relying on absolute coordinates.
+export component EncodeProgress inherits Rectangle {
+    in property <bool> compact-layout: false;
+    in property <string> selected-job-text: "No job selected";
+    in property <string> selected-job-details: "";
+    in property <string> selected-output: "";
+    in property <float> active-job-progress: 0.0;
+    in property <bool> backend-available: false;
+    in property <string> backend-version: "FFmpeg not found";
+
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        padding: root.compact-layout ? Theme.tokens.space.md : Theme.tokens.space.xl;
+        spacing: Theme.tokens.space.lg;
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.md;
+            cross-axis-alignment: center;
+            Rectangle {
+                min-width: 64px;
+                preferred-width: 86px;
+                max-width: 104px;
+                min-height: 64px;
+                preferred-height: 86px;
+                max-height: 104px;
+                border-radius: Theme.tokens.metrics.radius-large;
+                background: Theme.palette().selection-soft;
+                border-width: 1px;
+                border-color: Theme.palette().border-strong;
+                Icon { icon: "video"; size: 34px; tint: Theme.palette().accent; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: root.selected-job-text;
+                    font-size: Theme.tokens.typography.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.selected-job-details;
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink-secondary;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.selected-output;
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-disabled;
+                    overflow: elide;
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.palette().border; }
+        HorizontalLayout {
+            min-height: 28px;
+            cross-axis-alignment: center;
+            Text {
+                text: "ACTIVE JOB";
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 700;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            MetricChip { label: "Progress"; value: Math.round(root.active-job-progress) + "%"; }
+        }
+        Rectangle {
+            min-height: 10px;
+            preferred-height: 10px;
+            max-height: 10px;
+            border-radius: 5px;
+            background: Theme.palette().surface-sunken;
+            Rectangle {
+                width: parent.width * root.active-job-progress / 100;
+                height: parent.height;
+                border-radius: 5px;
+                background: Theme.palette().accent;
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        Rectangle {
+            min-height: 74px;
+            preferred-height: 86px;
+            max-height: 108px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            background: Theme.palette().surface;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.md;
+                cross-axis-alignment: center;
+                Icon {
+                    icon: root.backend-available ? "check" : "warning";
+                    size: 22px;
+                    tint: root.backend-available ? Theme.palette().success : Theme.palette().warning;
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: Theme.tokens.space.xs;
+                    Text {
+                        text: root.backend-available ? "Local FFmpeg backend" : "FFmpeg backend not found";
+                        font-size: Theme.tokens.typography.body-large;
+                        font-weight: 650;
+                        color: Theme.palette().ink;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.backend-version;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}

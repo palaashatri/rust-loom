@@ -8,8 +8,12 @@ import {
     StatusPill, MetricChip, CommandPalette, CommandPaletteItem
 } from "components.slint";
 import { Icon } from "icons.slint";
-import { Theme } from "theme.slint";
-export { Theme } from "theme.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import { StudioTransport } from "studio_transport.slint";
+import { StudioLibrary } from "studio_library.slint";
+import { StudioArrangement } from "studio_arrangement.slint";
+import { StudioMixer } from "studio_mixer.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
 
 export component StudioApp inherits Window {
     title: "Loom Studio";
@@ -168,202 +172,77 @@ export component StudioApp inherits Window {
             spacing: 0px;
             vertical-stretch: 1;
 
-            SidebarSurface {
-                width: root.compact-layout ? 200px : 248px;
-                title: "Library";
-                detail: root.track-labels.length + " tracks";
-                VerticalLayout {
-                    spacing: 10px;
-                    padding: 12px;
-                    Text { text: "Audio file"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                    Field { label: "WAV path"; placeholder: "Choose a WAV file…"; value <=> root.import-path; }
-                    ToolButton { icon: "import"; text: "Import WAV"; enabled: root.import-path != ""; clicked => { root.import-audio(root.import-path); } }
-                    Rectangle { height: 1px; background: Theme.palette().border; }
-                    Text { text: "MIDI input"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                    if root.midi-ports.length > 0 && root.midi-ports.length <= 6 : SegmentedControl {
-                        items: root.midi-ports;
-                        current <=> root.selected-midi-port;
-                    }
-                    // A segmented control allocates one intrinsic segment per
-                    // port and becomes unreadable once a host exposes more
-                    // than six devices. Use a bounded pager for larger MIDI
-                    // inventories while retaining keyboard/accessibility-safe
-                    // selection and the same connect command.
-                    if root.midi-ports.length > 6 : Rectangle {
-                        height: 28px;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
-                        background: Theme.palette().surface-sunken;
-                        HorizontalLayout {
-                            spacing: 2px;
-                            padding-left: 2px;
-                            padding-right: 2px;
-                            IconButton {
-                                icon: "chevron-left";
-                                label: "Previous MIDI input";
-                                clicked => {
-                                    root.selected-midi-port = root.selected-midi-port <= 0
-                                        ? root.midi-ports.length - 1
-                                        : root.selected-midi-port - 1;
-                                }
-                            }
-                            Text {
-                                text: root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
-                                horizontal-stretch: 1;
-                                font-size: Theme.tokens.typography.caption;
-                                color: Theme.palette().ink;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                            IconButton {
-                                icon: "chevron-right";
-                                label: "Next MIDI input";
-                                clicked => {
-                                    root.selected-midi-port = Math.mod(root.selected-midi-port + 1, root.midi-ports.length);
-                                }
-                            }
-                        }
-                        accessible-role: button;
-                        accessible-label: "MIDI input " + root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
-                    }
-                    ToolButton { icon: "keyboard"; text: "Connect MIDI"; enabled: root.midi-ports.length > 0; clicked => { root.connect-midi(root.selected-midi-port); } }
-                    StatusPill {
-                        text: root.midi-status;
-                        tone: root.midi-ports.length > 0 ? 1 : 0;
-                        max-content-width: root.compact-layout ? 166px : 224px;
-                    }
-                    Rectangle { height: 1px; background: Theme.palette().border; }
-                    Text { text: "Audio devices"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                    Text { text: root.output-device; wrap: word-wrap; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
-                    Text { text: root.input-device; wrap: word-wrap; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                    ToolButton { icon: "plus"; text: "Add Track"; clicked => { root.add-track(); } }
-                }
+            StudioLibrary {
+                min-width: root.compact-layout ? 200px : 224px;
+                preferred-width: root.compact-layout ? 208px : 248px;
+                max-width: root.compact-layout ? 224px : 280px;
+                compact-layout: root.compact-layout;
+                track-labels: root.track-labels;
+                midi-ports: root.midi-ports;
+                selected-midi-port <=> root.selected-midi-port;
+                import-path <=> root.import-path;
+                midi-status: root.midi-status;
+                output-device: root.output-device;
+                input-device: root.input-device;
+                import-audio(path) => { root.import-audio(path); }
+                connect-midi(index) => { root.connect-midi(index); }
+                add-track => { root.add-track(); }
             }
 
             Rectangle { width: 1px; background: Theme.palette().border; }
 
             VerticalLayout {
-                spacing: 0px;
                 horizontal-stretch: 1;
-
-                Rectangle {
-                    height: 50px;
-                    background: Theme.palette().surface;
-                    HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 14px;
-                        spacing: 10px;
-                        Text { text: format_time(root.playhead-seconds); width: 86px; color: Theme.palette().ink; font-size: Theme.tokens.typography.body; font-weight: 700; vertical-alignment: center; }
-                        Slider { label: "Playhead"; horizontal-stretch: 1; minimum: 0; maximum: Math.max(0.01, root.duration-seconds); value <=> root.playhead-seconds; changed(value) => { root.seek(value); } }
-                        Text { text: format_time(root.duration-seconds); width: 86px; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; horizontal-alignment: right; vertical-alignment: center; }
-                    }
+                spacing: 0px;
+                StudioTransport {
+                    playhead-seconds <=> root.playhead-seconds;
+                    duration-seconds: root.duration-seconds;
+                    seek(value) => { root.seek(value); }
                 }
-                Rectangle { height: 1px; background: Theme.palette().border; }
-
-                Rectangle {
-                    horizontal-stretch: 1;
+                StudioArrangement {
                     vertical-stretch: 1;
-                    background: Theme.palette().canvas;
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 7px;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: "ARRANGEMENT"; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; font-weight: 700; }
-                            Rectangle { horizontal-stretch: 1; background: transparent; }
-                            Text { text: root.duration-seconds > 0 ? Math.round(root.duration-seconds * 10) / 10 + " seconds" : "Empty project"; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; }
-                        }
-                        for label[index] in root.track-labels : WorkspaceRow {
-                            height: root.workspace-mode-index == 1 ? 78px : 64px;
-                            selected: index == root.active-track-index;
-                            clicked => { root.select-track(index); }
-                            HorizontalLayout {
-                                spacing: 0px;
-                                Rectangle {
-                                    width: root.compact-layout ? 180px : 230px;
-                                    background: Theme.palette().surface;
-                                    HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 8px;
-                                        spacing: 5px;
-                                        ToolButton { text: "M"; checked: root.track-mutes[index]; clicked => { root.toggle-mute(index); } }
-                                        ToolButton { text: "S"; checked: root.track-solos[index]; clicked => { root.toggle-solo(index); } }
-                                        ToolButton { text: "R"; checked: root.track-arms[index]; enabled: root.input-available; clicked => { root.toggle-rec-arm(index); } }
-                                        VerticalLayout {
-                                            spacing: 1px;
-                                            Text { text: label; color: Theme.palette().ink; font-size: 11px; font-weight: 650; overflow: elide; }
-                                            Text { text: root.track-kinds[index] + " · " + root.track-region-counts[index] + " regions"; color: Theme.palette().ink-secondary; font-size: Theme.tokens.typography.micro; overflow: elide; }
-                                        }
-                                    }
-                                }
-                                Rectangle {
-                                    horizontal-stretch: 1;
-                                    background: Math.mod(index, 2) == 0 ? Theme.palette().media-stage : Theme.palette().media-stage;
-                                    if root.track-region-counts[index] > 0 : Rectangle {
-                                        property <length> region-start-x: clamp(parent.width * root.track-region-starts[index] / Math.max(0.01, root.duration-seconds), 0px, max(0px, parent.width - 54px));
-                                        property <length> region-render-width: max(0px, min(max(54px, parent.width * root.track-region-durations[index] / Math.max(0.01, root.duration-seconds)), max(0px, parent.width - self.region-start-x - 2px)));
-                                        x: self.region-start-x;
-                                        width: self.region-render-width;
-                                        y: 8px;
-                                        height: parent.height - 16px;
-                                        border-radius: 7px;
-                                        background: index == root.active-track-index ? Theme.palette().content-accent : Theme.palette().content-cool;
-                                        border-width: 1px;
-                                        border-color: index == root.active-track-index ? Theme.palette().content-accent : Theme.palette().content-cool;
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            spacing: 7px;
-                                            Icon { icon: root.track-kinds[index] == "MIDI" ? "keyboard" : "waveform"; size: 18px; tint: Theme.palette().paper; }
-                                            Text { text: label; color: Theme.palette().paper; font-size: Theme.tokens.typography.micro; font-weight: 650; overflow: elide; vertical-alignment: center; }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-                    }
+                    track-labels: root.track-labels;
+                    track-kinds: root.track-kinds;
+                    track-region-counts: root.track-region-counts;
+                    track-region-starts: root.track-region-starts;
+                    track-region-durations: root.track-region-durations;
+                    track-mutes: root.track-mutes;
+                    track-solos: root.track-solos;
+                    track-arms: root.track-arms;
+                    active-track-index: root.active-track-index;
+                    duration-seconds: root.duration-seconds;
+                    workspace-mode-index: root.workspace-mode-index;
+                    compact-layout: root.compact-layout;
+                    input-available: root.input-available;
+                    select-track(index) => { root.select-track(index); }
+                    mute-toggled(index) => { root.toggle-mute(index); }
+                    solo-toggled(index) => { root.toggle-solo(index); }
+                    record-arm-toggled(index) => { root.toggle-rec-arm(index); }
                 }
             }
 
             Rectangle { width: 1px; background: Theme.palette().border; }
 
-            InspectorSurface {
-                width: root.compact-layout ? 240px : 292px;
-                title: "Mixer";
-                detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
-                VerticalLayout {
-                    spacing: 12px;
-                    // InspectorSurface supplies the shared 12px content inset.
-                    padding: 0px;
-                    Text {
-                        text: "CHANNEL STRIP";
-                        font-size: Theme.tokens.typography.caption;
-                        font-weight: 700;
-                        color: Theme.palette().ink-secondary;
-                    }
-                    if root.active-track-index < root.track-labels.length : VerticalLayout {
-                        spacing: 9px;
-                        Text { text: "Volume  " + Math.round(root.track-volumes[root.active-track-index] * 10) / 10 + " dB"; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
-                        Slider { label: "Volume"; minimum: -60; maximum: 6; value: root.track-volumes[root.active-track-index]; changed(value) => { root.volume-changed(root.active-track-index, value); } }
-                        Text { text: "Pan  " + Math.round(root.track-pans[root.active-track-index] * 100) + "%"; color: Theme.palette().ink; font-size: Theme.tokens.typography.caption; }
-                        Slider { label: "Pan"; minimum: -1; maximum: 1; value: root.track-pans[root.active-track-index]; changed(value) => { root.pan-changed(root.active-track-index, value); } }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            ToolButton { text: "Mute"; checked: root.track-mutes[root.active-track-index]; clicked => { root.toggle-mute(root.active-track-index); } }
-                            ToolButton { text: "Solo"; checked: root.track-solos[root.active-track-index]; clicked => { root.toggle-solo(root.active-track-index); } }
-                            ToolButton { text: "Arm"; checked: root.track-arms[root.active-track-index]; enabled: root.input-available; clicked => { root.toggle-rec-arm(root.active-track-index); } }
-                        }
-                    }
-                    Rectangle { height: 1px; background: Theme.palette().border; }
-                    Text { text: "Bounce destination"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                    Field { label: "WAV destination"; value <=> root.export-path; }
-                    PrimaryButton { text: "Export WAV"; clicked => { root.export-mix(root.export-path); } }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                    Text { text: "Third-party CLAP/VST3 hosting is not enabled in this build. No plugin is loaded or executed implicitly."; wrap: word-wrap; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.caption; }
-                }
+            StudioMixer {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 292px;
+                max-width: root.compact-layout ? 264px : 320px;
+                compact-layout: root.compact-layout;
+                active-track-index: root.active-track-index;
+                track-labels: root.track-labels;
+                track-volumes: root.track-volumes;
+                track-pans: root.track-pans;
+                track-mutes: root.track-mutes;
+                track-solos: root.track-solos;
+                track-arms: root.track-arms;
+                input-available: root.input-available;
+                export-path <=> root.export-path;
+                volume-changed(index, value) => { root.volume-changed(index, value); }
+                pan-changed(index, value) => { root.pan-changed(index, value); }
+                mute-toggled(index) => { root.toggle-mute(index); }
+                solo-toggled(index) => { root.toggle-solo(index); }
+                record-arm-toggled(index) => { root.toggle-rec-arm(index); }
+                export-mix(path) => { root.export-mix(path); }
             }
         }
 
@@ -402,7 +281,4 @@ export component StudioApp inherits Window {
     }
     }
 
-    pure function format_time(seconds: float) -> string {
-        return Math.floor(seconds / 60) + ":" + (Math.mod(Math.floor(seconds), 60) < 10 ? "0" : "") + (Math.mod(Math.floor(seconds), 60));
-    }
 }

@@ -1,0 +1,345 @@
+// Photo-specific workspace objects. Shared chrome and controls stay owned by
+// loom-ui; this module owns Photo's command/state boundaries.
+import {
+    LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarIconButton,
+    AppleToolbarItem, CanvasSurface, InspectorSurface, SectionHeader,
+    SegmentedControl, RangeSlider, PropertyRow, TabStrip, ToolkitStatusBar,
+    ToolbarButton
+} from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
+import { Icon } from "../../../../loom-core/crates/loom-ui/ui/icons.slint";
+import { Theme } from "../../../../loom-core/crates/loom-ui/ui/theme.slint";
+
+/// Photo's context toolbar. The app controller owns all mutations; this
+/// object only projects command state and emits the existing callbacks.
+export component PhotoToolbar inherits LabeledToolbar {
+    in property <int> active-tool: 0;
+    in-out property <float> zoom-value: 72.0;
+    in property <bool> inspector-visible: true;
+    in property <bool> labeled-export: false;
+
+    callback select-tool(string);
+    callback add-layer;
+    callback add-adjustment;
+    callback import-image;
+    callback export-png;
+    callback toggle-inspector;
+
+    ToolbarGroup { labeled-slot: true;
+        AppleToolbarItem {
+            icon: "cursor";
+            label: "Select";
+            checked: root.active-tool == 0;
+            clicked => { root.select-tool("select"); }
+        }
+        AppleToolbarItem {
+            icon: "brush";
+            label: "Brush";
+            checked: root.active-tool == 1;
+            clicked => { root.select-tool("brush"); }
+        }
+        AppleToolbarItem {
+            icon: "wand";
+            label: "Wand";
+            checked: root.active-tool == 2;
+            clicked => { root.select-tool("wand"); }
+        }
+    }
+
+    ToolbarSpacer { }
+
+    ToolbarGroup { labeled-slot: true;
+        AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+        AppleToolbarItem { icon: "slider"; label: "Adjustment"; clicked => { root.add-adjustment(); } }
+        AppleToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-image(); } }
+    }
+
+    ToolbarSpacer { }
+
+    ToolbarGroup { labeled-slot: true;
+        AppleToolbarItem {
+            icon: "zoom-in";
+            label: Math.round(root.zoom-value) + "%";
+            clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; }
+        }
+        AppleToolbarItem {
+            icon: "format";
+            label: "Inspector";
+            checked: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        if root.labeled-export : AppleToolbarItem {
+            icon: "export";
+            label: "Export";
+            clicked => { root.export-png(); }
+        }
+        if !root.labeled-export : ToolbarIconButton {
+            icon: "export";
+            label: "Export PNG";
+            clicked => { root.export-png(); }
+        }
+    }
+}
+
+/// The editable Photo canvas. Stage padding is layout-owned; preview bounds
+/// remain content geometry so pan/zoom and keyboard nudging stay unchanged.
+export component PhotoCanvas inherits CanvasSurface {
+    in property <bool> has-preview: false;
+    in property <image> preview-image;
+    in property <bool> show-grid: true;
+    in property <int> active-tool: 0;
+    in-out property <bool> pan-mode: false;
+    in-out property <float> zoom-value: 72.0;
+    in-out property <length> viewport-pan-x: 0px;
+    in-out property <length> viewport-pan-y: 0px;
+    out property <bool> panning: canvas-pan.pressed;
+    callback import-image;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+        padding: 24px;
+
+        stage := Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            background: Theme.palette().media-stage;
+            border-width: 1px;
+            border-color: canvas-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+            clip: true;
+
+            if root.show-grid : Rectangle { x: parent.width / 2; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
+            if root.show-grid : Rectangle { y: parent.height / 2; width: parent.width; height: 1px; background: Theme.palette().grid-major; }
+            if root.show-grid : Rectangle { x: parent.width / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-grid : Rectangle { x: parent.width * 3 / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-grid : Rectangle { y: parent.height / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            if root.show-grid : Rectangle { y: parent.height * 3 / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+            if root.has-preview : viewport := Rectangle {
+                property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
+                property <length> scaled-height: max(90px, stage.height * root.zoom-value / 100.0);
+                x: (stage.width - self.scaled-width) / 2 + root.viewport-pan-x;
+                y: (stage.height - self.scaled-height) / 2 + root.viewport-pan-y;
+                width: self.scaled-width;
+                height: self.scaled-height;
+                background: Theme.palette().paper-ink;
+                border-width: 1px;
+                border-color: Theme.palette().accent;
+                clip: true;
+                Image {
+                    source: root.preview-image;
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: contain;
+                }
+                for corner in [0, 1, 2, 3] : Rectangle {
+                    x: corner == 1 || corner == 3 ? parent.width - 4px : -4px;
+                    y: corner >= 2 ? parent.height - 4px : -4px;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: Theme.palette().paper;
+                    border-width: 1px;
+                    border-color: Theme.palette().accent;
+                }
+            }
+
+            if !root.has-preview : VerticalLayout {
+                width: parent.width;
+                height: parent.height;
+                alignment: center;
+                spacing: 12px;
+                Icon { icon: "image"; size: 40px; tint: Theme.palette().ink-disabled; }
+                Text {
+                    text: "Import an image to begin";
+                    font-size: Theme.tokens.typography.heading;
+                    font-weight: 600;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "PNG and JPEG are decoded locally.";
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink-secondary;
+                    horizontal-alignment: center;
+                }
+                ToolbarButton { icon: "import"; label: "Import Image"; primary: true; clicked => { root.import-image(); } }
+            }
+
+            canvas-focus := FocusScope {
+                enabled: root.has-preview;
+                key-pressed(event) => {
+                    if (event.text == Key.LeftArrow) { root.viewport-pan-x -= 1px; return accept; }
+                    if (event.text == Key.RightArrow) { root.viewport-pan-x += 1px; return accept; }
+                    if (event.text == Key.UpArrow) { root.viewport-pan-y -= 1px; return accept; }
+                    if (event.text == Key.DownArrow) { root.viewport-pan-y += 1px; return accept; }
+                    return reject;
+                }
+            }
+
+            canvas-pan := TouchArea {
+                enabled: root.has-preview && root.pan-mode;
+                mouse-cursor: root.pan-mode ? (self.pressed ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.default;
+                property <length> start-pan-x: 0px;
+                property <length> start-pan-y: 0px;
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        self.start-pan-x = root.viewport-pan-x;
+                        self.start-pan-y = root.viewport-pan-y;
+                        canvas-focus.focus();
+                    }
+                }
+                moved => {
+                    if (self.pressed && root.active-tool == 1) {
+                        root.viewport-pan-x = clamp(self.start-pan-x + self.mouse-x - self.pressed-x, -stage.width, stage.width);
+                        root.viewport-pan-y = clamp(self.start-pan-y + self.mouse-y - self.pressed-y, -stage.height, stage.height);
+                    }
+                }
+            }
+        }
+    }
+}
+
+component PhotoAdjustmentRow inherits Rectangle {
+    in property <string> label: "Adjustment";
+    in-out property <float> value: 0.0;
+    callback changed(float);
+    height: 56px;
+    VerticalLayout {
+        spacing: 4px;
+        HorizontalLayout {
+            height: 20px;
+            Text { text: root.label; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: Math.round(root.value); font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+        }
+        RangeSlider { label: root.label; minimum: -100; maximum: 100; value <=> root.value; changed(value) => { root.changed(value); } }
+    }
+}
+
+component PhotoLayerRow inherits Rectangle {
+    in property <string> label: "Layer";
+    in property <bool> selected: false;
+    in property <bool> layer-visible: true;
+    callback selected-layer;
+    callback toggle-visibility;
+    height: 44px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: root.selected ? Theme.palette().selection-soft : row-touch.has-hover ? Theme.palette().surface-raised : transparent;
+
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 6px;
+        padding-right: 8px;
+        cross-axis-alignment: center;
+        ToolbarIconButton { icon: root.layer-visible ? "eye" : "eye-off"; label: "Toggle layer visibility"; clicked => { root.toggle-visibility(); } }
+        Text { text: root.label; font-size: Theme.tokens.typography.body; font-weight: root.selected ? 600 : 400; color: Theme.palette().ink; horizontal-stretch: 1; overflow: elide; }
+    }
+
+    row-touch := TouchArea { clicked => { root.selected-layer(); } }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.selected-layer(); }
+}
+
+/// Photo's selection-aware inspector. Each visible action maps directly to a
+/// pre-existing controller callback; no local state is synthesized here.
+export component PhotoInspector inherits InspectorSurface {
+    in-out property <int> inspector-tab: 0;
+    in property <[string]> layer-labels: [];
+    in property <[bool]> layer-visibilities: [];
+    in property <int> active-layer-index: 0;
+    in property <string> active-blend-mode: "Normal";
+    in property <float> active-layer-opacity: 100.0;
+    in property <float> brightness-value: 0.0;
+    in property <float> contrast-value: 0.0;
+    in property <float> saturation-value: 0.0;
+    in property <bool> has-preview: false;
+
+    callback select-layer(int);
+    callback toggle-layer-visibility(int);
+    callback add-layer;
+    callback add-adjustment;
+    callback move-layer(int);
+    callback remove-layer;
+    callback blend-mode-changed(string);
+    callback opacity-changed(float);
+    callback brightness-changed(float);
+    callback contrast-changed(float);
+    callback saturation-changed(float);
+    callback import-image;
+    callback export-png;
+    callback export-jpeg;
+
+    width: 280px;
+    title: "Inspector";
+
+    VerticalLayout {
+        spacing: 12px;
+        padding: 0px;
+
+        TabStrip {
+            tabs: ["Adjust", "Layers", "Export"];
+            current <=> root.inspector-tab;
+        }
+
+        if root.inspector-tab == 0 : VerticalLayout {
+            spacing: 12px;
+            SectionHeader { title: "Color adjustments"; }
+            PhotoAdjustmentRow { label: "Brightness"; value: root.brightness-value; changed(value) => { root.brightness-changed(value); } }
+            PhotoAdjustmentRow { label: "Contrast"; value: root.contrast-value; changed(value) => { root.contrast-changed(value); } }
+            PhotoAdjustmentRow { label: "Saturation"; value: root.saturation-value; changed(value) => { root.saturation-changed(value); } }
+        }
+
+        if root.inspector-tab == 1 : VerticalLayout {
+            spacing: 10px;
+            SectionHeader { title: "Layers"; }
+            for label[index] in root.layer-labels : PhotoLayerRow {
+                label: label;
+                selected: index == root.active-layer-index;
+                visible: index < root.layer-visibilities.length;
+                layer-visible: root.layer-visibilities[index];
+                selected-layer => { root.select-layer(index); }
+                toggle-visibility => { root.toggle-layer-visibility(index); }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                ToolbarIconButton { icon: "plus"; label: "Add pixel layer"; clicked => { root.add-layer(); } }
+                ToolbarIconButton { icon: "wand"; label: "Add adjustment"; clicked => { root.add-adjustment(); } }
+                ToolbarIconButton { icon: "chevron-left"; label: "Move layer down"; clicked => { root.move-layer(-1); } }
+                ToolbarIconButton { icon: "chevron-right"; label: "Move layer up"; clicked => { root.move-layer(1); } }
+                ToolbarSpacer { }
+                ToolbarIconButton { icon: "trash"; label: "Delete selected layer"; enabled: root.layer-labels.length > 1; clicked => { root.remove-layer(); } }
+            }
+            SectionHeader { title: "Compositing"; }
+            SegmentedControl {
+                label: "Blend mode";
+                items: ["Normal", "Multiply", "Screen", "Overlay"];
+                current: root.active-blend-mode == "Multiply" ? 1 : root.active-blend-mode == "Screen" ? 2 : root.active-blend-mode == "Overlay" ? 3 : 0;
+                selected(index) => { root.blend-mode-changed(index == 1 ? "Multiply" : index == 2 ? "Screen" : index == 3 ? "Overlay" : "Normal"); }
+            }
+            PropertyRow {
+                label: "Opacity";
+                RangeSlider { label: "Opacity"; minimum: 0; maximum: 100; value: root.active-layer-opacity; changed(value) => { root.opacity-changed(value); } }
+            }
+        }
+
+        if root.inspector-tab == 2 : VerticalLayout {
+            spacing: 12px;
+            SectionHeader { title: "Import"; }
+            Text {
+                text: "Choose a PNG or JPEG with the native picker. Imported images remain separate from Loom Photo project files.";
+                wrap: word-wrap;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+            }
+            ToolbarButton { icon: "import"; label: "Import PNG / JPEG"; clicked => { root.import-image(); } }
+            SectionHeader { title: "Export"; }
+            ToolbarButton { icon: "export"; label: "Export PNG"; primary: true; enabled: root.has-preview; clicked => { root.export-png(); } }
+            ToolbarButton { icon: "export"; label: "Export JPEG"; enabled: root.has-preview; clicked => { root.export-jpeg(); } }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component PhotoStatusBar inherits ToolkitStatusBar { }

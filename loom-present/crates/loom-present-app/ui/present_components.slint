@@ -1,0 +1,381 @@
+import {
+    DirectionalLayout, ToolbarGroup, ToolbarSpacer, ToolbarButton, ContextToolbar,
+    LabeledToolbar, IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem,
+    InspectorSurface, SectionHeader, Field, SegmentedControl, StatusBar,
+    SidebarSurface, CanvasSurface
+} from "toolkit.slint";
+import { Theme } from "theme.slint";
+
+/// Present's responsive command groups. The toolbar host owns the row height;
+/// this component only projects live command callbacks into aligned groups.
+export component PresentToolbarBody inherits DirectionalLayout {
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+    callback toggle-notes;
+    callback open-theme-chooser;
+    callback add-slide;
+    callback add-text;
+    callback add-shape;
+    callback toggle-preview;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback overflow-requested;
+
+    spacing: Theme.tokens.space.xs;
+    leading-padding: 0px;
+    trailing-padding: 0px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "eye"; label: "View"; accessible-label: "View speaker notes"; clicked => { root.toggle-notes(); } }
+        IconOverLabelToolbarItem { icon: "format"; label: "Theme"; accessible-label: "Choose theme"; clicked => { root.open-theme-chooser(); } }
+        IconOverLabelToolbarItem { icon: "plus"; label: "Add Slide"; accessible-label: "Add slide"; clicked => { root.add-slide(); } }
+    }
+
+    if !root.labeled : ToolbarGroup {
+        labeled-slot: false;
+        if !root.overflow : IconOnlyToolbarItem { icon: "eye"; label: "View speaker notes"; clicked => { root.toggle-notes(); } }
+        if !root.overflow : IconOnlyToolbarItem { icon: "format"; label: "Choose theme"; clicked => { root.open-theme-chooser(); } }
+        if !root.overflow : IconOnlyToolbarItem { icon: "plus"; label: "Add slide"; clicked => { root.add-slide(); } }
+        if root.overflow : Overflow { label: "More presentation actions"; clicked => { root.overflow-requested(); } }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Add text"; clicked => { root.add-text(); } }
+        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Add shape"; clicked => { root.add-shape(); } }
+        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "play"; label: "Play"; accessible-label: "Play presentation"; clicked => { root.toggle-preview(); } }
+        IconOverLabelToolbarItem { icon: "format"; label: "Format"; accessible-label: "Format inspector"; clicked => { root.toggle-inspector(); } }
+        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "export"; label: "Export"; accessible-label: "Export PDF"; clicked => { root.export-pdf(); } }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup {
+        labeled-slot: false;
+        IconOnlyToolbarItem { icon: "play"; label: "Play presentation"; clicked => { root.toggle-preview(); } }
+        IconOnlyToolbarItem { icon: "format"; label: "Format inspector"; clicked => { root.toggle-inspector(); } }
+        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+    }
+}
+
+/// Thumbnail item used by the slide strip and kept content-sized so long
+/// localized titles elide inside the preview instead of overlapping neighbors.
+component PresentSlideThumbnail inherits Rectangle {
+    in property <string> title: "Slide";
+    in property <int> index: 0;
+    in property <bool> active: false;
+    callback clicked;
+    height: 100px;
+    min-width: 0px;
+    horizontal-stretch: 1;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: root.active ? 2px : 1px;
+    border-color: root.active ? Theme.palette().accent : Theme.palette().border;
+    background: root.active ? Theme.palette().selection-soft : Theme.palette().surface;
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding: Theme.tokens.space.sm;
+        Text { text: (root.index + 1) + ""; min-width: 12px; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().ink-secondary; vertical-alignment: top; }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.tokens.metrics.radius-small;
+            border-width: 1px;
+            border-color: Theme.palette().paper-line;
+            background: Theme.palette().paper;
+            VerticalLayout {
+                padding: Theme.tokens.space.sm;
+                spacing: Theme.tokens.space.xs;
+                alignment: center;
+                Text { text: root.title; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().paper-ink; horizontal-alignment: center; overflow: elide; }
+                Rectangle { height: 1px; width: 60%; background: Theme.palette().accent; }
+                Rectangle { height: 2px; width: 80%; background: Theme.palette().paper-line; }
+                Rectangle { height: 2px; width: 70%; background: Theme.palette().paper-line; }
+            }
+        }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component PresentSlideStrip inherits SidebarSurface {
+    in property <[string]> titles: [];
+    in property <int> active-index: 0;
+    callback select-slide(int);
+    callback add-slide;
+    callback delete-slide;
+
+    title: "Slides";
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-top: Theme.tokens.space.md;
+        padding-bottom: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.sm;
+        padding-right: Theme.tokens.space.sm;
+        alignment: start;
+        for title[idx] in root.titles : PresentSlideThumbnail {
+            index: idx;
+            title: title;
+            active: idx == root.active-index;
+            clicked => { root.select-slide(idx); }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            IconOnlyToolbarItem { icon: "plus"; label: "Add Slide"; clicked => { root.add-slide(); } }
+            IconOnlyToolbarItem { icon: "trash-2"; label: "Delete Slide"; clicked => { root.delete-slide(); } }
+            ToolbarSpacer { }
+        }
+    }
+}
+
+/// The scene-model canvas keeps element coordinates in slide space. The
+/// surrounding workspace is layout-driven; x/y below are deliberate content
+/// geometry, not shell positioning.
+export component PresentSlideCanvas inherits CanvasSurface {
+    in property <bool> aspect-ratio-wide: true;
+    in property <[string]> element-labels: [];
+    in property <[string]> element-contents: [];
+    in property <[float]> element-xs: [];
+    in property <[float]> element-ys: [];
+    in property <[float]> element-widths: [];
+    in property <[float]> element-heights: [];
+    in property <[int]> element-types: [];
+    in property <int> active-element-index: 0;
+    callback select-element(int);
+
+    slide := Rectangle {
+        property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
+        x: max(Theme.tokens.space.xxl, (parent.width - self.width) / 2);
+        y: max(Theme.tokens.space.xxl, (parent.height - self.height) / 2);
+        width: min(840px, max(1px, parent.width - Theme.tokens.space.xxl * 2));
+        height: min(parent.height - Theme.tokens.space.xxl * 2, self.width * self.slide-ratio);
+        border-radius: Theme.tokens.metrics.radius-small;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().paper;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 6px;
+        drop-shadow-color: Theme.palette().shadow;
+        clip: true;
+
+        for element_x[idx] in root.element-xs : Rectangle {
+            property <length> render-x: clamp(element_x * parent.width / 960.0, 0px, max(0px, parent.width - 2px));
+            property <length> render-y: clamp(root.element-ys[idx] * parent.height / 540.0, 0px, max(0px, parent.height - 2px));
+            property <length> render-width: max(1px, min(root.element-widths[idx] * parent.width / 960.0, max(1px, parent.width - self.render-x - 2px)));
+            property <length> render-height: max(1px, min(root.element-heights[idx] * parent.height / 540.0, max(1px, parent.height - self.render-y - 2px)));
+            x: self.render-x;
+            y: self.render-y;
+            width: self.render-width;
+            height: self.render-height;
+            border-radius: root.element-types[idx] == 4 ? self.width / 2 : Theme.tokens.metrics.radius-small;
+            border-width: idx == root.active-element-index ? 2px : 0px;
+            border-color: Theme.palette().accent;
+            background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
+                : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
+                : root.element-types[idx] == 5 ? Theme.palette().content-accent
+                : transparent;
+            accessible-role: button;
+            accessible-label: root.element-labels[idx];
+            accessible-action-default => { root.select-element(idx); }
+            Text {
+                x: Theme.tokens.space.sm;
+                y: Theme.tokens.space.xs;
+                width: max(1px, parent.width - Theme.tokens.space.lg * 2);
+                height: max(1px, parent.height - Theme.tokens.space.sm * 2);
+                text: root.element-contents[idx];
+                font-size: root.element-types[idx] == 0 ? Theme.tokens.typography.display
+                    : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large;
+                font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
+                color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
+                    : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
+                    : Theme.palette().paper-ink;
+                horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+            TouchArea { clicked => { root.select-element(idx); } }
+        }
+    }
+}
+
+/// Present's speaker notes editor is a local component so its text-input
+/// semantics travel with the notes drawer rather than the Window shell.
+export component PresentNotesEditor inherits Rectangle {
+    in-out property <string> text: "";
+    in property <string> placeholder-text: "";
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.tokens.typography.body;
+    callback edited(string);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+    callback key-released(event: KeyEvent) -> EventResult;
+
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: notes-input.has-focus ? 2px : 1px;
+    border-color: notes-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: root.enabled ? Theme.palette().surface-raised : Theme.palette().surface-sunken;
+    clip: true;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: "Speaker Notes";
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder-text;
+    accessible-read-only: false;
+    accessible-action-default => { notes-input.focus(); }
+    forward-focus: notes-input;
+    if root.text == "" : Text {
+        x: Theme.tokens.space.lg;
+        y: Theme.tokens.space.sm;
+        width: max(1px, root.width - Theme.tokens.space.xl);
+        height: max(1px, root.height - Theme.tokens.space.lg);
+        text: root.placeholder-text;
+        font-size: root.font-size;
+        color: Theme.palette().ink-disabled;
+        vertical-alignment: top;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+    notes-input := TextInput {
+        x: Theme.tokens.space.lg;
+        y: Theme.tokens.space.sm;
+        width: max(1px, root.width - Theme.tokens.space.xl);
+        height: max(1px, root.height - Theme.tokens.space.lg);
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        font-size: root.font-size;
+        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+        selection-background-color: Theme.palette().selection;
+        selection-foreground-color: Theme.palette().accent-ink;
+        accessible-role: none;
+        edited => { root.edited(notes-input.text); }
+        key-pressed(event) => { return root.key-pressed(event); }
+        key-released(event) => { return root.key-released(event); }
+    }
+}
+
+component PresentPropertyRow inherits Rectangle {
+    in property <string> label: "Property";
+    min-height: Theme.tokens.metrics.control-height;
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        Text { text: root.label; font-size: Theme.tokens.typography.caption; font-weight: 500; color: Theme.palette().ink-secondary; wrap: word-wrap; horizontal-stretch: 1; }
+        VerticalLayout { horizontal-stretch: 1; @children }
+    }
+}
+
+export component PresentInspector inherits InspectorSurface {
+    in-out property <int> inspector-tab: 0;
+    in-out property <int> active-template-index: 1;
+    in-out property <int> transition-index: 0;
+    in property <string> slide-count-text: "1 slide";
+    in property <bool> aspect-ratio-wide: true;
+    in property <string> active-element-label: "No element selected";
+    in property <string> active-element-content: "";
+    in property <int> active-element-index: 0;
+    in property <int> element-count: 0;
+    in property <string> element-x-text: "100";
+    in property <string> element-y-text: "100";
+    in property <string> element-width-text: "400";
+    in property <string> element-height-text: "100";
+    callback apply-template(int);
+    callback update-element-content(string);
+    callback set-transition(int);
+
+    title: "Format";
+    min-panel-width: 240px;
+    VerticalLayout {
+        spacing: Theme.tokens.space.lg;
+        padding: 0px;
+        alignment: start;
+        SegmentedControl { items: ["Format", "Animate", "Document"]; current <=> root.inspector-tab; label: "Inspector Tabs"; }
+        if root.inspector-tab == 0 : VerticalLayout {
+            spacing: Theme.tokens.space.lg;
+            SectionHeader { title: "Slide Layout"; }
+            SegmentedControl { items: ["Title", "Content", "2 Col", "Image"]; current <=> root.active-template-index; label: "Layout Template"; selected(idx) => { root.apply-template(idx); } }
+            SectionHeader { title: "Background"; }
+            PresentPropertyRow { label: "Color Fill"; Rectangle { height: Theme.tokens.metrics.control-height; border-radius: Theme.tokens.metrics.radius-small; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().border; } }
+            SectionHeader { title: "Selected Element"; }
+            Rectangle {
+                min-height: 40px; border-radius: Theme.tokens.metrics.radius-small; border-width: 1px; border-color: Theme.palette().border; background: Theme.palette().selection-soft;
+                VerticalLayout { padding: Theme.tokens.space.sm; spacing: Theme.tokens.space.xs; Text { text: root.active-element-label; font-size: Theme.tokens.typography.body; font-weight: 600; color: Theme.palette().ink; overflow: elide; } Text { text: root.element-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected"; font-size: Theme.tokens.typography.micro; color: Theme.palette().ink-secondary; overflow: elide; } }
+            }
+            Field { label: "Element text"; value: root.active-element-content; enabled: root.active-element-label != "No element selected"; edited(t) => { root.update-element-content(t); } }
+            SectionHeader { title: "Geometry"; }
+            PresentPropertyRow { label: "Position"; Text { text: root.element-x-text + " × " + root.element-y-text; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; overflow: elide; } }
+            PresentPropertyRow { label: "Size"; Text { text: root.element-width-text + " × " + root.element-height-text; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; overflow: elide; } }
+        }
+        if root.inspector-tab == 1 : VerticalLayout {
+            spacing: Theme.tokens.space.lg;
+            SectionHeader { title: "Slide Transition"; }
+            SegmentedControl { items: ["None", "Dissolve", "Push", "Wipe"]; current <=> root.transition-index; label: "Transition Type"; selected(idx) => { root.set-transition(idx); } }
+            PresentPropertyRow { label: "Duration"; Field { label: "Duration"; value: "1.00 s"; enabled: false; } }
+        }
+        if root.inspector-tab == 2 : VerticalLayout {
+            spacing: Theme.tokens.space.lg;
+            SectionHeader { title: "Slide Size"; }
+            SegmentedControl { items: ["16:9 Wide", "4:3 Standard"]; current: root.aspect-ratio-wide ? 0 : 1; label: "Slide Aspect Ratio"; }
+            SectionHeader { title: "Deck Information"; }
+            PresentPropertyRow { label: "Slides"; Text { text: root.slide-count-text; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; } }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component PresentStatusBar inherits StatusBar {
+    in property <string> leading-text: "";
+    in property <string> trailing-text: "";
+    leading: root.leading-text;
+    trailing: root.trailing-text;
+}
+
+export component PresentToolbarOverflow inherits Rectangle {
+    in property <bool> inspector-visible: false;
+    callback toggle-notes;
+    callback open-theme-chooser;
+    callback add-slide;
+    callback add-text;
+    callback add-shape;
+    callback toggle-preview;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback close-requested;
+
+    min-width: 220px;
+    max-width: 300px;
+    preferred-width: 256px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        padding: Theme.tokens.space.sm;
+        ToolbarButton { icon: "eye"; label: "View speaker notes"; horizontal-stretch: 1; clicked => { root.toggle-notes(); root.close-requested(); } }
+        ToolbarButton { icon: "format"; label: "Choose theme"; horizontal-stretch: 1; clicked => { root.open-theme-chooser(); root.close-requested(); } }
+        ToolbarButton { icon: "plus"; label: "Add slide"; horizontal-stretch: 1; clicked => { root.add-slide(); root.close-requested(); } }
+        ToolbarButton { icon: "text"; label: "Add text"; horizontal-stretch: 1; clicked => { root.add-text(); root.close-requested(); } }
+        ToolbarButton { icon: "shape"; label: "Add shape"; horizontal-stretch: 1; clicked => { root.add-shape(); root.close-requested(); } }
+        ToolbarButton { icon: "play"; label: "Play presentation"; horizontal-stretch: 1; clicked => { root.toggle-preview(); root.close-requested(); } }
+        ToolbarButton { icon: "format"; label: "Format inspector"; checked: root.inspector-visible; horizontal-stretch: 1; clicked => { root.toggle-inspector(); root.close-requested(); } }
+        ToolbarButton { icon: "export"; label: "Export PDF"; horizontal-stretch: 1; clicked => { root.export-pdf(); root.close-requested(); } }
+    }
+}

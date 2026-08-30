@@ -26,7 +26,6 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const COMPACT_LAYOUT_MAX_WIDTH: u32 = 1220;
 
 loom_production::define_snapshot_recovery!(STUDIO_RECOVERY, "org.loom.studio", "loom.studio/1");
 
@@ -37,6 +36,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
 }
 
@@ -48,6 +48,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".into(),
+        rtl: false,
         open: None,
     };
     let mut iterator = std::env::args().skip(1);
@@ -74,6 +75,7 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--rtl" => args.rtl = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -91,12 +93,17 @@ fn empty_session() -> (StudioSession, AudioAssetStore) {
     )
 }
 
-fn compact_layout_for_width(width: u32) -> bool {
-    width < COMPACT_LAYOUT_MAX_WIDTH
+fn compact_layout_for_width(app: &StudioApp, width: u32) -> bool {
+    let policy = ResponsivePolicy::get(app);
+    (width as f32) < policy.get_priority_1_icon_only_below()
 }
 
 fn configure_responsive_layout(app: &StudioApp, width: u32) {
-    app.set_compact_layout(compact_layout_for_width(width));
+    app.set_compact_layout(compact_layout_for_width(app, width));
+}
+
+fn configure_direction(app: &StudioApp, rtl: bool) {
+    app.set_rtl(rtl);
 }
 
 fn wire_responsive_layout(app: &StudioApp) {
@@ -435,6 +442,7 @@ fn apply_theme(app: &StudioApp, theme: &str) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let ((session, assets), save_path) = initial_session(args)?;
@@ -468,6 +476,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = StudioApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let ((session, assets), save_path) = initial_session(args)?;
@@ -1191,6 +1200,7 @@ fn main() -> Result<(), String> {
     }
 
     let app = StudioApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     app.window()
@@ -1700,9 +1710,11 @@ mod tests {
 
     #[test]
     fn compact_layout_boundary_keeps_reference_width_stable() {
-        assert!(compact_layout_for_width(1024));
-        assert!(compact_layout_for_width(1219));
-        assert!(!compact_layout_for_width(1220));
-        assert!(!compact_layout_for_width(1440));
+        set_platform();
+        let app = StudioApp::new().expect("create StudioApp");
+        assert!(compact_layout_for_width(&app, 1024));
+        assert!(compact_layout_for_width(&app, 1179));
+        assert!(!compact_layout_for_width(&app, 1180));
+        assert!(!compact_layout_for_width(&app, 1440));
     }
 }

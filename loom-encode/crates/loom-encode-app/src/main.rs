@@ -31,6 +31,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
 }
 
@@ -42,6 +43,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".into(),
+        rtl: false,
         open: None,
     };
     let mut iterator = std::env::args().skip(1);
@@ -68,6 +70,7 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--rtl" => args.rtl = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -289,7 +292,12 @@ fn configure_responsive_layout(app: &EncodeApp, size: (u32, u32)) {
 }
 
 fn configure_responsive_width(app: &EncodeApp, width: u32) {
-    app.set_compact_layout(width < 1220);
+    let policy = ResponsivePolicy::get(app);
+    app.set_compact_layout((width as f32) < policy.get_priority_1_icon_only_below());
+}
+
+fn configure_direction(app: &EncodeApp, rtl: bool) {
+    app.set_rtl(rtl);
 }
 
 fn wire_responsive_layout(app: &EncodeApp) {
@@ -304,6 +312,7 @@ fn wire_responsive_layout(app: &EncodeApp) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let (queue, _) = initial_queue(args)?;
@@ -328,6 +337,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let (queue, _) = initial_queue(args)?;
@@ -1044,6 +1054,7 @@ fn main() -> Result<(), String> {
     }
 
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -1450,10 +1461,10 @@ mod tests {
         set_platform();
         let app = EncodeApp::new().expect("create EncodeApp");
 
-        configure_responsive_layout(&app, (1219, 800));
+        configure_responsive_layout(&app, (1179, 800));
         assert!(app.get_compact_layout());
 
-        configure_responsive_layout(&app, (1220, 800));
+        configure_responsive_layout(&app, (1180, 800));
         assert!(!app.get_compact_layout());
     }
 }

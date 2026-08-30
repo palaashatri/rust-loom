@@ -25,7 +25,6 @@ use slint::{
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const COMPACT_LAYOUT_MAX_WIDTH: u32 = 1200;
 
 loom_production::define_snapshot_recovery!(VIDEO_RECOVERY, "org.loom.video", "loom.video/1");
 
@@ -36,6 +35,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
 }
 
@@ -47,6 +47,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".into(),
+        rtl: false,
         open: None,
     };
     let mut iterator = std::env::args().skip(1);
@@ -73,6 +74,7 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--theme" => args.theme = iterator.next().ok_or("--theme needs a name")?,
+            "--rtl" => args.rtl = true,
             "--open" => args.open = Some(iterator.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -87,12 +89,21 @@ fn empty_project() -> VideoProject {
     VideoProject::new("untitled-project", "Untitled Project")
 }
 
-fn compact_layout_for_width(width: u32) -> bool {
-    width < COMPACT_LAYOUT_MAX_WIDTH
+fn compact_layout_for_width(app: &VideoApp, width: u32) -> bool {
+    let policy = ResponsivePolicy::get(app);
+    compact_layout_for_breakpoint(width, policy.get_priority_1_icon_only_below())
+}
+
+fn compact_layout_for_breakpoint(width: u32, breakpoint: f32) -> bool {
+    (width as f32) < breakpoint
 }
 
 fn configure_responsive_layout(app: &VideoApp, width: u32) {
-    app.set_compact_layout(compact_layout_for_width(width));
+    app.set_compact_layout(compact_layout_for_width(app, width));
+}
+
+fn configure_direction(app: &VideoApp, rtl: bool) {
+    app.set_rtl(rtl);
 }
 
 fn wire_responsive_layout(app: &VideoApp) {
@@ -386,6 +397,7 @@ fn apply_theme(app: &VideoApp, theme: &str) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let (initial_proj, initial_path) = initial_session(args)?;
@@ -416,6 +428,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = VideoApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let (initial_proj, initial_path) = initial_session(args)?;
@@ -1116,6 +1129,7 @@ fn main() -> Result<(), String> {
         return run_journey(&args, out_dir);
     }
     let app = VideoApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     app.window()
@@ -1545,9 +1559,12 @@ mod tests {
 
     #[test]
     fn compact_layout_boundary_keeps_reference_width_stable() {
-        assert!(compact_layout_for_width(1024));
-        assert!(compact_layout_for_width(1199));
-        assert!(!compact_layout_for_width(1200));
-        assert!(!compact_layout_for_width(1440));
+        // The breakpoint is owned by the shared Slint policy; the pure helper
+        // keeps the boundary test independent from AppKit's main-thread window
+        // requirement on macOS.
+        assert!(compact_layout_for_breakpoint(1024, 1180.0));
+        assert!(compact_layout_for_breakpoint(1179, 1180.0));
+        assert!(!compact_layout_for_breakpoint(1180, 1180.0));
+        assert!(!compact_layout_for_breakpoint(1440, 1180.0));
     }
 }

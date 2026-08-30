@@ -1,0 +1,435 @@
+import {
+    DirectionalLayout, ToolbarGroup, ToolbarSpacer, ToolbarButton, ContextToolbar,
+    LabeledToolbar, IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem,
+    InspectorSurface, SectionHeader, TextField, SegmentedControl,
+    StatusBar, CanvasSurface
+} from "toolkit.slint";
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+/// Writer's responsive command surface. The slot host owns the row height;
+/// this component owns only command grouping and visibility. Keeping the
+/// groups local to Writer prevents the editor shell from growing a second,
+/// app-specific toolbar grammar in the shared toolkit.
+export component WriterToolbarBody inherits DirectionalLayout {
+    in property <bool> wide: false;
+    in property <bool> overflow: false;
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    in property <bool> labeled-export: false;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback overflow-requested;
+
+    spacing: Theme.tokens.space.xs;
+    leading-padding: 0px;
+    trailing-padding: 0px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.wide : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: "eye";
+            label: "View";
+            accessible-label: "View";
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOverLabelToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            accessible-label: "Page zoom unavailable";
+            enabled: false;
+        }
+        IconOverLabelToolbarItem {
+            icon: "plus";
+            label: "Add Page";
+            accessible-label: "Add Page unavailable";
+            enabled: false;
+        }
+    }
+
+    if !root.wide : ToolbarGroup {
+        labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "eye";
+            label: "View";
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        if root.overflow : Overflow {
+            label: "More Writer actions";
+            clicked => { root.overflow-requested(); }
+        }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    if root.wide : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
+        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    if root.wide : ToolbarGroup {
+        labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
+        IconOverLabelToolbarItem {
+            icon: "format";
+            label: "Format";
+            accessible-label: "Format inspector";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOverLabelToolbarItem { icon: "document"; label: "Document"; accessible-label: "Document settings unavailable"; enabled: false; }
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: "Export";
+            accessible-label: "Export PDF";
+            clicked => { root.export-pdf(); }
+        }
+    }
+
+    if !root.wide && !root.overflow : ToolbarGroup {
+        labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+    }
+
+    if root.overflow : ToolbarSpacer { }
+    if root.overflow : ToolbarGroup {
+        labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Format";
+            checked: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
+    }
+}
+
+/// Writer's selection-aware text editor. The editor is intentionally kept as
+/// a local component so its accessible value and selection announcement stay
+/// beside the paper surface that owns them.
+component WriterDocumentEditor inherits Rectangle {
+    in-out property <string> text: "";
+    in property <string> placeholder: "Type your text here...";
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.tokens.typography.body;
+    in property <int> selection-anchor: 0;
+    in property <int> selection-focus: 0;
+    in property <string> selection-announcement: "No text selected";
+    callback edited(string, int, int);
+    callback selection-changed(int, int);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-width: 0px;
+    min-height: 0px;
+    background: transparent;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: "Document body, " + root.selection-announcement;
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder;
+    accessible-action-default => { editor.focus(); }
+    forward-focus: editor;
+
+    if root.text == "" : Text {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text: root.placeholder;
+        font-size: root.font-size;
+        color: Theme.palette().paper-muted;
+        vertical-alignment: top;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+
+    editor := TextInput {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        font-size: root.font-size;
+        color: root.enabled ? Theme.palette().paper-ink : Theme.palette().ink-disabled;
+        selection-background-color: Theme.palette().selection;
+        selection-foreground-color: Theme.palette().accent-ink;
+        accessible-role: none;
+        edited => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte_offset);
+            root.edited(editor.text, editor.anchor-position-byte-offset, editor.cursor-position_byte-offset);
+        }
+        cursor-position-changed(_) => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte_offset);
+        }
+        key-pressed(event) => { return root.key-pressed(event); }
+    }
+
+    changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
+    changed selection-focus => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
+    TouchArea { clicked => { editor.focus(); } }
+}
+
+/// The editable paper surface. Canvas centering is expressed through nested
+/// layouts; only the document's page model owns its portrait aspect ratio.
+export component WriterPageCanvas inherits CanvasSurface {
+    in property <string> doc-title: "Untitled Document";
+    in-out property <string> doc-content: "";
+    in-out property <int> selection-anchor: 0;
+    in-out property <int> selection-focus: 0;
+    in property <string> selection-announcement: "No text selected";
+    callback document-edited(string, int, int);
+    callback selection-changed(int, int);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    // The paper itself is document geometry, not shell chrome: keep its
+    // portrait constraint explicit while the surrounding shell uses layouts.
+    page := Rectangle {
+        private property <length> page-height: min(1080px, max(420px, parent.height - Theme.tokens.space.xxl * 2));
+        private property <length> page-padding: min(56px, max(32px, self.width * 0.1));
+        x: max(Theme.tokens.space.xxl, (parent.width - self.width) / 2);
+        y: max(Theme.tokens.space.xxl, (parent.height - self.height) / 2);
+        width: min(820px, max(320px, self.page-height * 0.72));
+        height: self.page-height;
+        border-radius: Theme.tokens.metrics.radius-small;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().paper;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.palette().shadow;
+        clip: true;
+
+        VerticalLayout {
+            padding-top: Theme.tokens.space.xxxl;
+            padding-bottom: Theme.tokens.space.xxxl;
+            padding-left: page.page-padding;
+            padding-right: page.page-padding;
+            spacing: Theme.tokens.space.lg;
+
+            Text {
+                text: root.doc-title;
+                font-size: Theme.tokens.typography.heading;
+                font-weight: 700;
+                color: Theme.palette().paper-ink;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: "Local-first document";
+                font-size: Theme.tokens.typography.body;
+                color: Theme.palette().paper-muted;
+            }
+            Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
+
+            document-editor := WriterDocumentEditor {
+                text <=> root.doc-content;
+                selection-anchor <=> root.selection-anchor;
+                selection-focus <=> root.selection-focus;
+                selection-announcement <=> root.selection-announcement;
+                font-size: Theme.tokens.typography.body-large;
+                edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                key-pressed(event) => { return root.key-pressed(event); }
+            }
+        }
+    }
+}
+
+/// A compact, localization-safe property row. Writer inspectors intentionally
+/// stack the label above its control: this keeps 150% text and RTL labels from
+/// competing for a fixed two-column width.
+component WriterPropertyRow inherits Rectangle {
+    in property <string> label: "Property";
+    min-height: Theme.tokens.metrics.control-height;
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink-secondary;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            @children
+        }
+    }
+}
+
+/// Selection-driven format inspector. Property rows and sections remain in a
+/// single vertical flow, so translated labels automatically stack instead of
+/// painting into their neighbouring control column.
+export component WriterInspector inherits InspectorSurface {
+    in-out property <int> inspector-tab: 0;
+    in-out property <bool> is-bold: false;
+    in-out property <bool> is-italic: false;
+    in-out property <bool> is-underline: false;
+    in-out property <int> heading-level: 0;
+    in-out property <int> text-alignment: 0;
+    in property <string> status-left: "";
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback select-heading(int);
+    callback select-alignment(int);
+
+    title: "Format";
+    min-panel-width: 240px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.lg;
+        padding: 0px;
+        alignment: start;
+
+        SegmentedControl {
+            items: ["Style", "Layout", "More"];
+            current <=> root.inspector-tab;
+            label: "Format Tabs";
+        }
+
+        SectionHeader { title: "Paragraph Style"; }
+        SegmentedControl {
+            items: ["Body", "H1", "H2", "Title"];
+            current <=> root.heading-level;
+            label: "Heading Style";
+            selected(idx) => { root.select-heading(idx); }
+        }
+
+        SectionHeader { title: "Font"; }
+        WriterPropertyRow {
+            label: "Family";
+            TextField { label: "Font family"; value: "Helvetica Neue"; enabled: false; }
+        }
+        WriterPropertyRow {
+            label: "Style";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                IconOnlyToolbarItem { icon: "bold"; label: "Bold"; checked: root.is-bold; clicked => { root.toggle-bold(); } }
+                IconOnlyToolbarItem { icon: "italic"; label: "Italic"; checked: root.is-italic; clicked => { root.toggle-italic(); } }
+                IconOnlyToolbarItem { icon: "underline"; label: "Underline"; checked: root.is-underline; clicked => { root.toggle-underline(); } }
+                IconOnlyToolbarItem { icon: "strikethrough"; label: "Strikethrough"; checked: false; enabled: false; }
+            }
+        }
+
+        SectionHeader { title: "Alignment"; }
+        SegmentedControl {
+            items: ["Left", "Center", "Right", "Justify"];
+            current <=> root.text-alignment;
+            label: "Text Alignment";
+            selected(idx) => { root.select-alignment(idx); }
+        }
+        WriterPropertyRow {
+            label: "Indentation";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                IconOnlyToolbarItem { icon: "outdent"; label: "Decrease indent"; enabled: false; }
+                IconOnlyToolbarItem { icon: "indent"; label: "Increase indent"; enabled: false; }
+            }
+        }
+
+        SectionHeader { title: "Spacing & Lists"; }
+        WriterPropertyRow {
+            label: "Line Spacing";
+            TextField { label: "Line Spacing"; value: "1.15"; enabled: false; }
+        }
+        WriterPropertyRow {
+            label: "Bullets";
+            TextField { label: "Bullets & Lists"; value: "None"; enabled: false; }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        Rectangle {
+            height: 68px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            background: Theme.palette().surface-sunken;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            VerticalLayout {
+                padding-left: Theme.tokens.space.lg;
+                padding-right: Theme.tokens.space.lg;
+                padding-top: Theme.tokens.space.md;
+                padding-bottom: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.xs;
+                alignment: center;
+                Text { text: "Document Statistics"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                Text { text: root.status-left; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; overflow: elide; }
+            }
+        }
+    }
+}
+
+/// App-local status surface. This is deliberately tiny, but giving it a
+/// named owner keeps status alignment and future accessibility annotations out
+/// of the Window shell.
+export component WriterStatusBar inherits StatusBar {
+    leading: root.leading-text;
+    trailing: root.trailing-text;
+    in property <string> leading-text: "";
+    in property <string> trailing-text: "";
+}
+
+/// The modal overflow surface uses the same command labels as the compact
+/// toolbar while keeping its geometry in a vertical flow.
+export component WriterToolbarOverflow inherits Rectangle {
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback close-requested;
+
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+    min-width: 220px;
+    max-width: 280px;
+    preferred-width: 256px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        padding: Theme.tokens.space.sm;
+        ToolbarButton {
+            icon: "eye"; label: "View"; enabled: root.inspector-available; horizontal-stretch: 1;
+            clicked => { root.toggle-inspector(); root.close-requested(); }
+        }
+        ToolbarButton {
+            icon: "format"; label: "Format"; checked: root.inspector-visible; enabled: root.inspector-available; horizontal-stretch: 1;
+            clicked => { root.toggle-inspector(); root.close-requested(); }
+        }
+        ToolbarButton {
+            icon: "export"; label: "Export PDF"; horizontal-stretch: 1;
+            clicked => { root.export-pdf(); root.close-requested(); }
+        }
+    }
+}

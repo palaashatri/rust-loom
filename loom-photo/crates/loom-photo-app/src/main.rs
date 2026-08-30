@@ -35,6 +35,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
 }
 
@@ -46,6 +47,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".to_string(),
+        rtl: false,
         open: None,
     };
     let mut it = std::env::args().skip(1);
@@ -66,6 +68,7 @@ fn parse_args() -> Result<Args, String> {
                 );
             }
             "--theme" => args.theme = it.next().ok_or("--theme needs a name")?,
+            "--rtl" => args.rtl = true,
             "--open" => args.open = Some(it.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -262,8 +265,14 @@ fn configure_responsive_layout(app: &PhotoApp, size: (u32, u32)) {
 }
 
 fn configure_responsive_width(app: &PhotoApp, width: u32) {
-    app.set_inspector_available(width >= 1180);
-    app.set_labeled_export(width >= 1320);
+    let policy = ResponsivePolicy::get(app);
+    let width = width as f32;
+    app.set_inspector_available(width >= policy.get_priority_1_icon_only_below());
+    app.set_labeled_export(width >= policy.get_priority_2_overflow_below());
+}
+
+fn configure_direction(app: &PhotoApp, rtl: bool) {
+    app.set_rtl(rtl);
 }
 
 /// Resolve a tool command into the independent paint/select index and viewport
@@ -452,6 +461,7 @@ fn rebuild_palette(app: &PhotoApp, query: &str) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let session = PhotoSession::new(initial_canvas(args)?);
@@ -655,6 +665,7 @@ fn export_current_image(
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let session = PhotoSession::new(initial_canvas(args)?);
@@ -775,6 +786,7 @@ fn main() -> Result<(), String> {
     }
 
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));

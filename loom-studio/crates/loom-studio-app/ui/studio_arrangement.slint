@@ -1,0 +1,193 @@
+import { DirectionalLayout } from "toolkit.slint";
+import { WorkspaceRow, ToolButton } from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+/// A single timeline row.  The header has bounded intrinsic sizing; the
+/// timeline itself is a three-cell flow (lead-in, region, remainder) rather
+/// than an unbounded stack of absolute children.  Region widths remain tied to
+/// the media duration, while the surrounding layout can safely resize.
+export component StudioTrackRow inherits WorkspaceRow {
+    in property <string> track-label: "Track";
+    in property <string> track-kind: "Audio";
+    in property <int> region-count: 0;
+    in property <float> region-start-seconds: 0.0;
+    in property <float> region-duration-seconds: 0.0;
+    in property <float> duration-seconds: 10.0;
+    in property <bool> compact-layout: false;
+    in property <bool> mute: false;
+    in property <bool> solo: false;
+    in property <bool> record-arm: false;
+    in property <bool> input-available: false;
+    in property <int> track-height: 64;
+
+    callback mute-toggled;
+    callback solo-toggled;
+    callback record-arm-toggled;
+
+    label: root.track-label;
+    min-height: root.track-height * 1px;
+    preferred-height: root.track-height * 1px;
+    max-height: root.track-height * 1px;
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            min-width: root.compact-layout ? 156px : 192px;
+            preferred-width: root.compact-layout ? 176px : 220px;
+            max-width: root.compact-layout ? 204px : 260px;
+            background: Theme.palette().surface;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                padding-left: Theme.tokens.space.sm;
+                padding-right: Theme.tokens.space.sm;
+                cross-axis-alignment: center;
+                ToolButton {
+                    text: "M";
+                    checked: root.mute;
+                    accessible-label: "Mute " + root.track-label;
+                    clicked => { root.mute-toggled(); }
+                }
+                ToolButton {
+                    text: "S";
+                    checked: root.solo;
+                    accessible-label: "Solo " + root.track-label;
+                    clicked => { root.solo-toggled(); }
+                }
+                ToolButton {
+                    text: "R";
+                    checked: root.record-arm;
+                    enabled: root.input-available;
+                    accessible-label: "Record arm " + root.track-label;
+                    clicked => { root.record-arm-toggled(); }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: Theme.tokens.space.xs;
+                    Text {
+                        text: root.track-label;
+                        color: Theme.palette().ink;
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 650;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.track-kind + " · " + root.region-count + " regions";
+                        color: Theme.palette().ink-secondary;
+                        font-size: Theme.tokens.typography.micro;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        stage := Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.palette().media-stage;
+            clip: true;
+            property <length> timeline-width: max(0px, stage.width);
+            property <length> lead-width: root.region-count > 0
+                ? clamp(timeline-width * root.region-start-seconds / Math.max(0.01, root.duration-seconds), 0px, max(0px, timeline-width - 54px))
+                : 0px;
+            property <length> region-width: root.region-count > 0
+                ? max(0px, min(max(54px, timeline-width * root.region-duration-seconds / Math.max(0.01, root.duration-seconds)), max(0px, timeline-width - lead-width)))
+                : 0px;
+
+            if root.region-count > 0 : Rectangle {
+                x: stage.lead-width;
+                width: stage.region-width;
+                y: Theme.tokens.space.sm;
+                height: max(0px, stage.height - Theme.tokens.space.lg);
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: root.selected ? Theme.palette().content-accent : Theme.palette().content-cool;
+                border-width: 1px;
+                border-color: root.selected ? Theme.palette().content-accent : Theme.palette().content-cool;
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    padding-left: Theme.tokens.space.sm;
+                    padding-right: Theme.tokens.space.sm;
+                    cross-axis-alignment: center;
+                    Icon {
+                        icon: root.track-kind == "MIDI" ? "keyboard" : "waveform";
+                        size: 18px;
+                        tint: Theme.palette().paper;
+                    }
+                    Text {
+                        text: root.track-label;
+                        horizontal-stretch: 1;
+                        color: Theme.palette().paper;
+                        font-size: Theme.tokens.typography.micro;
+                        font-weight: 650;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Studio's arrangement surface owns only timeline presentation and selection
+/// callbacks; domain state remains in the Rust controller.
+export component StudioArrangement inherits Rectangle {
+    in property <[string]> track-labels: [];
+    in property <[string]> track-kinds: [];
+    in property <[int]> track-region-counts: [];
+    in property <[float]> track-region-starts: [];
+    in property <[float]> track-region-durations: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[bool]> track-arms: [];
+    in property <int> active-track-index: 0;
+    in property <float> duration-seconds: 10.0;
+    in property <int> workspace-mode-index: 0;
+    in property <bool> compact-layout: false;
+    in property <bool> input-available: false;
+    callback select-track(int);
+    callback mute-toggled(int);
+    callback solo-toggled(int);
+    callback record-arm-toggled(int);
+
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        padding: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.xs;
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            Text {
+                text: "ARRANGEMENT";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 700;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.duration-seconds > 0 ? Math.round(root.duration-seconds * 10) / 10 + " seconds" : "Empty project";
+                color: Theme.palette().ink-disabled;
+                font-size: Theme.tokens.typography.caption;
+                overflow: elide;
+            }
+        }
+        for label[index] in root.track-labels : StudioTrackRow {
+            track-label: label;
+            track-kind: root.track-kinds[index];
+            region-count: root.track-region-counts[index];
+            region-start-seconds: root.track-region-starts[index];
+            region-duration-seconds: root.track-region-durations[index];
+            duration-seconds: root.duration-seconds;
+            compact-layout: root.compact-layout;
+            mute: root.track-mutes[index];
+            solo: root.track-solos[index];
+            record-arm: root.track-arms[index];
+            input-available: root.input-available;
+            track-height: root.workspace-mode-index == 1 ? 78 : 64;
+            selected: index == root.active-track-index;
+            clicked => { root.select-track(index); }
+            mute-toggled => { root.mute-toggled(index); }
+            solo-toggled => { root.solo-toggled(index); }
+            record-arm-toggled => { root.record-arm-toggled(index); }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

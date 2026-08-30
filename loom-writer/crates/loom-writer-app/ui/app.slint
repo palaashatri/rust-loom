@@ -6,140 +6,12 @@ import {
 import { CommandPalette, CommandPaletteItem } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
+import {
+    WriterToolbarBody, WriterPageCanvas, WriterInspector, WriterStatusBar,
+    WriterToolbarOverflow
+} from "writer_components.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
-
-/// Toolbar contents are kept in one component so the slot owner can change
-/// between the explicit context and labeled variants without duplicating the
-/// command surface. The component is instantiated as a child of either host;
-/// its `wide`/`overflow` inputs only select controls, never geometry.
-component WriterToolbarBody inherits DirectionalLayout {
-    in property <bool> wide: false;
-    in property <bool> overflow: false;
-    in property <bool> inspector-available: true;
-    in property <bool> inspector-visible: false;
-    in property <bool> labeled-export: false;
-    callback toggle-inspector;
-    callback export-pdf;
-    callback overflow-requested;
-
-    spacing: 4px;
-    leading-padding: 0px;
-    trailing-padding: 0px;
-    horizontal-stretch: 1;
-    vertical-stretch: 1;
-
-    // Wide left group: View, page zoom, Add Page.
-    if root.wide : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "eye";
-            label: "View";
-            accessible-label: "View";
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem {
-            icon: "zoom-in";
-            label: "Page Zoom";
-            accessible-label: "Page zoom unavailable";
-            enabled: false;
-        }
-        IconOverLabelToolbarItem {
-            icon: "plus";
-            label: "Add Page";
-            accessible-label: "Add Page unavailable";
-            enabled: false;
-        }
-    }
-
-    // Compact left group: keep the view command and, at P2, the overflow
-    // affordance in the 40px context slot.
-    if !root.wide : ToolbarGroup { labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "eye";
-            label: "View";
-            enabled: root.inspector-available;
-            clicked => { root.toggle-inspector(); }
-        }
-        if root.overflow : Overflow {
-            label: "More Writer actions";
-            clicked => { root.overflow-requested(); }
-        }
-    }
-
-    if !root.overflow : ToolbarSpacer { }
-
-    // Center group: Table, Chart, Text, Shape, Media, Comment
-    if root.wide : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
-    }
-
-    if !root.overflow : ToolbarSpacer { }
-
-    // Right group: Share, Format, Document / Export
-    if root.wide : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "format";
-            label: "Format";
-            accessible-label: "Format inspector";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem {
-            icon: "document";
-            label: "Document";
-            accessible-label: "Document settings unavailable";
-            checked: false;
-            enabled: false;
-        }
-        IconOverLabelToolbarItem {
-            icon: "export";
-            label: "Export";
-            accessible-label: "Export PDF";
-            clicked => { root.export-pdf(); }
-        }
-    }
-
-    if !root.wide && !root.overflow : ToolbarGroup { labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem {
-            icon: "export";
-            label: "Export PDF";
-            clicked => { root.export-pdf(); }
-        }
-    }
-
-    // Compact desktops keep the two document actions users need during
-    // normal editing visible. The overflow remains for secondary actions.
-    if root.overflow : ToolbarSpacer { }
-    if root.overflow : ToolbarGroup { labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem {
-            icon: "export";
-            label: "Export PDF";
-            clicked => { root.export-pdf(); }
-        }
-    }
-}
 
 /// A Pages-class portrait template card for the New Document chooser.
 /// Uses realistic paper proportions (1:1.414 portrait) with deterministic
@@ -271,82 +143,6 @@ component TemplateCard inherits Rectangle {
 
     touch := TouchArea {
         clicked => { root.clicked(); }
-    }
-}
-
-/// The document editor text area rendered inside the white page.
-component DocumentPageEditor inherits Rectangle {
-    in-out property <string> text: "";
-    in property <string> placeholder: "Type your text here...";
-    in property <bool> enabled: true;
-    in property <length> font-size: 14px;
-    in property <int> selection-anchor: 0;
-    in property <int> selection-focus: 0;
-    in property <string> selection-announcement: "No text selected";
-    callback edited(string, int, int);
-    callback selection-changed(int, int);
-    callback key-pressed(event: KeyEvent) -> EventResult;
-
-    background: transparent;
-    accessible-role: AccessibleRole.text-input;
-    accessible-label: "Document body, " + root.selection-announcement;
-    accessible-enabled: root.enabled;
-    accessible-value <=> root.text;
-    accessible-placeholder-text: root.placeholder;
-    accessible-action-default => { editor.focus(); }
-    forward-focus: editor;
-
-    if root.text == "" : Text {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        text: root.placeholder;
-        font-size: root.font-size;
-        color: Theme.palette().paper-muted;
-        vertical-alignment: top;
-        wrap: word-wrap;
-        accessible-role: none;
-    }
-
-    editor := TextInput {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        text <=> root.text;
-        enabled: root.enabled;
-        single-line: false;
-        wrap: word-wrap;
-        vertical-alignment: top;
-        font-size: root.font-size;
-        color: root.enabled ? Theme.palette().paper-ink : Theme.palette().ink-disabled;
-        selection-background-color: Theme.palette().selection;
-        selection-foreground-color: Theme.palette().accent-ink;
-        accessible-role: none;
-        edited => {
-            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte-offset);
-            root.edited(
-                editor.text,
-                editor.anchor-position-byte-offset,
-                editor.cursor-position_byte-offset
-            );
-        }
-        cursor-position-changed(_) => {
-            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte-offset);
-        }
-        key-pressed(event) => { return root.key-pressed(event); }
-    }
-
-    changed selection-anchor => {
-        editor.set-selection-offsets(root.selection-anchor, root.selection-focus);
-    }
-    changed selection-focus => {
-        editor.set-selection-offsets(root.selection-anchor, root.selection-focus);
-    }
-
-    TouchArea {
-        clicked => { editor.focus(); }
     }
 }
 
@@ -593,236 +389,45 @@ export component WriterApp inherits Window {
                 }
             }
 
-            // Main Editor Canvas and Right Inspector
+            // Main editor work area. The canvas and inspector own their
+            // internal flow; this row only assigns the primary/secondary
+            // workspace roles and remains direction-aware at the shell edge.
             DirectionalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                // Document Canvas Area
-                CanvasSurface {
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-
-                    // Centered Document Page
-                    page := Rectangle {
-                        // Keep the editable page recognizably portrait at
-                        // every desktop height. Width must follow the paper
-                        // height rather than independently consuming a wide
-                        // canvas, which produced a landscape "document".
-                        private property <length> page-height: min(1080px, max(420px, parent.height - 48px));
-                        // Keep readable margins as the page scales down. A
-                        // fixed 56px inset leaves an unnecessarily narrow
-                        // text column at compact widths (especially 1024px).
-                        private property <length> page-padding: min(56px, max(32px, self.width * 0.1));
-                        x: max(24px, (parent.width - self.width) / 2);
-                        y: max(24px, (parent.height - self.height) / 2);
-                        width: min(820px, max(320px, self.page-height * 0.72));
-                        height: self.page-height;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.palette().border;
-                        background: Theme.palette().paper;
-                        drop-shadow-blur: 24px;
-                        drop-shadow-offset-y: 8px;
-                        drop-shadow-color: Theme.palette().shadow;
-                        clip: true;
-
-                        VerticalLayout {
-                            padding-top: 48px;
-                            padding-bottom: 48px;
-                            padding-left: page.page-padding;
-                            padding-right: page.page-padding;
-                            spacing: 12px;
-
-                            Text {
-                                text: root.doc-title;
-                                font-size: 22px;
-                                font-weight: 700;
-                                color: Theme.palette().paper-ink;
-                                wrap: word-wrap;
-                                horizontal-stretch: 1;
-                            }
-                            Text {
-                                text: "Local-first document";
-                                font-size: 13px;
-                                font-weight: 400;
-                                color: Theme.palette().paper-muted;
-                            }
-                            Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
-
-                            document-editor := DocumentPageEditor {
-                                text <=> root.doc-content;
-                                selection-anchor <=> root.selection-anchor;
-                                selection-focus <=> root.selection-focus;
-                                selection-announcement <=> root.selection-announcement;
-                                font-size: 15px;
-                                edited(val, anchor, focus) => { root.document-edited(val, anchor, focus); }
-                                selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
-                            }
-                        }
-                    }
+                WriterPageCanvas {
+                    doc-title: root.doc-title;
+                    doc-content <=> root.doc-content;
+                    selection-anchor <=> root.selection-anchor;
+                    selection-focus <=> root.selection-focus;
+                    selection-announcement: root.selection-announcement;
+                    document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    key-pressed(event) => { return reject; }
                 }
 
-                // Apple Pages-Style Text Inspector
-                if root.inspector-visible : InspectorSurface {
-                    title: "Format";
-                    width: 280px;
-
-                    VerticalLayout {
-                        spacing: 12px;
-                        // InspectorSurface supplies the shared 12px content inset.
-                        padding: 0px;
-                        alignment: start;
-
-                        // Tab selector: Style | Layout | More
-                        SegmentedControl {
-                            items: ["Style", "Layout", "More"];
-                            current <=> root.inspector-tab;
-                            label: "Format Tabs";
-                        }
-
-                        // Paragraph Style Section
-                        SectionHeader { title: "Paragraph Style"; }
-
-                        SegmentedControl {
-                            items: ["Body", "H1", "H2", "Title"];
-                            current <=> root.heading-level;
-                            label: "Heading Style";
-                            selected(idx) => { root.select-heading(idx); }
-                        }
-
-                        // Font & Typography Section
-                        SectionHeader { title: "Font"; }
-
-                        PropertyRow {
-                            label: "Family";
-                            TextField {
-                                label: "Font family";
-                                value: "Helvetica Neue";
-                                enabled: false;
-                            }
-                        }
-
-                        // Inline Formatting: B I U S
-                        PropertyRow {
-                            label: "Style";
-                            HorizontalLayout {
-                                spacing: 4px;
-
-                                IconOnlyToolbarItem {
-                                    icon: "bold";
-                                    label: "Bold";
-                                    checked: root.is-bold;
-                                    clicked => { root.toggle-bold(); }
-                                }
-                                IconOnlyToolbarItem {
-                                    icon: "italic";
-                                    label: "Italic";
-                                    checked: root.is-italic;
-                                    clicked => { root.toggle-italic(); }
-                                }
-                                IconOnlyToolbarItem {
-                                    icon: "underline";
-                                    label: "Underline";
-                                    checked: root.is-underline;
-                                    clicked => { root.toggle-underline(); }
-                                }
-                                IconOnlyToolbarItem {
-                                    icon: "strikethrough";
-                                    label: "Strikethrough";
-                                    checked: false;
-                                    enabled: false;
-                                }
-                            }
-                        }
-
-                        // Alignment Section
-                        SectionHeader { title: "Alignment"; }
-
-                        SegmentedControl {
-                            items: ["Left", "Center", "Right", "Justify"];
-                            current <=> root.text-alignment;
-                            label: "Text Alignment";
-                            selected(idx) => { root.select-alignment(idx); }
-                        }
-
-                        PropertyRow {
-                            label: "Indentation";
-                            HorizontalLayout {
-                                spacing: 4px;
-                                IconOnlyToolbarItem {
-                                    icon: "outdent";
-                                    label: "Decrease indent";
-                                    enabled: false;
-                                }
-                                IconOnlyToolbarItem {
-                                    icon: "indent";
-                                    label: "Increase indent";
-                                    enabled: false;
-                                }
-                            }
-                        }
-
-                        // Spacing & Lists Section
-                        SectionHeader { title: "Spacing & Lists"; }
-
-                        PropertyRow {
-                            label: "Line Spacing";
-                            TextField {
-                                label: "Line Spacing";
-                                value: "1.15";
-                                enabled: false;
-                            }
-                        }
-
-                        PropertyRow {
-                            label: "Bullets";
-                            TextField {
-                                label: "Bullets & Lists";
-                                value: "None";
-                                enabled: false;
-                            }
-                        }
-
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-
-                        // Document Statistics Summary Card
-                        Rectangle {
-                            height: 68px;
-                            border-radius: 6px;
-                            background: Theme.palette().surface-sunken;
-                            border-width: 1px;
-                            border-color: Theme.palette().border;
-
-                            VerticalLayout {
-                                padding-left: 12px;
-                                padding-right: 12px;
-                                padding-top: 10px;
-                                padding-bottom: 10px;
-                                spacing: 4px;
-                                alignment: center;
-                                Text {
-                                    text: "Document Statistics";
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    color: Theme.palette().ink;
-                                }
-                                Text {
-                                    text: root.status-left;
-                                    font-size: 11px;
-                                    color: Theme.palette().ink-secondary;
-                                    overflow: elide;
-                                }
-                            }
-                        }
-                    }
+                if root.inspector-visible : WriterInspector {
+                    preferred-width: 280px;
+                    inspector-tab <=> root.inspector-tab;
+                    is-bold <=> root.is-bold;
+                    is-italic <=> root.is-italic;
+                    is-underline <=> root.is-underline;
+                    heading-level <=> root.heading-level;
+                    text-alignment <=> root.text-alignment;
+                    status-left: root.status-left;
+                    toggle-bold => { root.toggle-bold(); }
+                    toggle-italic => { root.toggle-italic(); }
+                    toggle-underline => { root.toggle-underline(); }
+                    select-heading(idx) => { root.select-heading(idx); }
+                    select-alignment(idx) => { root.select-alignment(idx); }
                 }
             }
 
             // Standard Status Bar
-            StatusBar {
-                leading: root.status-left;
-                trailing: root.status-right;
+            WriterStatusBar {
+                leading-text: root.status-left;
+                trailing-text: root.status-right;
             }
         }
     }
@@ -831,54 +436,23 @@ export component WriterApp inherits Window {
     // currently actionable toolbar command through one real,
     // keyboard-accessible menu.
     if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
-        x: 0px;
-        y: 0px;
         width: root.width;
         height: root.height;
         background: transparent;
 
-        TouchArea {
-            clicked => { root.close-toolbar-overflow(); }
-        }
+        TouchArea { clicked => { root.close-toolbar-overflow(); } }
 
-        Rectangle {
-            x: max(8px, root.width - 272px);
-            y: Theme.tokens.metrics.header-height + 8px;
-            width: 256px;
-            height: 148px;
-            border-radius: Theme.tokens.metrics.radius-medium;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface;
-            drop-shadow-blur: 16px;
-            drop-shadow-offset-y: 4px;
-            drop-shadow-color: Theme.palette().shadow;
-
-            VerticalLayout {
-                spacing: 4px;
-                padding: 8px;
-
-                ToolbarButton {
-                    icon: "eye";
-                    label: "View";
-                    enabled: root.inspector-available;
-                    horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "format";
-                    label: "Format";
-                    checked: root.inspector-visible;
-                    enabled: root.inspector-available;
-                    horizontal-stretch: 1;
-                    clicked => { root.toggle-inspector(); root.close-toolbar-overflow(); }
-                }
-                ToolbarButton {
-                    icon: "export";
-                    label: "Export PDF";
-                    horizontal-stretch: 1;
-                    clicked => { root.export-pdf(); root.close-toolbar-overflow(); }
-                }
+        VerticalLayout {
+            padding-top: Theme.tokens.metrics.header-height + Theme.tokens.metrics.context-toolbar-height + Theme.tokens.space.sm;
+            padding-right: Theme.tokens.space.lg;
+            padding-left: Theme.tokens.space.lg;
+            cross-axis-alignment: end;
+            WriterToolbarOverflow {
+                inspector-available: root.inspector-available;
+                inspector-visible: root.inspector-visible;
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                close-requested => { root.close-toolbar-overflow(); }
             }
         }
     }

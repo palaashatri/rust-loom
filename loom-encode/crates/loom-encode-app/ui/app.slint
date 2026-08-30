@@ -8,8 +8,11 @@ import {
     Slider, SegmentedControl, StatusPill, CommandPalette, CommandPaletteItem
 } from "components.slint";
 import { Icon } from "icons.slint";
-import { Theme } from "theme.slint";
-export { Theme } from "theme.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import { EncodeQueue } from "encode_queue.slint";
+import { EncodeProgress } from "encode_progress.slint";
+import { EncodeInspector } from "encode_inspector.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
 
 export component EncodeApp inherits Window {
     title: "Loom Encode";
@@ -121,169 +124,52 @@ export component EncodeApp inherits Window {
         DirectionalLayout {
             spacing: 0px;
             vertical-stretch: 1;
-            SidebarSurface {
-                // Keep the queue pane within SidebarSurface's shared 360px
-                // maximum; the previous 420px wide pane left the central
-                // job view needlessly compressed on large windows.
-                width: root.compact-layout ? 296px : 360px;
-                title: "Delivery Queue";
-                detail: Math.round(root.batch-progress) + "% complete";
-                VerticalLayout {
-                    spacing: 8px;
-                    padding: 10px;
-                    for label[index] in root.job-labels : WorkspaceRow {
-                        height: 86px;
-                        selected: index == root.active-job-index;
-                        emphasized: root.job-running[index];
-                        clicked => { root.select-job(index); }
-                        VerticalLayout {
-                            spacing: 6px;
-                            padding: 9px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Rectangle {
-                                    width: 46px; height: 46px; border-radius: 7px;
-                                    background: Theme.palette().surface-sunken;
-                                    border-width: 1px; border-color: Theme.palette().border;
-                                    Icon { icon: "video"; size: 20px; tint: Theme.palette().accent; }
-                                }
-                                VerticalLayout {
-                                    spacing: 3px;
-                                    Text { text: label; font-size: Theme.tokens.typography.body; font-weight: 650; color: Theme.palette().ink; overflow: elide; }
-                                    Text { text: root.job-details[index]; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; overflow: elide; }
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        StatusPill {
-                                            text: root.job-statuses[index];
-                                            tone: root.job-tones[index];
-                                            max-content-width: root.compact-layout ? 210px : 280px;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Text { text: Math.round(root.job-progresses[index]) + "%"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink; }
-                                    }
-                                }
-                            }
-                            Rectangle {
-                                height: 4px;
-                                border-radius: 2px;
-                                background: Theme.palette().surface-sunken;
-                                Rectangle { width: parent.width * root.job-progresses[index] / 100; height: parent.height; border-radius: 2px; background: Theme.palette().accent; }
-                            }
-                        }
-                    }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                }
+
+            EncodeQueue {
+                min-width: root.compact-layout ? 280px : 320px;
+                preferred-width: root.compact-layout ? 296px : 360px;
+                max-width: root.compact-layout ? 320px : 392px;
+                compact-layout: root.compact-layout;
+                job-labels: root.job-labels;
+                job-details: root.job-details;
+                job-statuses: root.job-statuses;
+                job-progresses: root.job-progresses;
+                job-tones: root.job-tones;
+                job-running: root.job-running;
+                active-job-index: root.active-job-index;
+                batch-progress: root.batch-progress;
+                select-job(index) => { root.select-job(index); }
             }
             Rectangle { width: 1px; background: Theme.palette().border; }
 
-            Rectangle {
+            EncodeProgress {
                 horizontal-stretch: 1;
-                background: Theme.palette().canvas;
-                VerticalLayout {
-                    padding: root.compact-layout ? 12px : 22px;
-                    spacing: 16px;
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Rectangle {
-                            width: root.compact-layout ? 64px : 86px; height: root.compact-layout ? 64px : 86px; border-radius: 12px;
-                            background: Theme.palette().selection-soft;
-                            border-width: 1px; border-color: Theme.palette().border-strong;
-                            Icon { icon: "video"; size: 34px; tint: Theme.palette().accent; }
-                        }
-                        VerticalLayout {
-                            spacing: 6px;
-                            Text { text: root.selected-job-text; font-size: Theme.tokens.typography.heading; font-weight: 700; color: Theme.palette().ink; overflow: elide; }
-                            Text { text: root.selected-job-details; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; overflow: elide; }
-                            Text { text: root.selected-output; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; overflow: elide; }
-                        }
-                    }
-                    Rectangle { height: 1px; background: Theme.palette().border; }
-                    HorizontalLayout {
-                        height: 28px;
-                        Text { text: "ACTIVE JOB"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; vertical-alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        MetricChip {
-                            label: "Progress";
-                            value: Math.round(root.active-job-progress) + "%";
-                        }
-                    }
-                    Rectangle {
-                        height: 10px; border-radius: 5px; background: Theme.palette().surface-sunken;
-                        Rectangle { width: parent.width * root.active-job-progress / 100; height: parent.height; border-radius: 5px; background: Theme.palette().accent; }
-                    }
-                    Rectangle { vertical-stretch: 1; background: transparent; }
-                    Rectangle {
-                        height: 86px; border-radius: 12px; background: Theme.palette().surface;
-                        border-width: 1px; border-color: Theme.palette().border;
-                        HorizontalLayout {
-                            padding: 14px; spacing: 14px;
-                            Icon { icon: root.backend-available ? "check" : "warning"; size: 22px; tint: root.backend-available ? Theme.palette().success : Theme.palette().warning; }
-                            VerticalLayout {
-                                spacing: 4px;
-                                Text { text: root.backend-available ? "Local FFmpeg backend" : "FFmpeg backend not found"; font-size: Theme.tokens.typography.body-large; font-weight: 650; color: Theme.palette().ink; }
-                                Text { text: root.backend-version; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; overflow: elide; }
-                            }
-                        }
-                    }
-                }
+                compact-layout: root.compact-layout;
+                selected-job-text: root.selected-job-text;
+                selected-job-details: root.selected-job-details;
+                selected-output: root.selected-output;
+                active-job-progress: root.active-job-progress;
+                backend-available: root.backend-available;
+                backend-version: root.backend-version;
             }
 
             Rectangle { width: 1px; background: Theme.palette().border; }
-            InspectorSurface {
-                // InspectorSurface has a 240px minimum; matching it avoids a
-                // compact-width constraint conflict and keeps fields usable.
-                width: root.compact-layout ? 240px : 330px;
-                title: "Job Inspector";
-                detail: root.running ? "Queue locked" : "Editable";
-                VerticalLayout {
-                    spacing: 0px;
-                    PaneTabs { items: ["Source", "Preset", "Activity"]; current <=> root.inspector-tab; }
-                    Rectangle { height: 1px; background: Theme.palette().border; }
-                    VerticalLayout {
-                        spacing: Theme.tokens.space.md;
-                        // InspectorSurface supplies the shared 12px content inset.
-                        padding: 0px;
-                        vertical-stretch: 1;
-                        if root.inspector-tab == 0 : VerticalLayout {
-                            spacing: Theme.tokens.space.sm;
-                            vertical-stretch: 0;
-                            Text { text: "SOURCE & DESTINATION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                            Text { text: "Input path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                            Field { label: "Input path"; placeholder: "Choose a source file…"; value <=> root.selected-source; edited(value) => { root.source-changed(value); } }
-                            Text { text: "Output path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                            Field { label: "Output path"; placeholder: "Choose an output file…"; value <=> root.selected-output; edited(value) => { root.output-changed(value); } }
-                        }
-                        if root.inspector-tab == 1 : VerticalLayout {
-                            spacing: Theme.tokens.space.sm;
-                            vertical-stretch: 0;
-                            Text { text: "DELIVERY PRESET"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                            if !root.compact-layout : SegmentedControl {
-                                items: ["Web 1080p", "ProRes 422", "AV1 High"];
-                                current: root.selected-preset == "ProRes 422" ? 1 : root.selected-preset == "AV1 High" ? 2 : 0;
-                                selected(index) => { root.preset-changed(index == 1 ? "ProRes 422" : index == 2 ? "AV1 High" : "Web 1080p"); }
-                            }
-                            if root.compact-layout : VerticalLayout {
-                                spacing: Theme.tokens.space.xs;
-                                for preset[index] in ["Web 1080p", "ProRes 422", "AV1 High"] : ToolButton {
-                                    text: preset;
-                                    horizontal-stretch: 1;
-                                    checked: root.selected-preset == preset;
-                                    clicked => { root.preset-changed(preset); }
-                                }
-                            }
-                            Text { text: root.selected-job-details; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; }
-                        }
-                        if root.inspector-tab == 2 : VerticalLayout {
-                            spacing: Theme.tokens.space.sm;
-                            vertical-stretch: 0;
-                            Text { text: "QUEUE ACTIVITY"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
-                            Text { text: root.status-left; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
-                            ToolButton { icon: "redo"; text: "Retry selected job"; enabled: !root.running; clicked => { root.retry-job(); } }
-                            Text { text: "Progress is parsed from FFmpeg's local -progress stream. Cancellation terminates the active process cooperatively."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
-                        }
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-                    }
-                }
+            EncodeInspector {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 330px;
+                max-width: root.compact-layout ? 272px : 360px;
+                compact-layout: root.compact-layout;
+                running: root.running;
+                inspector-tab <=> root.inspector-tab;
+                selected-source <=> root.selected-source;
+                selected-output <=> root.selected-output;
+                selected-preset: root.selected-preset;
+                selected-job-details: root.selected-job-details;
+                status-left: root.status-left;
+                preset-changed(preset) => { root.preset-changed(preset); }
+                source-changed(path) => { root.source-changed(path); }
+                output-changed(path) => { root.output-changed(path); }
+                retry-job => { root.retry-job(); }
             }
         }
         ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }

@@ -29,6 +29,7 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
 }
 
@@ -40,6 +41,7 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "dark".to_string(),
+        rtl: false,
         open: None,
     };
     let mut it = std::env::args().skip(1);
@@ -66,6 +68,7 @@ fn parse_args() -> Result<Args, String> {
             "--theme" => {
                 args.theme = it.next().ok_or("--theme needs a name")?;
             }
+            "--rtl" => args.rtl = true,
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
             }
@@ -359,12 +362,17 @@ fn rebuild_palette(app: &MotionApp, query: &str) {
     }
 }
 
-fn compact_layout_for_width(width: u32) -> bool {
-    width < 1180
+fn compact_layout_for_width(app: &MotionApp, width: u32) -> bool {
+    let policy = ResponsivePolicy::get(app);
+    (width as f32) < policy.get_priority_1_icon_only_below()
 }
 
 fn configure_responsive_layout(app: &MotionApp, width: u32) {
-    app.set_compact_layout(compact_layout_for_width(width));
+    app.set_compact_layout(compact_layout_for_width(app, width));
+}
+
+fn configure_direction(app: &MotionApp, rtl: bool) {
+    app.set_rtl(rtl);
 }
 
 fn wire_responsive_layout(app: &MotionApp) {
@@ -379,6 +387,7 @@ fn wire_responsive_layout(app: &MotionApp) {
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
@@ -399,6 +408,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = MotionApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
@@ -661,6 +671,7 @@ fn main() -> Result<(), String> {
     }
 
     let app = MotionApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     app.window()

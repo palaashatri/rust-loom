@@ -1,0 +1,39 @@
+import { SidebarSurface } from "components.slint";
+import { EncodeJobCard } from "encode_job_card.slint";
+import { Theme } from "theme.slint";
+
+/// Queue rail for Encode.  Job cards are a reusable component and the rail
+/// itself only owns selection and progress presentation.
+export component EncodeQueue inherits SidebarSurface {
+    in property <bool> compact-layout: false;
+    in property <[string]> job-labels: [];
+    in property <[string]> job-details: [];
+    in property <[string]> job-statuses: [];
+    in property <[float]> job-progresses: [];
+    in property <[int]> job-tones: [];
+    in property <[bool]> job-running: [];
+    in property <int> active-job-index: 0;
+    in property <float> batch-progress: 0.0;
+
+    callback select-job(int);
+
+    title: "Delivery Queue";
+    detail: Math.round(root.batch-progress) + "% complete";
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding: Theme.tokens.space.sm;
+        for label[index] in root.job-labels : EncodeJobCard {
+            job-label: label;
+            job-detail: root.job-details[index];
+            job-status: root.job-statuses[index];
+            progress: root.job-progresses[index];
+            tone: root.job-tones[index];
+            running: root.job-running[index];
+            compact-layout: root.compact-layout;
+            selected: index == root.active-job-index;
+            clicked => { root.select-job(index); }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
