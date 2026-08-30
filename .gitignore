@@ -46,6 +46,11 @@ __MACOSX/
 .serena/
 .superpowers/
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
 # Generated release/audit artifacts
 Loom-Complete.zip
 Loom-Complete.zip.sha256
