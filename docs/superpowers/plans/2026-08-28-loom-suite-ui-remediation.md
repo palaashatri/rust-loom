@@ -260,3 +260,105 @@ production apps.
 - [ ] Run one complete mouse/keyboard/persistence/failure journey per app and retain logs/screenshots next to its exact commit.
 - [ ] Reject a milestone for overlap, clipping, stale inspector values, theme inconsistency, fake controls, or an unsupported completion claim.
 - [ ] Commit: `test(ui): record native suite remediation evidence`.
+
+## Componentization tranche — 2026-08-30
+
+The current visual problem is not solved by another pass of padding tweaks.
+Each visible object needs a named owner, a bounded layout contract, and one
+state/interaction surface. These tasks are intentionally component-first and
+must preserve the existing domain callbacks rather than introducing static
+facades.
+
+### Task 12: Shared UI object kit and shell policy
+
+**Files:** `loom-core/crates/loom-ui/ui/{theme,toolkit,components}.slint`,
+`loom-design-bible/{LAYOUT,TOOLBARS,COMPONENTS,THEMING}.md`,
+`loom-design-bible/contracts/desktop-ui.toml`,
+`loom-bootstrap/scripts/audit-product-ui.py`.
+
+- [ ] Define explicit objects for title chrome, icon-only toolbar item,
+  icon-over-label toolbar item, sheet-tab strip, formula bar, inspector
+  section, property row, field, segmented control, status bar, and overflow.
+- [ ] Reconcile the 40px context-toolbar token with the 48–52px
+  icon-over-label slot; no host may silently stretch one into the other.
+- [ ] Centralize the 1180/1320 responsive policy and test the transition at
+  1179, 1180, 1279, 1280, 1319, and 1320px plus 150% text.
+- [ ] Add a geometry manifest/assertion that detects overlap, clipping,
+  wrapped toolbars, and primary-surface starvation; a PNG hash is not enough.
+- [ ] Preserve semantic light, dark, high-contrast, reduced-motion, and RTL
+  states without app-local colors or padding overrides.
+
+### Task 13: Sheets componentized Numbers surface
+
+**Files:** `loom-sheets/crates/loom-sheets-app/ui/{app,components}.slint`,
+`loom-sheets/crates/loom-sheets-app/src/main.rs`,
+`loom-sheets/crates/loom-sheets-core/src/lib.rs`.
+
+- [ ] Move the sheet tabs, action toolbar, formula/name bar, virtual grid,
+  selection overlay, scrollbars, and Table/Cell inspector into named objects.
+- [ ] Make the grid the dominant surface; keep a real table object boundary,
+  visible row/column headers, selection handles, and context-driven inspector.
+- [ ] Bind each object to selection, formula commit/cancel, fill/copy, undo,
+  save/reopen, keyboard navigation, and accessibility announcements.
+- [ ] Replace the generic sample/empty state with an honest editable workbook
+  journey and a Numbers-quality 1024/1280/1440/1920 layout matrix.
+
+### Task 14: Componentize office and creative application surfaces
+
+**Files:** Writer, Present, Photo, Motion, Video, Studio, and Encode app UI
+  modules and their existing controllers.
+
+- [ ] Give every app named objects for its title, toolbar groups, primary
+  surface, selection/transport strip, sidebar/timeline, inspector sections,
+  and status/error state; keep domain state in Rust controllers.
+- [ ] Remove inline duplicate shells, diagnostic/sample content presented as
+  finished work, and local geometry overrides that bypass the shared kit.
+- [ ] Ensure every object has pointer, keyboard, focus, accessibility,
+  persistence, undo, and failure semantics before it is enabled.
+- [ ] Run the same compact/reference/large theme matrix and inspect long
+  labels, 150% text, RTL, and reduced motion for each application.
+
+Because this spans seven independent applications, execution is split into
+reviewable batches while retaining the single Task 14 acceptance contract:
+
+#### Task 14A: Writer and Present
+
+- [ ] Extract named title, toolbar groups, page/scene surface, selection
+  overlay, inspector sections, and status/error objects from the existing
+  Slint layouts.
+- [ ] Keep selection, transforms/formatting, undo, persistence, keyboard,
+  accessibility, and failure callbacks in the existing Rust controllers.
+- [ ] Capture compact/reference/large light/dark/high-contrast states and
+  inspect long labels, 150% text, RTL, and reduced motion.
+
+#### Task 14B: Photo, Motion, and Video
+
+- [ ] Extract named title, tool groups, canvas/stage/preview, selection or
+  transport strip, timeline/layer surfaces, inspector sections, and
+  status/error objects.
+- [ ] Preserve real layer/clock/clip state and do not present diagnostics or
+  synthetic samples as completed editing workflows.
+- [ ] Capture the same theme/density matrix and exercise a real state change
+  before accepting the componentization.
+
+#### Task 14C: Studio and Encode
+
+- [ ] Extract named title, transport/queue controls, arrangement or queue
+  surface, inspector sections, and status/error objects.
+- [ ] Preserve durable job/region/mixer state, cancellation, retry/failure,
+  keyboard, accessibility, and undo semantics.
+- [ ] Capture the same theme/density matrix and inspect device/file-panel
+  failure states.
+
+### Task 15: Exact-head visual and interaction acceptance
+
+**Files:** `.work/evidence/ui/<exact-sha>/` only.
+
+- [ ] Build from the exact pushed SHA and capture genuine macOS windows with
+  titlebar, menus, focus rings, file panels, and appearance changes.
+- [ ] Exercise one real edit journey per app: select → mutate → undo/redo →
+  save/reopen → recoverable failure/cancel.
+- [ ] Review screenshots side-by-side with the supplied references; reject
+  overlap, clipping, stale inspector state, fake controls, or a screenshot
+  that implies behavior the app does not implement.
+- [ ] Re-score only from this evidence and record known limitations honestly.
