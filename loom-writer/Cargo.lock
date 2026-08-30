@@ -2801,6 +2801,7 @@ dependencies = [
 name = "loom-writer-app"
 version = "0.1.0"
 dependencies = [
+ "loom-command",
  "loom-desktop",
  "loom-production",
  "loom-storage",

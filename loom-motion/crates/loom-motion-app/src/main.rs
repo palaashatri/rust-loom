@@ -8,7 +8,9 @@ use loom_desktop::{
     build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
     MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
-use loom_motion_core::{load_motion, save_motion, CompositionClock, CompositionDocument, MotionLayer};
+use loom_motion_core::{
+    load_motion, save_motion, CompositionClock, CompositionDocument, MotionLayer,
+};
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};

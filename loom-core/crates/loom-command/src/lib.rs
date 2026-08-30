@@ -361,6 +361,12 @@ impl CommandSpec {
         self.radio_group = Some(group.into());
         self
     }
+
+    /// Set ordering index within its category.
+    pub fn with_order(mut self, order: u32) -> Self {
+        self.order = order;
+        self
+    }
 }
 
 /// Authoritative command registry managing specs, state, search, and execution.

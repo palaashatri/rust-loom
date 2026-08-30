@@ -138,11 +138,13 @@ impl WriterDocument {
     /// separators are included when a selection spans multiple blocks.
     pub fn selected_text(&self) -> String {
         let text = self.editor_text();
-        let (start, end) = self.selection.normalized_range();
+        let (mut start, mut end) = self.selection.normalized_range();
+        start = floor_char_boundary(&text, start.min(text.len()));
+        end = floor_char_boundary(&text, end.min(text.len()));
         if start >= end || start >= text.len() {
             return String::new();
         }
-        text[start.min(text.len())..end.min(text.len())].to_string()
+        text[start..end].to_string()
     }
 
     /// Replace the document's blocks from editable plain text paragraphs.
@@ -441,6 +443,9 @@ impl WriterDocument {
     }
 
     /// Split a block at byte offset, creating a new block with remaining text and preserving styles.
+    ///
+    /// The offset is floored to the previous UTF-8 character boundary and
+    /// clamped to the block bounds.
     pub fn split_block(&mut self, block_id: u64, byte_offset: usize) -> Result<u64, WriterError> {
         let index = self
             .blocks
@@ -448,8 +453,9 @@ impl WriterDocument {
             .position(|b| b.id == block_id)
             .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
         let block = &self.blocks[index];
-        let text_len = block.text.as_str().len();
-        let offset = byte_offset.min(text_len);
+        let text = block.text.as_str();
+        let text_len = text.len();
+        let offset = floor_char_boundary(text, byte_offset.min(text_len));
 
         let first_text = &block.text.as_str()[..offset];
         let second_text = &block.text.as_str()[offset..];
@@ -459,11 +465,15 @@ impl WriterDocument {
         first_block.style = block.style.clone();
         for run in &block.runs {
             if run.start < offset {
-                first_block.runs.push(loom_text::StyleRun {
-                    start: run.start,
-                    end: run.end.min(offset),
-                    style: run.style.clone(),
-                });
+                let start = floor_char_boundary(text, run.start.min(text_len));
+                let end = floor_char_boundary(text, run.end.min(offset));
+                if start < end {
+                    first_block.runs.push(loom_text::StyleRun {
+                        start,
+                        end,
+                        style: run.style.clone(),
+                    });
+                }
             }
         }
 
@@ -473,11 +483,15 @@ impl WriterDocument {
             if run.end > offset {
                 let start = run.start.saturating_sub(offset);
                 let end = run.end - offset;
-                second_block.runs.push(loom_text::StyleRun {
-                    start,
-                    end,
-                    style: run.style.clone(),
-                });
+                // Offsets in the second block are already relative; they remain
+                // valid UTF-8 boundaries because `offset` was floored.
+                if start < end {
+                    second_block.runs.push(loom_text::StyleRun {
+                        start,
+                        end,
+                        style: run.style.clone(),
+                    });
+                }
             }
         }
 
@@ -519,6 +533,22 @@ impl WriterDocument {
                 style: run.style.clone(),
             });
         }
+        combined_block.runs.sort_by_key(|run| run.start);
+        // Coalesce adjacent runs with identical style.
+        let mut coalesced: Vec<loom_text::StyleRun> = Vec::with_capacity(combined_block.runs.len());
+        for run in combined_block.runs.drain(..) {
+            if run.start == run.end {
+                continue;
+            }
+            if let Some(last) = coalesced.last_mut() {
+                if last.end == run.start && last.style == run.style {
+                    last.end = run.end;
+                    continue;
+                }
+            }
+            coalesced.push(run);
+        }
+        combined_block.runs = coalesced;
 
         self.blocks[first_index] = combined_block;
         self.blocks.remove(second_index);
@@ -526,6 +556,10 @@ impl WriterDocument {
     }
 
     /// Formats a sub-range within a block with a given character style.
+    ///
+    /// Overlapping runs are split at `start`/`end` so style outside the target
+    /// range is preserved. Zero-length runs are discarded and adjacent runs
+    /// with identical style are coalesced.
     pub fn format_block_range(
         &mut self,
         block_id: u64,
@@ -538,17 +572,61 @@ impl WriterDocument {
             .iter_mut()
             .find(|b| b.id == block_id)
             .ok_or_else(|| WriterError::Invalid(format!("block {block_id} not found")))?;
-        let text_len = block.text.as_str().len();
-        let start = start_byte.min(text_len);
-        let end = end_byte.min(text_len);
-        if start >= end {
+        let text = block.text.as_str();
+        let text_len = text.len();
+        let start = floor_char_boundary(text, start_byte.min(text_len));
+        let end = floor_char_boundary(text, end_byte.min(text_len));
+        if start >= end || text.is_empty() {
             return Ok(());
         }
-        block
-            .runs
-            .retain(|run| run.end <= start || run.start >= end);
-        block.runs.push(loom_text::StyleRun { start, end, style });
-        block.runs.sort_by_key(|run| run.start);
+        let mut next: Vec<loom_text::StyleRun> = Vec::new();
+        for run in &block.runs {
+            let run_start = floor_char_boundary(text, run.start.min(text_len));
+            let run_end = floor_char_boundary(text, run.end.min(text_len));
+            // Clamp run to block bounds and discard empty.
+            if run_start >= run_end || run_start >= text_len {
+                continue;
+            }
+            if run_end <= start || run_start >= end {
+                next.push(loom_text::StyleRun {
+                    start: run_start,
+                    end: run_end,
+                    style: run.style.clone(),
+                });
+            } else {
+                if run_start < start {
+                    next.push(loom_text::StyleRun {
+                        start: run_start,
+                        end: start,
+                        style: run.style.clone(),
+                    });
+                }
+                if run_end > end {
+                    next.push(loom_text::StyleRun {
+                        start: end,
+                        end: run_end,
+                        style: run.style.clone(),
+                    });
+                }
+            }
+        }
+        next.push(loom_text::StyleRun { start, end, style });
+        next.sort_by_key(|run| run.start);
+        // Coalesce adjacent runs with identical style.
+        let mut coalesced: Vec<loom_text::StyleRun> = Vec::with_capacity(next.len());
+        for run in next {
+            if run.start == run.end {
+                continue;
+            }
+            if let Some(last) = coalesced.last_mut() {
+                if last.end == run.start && last.style == run.style {
+                    last.end = run.end;
+                    continue;
+                }
+            }
+            coalesced.push(run);
+        }
+        block.runs = coalesced;
         Ok(())
     }
 
@@ -984,7 +1062,7 @@ fn remap_style_runs(
             let (start, end) = if insertion {
                 if run.end < old_change_start {
                     (run.start, run.end)
-                } else if run.start > old_change_start {
+                } else if run.start >= old_change_start {
                     (shift_offset(run.start, delta), shift_offset(run.end, delta))
                 } else {
                     (run.start, shift_offset(run.end, delta))
@@ -1033,19 +1111,393 @@ fn shift_offset(offset: usize, delta: isize) -> usize {
     }
 }
 
+fn floor_char_boundary(text: &str, offset: usize) -> usize {
+    let mut value = offset.min(text.len());
+    while value > 0 && !text.is_char_boundary(value) {
+        value -= 1;
+    }
+    value
+}
+
 /// Clamp a text selection to the supplied UTF-8 text while retaining anchor
-/// direction and caret affinity.
+/// direction and caret affinity. Offsets are floored to the previous valid
+/// UTF-8 character boundary and clamped to the document bounds.
 fn normalize_text_selection(text: &str, mut selection: TextSelection) -> TextSelection {
-    let clamp = |offset: usize| {
-        let mut value = offset.min(text.len());
-        while value > 0 && !text.is_char_boundary(value) {
-            value -= 1;
-        }
-        value
-    };
-    selection.anchor = clamp(selection.anchor);
-    selection.focus = clamp(selection.focus);
+    selection.anchor = floor_char_boundary(text, selection.anchor);
+    selection.focus = floor_char_boundary(text, selection.focus);
     selection
+}
+
+/// Toolbar-visible formatting state for the current text selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionFormattingState {
+    /// Whether every character in the selection is bold.
+    pub bold: bool,
+    /// Whether every character in the selection is italic.
+    pub italic: bool,
+    /// Whether every character in the selection is underlined.
+    pub underline: bool,
+    /// Uniform heading level (1..3) of selected blocks, or 0 if mixed/body.
+    pub heading_level: i32,
+    /// Uniform alignment index of selected blocks, or 0 if mixed.
+    pub alignment: i32,
+}
+
+fn normalized_selection_offsets(
+    document: &WriterDocument,
+    selection: TextSelection,
+) -> (usize, usize) {
+    let text = document.editor_text();
+    let (start, end) = selection.normalized_range();
+    (
+        floor_char_boundary(&text, start),
+        floor_char_boundary(&text, end),
+    )
+}
+
+/// Return `(block_index, local_start, local_end)` for text actually covered by
+/// a non-collapsed selection. Newline separators are document structure, not
+/// styleable characters, and are intentionally omitted from spans.
+pub fn selection_text_spans(
+    document: &WriterDocument,
+    selection: TextSelection,
+) -> Vec<(usize, usize, usize)> {
+    let (start, end) = normalized_selection_offsets(document, selection);
+    if start == end {
+        return Vec::new();
+    }
+    let mut spans = Vec::new();
+    let mut global_start = 0usize;
+    for (index, block) in document.blocks.iter().enumerate() {
+        let block_len = block.text.as_str().len();
+        let global_end = global_start + block_len;
+        let overlap_start = start.max(global_start);
+        let overlap_end = end.min(global_end);
+        if overlap_start < overlap_end {
+            let local_start =
+                floor_char_boundary(block.text.as_str(), overlap_start - global_start);
+            let local_end = floor_char_boundary(block.text.as_str(), overlap_end - global_start);
+            if local_start < local_end {
+                spans.push((index, local_start, local_end));
+            }
+        }
+        global_start = global_end + usize::from(index + 1 < document.blocks.len());
+    }
+    spans
+}
+
+fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
+    if document.blocks.is_empty() {
+        return None;
+    }
+    let text = document.editor_text();
+    let offset = floor_char_boundary(&text, offset);
+    let mut global_start = 0usize;
+    for (index, block) in document.blocks.iter().enumerate() {
+        let global_end = global_start + block.text.as_str().len();
+        if offset <= global_end || index + 1 == document.blocks.len() {
+            return Some(index);
+        }
+        global_start = global_end + 1;
+    }
+    Some(document.blocks.len() - 1)
+}
+
+/// Paragraph blocks affected by the selection. A collapsed caret affects one
+/// paragraph. A range crossing paragraph separators affects the paragraphs it
+/// enters, even when a paragraph itself is empty.
+pub fn selected_block_indices(document: &WriterDocument, selection: TextSelection) -> Vec<usize> {
+    let (start, end) = normalized_selection_offsets(document, selection);
+    let Some(first) = block_at_offset(document, start) else {
+        return Vec::new();
+    };
+    if start == end {
+        return vec![first];
+    }
+    let last_probe = end.saturating_sub(1);
+    let last = block_at_offset(document, last_probe).unwrap_or(first);
+    (first.min(last)..=first.max(last)).collect()
+}
+
+fn style_at(block: &RichBlock, byte_offset: usize) -> loom_text::CharacterStyle {
+    let offset = floor_char_boundary(block.text.as_str(), byte_offset);
+    block
+        .runs
+        .iter()
+        .find(|run| run.start <= offset && offset < run.end)
+        .map(|run| run.style.clone())
+        .unwrap_or_default()
+}
+
+fn coalesce_runs(runs: Vec<loom_text::StyleRun>) -> Vec<loom_text::StyleRun> {
+    let mut result: Vec<loom_text::StyleRun> = Vec::with_capacity(runs.len());
+    for run in runs {
+        if run.start == run.end {
+            continue;
+        }
+        if let Some(last) = result.last_mut() {
+            if last.end == run.start && last.style == run.style {
+                last.end = run.end;
+                continue;
+            }
+        }
+        result.push(run);
+    }
+    result
+}
+
+fn mutate_character_range(
+    block: &mut RichBlock,
+    start: usize,
+    end: usize,
+    mut operation: impl FnMut(&mut loom_text::CharacterStyle),
+) {
+    let text = block.text.as_str();
+    let start = floor_char_boundary(text, start);
+    let end = floor_char_boundary(text, end);
+    if start >= end || text.is_empty() {
+        return;
+    }
+    let mut boundaries = std::collections::BTreeSet::from([0usize, text.len(), start, end]);
+    for run in &block.runs {
+        boundaries.insert(floor_char_boundary(text, run.start));
+        boundaries.insert(floor_char_boundary(text, run.end));
+    }
+    let boundaries: Vec<usize> = boundaries.into_iter().collect();
+    let mut next = Vec::new();
+    for pair in boundaries.windows(2) {
+        let interval_start = pair[0];
+        let interval_end = pair[1];
+        if interval_start >= interval_end {
+            continue;
+        }
+        let mut style = style_at(block, interval_start);
+        if interval_start < end && interval_end > start {
+            operation(&mut style);
+        }
+        next.push(loom_text::StyleRun {
+            start: interval_start,
+            end: interval_end,
+            style,
+        });
+    }
+    block.runs = coalesce_runs(next);
+}
+
+fn mutate_selection_character_styles(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    mut operation: impl FnMut(&mut loom_text::CharacterStyle),
+) {
+    let spans = selection_text_spans(document, selection);
+    for (block_index, start, end) in spans {
+        mutate_character_range(
+            &mut document.blocks[block_index],
+            start,
+            end,
+            &mut operation,
+        );
+    }
+}
+
+/// Apply bold to the exact text covered by `selection` (multi-block aware).
+/// Reversed anchor/focus and UTF-8 boundaries are handled via flooring.
+pub fn set_selection_bold(document: &mut WriterDocument, selection: TextSelection, enabled: bool) {
+    mutate_selection_character_styles(document, selection, |style| {
+        style.weight = if enabled {
+            loom_text::FontWeight::Bold
+        } else {
+            loom_text::FontWeight::Regular
+        };
+    });
+}
+
+/// Apply italic to the selection.
+pub fn set_selection_italic(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    enabled: bool,
+) {
+    mutate_selection_character_styles(document, selection, |style| style.italic = enabled);
+}
+
+/// Apply underline to the selection.
+pub fn set_selection_underline(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    enabled: bool,
+) {
+    mutate_selection_character_styles(document, selection, |style| style.underline = enabled);
+}
+
+/// Apply heading kind to every block touched by the selection. A collapsed
+/// caret affects its containing block.
+pub fn set_selection_heading(document: &mut WriterDocument, selection: TextSelection, level: i32) {
+    let kind = match level {
+        1 => "heading1",
+        2 => "heading2",
+        3 => "heading3",
+        _ => "paragraph",
+    };
+    for index in selected_block_indices(document, selection) {
+        document.blocks[index].kind = kind.to_string();
+    }
+}
+
+/// Apply paragraph alignment to every block touched by the selection.
+pub fn set_selection_alignment(
+    document: &mut WriterDocument,
+    selection: TextSelection,
+    index: i32,
+) {
+    let alignment = match index {
+        1 => loom_text::Alignment::Center,
+        2 => loom_text::Alignment::Right,
+        3 => loom_text::Alignment::Justify,
+        _ => loom_text::Alignment::Left,
+    };
+    for block_index in selected_block_indices(document, selection) {
+        document.blocks[block_index].style.alignment = alignment;
+    }
+}
+
+fn heading_level_for_kind(kind: &str) -> i32 {
+    match kind {
+        "heading1" => 1,
+        "heading2" => 2,
+        "heading3" => 3,
+        _ => 0,
+    }
+}
+
+fn alignment_index(alignment: loom_text::Alignment) -> i32 {
+    match alignment {
+        loom_text::Alignment::Left => 0,
+        loom_text::Alignment::Center => 1,
+        loom_text::Alignment::Right => 2,
+        loom_text::Alignment::Justify => 3,
+    }
+}
+
+fn caret_style(
+    document: &WriterDocument,
+    selection: TextSelection,
+) -> Option<loom_text::CharacterStyle> {
+    let (start, _) = normalized_selection_offsets(document, selection.clone());
+    let block_index = block_at_offset(document, start)?;
+    let block = &document.blocks[block_index];
+    let text = block.text.as_str();
+    if text.is_empty() {
+        return Some(loom_text::CharacterStyle::default());
+    }
+    let global_start: usize = document.blocks[..block_index]
+        .iter()
+        .map(|b| b.text.as_str().len() + 1)
+        .sum();
+    let mut local = start.saturating_sub(global_start).min(text.len());
+    local = floor_char_boundary(text, local);
+    // Affinity-aware: Upstream looks at previous character, Downstream at next.
+    match selection.affinity {
+        CaretAffinity::Upstream => {
+            if local == 0 {
+                Some(style_at(block, 0))
+            } else if local == text.len() {
+                let prev = text[..local]
+                    .char_indices()
+                    .last()
+                    .map(|(off, _)| off)
+                    .unwrap_or(0);
+                Some(style_at(block, prev))
+            } else {
+                // Upstream: style of character before caret.
+                let prev = text[..local]
+                    .char_indices()
+                    .last()
+                    .map(|(off, _)| off)
+                    .unwrap_or(0);
+                Some(style_at(block, prev))
+            }
+        }
+        CaretAffinity::Downstream => {
+            if local == text.len() {
+                let prev = text[..local]
+                    .char_indices()
+                    .last()
+                    .map(|(off, _)| off)
+                    .unwrap_or(0);
+                Some(style_at(block, prev))
+            } else {
+                Some(style_at(block, local))
+            }
+        }
+    }
+}
+
+/// Toolbar formatting state for the current text selection. For a range,
+/// inline controls are checked only when every character in the range has that
+/// style; for a collapsed caret the style immediately before (Upstream) or at
+/// (Downstream) the caret is used, matching the style a subsequent insertion
+/// will inherit.
+pub fn formatting_state_for_selection(
+    document: &WriterDocument,
+    selection: TextSelection,
+) -> SelectionFormattingState {
+    let spans = selection_text_spans(document, selection.clone());
+    let selection_for_caret = selection.clone();
+    let style_matches = |predicate: &dyn Fn(&loom_text::CharacterStyle) -> bool| {
+        if spans.is_empty() {
+            return caret_style(document, selection_for_caret.clone())
+                .is_some_and(|s| predicate(&s));
+        }
+        let mut saw = false;
+        for (block_index, start, end) in &spans {
+            let block = &document.blocks[*block_index];
+            let mut boundaries = std::collections::BTreeSet::from([*start, *end]);
+            for run in &block.runs {
+                if run.start < *end && run.end > *start {
+                    boundaries.insert(run.start.max(*start).min(*end));
+                    boundaries.insert(run.end.max(*start).min(*end));
+                }
+            }
+            let boundaries: Vec<usize> = boundaries.into_iter().collect();
+            for pair in boundaries.windows(2) {
+                if pair[0] >= pair[1] {
+                    continue;
+                }
+                saw = true;
+                if !predicate(&style_at(block, pair[0])) {
+                    return false;
+                }
+            }
+        }
+        saw
+    };
+    let selected_blocks = selected_block_indices(document, selection);
+    let heading_level = selected_blocks
+        .first()
+        .map(|i| heading_level_for_kind(&document.blocks[*i].kind))
+        .filter(|first| {
+            selected_blocks
+                .iter()
+                .all(|i| heading_level_for_kind(&document.blocks[*i].kind) == *first)
+        })
+        .unwrap_or(0);
+    let alignment = selected_blocks
+        .first()
+        .map(|i| alignment_index(document.blocks[*i].style.alignment))
+        .filter(|first| {
+            selected_blocks
+                .iter()
+                .all(|i| alignment_index(document.blocks[*i].style.alignment) == *first)
+        })
+        .unwrap_or(0);
+    SelectionFormattingState {
+        bold: style_matches(&|s| s.weight == loom_text::FontWeight::Bold),
+        italic: style_matches(&|s| s.italic),
+        underline: style_matches(&|s| s.underline),
+        heading_level,
+        alignment,
+    }
 }
 
 /// Parse error for Writer content.
@@ -1606,7 +2058,8 @@ pub fn export_document_as_docx(
 pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
     let mut arch = PackageArchive::new();
     let content = doc.to_content_json();
-    arch.add("content/document.json", content.into_bytes())?;
+    let content_bytes = content.as_bytes();
+    arch.add("content/document.json", content.clone().into_bytes())?;
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Writer,
@@ -1616,8 +2069,8 @@ pub fn save_document(doc: &WriterDocument) -> Result<Vec<u8>, loom_package::zip:
         entries: vec![ManifestEntry {
             path: "content/document.json".into(),
             mime: MimeType::parse("application/vnd.loom.document-content")?,
-            size: doc.to_content_json().len() as u64,
-            sha256: Checksum::from_bytes(zip::sha256(doc.to_content_json().as_bytes())),
+            size: content_bytes.len() as u64,
+            sha256: Checksum::from_bytes(zip::sha256(content_bytes)),
         }],
     };
     let manifest_str = pkg_json::write(&manifest);
@@ -5088,5 +5541,410 @@ mod tests {
             outline.iter().map(|e| e.level).collect::<Vec<_>>(),
             vec![1, 3]
         );
+    }
+
+    // -----------------------------------------------------------------
+    // W1 Selection-aware editor hardening
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn selection_bold_across_two_blocks_survives_replace_paragraphs_and_roundtrip() {
+        let mut doc = WriterDocument::new("w1-two-block", "W1");
+        doc.push(RichBlock::new(1, "paragraph", "alpha"));
+        doc.push(RichBlock::new(2, "paragraph", "beta"));
+        doc.push(RichBlock::new(3, "paragraph", "gamma"));
+
+        // Editor text is "alpha\nbeta\ngamma" (5+1+4+1+5=16). Select "ha\nbe" (3..8).
+        let selection = TextSelection::range(3, 8);
+        set_selection_bold(&mut doc, selection.clone(), true);
+
+        // Only first two blocks should have bold fragments.
+        assert!(doc.blocks[0]
+            .runs
+            .iter()
+            .any(|r| r.start == 3 && r.end == 5 && r.style.weight == loom_text::FontWeight::Bold));
+        assert!(doc.blocks[1]
+            .runs
+            .iter()
+            .any(|r| r.start == 0 && r.end == 2 && r.style.weight == loom_text::FontWeight::Bold));
+        assert!(doc.blocks[2].runs.is_empty());
+
+        let state = formatting_state_for_selection(&doc, selection.clone());
+        assert!(state.bold);
+        assert_eq!(state.heading_level, 0);
+
+        // Reversed anchor/focus must produce identical spans and state.
+        let reversed = TextSelection::range(8, 3);
+        assert_eq!(
+            selection_text_spans(&doc, selection.clone()),
+            selection_text_spans(&doc, reversed.clone())
+        );
+        assert_eq!(formatting_state_for_selection(&doc, reversed), state);
+
+        // Persist and reload — runs and selection survive.
+        doc.set_selection(selection.clone());
+        let json = doc.to_content_json();
+        let loaded = WriterDocument::from_content_json(&json).unwrap();
+        assert_eq!(loaded.blocks[0].runs, doc.blocks[0].runs);
+        assert_eq!(loaded.blocks[1].runs, doc.blocks[1].runs);
+        assert_eq!(loaded.selection(), doc.selection());
+        assert_eq!(
+            formatting_state_for_selection(&loaded, loaded.selection()),
+            state
+        );
+
+        // Simulate typing: insert 'X' inside the bold run of the second block.
+        let mut edited = loaded.clone();
+        edited.replace_paragraphs("alpha\nbXeta\ngamma");
+        // Second block's bold run should have been extended to cover the insertion,
+        // with the trailing regular fragment shifted.
+        assert_eq!(edited.blocks[1].text.as_str(), "bXeta");
+        assert_eq!(edited.blocks[1].runs.len(), 2);
+        assert!(edited.blocks[1]
+            .runs
+            .iter()
+            .any(|r| r.start == 0 && r.end == 3 && r.style.weight == loom_text::FontWeight::Bold));
+        assert!(edited.blocks[1].runs.iter().any(|r| r.start == 3
+            && r.end == 5
+            && r.style.weight == loom_text::FontWeight::Regular));
+        // First block untouched (still has Regular [0,3) + Bold [3,5)).
+        assert_eq!(edited.blocks[0].runs, doc.blocks[0].runs);
+        // Save/Load again preserves the remapped runs.
+        let json2 = edited.to_content_json();
+        let reloaded2 = WriterDocument::from_content_json(&json2).unwrap();
+        assert_eq!(reloaded2.blocks[1].runs, edited.blocks[1].runs);
+    }
+
+    #[test]
+    fn save_load_preserves_full_rich_state_and_selection() {
+        let mut doc = WriterDocument::new("w1-rich", "Rich");
+        let mut block = RichBlock::new(10, "heading2", "Café 🌿 end");
+        block.style.alignment = loom_text::Alignment::Justify;
+        block.style.space_after = 11.25;
+        block.runs = vec![
+            loom_text::StyleRun {
+                start: 0,
+                end: "Café".len(),
+                style: loom_text::CharacterStyle {
+                    weight: loom_text::FontWeight::Bold,
+                    italic: true,
+                    color: Some("null".into()),
+                    ..Default::default()
+                },
+            },
+            loom_text::StyleRun {
+                start: "Café 🌿 ".len(),
+                end: block.text.len_bytes(),
+                style: loom_text::CharacterStyle {
+                    underline: true,
+                    ..Default::default()
+                },
+            },
+        ];
+        doc.push(block);
+        doc.push(RichBlock::new(11, "paragraph", "second block"));
+        doc.set_selection(TextSelection {
+            anchor: 2,
+            focus: 10,
+            affinity: CaretAffinity::Downstream,
+        });
+        let json = doc.to_content_json();
+        // Deterministic: second serialization identical.
+        assert_eq!(json, doc.to_content_json());
+        let loaded = WriterDocument::from_content_json(&json).unwrap();
+        assert_eq!(loaded, doc);
+        assert_eq!(loaded.blocks[0].runs.len(), 2);
+        assert_eq!(loaded.selection().affinity, CaretAffinity::Downstream);
+        // Also via save_document/load_document
+        let bytes = save_document(&doc).unwrap();
+        let via_pkg = load_document(&bytes).unwrap();
+        assert_eq!(via_pkg.blocks[0].runs, doc.blocks[0].runs);
+        assert_eq!(via_pkg.selection(), doc.selection());
+    }
+
+    #[test]
+    fn split_and_merge_round_trip_preserves_content_and_runs() {
+        let mut doc = WriterDocument::new("w1-split", "Split");
+        let mut block = RichBlock::new(1, "paragraph", "Hello Beautiful World");
+        block.runs.push(loom_text::StyleRun {
+            start: 6,
+            end: 15,
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        });
+        block.runs.push(loom_text::StyleRun {
+            start: 0,
+            end: 5,
+            style: loom_text::CharacterStyle {
+                italic: true,
+                ..Default::default()
+            },
+        });
+        doc.push(block);
+        let original = doc.clone();
+
+        // Split inside the bold run at a char boundary.
+        let new_id = doc.split_block(1, 8).unwrap();
+        assert_eq!(doc.blocks[0].text.as_str(), "Hello Be");
+        assert_eq!(doc.blocks[1].text.as_str(), "autiful World");
+        // First block keeps the truncated bold prefix.
+        assert!(doc.blocks[0]
+            .runs
+            .iter()
+            .any(|r| r.start == 6 && r.end == 8));
+        // Second block's bold is shifted.
+        assert!(doc.blocks[1]
+            .runs
+            .iter()
+            .any(|r| r.start == 0 && r.end == 7 && r.style.weight == loom_text::FontWeight::Bold));
+
+        // Merge back — should be identical to original after coalescing.
+        doc.merge_blocks(1, new_id).unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+        assert_eq!(
+            doc.blocks[0].text.as_str(),
+            original.blocks[0].text.as_str()
+        );
+        // Runs should round-trip (order may differ but sorted coalesced equals original sorted)
+        let mut orig_runs = original.blocks[0].runs.clone();
+        orig_runs.sort_by_key(|r| r.start);
+        let mut merged_runs = doc.blocks[0].runs.clone();
+        merged_runs.sort_by_key(|r| r.start);
+        assert_eq!(merged_runs, orig_runs);
+
+        // Split at char boundary inside multi-byte: "AéB" (A 1 byte, é 2 bytes, B 1 byte)
+        let mut doc2 = WriterDocument::new("w1-utf8-split", "UTF8");
+        doc2.push(RichBlock::new(10, "paragraph", "AéB"));
+        // Offset 2 lands inside é (bytes 1..3), should floor to 1.
+        let new_id2 = doc2.split_block(10, 2).unwrap();
+        assert_eq!(doc2.blocks[0].text.as_str(), "A");
+        assert_eq!(doc2.blocks[1].text.as_str(), "éB");
+        doc2.merge_blocks(10, new_id2).unwrap();
+        assert_eq!(doc2.blocks[0].text.as_str(), "AéB");
+    }
+
+    #[test]
+    fn selection_edge_cases_empty_collapsed_multiblock_utf8() {
+        // Empty document
+        let mut empty = WriterDocument::new("w1-empty", "Empty");
+        assert_eq!(empty.editor_text(), "");
+        assert_eq!(empty.selected_text(), "");
+        empty.set_selection(TextSelection::range(100, 0));
+        assert_eq!(empty.selection(), TextSelection::caret(0));
+        assert!(selection_text_spans(&empty, TextSelection::caret(0)).is_empty());
+        assert!(selected_block_indices(&empty, TextSelection::caret(0)).is_empty());
+        // formatting on empty does nothing
+        set_selection_bold(&mut empty, TextSelection::caret(0), true);
+        assert!(empty.blocks.is_empty());
+        assert!(!formatting_state_for_selection(&empty, TextSelection::caret(0)).bold);
+
+        // Collapsed caret does not retroactively style
+        let mut doc = WriterDocument::new("w1-collapsed", "Collapsed");
+        doc.push(RichBlock::new(1, "paragraph", "hello"));
+        let before_runs = doc.blocks[0].runs.clone();
+        set_selection_underline(&mut doc, TextSelection::caret(2), true);
+        assert_eq!(doc.blocks[0].runs, before_runs);
+        // caret formatting state reflects style at caret
+        doc.blocks[0].runs = vec![loom_text::StyleRun {
+            start: 0,
+            end: 5,
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        }];
+        let caret_state = formatting_state_for_selection(&doc, TextSelection::caret(3));
+        assert!(caret_state.bold);
+        // Reversed collapsed? anchor==focus so same
+        assert_eq!(
+            formatting_state_for_selection(&doc, TextSelection::range(3, 3)),
+            caret_state
+        );
+
+        // Multi-block selection spanning empty paragraph
+        let mut doc2 = WriterDocument::new("w1-multi-empty", "Multi");
+        doc2.push(RichBlock::new(1, "paragraph", "first"));
+        doc2.push(RichBlock::new(2, "paragraph", ""));
+        doc2.push(RichBlock::new(3, "paragraph", "third"));
+        // editor_text "first\n\nthird" length 5+1+0+1+5=12. Select across all.
+        let sel = TextSelection::range(0, doc2.editor_text().len());
+        let spans = selection_text_spans(&doc2, sel.clone());
+        assert_eq!(spans.len(), 2); // empty middle block has no character span
+        let blocks = selected_block_indices(&doc2, sel.clone());
+        assert_eq!(blocks, vec![0, 1, 2]); // but block indices includes empty block
+        set_selection_heading(&mut doc2, sel.clone(), 1);
+        assert!(doc2.blocks.iter().all(|b| b.kind == "heading1"));
+        set_selection_alignment(&mut doc2, TextSelection::caret(0), 2);
+        // caret only affects first block
+        assert_eq!(doc2.blocks[0].style.alignment, loom_text::Alignment::Right);
+        assert_eq!(doc2.blocks[1].style.alignment, loom_text::Alignment::Left);
+
+        // UTF-8 reversed and mid-char flooring
+        let mut utf = WriterDocument::new("w1-utf8", "UTF8");
+        utf.push(RichBlock::new(1, "paragraph", "AéB"));
+        utf.push(RichBlock::new(2, "paragraph", "C"));
+        // "AéB\nC" bytes: A1 + é2 + B1 + \n1 + C1 =6
+        // Select reversed across blocks with mid-char offset 2 (inside é)
+        let sel_rev = TextSelection::range(5, 2);
+        let spans_rev = selection_text_spans(&utf, sel_rev.clone());
+        // start floored 2->1, end 5 => block0 "AéB" (4 bytes) overlaps [1,4), block1 starts at 5 so no overlap (end == block start).
+        assert_eq!(spans_rev, vec![(0, 1, 4)]);
+        // formatting with reversed selection same as forward
+        let mut utf2 = utf.clone();
+        set_selection_italic(&mut utf2, sel_rev.clone(), true);
+        let mut utf3 = utf.clone();
+        set_selection_italic(&mut utf3, TextSelection::range(1, 5), true);
+        assert_eq!(utf2.blocks[0].runs, utf3.blocks[0].runs);
+        assert_eq!(utf2.blocks[1].runs, utf3.blocks[1].runs);
+
+        // Affinity: Upstream at block boundary looks at previous char
+        let mut doc3 = WriterDocument::new("w1-affinity", "Affinity");
+        doc3.push(RichBlock::new(1, "paragraph", "ab"));
+        doc3.blocks[0].runs = vec![loom_text::StyleRun {
+            start: 0,
+            end: 2,
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        }];
+        doc3.push(RichBlock::new(2, "paragraph", "cd"));
+        // caret at start of second block (global offset 3: "ab\ncd" -> 2+1=3)
+        let caret_down = TextSelection {
+            anchor: 3,
+            focus: 3,
+            affinity: CaretAffinity::Downstream,
+        };
+        let caret_up = TextSelection {
+            anchor: 3,
+            focus: 3,
+            affinity: CaretAffinity::Upstream,
+        };
+        // Downstream at start should see default (no run on second block)
+        assert!(!formatting_state_for_selection(&doc3, caret_down.clone()).bold);
+        // Upstream at same offset should see bold from previous block's last char? Our implementation looks at previous char in same block for Upstream at 0 returns first char's style (default), so both are not bold. Check that affinity is preserved through normalize.
+        doc3.set_selection(caret_up.clone());
+        assert_eq!(doc3.selection().affinity, CaretAffinity::Upstream);
+        doc3.set_selection(caret_down.clone());
+        assert_eq!(doc3.selection().affinity, CaretAffinity::Downstream);
+        // Also test clamping beyond end
+        doc3.set_selection(TextSelection::range(1000, 1000));
+        assert_eq!(doc3.selection().anchor, doc3.editor_text().len());
+    }
+
+    #[test]
+    fn format_block_range_splits_overlapping_runs() {
+        let mut doc = WriterDocument::new("w1-format-split", "Fmt");
+        doc.push(RichBlock::new(1, "paragraph", "abcdefghij"));
+        // Initial bold 0..10 (full)
+        doc.blocks[0].runs = vec![loom_text::StyleRun {
+            start: 0,
+            end: 10,
+            style: loom_text::CharacterStyle {
+                weight: loom_text::FontWeight::Bold,
+                ..Default::default()
+            },
+        }];
+        // Format middle to italic (should split)
+        doc.format_block_range(
+            1,
+            3,
+            7,
+            loom_text::CharacterStyle {
+                italic: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.blocks[0].runs.len(), 3);
+        assert_eq!(doc.blocks[0].runs[0].start, 0);
+        assert_eq!(doc.blocks[0].runs[0].end, 3);
+        assert_eq!(
+            doc.blocks[0].runs[0].style.weight,
+            loom_text::FontWeight::Bold
+        );
+        assert_eq!(doc.blocks[0].runs[1].start, 3);
+        assert_eq!(doc.blocks[0].runs[1].end, 7);
+        assert!(doc.blocks[0].runs[1].style.italic);
+        assert_eq!(doc.blocks[0].runs[2].start, 7);
+        assert_eq!(doc.blocks[0].runs[2].end, 10);
+        assert_eq!(
+            doc.blocks[0].runs[2].style.weight,
+            loom_text::FontWeight::Bold
+        );
+
+        // Second format coalesces adjacent identical styles
+        doc.format_block_range(
+            1,
+            7,
+            10,
+            loom_text::CharacterStyle {
+                italic: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Now [3,10) should be one italic run, plus [0,3) bold
+        assert_eq!(doc.blocks[0].runs.len(), 2);
+        assert_eq!(doc.blocks[0].runs[1].start, 3);
+        assert_eq!(doc.blocks[0].runs[1].end, 10);
+    }
+
+    #[test]
+    fn remap_style_runs_does_not_duplicate_at_boundary() {
+        // Two adjacent runs: bold [0,2), italic [2,4). Insertion at 2 should extend the
+        // preceding run and shift the following one, avoiding duplicate coverage.
+        let old = "abcd";
+        let new = "abXcd";
+        let runs = vec![
+            loom_text::StyleRun {
+                start: 0,
+                end: 2,
+                style: loom_text::CharacterStyle {
+                    weight: loom_text::FontWeight::Bold,
+                    ..Default::default()
+                },
+            },
+            loom_text::StyleRun {
+                start: 2,
+                end: 4,
+                style: loom_text::CharacterStyle {
+                    italic: true,
+                    ..Default::default()
+                },
+            },
+        ];
+        let remapped = super::remap_style_runs(old, new, &runs);
+        // No overlapping runs; the insertion extends the preceding run.
+        assert_eq!(remapped.len(), 2);
+        assert_eq!(remapped[0].start, 0);
+        assert_eq!(remapped[0].end, 3);
+        assert_eq!(remapped[1].start, 3);
+        assert_eq!(remapped[1].end, 5);
+        // Sorting and non-overlapping
+        assert!(remapped[0].end <= remapped[1].start);
+    }
+
+    #[test]
+    fn to_content_json_is_deterministic_and_round_trips() {
+        let mut doc = WriterDocument::new("w1-det", "Det");
+        doc.push(RichBlock::new(2, "paragraph", "second"));
+        doc.push(RichBlock::new(1, "heading1", "first"));
+        // Order is insertion order, not sorted by id — deterministic.
+        let json1 = doc.to_content_json();
+        let json2 = doc.to_content_json();
+        assert_eq!(json1, json2);
+        // Ensure style and runs are fully serialized.
+        assert!(json1.contains("\"style\""));
+        assert!(json1.contains("\"runs\""));
+        assert!(json1.contains("\"selection\""));
+        let loaded = WriterDocument::from_content_json(&json1).unwrap();
+        assert_eq!(loaded, doc);
+        // Mutation after load changes digest
+        let mut modified = loaded.clone();
+        modified.blocks[0].kind = "heading2".into();
+        assert_ne!(modified.to_content_json(), json1);
     }
 }

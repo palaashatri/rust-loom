@@ -165,6 +165,12 @@ export component WriterApp inherits Window {
         }
     }
 
+    changed palette-open => {
+        if (!root.palette-open) {
+            app-focus.focus();
+        }
+    }
+
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open) { return reject; }
