@@ -110,8 +110,8 @@ fn blank_sheet() -> Sheet {
     Sheet::new("Untitled")
 }
 
-/// A small budget workbook used by `--smoke`, screenshots, and first launch.
-fn sample_sheet() -> Sheet {
+/// A small, editable budget workbook used by `--smoke`, screenshots, and first launch.
+fn starter_workbook() -> Sheet {
     let mut sheet = Sheet::new("Budget");
     sheet.set_str("A1", "Item");
     sheet.set_str("A2", "Rent");
@@ -891,7 +891,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     apply_headless_viewport_size(&app, w, h);
     let sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,
-        None => sample_sheet(),
+        None => starter_workbook(),
     };
     apply_sheet(&app, &sheet);
     if args.palette {
@@ -1024,7 +1024,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             .as_deref()
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
             .and_then(|json| sheet_from_json(json).ok())
-            .unwrap_or_else(sample_sheet),
+            .unwrap_or_else(starter_workbook),
     };
     let workbook_filter = FileFilter::new("Loom Sheets workbook", ["loomtable"])
         .map_err(|error| error.to_string())?;
@@ -1531,7 +1531,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     apply_theme(&app, &args.theme);
     let sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,
-        None => sample_sheet(),
+        None => starter_workbook(),
     };
     wire_palette(&app);
     rebuild_palette(&app, "");
@@ -1981,7 +1981,7 @@ mod tests {
             [Some(PathBuf::from("/tmp/workbook.loomtable"))],
         ));
         let state = GuiState {
-            current: RefCell::new(sample_sheet()),
+            current: RefCell::new(starter_workbook()),
             save_path: RefCell::new(Some(PathBuf::from("/tmp/current.loomtable"))),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
@@ -2128,7 +2128,7 @@ mod tests {
     fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
-        let sheet = sample_sheet();
+        let sheet = starter_workbook();
         update_selection(
             &app,
             &sheet,
@@ -2298,6 +2298,7 @@ mod tests {
         }
         assert_eq!(layout_breakpoints(&app, 1320), (true, true));
         assert_eq!(layout_breakpoints(&app, 1440), (true, true));
+        assert_eq!(layout_breakpoints(&app, 1920), (true, true));
     }
 
     #[test]
@@ -2512,7 +2513,7 @@ mod tests {
         let app = SheetsApp::new().expect("create SheetsApp");
         let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
         let state = GuiState {
-            current: RefCell::new(sample_sheet()),
+            current: RefCell::new(starter_workbook()),
             save_path: RefCell::new(None),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),

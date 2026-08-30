@@ -5663,6 +5663,24 @@ mod tests {
     }
 
     #[test]
+    fn viewport_clamps_invalid_and_out_of_range_scroll_offsets() {
+        let dimensions = SheetDimensions::new(10, 8);
+        let origin =
+            SheetViewport::from_scroll(-100.0, f32::NAN, 160.0, 48.0, 24.0, 80.0, dimensions);
+        assert_eq!(origin.first_row, 0);
+        assert_eq!(origin.first_col, 0);
+        assert_eq!(origin.visible_rows, 2);
+        assert_eq!(origin.visible_cols, 2);
+
+        let tail =
+            SheetViewport::from_scroll(10_000.0, 10_000.0, 160.0, 48.0, 24.0, 80.0, dimensions);
+        assert_eq!(tail.first_row, 8);
+        assert_eq!(tail.first_col, 6);
+        assert_eq!(tail.visible_rows, 2);
+        assert_eq!(tail.visible_cols, 2);
+    }
+
+    #[test]
     fn sheet_dimensions_follow_sparse_used_cells_with_nonempty_minimum() {
         let mut empty = Sheet::new("empty");
         assert_eq!(empty.dimensions(), SheetDimensions::new(1, 1));
@@ -5704,6 +5722,20 @@ mod tests {
     }
 
     #[test]
+    fn grid_selection_extend_and_collapse_keep_keyboard_semantics() {
+        let anchor = CellRef::parse("C3").unwrap();
+        let selection = GridSelection::new(anchor, anchor).extend(CellRef::parse("E5").unwrap());
+        assert_eq!(selection.anchor, anchor);
+        assert_eq!(selection.focus, CellRef::parse("E5").unwrap());
+        assert_eq!(selection.label(), "C3:E5");
+
+        let collapsed = selection.collapse(CellRef::parse("B2").unwrap());
+        assert_eq!(collapsed.anchor, CellRef::parse("B2").unwrap());
+        assert_eq!(collapsed.focus, CellRef::parse("B2").unwrap());
+        assert_eq!(collapsed.label(), "B2");
+    }
+
+    #[test]
     fn range_edit_fills_formulas_and_reverts_without_losing_absent_cells() {
         let mut sheet = Sheet::new("fill");
         sheet.set_str("A1", "10");
@@ -5740,5 +5772,36 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn range_edit_copy_handles_multi_cell_formulas_and_noop_detection() {
+        let mut sheet = Sheet::new("copy");
+        sheet.set_str("A1", "10");
+        sheet.set_str("B1", "=A1+1");
+        sheet.set_str("A2", "20");
+
+        let source = CellRange::parse("A1:B2").unwrap();
+        let copy = RangeEdit::copy(&sheet, source, CellRef::parse("D3").unwrap());
+        assert_eq!(copy.len(), 4);
+        assert!(!copy.is_noop());
+        copy.apply(&mut sheet);
+        assert_eq!(sheet.raw(CellRef::parse("D3").unwrap()), Some("10"));
+        assert_eq!(sheet.raw(CellRef::parse("E3").unwrap()), Some("=D3+1"));
+        assert_eq!(sheet.raw(CellRef::parse("D4").unwrap()), Some("20"));
+        assert_eq!(sheet.raw(CellRef::parse("E4").unwrap()), None);
+
+        copy.revert(&mut sheet);
+        assert_eq!(sheet.raw(CellRef::parse("D3").unwrap()), None);
+        assert_eq!(sheet.raw(CellRef::parse("E3").unwrap()), None);
+        assert_eq!(sheet.raw(CellRef::parse("D4").unwrap()), None);
+        assert_eq!(sheet.raw(CellRef::parse("E4").unwrap()), None);
+
+        let noop = RangeEdit::copy(
+            &sheet,
+            CellRange::parse("A1").unwrap(),
+            CellRef::parse("A1").unwrap(),
+        );
+        assert!(noop.is_noop());
     }
 }
