@@ -781,6 +781,14 @@ impl PlaybackClock {
         self.source
     }
 
+    fn is_audio_master_for_clip(&self, clip_id: Option<&str>) -> bool {
+        clip_id.is_some_and(|clip_id| {
+            self.source == ClockSource::AudioMaster
+                && self.audio.is_some()
+                && self.audio_clip_id.as_deref() == Some(clip_id)
+        })
+    }
+
     #[cfg(test)]
     fn audio_clip_id(&self) -> Option<&str> {
         self.audio_clip_id.as_deref()
@@ -2836,11 +2844,12 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                         })
                 };
                 if let Some(clock) = lock(&state.playback_clock).as_mut() {
-                    let was_audio_master = clock.source() == ClockSource::AudioMaster;
-                    let clip_matches = match (
-                        clock.active_clip_id(),
-                        sought_source.as_ref().map(|(clip_id, _)| clip_id.as_str()),
-                    ) {
+                    let sought_clip_id =
+                        sought_source.as_ref().map(|(clip_id, _)| clip_id.as_str());
+                    let in_place_audio_seek = clock.is_audio_master_for_clip(sought_clip_id);
+                    let identity_free_fallback = clock.active_clip_id().is_none()
+                        && clock.source() == ClockSource::MonotonicFallback;
+                    let clip_matches = match (clock.active_clip_id(), sought_clip_id) {
                         (Some(active_clip_id), Some(sought_clip_id)) => {
                             active_clip_id == sought_clip_id
                         }
@@ -2850,7 +2859,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                         // than inventing a source mismatch.
                         (None, _) => true,
                     };
-                    if clip_matches {
+                    if in_place_audio_seek || identity_free_fallback {
+                        let was_audio_master = clock.source() == ClockSource::AudioMaster;
                         clock.seek_with_source(
                             seconds,
                             sought_source
@@ -2864,6 +2874,10 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                                 "Audio seek unavailable · monotonic fallback clock".into(),
                             );
                         }
+                    } else if clip_matches {
+                        let setup = build_playback_clock(&state, seconds);
+                        apply_playback_clock_setup(&app, &setup);
+                        *clock = setup.clock;
                     } else {
                         // Keep the target unresolved so the next playback
                         // tick probes its own media and can attach the right
@@ -4049,6 +4063,120 @@ mod tests {
             .get_audio_output_status()
             .to_string()
             .contains("Audio stream ended"));
+        app.invoke_stop_playback();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_clip_fallback_seek_rebuilds_audio_clock_and_preserves_unavailable_fallback() {
+        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let dir = std::env::temp_dir().join(format!(
+            "loom-video-audio-fallback-seek-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = create_workflow_media(&tools, &dir).expect("create audio/video fixture");
+        let sample_rate = probe_media(&tools, &source)
+            .expect("probe audio/video fixture")
+            .audio_sample_rate
+            .expect("audio fixture must expose a sample rate");
+
+        let mut project = sample_project();
+        project.tracks[0].clips[0].source_path = source.to_string_lossy().into_owned();
+        let (app, state) = test_app_and_state_with_project(project.clone(), tools.clone());
+        let consumer = spawn_decoded_audio_consumer(
+            state.tools.as_ref().unwrap(),
+            &source,
+            999.0,
+            sample_rate,
+        )
+        .expect("spawn bounded local audio consumer");
+        *lock(&state.playback_clock) = Some(PlaybackClock::start_audio_for_clip(
+            0.0,
+            consumer,
+            Some("clip-1".into()),
+            1.0,
+        ));
+        app.set_is_playing(true);
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while Instant::now() < deadline
+            && lock(&state.playback_clock)
+                .as_ref()
+                .is_some_and(|clock| clock.source() == ClockSource::AudioMaster)
+        {
+            assert!(advance_playback_tick(&app, &state));
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            lock(&state.playback_clock)
+                .as_ref()
+                .map(PlaybackClock::source),
+            Some(ClockSource::MonotonicFallback)
+        );
+        assert_eq!(
+            lock(&state.playback_clock)
+                .as_ref()
+                .and_then(|clock| clock.active_clip_id()),
+            Some("clip-1")
+        );
+
+        app.invoke_seek(0.75);
+
+        {
+            let clock = lock(&state.playback_clock);
+            let clock = clock
+                .as_ref()
+                .expect("same-clip seek should retain a playback clock");
+            assert_eq!(clock.source(), ClockSource::AudioMaster);
+            assert_eq!(clock.audio_clip_id(), Some("clip-1"));
+            assert_eq!(clock.active_clip_id(), Some("clip-1"));
+            assert!((clock.position() - 0.75).abs() < 1e-6);
+            assert!(
+                (clock
+                    .audio
+                    .as_ref()
+                    .expect("same-clip fallback seek should reattach audio")
+                    .consumer
+                    .start_time()
+                    - 0.75)
+                    .abs()
+                    < 1e-6
+            );
+        }
+        assert_eq!(app.get_playback_clock_source().as_str(), "Audio master");
+
+        let failed_tools = MediaTools {
+            ffmpeg: dir.join("missing-ffmpeg"),
+            ..tools
+        };
+        let (fallback_app, fallback_state) = test_app_and_state_with_project(project, failed_tools);
+        *lock(&fallback_state.playback_clock) = Some(PlaybackClock::start_for_clip_with_status(
+            0.0,
+            Some("clip-1".into()),
+            "Audio stream ended · monotonic fallback clock",
+        ));
+
+        fallback_app.invoke_seek(0.75);
+
+        {
+            let clock = lock(&fallback_state.playback_clock);
+            let clock = clock
+                .as_ref()
+                .expect("failed consumer seek should retain a playback clock");
+            assert_eq!(clock.source(), ClockSource::MonotonicFallback);
+            assert_eq!(clock.active_clip_id(), Some("clip-1"));
+            assert_eq!(
+                clock.audio_status(),
+                "Audio stream detected · decoded consumer unavailable; monotonic fallback clock"
+            );
+        }
+        assert_eq!(
+            fallback_app.get_audio_output_status().as_str(),
+            "Audio stream detected · decoded consumer unavailable; monotonic fallback clock"
+        );
+
+        fallback_app.invoke_stop_playback();
         app.invoke_stop_playback();
         let _ = std::fs::remove_dir_all(&dir);
     }
