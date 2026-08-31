@@ -110,6 +110,7 @@ export component EncodeInspector inherits InspectorSurface {
                     accessible-role: button;
                     accessible-label: "Drop source file here";
                     accessible-description: "Drop a media file from the file manager to replace the selected job source, or use Choose source file";
+                    accessible-action-default => { if (!root.running) { root.choose-source(); } }
                     Text {
                         text: "Drop source file here";
                         width: parent.width;
@@ -157,6 +158,7 @@ export component EncodeInspector inherits InspectorSurface {
                     accessible-role: button;
                     accessible-label: "Drop destination file here";
                     accessible-description: "Drop a destination path from the file manager to replace the selected job destination, or use Choose destination";
+                    accessible-action-default => { if (!root.running) { root.choose-output(); } }
                     Text {
                         text: "Drop destination file here";
                         width: parent.width;

@@ -627,18 +627,21 @@ impl EncodeQueue {
         }
     }
 
-    /// Resolve every output according to each job's destination policy.  The
-    /// operation is deterministic and mutates paths only for `Rename` jobs;
-    /// `Fail` rejects both existing files and duplicate paths.
+    /// Resolve every output according to each job's destination policy. The
+    /// operation is deterministic and transactional: paths are only committed
+    /// after every job has passed collision validation.
     pub fn apply_destination_policies(&mut self) -> Result<(), String> {
         let outputs = self
             .jobs
             .iter()
             .map(|job| job.output_file.clone())
             .collect::<Vec<_>>();
+        // Resolve into a scratch vector first. A later collision error must
+        // not partially apply an earlier Rename decision.
+        let mut resolved_outputs = outputs.clone();
         let mut claimed = std::collections::HashSet::new();
-        for (index, job) in self.jobs.iter_mut().enumerate() {
-            let output = outputs[index].clone();
+        for (index, job) in self.jobs.iter().enumerate() {
+            let output = &outputs[index];
             if output.trim().is_empty() {
                 return Err(format!("output path is empty for job {}", job.id));
             }
@@ -655,12 +658,12 @@ impl EncodeQueue {
                 }
                 DestinationCollisionPolicy::Fail => {
                     let key = output.to_lowercase();
-                    if Path::new(&output).exists() || !claimed.insert(key) {
+                    if Path::new(output).exists() || !claimed.insert(key) {
                         return Err(format!("output collision for job {}: {}", job.id, output));
                     }
                 }
                 DestinationCollisionPolicy::Rename => {
-                    let mut candidate = output.clone();
+                    let candidate = output.clone();
                     let mut resolved = candidate.clone();
                     let mut attempt = 1;
                     while Path::new(&resolved).exists()
@@ -688,11 +691,13 @@ impl EncodeQueue {
                             .to_string_lossy()
                             .into_owned();
                     }
-                    candidate = resolved;
-                    claimed.insert(candidate.to_lowercase());
-                    job.output_file = candidate;
+                    claimed.insert(resolved.to_lowercase());
+                    resolved_outputs[index] = resolved;
                 }
             }
+        }
+        for (job, output) in self.jobs.iter_mut().zip(resolved_outputs) {
+            job.output_file = output;
         }
         Ok(())
     }
@@ -720,9 +725,10 @@ pub struct EncodeConformanceReport {
 pub type QueueConformanceReport = EncodeConformanceReport;
 
 impl EncodeQueue {
-    /// Produces a deterministic report from durable job state and output
-    /// existence.  Media-specific probes remain an explicit future check; a
-    /// completed job with no output is never reported as passing.
+    /// Produces a deterministic report from durable job state and a bounded
+    /// media-container probe. A completed job only passes when its output has
+    /// a recognized container signature; plain-text or mislabeled fixtures
+    /// are rejected instead of being reported as conforming.
     pub fn conformance_report(&self) -> EncodeConformanceReport {
         let jobs = self
             .jobs
@@ -730,11 +736,23 @@ impl EncodeQueue {
             .map(|job| {
                 let output_exists = Path::new(&job.output_file).is_file();
                 let (status, passed, checks) = match &job.status {
-                    JobStatus::Complete if output_exists => (
-                        "complete".to_string(),
-                        true,
-                        vec!["output exists".to_string()],
-                    ),
+                    JobStatus::Complete if output_exists => {
+                        match media_container_signature(Path::new(&job.output_file)) {
+                            Ok(container) => (
+                                "complete".to_string(),
+                                true,
+                                vec![
+                                    "output exists".to_string(),
+                                    format!("media container: {container}"),
+                                ],
+                            ),
+                            Err(reason) => (
+                                "failed".to_string(),
+                                false,
+                                vec![format!("media conformance failed: {reason}")],
+                            ),
+                        }
+                    }
                     JobStatus::Complete => (
                         "failed".to_string(),
                         false,
@@ -778,6 +796,53 @@ impl EncodeQueue {
             passed: !jobs.is_empty() && jobs.iter().all(|job| job.passed),
             jobs,
         }
+    }
+}
+
+/// Reads a small header and verifies that a completed output resembles the
+/// media container implied by its extension. This avoids reading an entire
+/// render into memory while rejecting plain-text or mislabeled fixtures.
+/// Full stream decode/duration checks remain a separate production stage.
+fn media_container_signature(path: &Path) -> Result<&'static str, String> {
+    use std::io::Read;
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| "output has no recognized media extension".to_string())?;
+    let mut header = [0_u8; 16];
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let count = file
+        .read(&mut header)
+        .map_err(|error| format!("cannot read output header: {error}"))?;
+    let starts_with = |prefix: &[u8]| count >= prefix.len() && header[..prefix.len()] == *prefix;
+    let is_mp4 = count >= 8 && header[4..8] == *b"ftyp";
+    let (recognized, label) = match extension.as_str() {
+        "mp4" | "m4v" | "mov" | "3gp" => (is_mp4, "ISO base media / QuickTime"),
+        "mkv" | "webm" => (starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "Matroska/WebM"),
+        "flac" => (starts_with(b"fLaC"), "FLAC"),
+        "mp3" => (
+            starts_with(b"ID3") || (count >= 2 && header[0] == 0xff && header[1] & 0xe0 == 0xe0),
+            "MPEG audio",
+        ),
+        "wav" => (
+            count >= 12 && starts_with(b"RIFF") && header[8..12] == *b"WAVE",
+            "WAV",
+        ),
+        "avi" => (
+            count >= 12 && starts_with(b"RIFF") && header[8..12] == *b"AVI ",
+            "AVI",
+        ),
+        "ogg" | "oga" | "ogv" => (starts_with(b"OggS"), "Ogg"),
+        _ => (false, "unknown"),
+    };
+    if recognized {
+        Ok(label)
+    } else {
+        Err(format!(
+            "output does not contain a valid {label} container signature"
+        ))
     }
 }
 
@@ -1817,6 +1882,16 @@ impl EncodeJob {
                 SubtitleMode::PassthroughCopy | SubtitleMode::ConvertSrt
             ) {
                 arguments.extend(["-i".into(), path.to_string()]);
+                // Adding any explicit map disables FFmpeg's automatic stream
+                // selection. Preserve the default source video/audio streams
+                // when the user did not choose a specific track, then append
+                // the sidecar subtitle stream.
+                if self.source.video_track.is_none() && video_encoder != "none" {
+                    arguments.extend(["-map".into(), "0:v?".into()]);
+                }
+                if self.source.audio_track.is_none() && audio_encoder != "none" {
+                    arguments.extend(["-map".into(), "0:a?".into()]);
+                }
                 arguments.extend(["-map".into(), "1:0".into()]);
             }
         }
@@ -2111,7 +2186,9 @@ where
     use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
     use std::sync::atomic::Ordering;
+    use std::sync::mpsc::{self, RecvTimeoutError};
     use std::thread;
+    use std::time::Duration;
 
     if !plan.input.is_file() {
         let error =
@@ -2200,28 +2277,40 @@ where
         }
         Ok(output)
     });
+    // Keep stdout draining on its own thread. Reading lines directly on the
+    // worker would block indefinitely when an encoder is silent, preventing a
+    // cancellation request from ever reaching child.kill().
+    let (stdout_tx, stdout_rx) = mpsc::channel::<std::io::Result<String>>();
+    let stdout_thread = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if stdout_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
     let mut parser = ProgressParser::new(duration_secs);
     let mut cancelled = false;
-    for line in BufReader::new(stdout).lines() {
+    let mut stdout_error = None;
+    loop {
         if cancel.load(Ordering::Relaxed) {
             cancelled = true;
             let _ = child.kill();
             break;
         }
-        let line = match line {
-            Ok(line) => line,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stderr_thread.join();
-                let error = EncodeError::Io(error);
-                job.status = JobStatus::Failed(error.to_string());
-                return Err(error);
+        match stdout_rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(Ok(line)) => {
+                if let Some(progress) = parser.push_line(&line) {
+                    job.status = JobStatus::Encoding { progress };
+                    on_progress(progress);
+                }
             }
-        };
-        if let Some(progress) = parser.push_line(&line) {
-            job.status = JobStatus::Encoding { progress };
-            on_progress(progress);
+            Ok(Err(error)) => {
+                stdout_error = Some(error);
+                let _ = child.kill();
+                break;
+            }
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         }
     }
     if cancel.load(Ordering::Relaxed) {
@@ -2237,6 +2326,7 @@ where
             return Err(error);
         }
     };
+    let stdout_join = stdout_thread.join();
     let stderr = match stderr_thread.join() {
         Ok(Ok(stderr)) => stderr,
         Ok(Err(error)) => {
@@ -2250,6 +2340,16 @@ where
             return Err(error);
         }
     };
+    if let Some(error) = stdout_error {
+        let error = EncodeError::Io(error);
+        job.status = JobStatus::Failed(error.to_string());
+        return Err(error);
+    }
+    if stdout_join.is_err() {
+        let error = EncodeError::InvalidJob("encoder stdout reader panicked".into());
+        job.status = JobStatus::Failed(error.to_string());
+        return Err(error);
+    }
     if cancelled {
         job.status = JobStatus::Cancelled;
         return Err(EncodeError::Cancelled);
@@ -3106,6 +3206,53 @@ mod tests {
     }
 
     #[test]
+    fn destination_policy_rejection_is_transactional() {
+        let root = std::env::temp_dir().join(format!(
+            "loom-encode-collision-rollback-{}-{}",
+            std::process::id(),
+            NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let existing = root.join("render.mp4");
+        std::fs::write(&existing, b"existing").unwrap();
+        let renamed_candidate = root.join("render - 2.mp4");
+
+        let mut queue = EncodeQueue::new("queue", "Queue");
+        queue.jobs.clear();
+        let mut rename = EncodeJob::new(
+            "rename",
+            "rename.mov",
+            existing.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        rename.set_collision_policy(DestinationCollisionPolicy::Rename);
+        queue.add_job(rename);
+        let mut fail = EncodeJob::new(
+            "fail",
+            "fail.mov",
+            renamed_candidate.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        fail.set_collision_policy(DestinationCollisionPolicy::Fail);
+        queue.add_job(fail);
+
+        let before = queue.clone();
+        let error = queue
+            .apply_destination_policies()
+            .expect_err("later Fail collision must reject the batch");
+        assert!(error.contains("output collision for job fail"));
+        assert_eq!(queue.jobs, before.jobs);
+        assert_eq!(queue.queue_digest(), before.queue_digest());
+        assert_eq!(queue.jobs[0].output_file, existing.to_string_lossy());
+        assert_eq!(
+            queue.jobs[1].output_file,
+            renamed_candidate.to_string_lossy()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn test_save_load_roundtrip() {
         let mut q = EncodeQueue::new("q-test", "Daily Dailies");
         q.add_job(EncodeJob::new(
@@ -3234,6 +3381,33 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["-c:s", "copy"]));
         assert!(plan.arguments.iter().any(|arg| arg == "captions.srt"));
+    }
+
+    #[test]
+    fn sidecar_subtitle_mapping_preserves_default_source_streams() {
+        let backend = EncoderBackend {
+            executable: "/usr/bin/ffmpeg".into(),
+            version: "test".into(),
+        };
+        for mode in [SubtitleMode::PassthroughCopy, SubtitleMode::ConvertSrt] {
+            let mut job =
+                EncodeJob::new("job", "input.mov", "output.mp4", EncodePreset::h264_1080p());
+            job.set_subtitle_mode(mode);
+            job.subtitles.path = Some("captions.srt".into());
+            let plan = job.plan(&backend, ExecutionPolicy::default()).unwrap();
+            assert!(plan
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["-map", "0:v?"]));
+            assert!(plan
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["-map", "0:a?"]));
+            assert!(plan
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["-map", "1:0"]));
+        }
     }
 
     #[test]
@@ -3606,6 +3780,106 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .contains(".loom-encode-")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stalled_encoder_cancellation_is_observed_without_stdout() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let script = "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\nprintf 'partial' > \"$out\"\nexec sleep 30\n";
+        let (root, executable) = executable_fixture(script, "stall");
+        std::fs::write(root.join("input.mov"), b"input").unwrap();
+        let output = root.join("stalled.mp4");
+        std::fs::write(&output, b"prior destination").unwrap();
+        let job = execution_fixture_job(&root, "stalled.mp4");
+        let backend = EncoderBackend {
+            executable,
+            version: "fixture".into(),
+        };
+        let plan = job
+            .plan(
+                &backend,
+                ExecutionPolicy {
+                    overwrite: true,
+                    ..ExecutionPolicy::default()
+                },
+            )
+            .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = cancel.clone();
+        let job = Arc::new(Mutex::new(job));
+        let worker_job = job.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let mut job = worker_job.lock().unwrap();
+            let result = execute_job_with_cancel(&mut job, &plan, None, &cancel_for_worker, |_| {});
+            done_tx.send(result).unwrap();
+        });
+        thread::sleep(Duration::from_millis(80));
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("silent encoder must not block cancellation");
+        assert!(matches!(result, Err(EncodeError::Cancelled)));
+        assert!(matches!(job.lock().unwrap().status, JobStatus::Cancelled));
+        assert_eq!(std::fs::read(&output).unwrap(), b"prior destination");
+        assert!(!std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".loom-encode-")
+            }));
+        worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn conformance_rejects_plaintext_and_accepts_media_container_header() {
+        let root = std::env::temp_dir().join(format!(
+            "loom-encode-conformance-{}-{}",
+            std::process::id(),
+            NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let output = root.join("encoded.mp4");
+        let mut queue = EncodeQueue::new("queue", "Queue");
+        queue.jobs.clear();
+        let mut job = EncodeJob::new(
+            "job",
+            "input.mov",
+            output.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        job.status = JobStatus::Complete;
+        queue.add_job(job);
+
+        std::fs::write(&output, b"encoded").unwrap();
+        let plain_report = queue.conformance_report();
+        assert!(!plain_report.passed);
+        assert!(!plain_report.jobs[0].passed);
+        assert!(plain_report.jobs[0]
+            .checks
+            .iter()
+            .any(|check| check.contains("media conformance failed")));
+
+        std::fs::write(&output, b"\0\0\0\x1cftypisom\0\0\x02\0isomiso2mp41").unwrap();
+        let media_report = queue.conformance_report();
+        assert!(media_report.passed);
+        assert!(media_report.jobs[0].passed);
+        assert!(media_report.jobs[0]
+            .checks
+            .iter()
+            .any(|check| check.contains("media container")));
+
         let _ = std::fs::remove_dir_all(root);
     }
 

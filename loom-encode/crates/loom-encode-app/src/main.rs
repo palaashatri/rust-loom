@@ -821,12 +821,14 @@ case "$source" in
             echo progress=end
             exit 7
         fi
-        printf 'retry-encoded' > "$out"
+        # Minimal deterministic ISO-BMFF header. The queue conformance probe
+        # rejects the old plain-text fixture and requires this media marker.
+        printf '\000\000\000\034ftypisom\000\000\002\000isomiso2mp41' > "$out"
         echo out_time_us=100000
         echo progress=end
         ;;
     *)
-        printf 'encoded' > "$out"
+        printf '\000\000\000\034ftypisom\000\000\002\000isomiso2mp41' > "$out"
         echo out_time_us=100000
         echo progress=end
         ;;
@@ -2763,5 +2765,27 @@ mod tests {
 
         let transfer = DataTransfer::from(SharedString::from("file:////tmp/encode.mov"));
         assert_eq!(dropped_path(&transfer), Some("//tmp/encode.mov".into()));
+    }
+
+    #[test]
+    fn drop_targets_expose_default_accessible_chooser_actions() {
+        let inspector = include_str!("../ui/encode_inspector.slint");
+        assert!(inspector.contains(
+            "accessible-action-default => { if (!root.running) { root.choose-source(); } }"
+        ));
+        assert!(inspector.contains(
+            "accessible-action-default => { if (!root.running) { root.choose-output(); } }"
+        ));
+    }
+
+    #[test]
+    fn queue_reorder_controls_have_a_non_clipping_hit_target() {
+        let queue = include_str!("../ui/encode_queue.slint");
+        assert!(queue.contains("min-width: 48px;"));
+        assert!(queue.contains("preferred-width: 48px;"));
+        assert!(queue.contains("ToolbarIconButton"));
+        assert!(!queue.contains("ToolbarButton"));
+        assert!(!queue.contains("min-width: 28px;"));
+        assert_eq!(queue.matches("horizontal-stretch: 1;").count(), 3);
     }
 }
