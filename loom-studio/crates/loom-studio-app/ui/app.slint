@@ -74,6 +74,11 @@ export component StudioApp inherits Window {
     in property <float> job-progress: 0.0;
     in property <bool> job-cancellable: false;
 
+    /// Focus the arrangement's selected-region keyboard command scope.
+    public function focus-arrangement() {
+        arrangement.focus-timeline();
+    }
+
     callback new-song;
     callback open-song;
     callback save-song;
@@ -220,7 +225,7 @@ export component StudioApp inherits Window {
                     duration-seconds: root.duration-seconds;
                     seek(value) => { root.seek(value); }
                 }
-                StudioArrangement {
+                arrangement := StudioArrangement {
                     vertical-stretch: 1;
                     track-labels: root.track-labels;
                     track-kinds: root.track-kinds;

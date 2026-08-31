@@ -1210,6 +1210,20 @@ impl AudioBuffer {
 
     /// Encodes signed 16-bit PCM WAV bytes.
     pub fn to_wav_pcm16(&self) -> Result<Vec<u8>, String> {
+        let cancellation = StudioCancellation::default();
+        self.to_wav_pcm16_with_cancel(&cancellation, |_| {})
+    }
+
+    /// Encodes signed 16-bit PCM WAV bytes while checking cooperative
+    /// cancellation between bounded chunks.
+    pub fn to_wav_pcm16_with_cancel<F>(
+        &self,
+        cancel: &StudioCancellation,
+        mut progress: F,
+    ) -> Result<Vec<u8>, String>
+    where
+        F: FnMut(f32),
+    {
         self.validate()?;
         let data_len = self
             .samples
@@ -1244,10 +1258,18 @@ impl AudioBuffer {
         output.extend_from_slice(&16u16.to_le_bytes());
         output.extend_from_slice(b"data");
         output.extend_from_slice(&(data_len as u32).to_le_bytes());
-        for sample in &self.samples {
+        progress(0.0);
+        for (index, sample) in self.samples.iter().enumerate() {
+            if index % 4096 == 0 && cancel.is_cancelled() {
+                return Err("bounce cancelled".into());
+            }
             let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
             output.extend_from_slice(&value.to_le_bytes());
+            if index % 4096 == 0 {
+                progress((index + 1) as f32 / self.samples.len().max(1) as f32);
+            }
         }
+        progress(1.0);
         Ok(output)
     }
 
@@ -1485,6 +1507,7 @@ pub fn decode_wav(bytes: &[u8]) -> Result<AudioBuffer, String> {
 struct SessionSnapshot {
     project: StudioProject,
     selection: TimelineSelection,
+    assets: AudioAssetStore,
 }
 
 /// Undoable editing session around a Studio project.
@@ -1494,6 +1517,10 @@ pub struct StudioSession {
     pub project: StudioProject,
     /// Current arrangement/mixer selection.
     pub selection: TimelineSelection,
+    /// Imported/recorded assets that participate in the same undo journal as
+    /// their regions.  Keeping this in the session prevents an import undo
+    /// from leaving an orphaned asset behind.
+    pub assets: AudioAssetStore,
     undo: Vec<SessionSnapshot>,
     redo: Vec<SessionSnapshot>,
     history_limit: usize,
@@ -1502,9 +1529,15 @@ pub struct StudioSession {
 impl StudioSession {
     /// Creates a session with bounded project snapshots.
     pub fn new(project: StudioProject) -> Self {
+        Self::with_assets(project, AudioAssetStore::default())
+    }
+
+    /// Creates a session with a project and its embedded audio assets.
+    pub fn with_assets(project: StudioProject, assets: AudioAssetStore) -> Self {
         Self {
             project,
             selection: TimelineSelection::none(),
+            assets,
             undo: Vec::new(),
             redo: Vec::new(),
             history_limit: 64,
@@ -1515,6 +1548,7 @@ impl StudioSession {
         SessionSnapshot {
             project: self.project.clone(),
             selection: self.selection.clone(),
+            assets: self.assets.clone(),
         }
     }
 
@@ -1547,6 +1581,28 @@ impl StudioSession {
         Ok(())
     }
 
+    /// Applies a project edit and replaces the asset store in the same undo
+    /// transaction.  The candidate asset store is prepared by the caller so
+    /// failed edits never mutate the live store.
+    pub fn apply_edit_with_assets<F>(
+        &mut self,
+        assets: AudioAssetStore,
+        edit: F,
+    ) -> Result<(), StudioEditError>
+    where
+        F: FnOnce(&mut StudioProject) -> Result<(), StudioEditError>,
+    {
+        let mut candidate = self.project.clone();
+        edit(&mut candidate)?;
+        if candidate == self.project && assets == self.assets {
+            return Err(StudioEditError::NoOp);
+        }
+        self.checkpoint();
+        self.project = candidate;
+        self.assets = assets;
+        Ok(())
+    }
+
     /// Applies a gesture update without adding a history entry.
     pub fn apply_edit_without_history<F>(&mut self, edit: F) -> Result<(), StudioEditError>
     where
@@ -1566,6 +1622,7 @@ impl StudioSession {
         self.push_snapshot(SessionSnapshot {
             project: baseline,
             selection: self.selection.clone(),
+            assets: self.assets.clone(),
         });
         true
     }
@@ -1584,6 +1641,7 @@ impl StudioSession {
         self.redo.push(self.snapshot());
         self.project = previous.project;
         self.selection = previous.selection;
+        self.assets = previous.assets;
         true
     }
 
@@ -1595,6 +1653,7 @@ impl StudioSession {
         self.undo.push(self.snapshot());
         self.project = next.project;
         self.selection = next.selection;
+        self.assets = next.assets;
         true
     }
 
@@ -1615,7 +1674,6 @@ impl StudioSession {
             return Err(StudioEditError::InvalidTrackIndex);
         }
         self.selection = TimelineSelection::track(index);
-        self.project.active_track_index = index;
         Ok(())
     }
 
@@ -1634,7 +1692,6 @@ impl StudioSession {
         if !track.regions.iter().any(|region| region.id == region_id) {
             return Err(StudioEditError::RegionNotFound);
         }
-        self.project.active_track_index = index;
         self.selection = TimelineSelection::region(index, region_id);
         Ok(())
     }
@@ -1968,7 +2025,7 @@ impl AutomationLane {
 }
 
 /// Host-managed audio assets keyed by region name/path.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AudioAssetStore {
     assets: BTreeMap<String, AudioBuffer>,
 }
@@ -2062,15 +2119,22 @@ where
     if cancel.is_cancelled() {
         return Err("bounce cancelled".into());
     }
-    progress(0.05);
-    let mixed = project.mix(assets)?;
+    progress(0.0);
+    let mixed = project.mix_with_cancel(assets, cancel, |mix_progress| {
+        progress(0.05 + 0.45 * mix_progress.clamp(0.0, 1.0));
+    })?;
     if cancel.is_cancelled() {
         return Err("bounce cancelled".into());
     }
-    let bytes = mixed.audio.to_wav_pcm16()?;
+    let bytes = mixed
+        .audio
+        .to_wav_pcm16_with_cancel(cancel, |encode_progress| {
+            progress(0.5 + 0.2 * encode_progress.clamp(0.0, 1.0));
+        })?;
     let parent = destination
         .parent()
-        .ok_or_else(|| "bounce destination has no parent directory".to_string())?;
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let file_name = destination
         .file_name()
@@ -2088,7 +2152,7 @@ where
             }
             file.write_all(chunk).map_err(|error| error.to_string())?;
             progress(
-                0.1 + 0.85 * ((index + 1) * chunk_size).min(bytes.len()) as f32
+                0.7 + 0.3 * ((index + 1) * chunk_size).min(bytes.len()) as f32
                     / bytes.len().max(1) as f32,
             );
         }
@@ -2096,7 +2160,26 @@ where
         if cancel.is_cancelled() {
             return Err("bounce cancelled".to_string());
         }
-        std::fs::rename(&temp, destination).map_err(|error| error.to_string())?;
+        let backup = parent.join(format!(".{file_name}.loom-studio-{unique}.bak"));
+        let had_destination = destination.exists();
+        if had_destination {
+            std::fs::rename(destination, &backup).map_err(|error| error.to_string())?;
+        }
+        if cancel.is_cancelled() {
+            if had_destination {
+                let _ = std::fs::rename(&backup, destination);
+            }
+            return Err("bounce cancelled".into());
+        }
+        if let Err(error) = std::fs::rename(&temp, destination) {
+            if had_destination {
+                let _ = std::fs::rename(&backup, destination);
+            }
+            return Err(error.to_string());
+        }
+        if had_destination {
+            let _ = std::fs::remove_file(&backup);
+        }
         progress(1.0);
         Ok(())
     })();
@@ -2192,13 +2275,46 @@ impl StudioProject {
 
     /// Mixes audio regions into a stereo floating-point buffer.
     pub fn mix(&self, assets: &AudioAssetStore) -> Result<MixResult, String> {
+        let cancellation = StudioCancellation::default();
+        self.mix_with_cancel(assets, &cancellation, |_| {})
+    }
+
+    /// Mixes audio regions while reporting bounded progress and honoring
+    /// cooperative cancellation.  The output is only returned after all
+    /// renderable regions have been processed, so callers can commit it
+    /// transactionally.
+    pub fn mix_with_cancel<F>(
+        &self,
+        assets: &AudioAssetStore,
+        cancel: &StudioCancellation,
+        mut progress: F,
+    ) -> Result<MixResult, String>
+    where
+        F: FnMut(f32),
+    {
         if self.sample_rate == 0 {
             return Err("project sample rate must be non-zero".into());
         }
         let mut output = AudioBuffer::silence(self.sample_rate, 2, self.duration_samples())?;
         let solo_active = self.tracks.iter().any(|track| track.solo);
         let mut warnings = Vec::new();
+        let total_work = self
+            .tracks
+            .iter()
+            .filter(|track| !track.mute && (!solo_active || track.solo))
+            .flat_map(|track| track.regions.iter())
+            .filter_map(|region| {
+                assets
+                    .get(&region.name)
+                    .map(|asset| asset.frames().min(region.length_samples))
+            })
+            .fold(0_u64, u64::saturating_add);
+        let mut completed_work = 0_u64;
+        progress(0.0);
         for track in &self.tracks {
+            if cancel.is_cancelled() {
+                return Err("bounce cancelled".into());
+            }
             if track.mute || (solo_active && !track.solo) {
                 continue;
             }
@@ -2207,6 +2323,9 @@ impl StudioProject {
             let left_gain = gain * ((1.0 - pan) * 0.5).sqrt();
             let right_gain = gain * ((1.0 + pan) * 0.5).sqrt();
             for region in &track.regions {
+                if cancel.is_cancelled() {
+                    return Err("bounce cancelled".into());
+                }
                 let Some(asset) = assets.get(&region.name) else {
                     warnings.push(format!("missing audio asset {}", region.name));
                     continue;
@@ -2220,6 +2339,9 @@ impl StudioProject {
                 }
                 let available_frames = asset.frames().min(region.length_samples);
                 for frame in 0..available_frames as usize {
+                    if frame % 4096 == 0 && cancel.is_cancelled() {
+                        return Err("bounce cancelled".into());
+                    }
                     let destination_frame = region.start_sample as usize + frame;
                     if destination_frame >= output.frames() as usize {
                         break;
@@ -2232,12 +2354,22 @@ impl StudioProject {
                     };
                     output.samples[destination_frame * 2] += left * left_gain;
                     output.samples[destination_frame * 2 + 1] += right * right_gain;
+                    completed_work = completed_work.saturating_add(1);
+                    if frame % 4096 == 0 {
+                        let fraction = if total_work == 0 {
+                            1.0
+                        } else {
+                            completed_work as f32 / total_work as f32
+                        };
+                        progress(fraction.clamp(0.0, 1.0));
+                    }
                 }
             }
         }
         for sample in &mut output.samples {
             *sample = sample.clamp(-1.0, 1.0);
         }
+        progress(1.0);
         Ok(MixResult {
             audio: output,
             warnings,
@@ -3686,6 +3818,67 @@ mod studio_runtime_tests {
     }
 
     #[test]
+    fn timeline_selection_is_runtime_state_not_a_project_mutation() {
+        let project = StudioProject::new("selection", "Selection");
+        let assets = AudioAssetStore::default();
+        let mut session = StudioSession::with_assets(project, assets.clone());
+        let before_digest = session.session_digest();
+        let before_bundle = save_studio_bundle(&session.project, &assets).unwrap();
+
+        session.select_track(1).unwrap();
+        assert_eq!(session.selection, TimelineSelection::track(1));
+        assert_eq!(session.project.active_track_index, 0);
+        assert_eq!(session.session_digest(), before_digest);
+        assert_eq!(
+            save_studio_bundle(&session.project, &session.assets).unwrap(),
+            before_bundle
+        );
+
+        session.select_region(0, "r1").unwrap();
+        assert_eq!(session.selection, TimelineSelection::region(0, "r1"));
+        assert_eq!(session.project.active_track_index, 0);
+        assert_eq!(session.session_digest(), before_digest);
+        assert_eq!(
+            save_studio_bundle(&session.project, &session.assets).unwrap(),
+            before_bundle
+        );
+        assert!(!session.can_undo(), "selection must not create history");
+    }
+
+    #[test]
+    fn imported_asset_and_region_undo_redo_as_one_session_edit() {
+        let mut project = StudioProject::new("import", "Import");
+        project.tracks.clear();
+        project
+            .tracks
+            .push(StudioTrack::new("track-1", "Audio", TrackKind::Audio));
+        let mut session = StudioSession::new(project);
+        let buffer = AudioBuffer::sine(48_000, 1, 440.0, 0.1, 0.2).unwrap();
+        let mut candidate_assets = session.assets.clone();
+        candidate_assets.insert("take.wav", buffer.clone()).unwrap();
+        session
+            .apply_edit_with_assets(candidate_assets, |project| {
+                project.tracks[0].add_region(AudioRegion {
+                    id: "import-1".into(),
+                    name: "take.wav".into(),
+                    start_sample: 0,
+                    length_samples: buffer.frames(),
+                });
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(session.project.total_regions(), 1);
+        assert_eq!(session.assets.get("take.wav"), Some(&buffer));
+
+        assert!(session.undo());
+        assert_eq!(session.project.total_regions(), 0);
+        assert!(session.assets.get("take.wav").is_none());
+        assert!(session.redo());
+        assert_eq!(session.project.total_regions(), 1);
+        assert_eq!(session.assets.get("take.wav"), Some(&buffer));
+    }
+
+    #[test]
     fn timeline_selection_and_region_edits_validate_and_undo_as_operations() {
         let mut session = editable_session();
         assert!(session.select_region(0, "region-1").is_ok());
@@ -3807,6 +4000,77 @@ mod studio_runtime_tests {
             .count();
         assert_eq!(temporary_files, 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relative_bounce_overwrites_existing_destination_transactionally() {
+        let unique = BOUNCE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let destination = std::path::PathBuf::from(format!(
+            "loom-studio-relative-bounce-{}-{unique}.wav",
+            std::process::id()
+        ));
+        std::fs::write(&destination, b"previous mix").unwrap();
+
+        let mut project = StudioProject::new("relative-bounce", "Relative Bounce");
+        project.tracks[0].regions[0].name = "tone.wav".into();
+        project.tracks[0].regions[0].length_samples = 4_800;
+        let mut assets = AudioAssetStore::default();
+        assets
+            .insert(
+                "tone.wav",
+                AudioBuffer::sine(48_000, 1, 220.0, 0.1, 0.2).unwrap(),
+            )
+            .unwrap();
+
+        let cancellation = StudioCancellation::default();
+        let result =
+            bounce_mix_with_cancel(&project, &assets, &destination, &cancellation, |_| {}).unwrap();
+        assert_eq!(result.audio.sample_rate, 48_000);
+        let output = std::fs::read(&destination).unwrap();
+        assert_eq!(&output[0..4], b"RIFF");
+        assert_ne!(output, b"previous mix");
+        let expected_temp_prefix = format!(
+            ".loom-studio-relative-bounce-{}-{unique}.wav.loom-studio-{unique}",
+            std::process::id()
+        );
+        let temporary_files = std::fs::read_dir(".")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&expected_temp_prefix)
+            })
+            .count();
+        assert_eq!(temporary_files, 0, "transactional temporary output leaked");
+        std::fs::remove_file(destination).unwrap();
+    }
+
+    #[test]
+    fn cancellable_mix_reports_progress_before_stopping() {
+        let mut project = StudioProject::new("cancel-mix", "Cancellable Mix");
+        project.tracks[0].regions[0].name = "tone.wav".into();
+        project.tracks[0].regions[0].length_samples = 48_000;
+        let mut assets = AudioAssetStore::default();
+        assets
+            .insert(
+                "tone.wav",
+                AudioBuffer::sine(48_000, 1, 220.0, 1.0, 0.2).unwrap(),
+            )
+            .unwrap();
+        let cancellation = StudioCancellation::default();
+        let cancel_for_progress = cancellation.clone();
+        let mut progress_samples = Vec::new();
+        let result = project.mix_with_cancel(&assets, &cancellation, |progress| {
+            progress_samples.push(progress);
+            if progress > 0.0 {
+                cancel_for_progress.cancel();
+            }
+        });
+        assert!(result.is_err());
+        assert!(progress_samples.iter().any(|progress| *progress > 0.0));
+        assert!(cancellation.is_cancelled());
     }
 
     #[test]

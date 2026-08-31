@@ -154,25 +154,29 @@ export component StudioTrackRow inherits WorkspaceRow {
                 }
                 region-touch := TouchArea {
                     property <length> last-drag-x: 0px;
+                    property <string> gesture-region-id: "";
                     pointer-event(event) => {
                         if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                             root.focus-requested();
-                            root.select-region(root.region-ids[region-index]);
-                            root.begin-region-gesture(root.region-ids[region-index], "move");
+                            self.gesture-region-id = root.region-ids[region-index];
+                            root.select-region(self.gesture-region-id);
+                            root.begin-region-gesture(self.gesture-region-id, "move");
                             self.last-drag-x = self.mouse-x;
                         } else if (event.kind == PointerEventKind.cancel) {
                             root.cancel-region-gesture();
                             self.last-drag-x = 0px;
+                            self.gesture-region-id = "";
                         } else if (event.kind == PointerEventKind.up) {
                             root.end-region-gesture();
                             self.last-drag-x = 0px;
+                            self.gesture-region-id = "";
                         }
                     }
                     moved => {
-                        if (self.pressed) {
+                        if (self.pressed && self.gesture-region-id != "") {
                             let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
                             self.last-drag-x = self.mouse-x;
-                            root.move-region(root.region-ids[region-index], delta);
+                            root.move-region(self.gesture-region-id, delta);
                         }
                     }
                     clicked => { root.select-region(root.region-ids[region-index]); }
@@ -191,23 +195,27 @@ export component StudioTrackRow inherits WorkspaceRow {
                     }
                     TouchArea {
                         property <length> last-drag-x: 0px;
+                        property <string> gesture-region-id: "";
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                 root.focus-requested();
-                                root.select-region(root.region-ids[region-index]);
-                                root.begin-region-gesture(root.region-ids[region-index], "trim-start");
+                                self.gesture-region-id = root.region-ids[region-index];
+                                root.select-region(self.gesture-region-id);
+                                root.begin-region-gesture(self.gesture-region-id, "trim-start");
                                 self.last-drag-x = self.mouse-x;
                             } else if (event.kind == PointerEventKind.cancel) {
                                 root.cancel-region-gesture();
+                                self.gesture-region-id = "";
                             } else if (event.kind == PointerEventKind.up) {
                                 root.end-region-gesture();
+                                self.gesture-region-id = "";
                             }
                         }
                         moved => {
-                            if (self.pressed) {
+                            if (self.pressed && self.gesture-region-id != "") {
                                 let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
                                 self.last-drag-x = self.mouse-x;
-                                root.trim-region-start(root.region-ids[region-index], delta);
+                                root.trim-region-start(self.gesture-region-id, delta);
                             }
                         }
                     }
@@ -226,23 +234,27 @@ export component StudioTrackRow inherits WorkspaceRow {
                     }
                     TouchArea {
                         property <length> last-drag-x: 0px;
+                        property <string> gesture-region-id: "";
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                 root.focus-requested();
-                                root.select-region(root.region-ids[region-index]);
-                                root.begin-region-gesture(root.region-ids[region-index], "trim-end");
+                                self.gesture-region-id = root.region-ids[region-index];
+                                root.select-region(self.gesture-region-id);
+                                root.begin-region-gesture(self.gesture-region-id, "trim-end");
                                 self.last-drag-x = self.mouse-x;
                             } else if (event.kind == PointerEventKind.cancel) {
                                 root.cancel-region-gesture();
+                                self.gesture-region-id = "";
                             } else if (event.kind == PointerEventKind.up) {
                                 root.end-region-gesture();
+                                self.gesture-region-id = "";
                             }
                         }
                         moved => {
-                            if (self.pressed) {
+                            if (self.pressed && self.gesture-region-id != "") {
                                 let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
                                 self.last-drag-x = self.mouse-x;
-                                root.trim-region-end(root.region-ids[region-index], delta);
+                                root.trim-region-end(self.gesture-region-id, delta);
                             }
                         }
                     }
@@ -325,6 +337,18 @@ export component StudioArrangement inherits Rectangle {
                 root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1);
                 return accept;
             }
+            if (event.text == "i" || event.text == "I") {
+                root.trim-region-start(root.selected-region-track, root.selected-region-id, -0.1);
+                return accept;
+            }
+            if (event.text == "o" || event.text == "O") {
+                root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1);
+                return accept;
+            }
+            if (event.text == "s" || event.text == "S") {
+                root.split-region(root.selected-region-track, root.selected-region-id);
+                return accept;
+            }
             if (event.text == Key.LeftArrow) {
                 root.move-region(root.selected-region-track, root.selected-region-id, -0.1);
                 return accept;
@@ -335,6 +359,12 @@ export component StudioArrangement inherits Rectangle {
             }
             return reject;
         }
+    }
+
+    /// Gives keyboard and accessibility journeys a deterministic way to move
+    /// focus to the selected region without mutating document state.
+    public function focus-timeline() {
+        timeline-focus.focus();
     }
 
     VerticalLayout {
@@ -396,19 +426,48 @@ export component StudioArrangement inherits Rectangle {
                 clicked => { root.timeline-scroll-seconds = Math.min(Math.max(0, root.duration-seconds * (root.timeline-zoom - 1)), root.timeline-scroll-seconds + 1); }
             }
             ToolbarButton {
+                text: root.job-state;
+                enabled: root.job-cancellable;
+                clicked => { root.cancel-job(); }
+            }
+        }
+        if root.selected-region-id != "" : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            Text {
+                text: "REGION ACTIONS";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                vertical-alignment: center;
+            }
+            ToolbarButton {
+                text: "←";
+                accessible-label: "Move selected region earlier";
+                clicked => { root.move-region(root.selected-region-track, root.selected-region-id, -0.1); }
+            }
+            ToolbarButton {
+                text: "→";
+                accessible-label: "Move selected region later";
+                clicked => { root.move-region(root.selected-region-track, root.selected-region-id, 0.1); }
+            }
+            ToolbarButton {
+                text: "In";
+                accessible-label: "Trim selected region start earlier";
+                clicked => { root.trim-region-start(root.selected-region-track, root.selected-region-id, -0.1); }
+            }
+            ToolbarButton {
+                text: "Out";
+                accessible-label: "Trim selected region end later";
+                clicked => { root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1); }
+            }
+            ToolbarButton {
                 text: "Split";
-                enabled: root.selected-region-id != "";
+                accessible-label: "Split selected region";
                 clicked => { root.split-region(root.selected-region-track, root.selected-region-id); }
             }
             ToolbarButton {
                 text: "Delete";
-                enabled: root.selected-region-id != "";
+                accessible-label: "Delete selected region";
                 clicked => { root.delete-region(root.selected-region-track, root.selected-region-id); }
-            }
-            ToolbarButton {
-                text: root.job-state;
-                enabled: root.job-cancellable;
-                clicked => { root.cancel-job(); }
             }
         }
         for label[index] in root.track-labels : StudioTrackRow {

@@ -6,13 +6,15 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use audio_io::AudioIo;
 use loom_desktop::{
-    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
-    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, CommandAction, FileDialogService, FileFilter, Menu, MenuActionSink,
+    MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest,
+    SaveFileRequest,
 };
 use loom_studio_core::{
     bounce_mix_with_cancel, decode_wav, load_studio_bundle, save_studio_bundle, synthesize_notes,
@@ -89,9 +91,13 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn empty_session() -> (StudioSession, AudioAssetStore) {
+    let assets = AudioAssetStore::default();
     (
-        StudioSession::new(StudioProject::new("untitled-studio", "Untitled Session")),
-        AudioAssetStore::default(),
+        StudioSession::with_assets(
+            StudioProject::new("untitled-studio", "Untitled Session"),
+            assets.clone(),
+        ),
+        assets,
     )
 }
 
@@ -191,7 +197,7 @@ fn sample_session() -> Result<(StudioSession, AudioAssetStore), String> {
             0.2,
         )?,
     )?;
-    Ok((StudioSession::new(project), assets))
+    Ok((StudioSession::with_assets(project, assets.clone()), assets))
 }
 
 fn initial_session(
@@ -204,7 +210,10 @@ fn initial_session(
                 .map_err(|error| format!("failed to read Studio project '{path}': {error}"))?;
             let (project, assets) = load_studio_bundle(&bytes)
                 .map_err(|error| format!("failed to load Studio project '{path}': {error}"))?;
-            Ok(((StudioSession::new(project), assets), Some(p)))
+            Ok((
+                (StudioSession::with_assets(project, assets.clone()), assets),
+                Some(p),
+            ))
         }
         None => Ok((sample_session()?, None)),
     }
@@ -236,6 +245,7 @@ struct RegionGesture {
     track_index: usize,
     region_id: String,
     kind: GestureKind,
+    accumulated_delta_samples: i64,
 }
 
 #[derive(Debug)]
@@ -243,6 +253,8 @@ struct JobUiState {
     state: StudioJobState,
     cancellation: Option<StudioCancellation>,
     receiver: Option<Receiver<StudioJobEvent>>,
+    generation: u64,
+    warnings: Vec<String>,
 }
 
 impl Default for JobUiState {
@@ -251,6 +263,8 @@ impl Default for JobUiState {
             state: StudioJobState::Idle,
             cancellation: None,
             receiver: None,
+            generation: 0,
+            warnings: Vec::new(),
         }
     }
 }
@@ -260,15 +274,20 @@ impl Default for JobUiState {
 /// deterministic and single-threaded.
 #[derive(Debug)]
 enum StudioJobEvent {
-    Progress(f32),
+    Progress {
+        generation: u64,
+        progress: f32,
+    },
     ImportFinished {
+        generation: u64,
         path: PathBuf,
         name: String,
         result: Result<AudioBuffer, String>,
     },
     BounceFinished {
+        generation: u64,
         destination: PathBuf,
-        result: Result<(), String>,
+        result: Result<Vec<String>, String>,
     },
 }
 
@@ -431,7 +450,14 @@ fn refresh(app: &StudioApp, state: &GuiState) {
             .map(|track| track.pan)
             .collect::<Vec<_>>(),
     )));
-    app.set_active_track_index(project.active_track_index as i32);
+    // TimelineSelection is runtime UI state.  The project field remains a
+    // backwards-compatible fallback for an unselected session, but selecting
+    // a track or region must not dirty the persisted package.
+    let active_track_index = session
+        .selection
+        .track_index
+        .unwrap_or(project.active_track_index);
+    app.set_active_track_index(active_track_index as i32);
     app.set_duration_seconds(project.duration_samples() as f32 / project.sample_rate.max(1) as f32);
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
@@ -538,13 +564,42 @@ fn refresh(app: &StudioApp, state: &GuiState) {
     app.set_job_state(job_state.into());
     app.set_job_progress(job_progress);
     app.set_job_cancellable(job_cancellable);
-    if let Ok(bytes) = save_studio_bundle(project, &state.assets.borrow()) {
+}
+
+/// Records a recovery snapshot at mutation boundaries.  Keeping this out of
+/// `refresh` avoids serializing the whole bundle for every pointer-move frame.
+fn record_recovery_snapshot(state: &GuiState) {
+    let session = state.session.borrow();
+    let assets = state.assets.borrow();
+    if let Ok(bytes) = save_studio_bundle(&session.project, &assets) {
         let _ = record_snapshot_recovery("studio state", bytes);
     }
 }
 
+/// Cancels background work and drops in-flight pointer state before replacing
+/// the document.  Workers may finish after this point, but their receiver is
+/// dropped and generation-tagged events cannot update the new session.
+fn clear_transient_state(state: &GuiState) {
+    state.gesture.borrow_mut().take();
+    let mut job = state.job.borrow_mut();
+    if let Some(cancellation) = job.cancellation.take() {
+        cancellation.cancel();
+    }
+    job.receiver = None;
+    job.generation = job.generation.wrapping_add(1);
+    job.warnings.clear();
+    job.state = StudioJobState::Idle;
+}
+
 fn format_edit_error(operation: &str, error: &StudioEditError) -> String {
     format!("{operation} failed: {error}")
+}
+
+fn active_track_index(session: &StudioSession) -> usize {
+    session
+        .selection
+        .track_index
+        .unwrap_or(session.project.active_track_index)
 }
 
 /// Applies an indexed mixer edit and makes that channel the active selection
@@ -608,6 +663,33 @@ fn region_target_sample(
         session.project.sample_rate,
     )?)
     .ok_or_else(|| StudioEditError::InvalidTiming("region position overflowed".into()))
+}
+
+fn baseline_region_target_sample(
+    baseline: &StudioProject,
+    track_index: usize,
+    region_id: &str,
+    kind: GestureKind,
+    delta_samples: i64,
+) -> Result<i64, StudioEditError> {
+    let track = baseline
+        .tracks
+        .get(track_index)
+        .ok_or(StudioEditError::InvalidTrackIndex)?;
+    let region = track
+        .regions
+        .iter()
+        .find(|region| region.id == region_id)
+        .ok_or(StudioEditError::RegionNotFound)?;
+    let base = match kind {
+        GestureKind::Move | GestureKind::TrimStart => region.start_sample,
+        GestureKind::TrimEnd => region.end_sample(),
+    };
+    let base = i64::try_from(base).map_err(|_| {
+        StudioEditError::InvalidTiming("region position exceeds the supported range".into())
+    })?;
+    base.checked_add(delta_samples)
+        .ok_or_else(|| StudioEditError::InvalidTiming("region position overflowed".into()))
 }
 
 fn mutate_region_at(
@@ -698,15 +780,46 @@ fn apply_region_delta(
     }
 }
 
+fn apply_region_gesture_delta(
+    session: &mut StudioSession,
+    gesture: &mut RegionGesture,
+    delta_seconds: f32,
+) -> Result<(), StudioEditError> {
+    let delta_samples = delta_to_samples(delta_seconds, gesture.baseline.sample_rate)?;
+    let next_delta = gesture
+        .accumulated_delta_samples
+        .checked_add(delta_samples)
+        .ok_or_else(|| StudioEditError::InvalidTiming("timeline delta overflowed".into()))?;
+    let target_sample = baseline_region_target_sample(
+        &gesture.baseline,
+        gesture.track_index,
+        &gesture.region_id,
+        gesture.kind,
+        next_delta,
+    )?;
+    mutate_region_at(
+        &mut session.project,
+        gesture.track_index as i32,
+        &gesture.region_id,
+        gesture.kind,
+        target_sample,
+    )?;
+    gesture.accumulated_delta_samples = next_delta;
+    Ok(())
+}
+
 /// Drains worker events and applies their terminal result on the UI thread.
 /// Returns whether any event was consumed, allowing headless journeys and the
 /// live timer to share exactly the same job lifecycle.
 fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
-    let events = {
+    let (events, generation) = {
         let job = state.job.borrow();
-        job.receiver
-            .as_ref()
-            .map(|receiver| receiver.try_iter().collect::<Vec<_>>())
+        (
+            job.receiver
+                .as_ref()
+                .map(|receiver| receiver.try_iter().collect::<Vec<_>>()),
+            job.generation,
+        )
     };
     let Some(events) = events else {
         return false;
@@ -720,7 +833,10 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
         let mut job = state.job.borrow_mut();
         for event in events {
             match event {
-                StudioJobEvent::Progress(progress) => {
+                StudioJobEvent::Progress {
+                    generation: event_generation,
+                    progress,
+                } if event_generation == generation => {
                     if let StudioJobState::Running {
                         progress: current, ..
                     } = &mut job.state
@@ -728,10 +844,17 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
                         *current = progress.clamp(0.0, 1.0);
                     }
                 }
-                event @ (StudioJobEvent::ImportFinished { .. }
-                | StudioJobEvent::BounceFinished { .. }) => {
+                event @ (StudioJobEvent::ImportFinished {
+                    generation: event_generation,
+                    ..
+                }
+                | StudioJobEvent::BounceFinished {
+                    generation: event_generation,
+                    ..
+                }) if event_generation == generation => {
                     terminal = Some(event);
                 }
+                _ => {}
             }
         }
         if terminal.is_some() {
@@ -746,7 +869,9 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
             _ => "Studio job".into(),
         };
         match event {
-            StudioJobEvent::ImportFinished { path, name, result } => match result {
+            StudioJobEvent::ImportFinished {
+                path, name, result, ..
+            } => match result {
                 Ok(buffer) => {
                     let frames = buffer.frames();
                     if frames == 0 {
@@ -758,16 +883,16 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
                         app.set_status_left("Import failed: imported audio is empty".into());
                         return true;
                     }
-                    let previous_asset = state.assets.borrow().get(&name).cloned();
-                    let insert_result = state.assets.borrow_mut().insert(name.clone(), buffer);
+                    let mut candidate_assets = state.assets.borrow().clone();
+                    let insert_result = candidate_assets.insert(name.clone(), buffer);
                     let edit_result = insert_result.and_then(|()| {
                         let mut session = state.session.borrow_mut();
-                        let active = i32::try_from(session.project.active_track_index)
+                        let active = i32::try_from(active_track_index(&session))
                             .map_err(|_| "active track index is too large".to_string())?;
                         let region_id = next_region_id(&session.project, "import");
                         let selected_region_id = region_id.clone();
                         session
-                            .apply_edit(|project| {
+                            .apply_edit_with_assets(candidate_assets, |project| {
                                 let track = project
                                     .tracks
                                     .get_mut(
@@ -793,20 +918,16 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
                     });
                     match edit_result {
                         Ok(()) => {
+                            let assets = state.session.borrow().assets.clone();
+                            *state.assets.borrow_mut() = assets;
                             state.job.borrow_mut().state =
                                 StudioJobState::Completed { kind: kind.clone() };
+                            state.job.borrow_mut().warnings.clear();
+                            record_recovery_snapshot(state);
                             refresh(app, state);
                             app.set_status_left(format!("Imported {}", path.display()).into());
                         }
                         Err(error) => {
-                            if let Some(previous_asset) = previous_asset {
-                                let _ = state
-                                    .assets
-                                    .borrow_mut()
-                                    .insert(name.clone(), previous_asset);
-                            } else {
-                                let _ = state.assets.borrow_mut().remove(&name);
-                            }
                             state.job.borrow_mut().state = StudioJobState::Failed {
                                 kind: kind.clone(),
                                 message: error.clone(),
@@ -833,13 +954,24 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
             StudioJobEvent::BounceFinished {
                 destination,
                 result,
+                ..
             } => match result {
-                Ok(()) => {
+                Ok(warnings) => {
                     state.job.borrow_mut().state = StudioJobState::Completed { kind: kind.clone() };
+                    state.job.borrow_mut().warnings = warnings.clone();
                     refresh(app, state);
-                    app.set_status_left(
-                        format!("Exported mix to {}", destination.display()).into(),
-                    );
+                    let status = if warnings.is_empty() {
+                        format!("Exported mix to {}", destination.display())
+                    } else {
+                        format!(
+                            "Exported mix to {} · {} warning{}: {}",
+                            destination.display(),
+                            warnings.len(),
+                            if warnings.len() == 1 { "" } else { "s" },
+                            warnings.join("; ")
+                        )
+                    };
+                    app.set_status_left(status.into());
                 }
                 Err(error) if error.contains("cancel") => {
                     state.job.borrow_mut().state = StudioJobState::Cancelled { kind };
@@ -857,7 +989,7 @@ fn poll_job(app: &StudioApp, state: &GuiState) -> bool {
                     app.set_status_left(format!("Bounce failed: {error}").into());
                 }
             },
-            StudioJobEvent::Progress(_) => unreachable!("progress is consumed above"),
+            StudioJobEvent::Progress { .. } => unreachable!("progress is consumed above"),
         }
     } else {
         refresh(app, state);
@@ -1051,6 +1183,22 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         return Err("undo did not restore the pre-gesture arrangement".into());
     }
     app.invoke_redo();
+
+    // Exercise the arrangement FocusScope through the same public window
+    // event path used by a physical keyboard.  This deliberately selects a
+    // second track so the evidence is distinct from the pointer gesture.
+    app.invoke_select_region(1, "region-guitar".into());
+    let before_keyboard = state.session.borrow().project.tracks[1].regions[0].start_sample;
+    app.invoke_focus_arrangement();
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::RightArrow.into(),
+        });
+    if state.session.borrow().project.tracks[1].regions[0].start_sample != before_keyboard + 4_800 {
+        return Err("arrangement keyboard move did not reach the region command".into());
+    }
+    capture_studio_journey_step(&app, &state, &out_dir, "keyboard-edited", &mut steps)?;
+
     app.invoke_trim_region_start(0, "region-vocal".into(), 0.05);
     app.invoke_trim_region_end(0, "region-vocal".into(), -0.05);
     app.invoke_split_region(0, "region-vocal".into());
@@ -1115,7 +1263,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     }
     let transcript = serde_json::json!({
         "app": "studio",
-        "workflow": "import -> select/edit -> undo/redo -> save/reopen -> device failure -> bounce/cancel",
+        "workflow": "import -> pointer edit -> undo/redo -> arrangement keyboard edit -> save/reopen -> device failure -> bounce/cancel",
         "passed": true,
         "steps": steps,
         "palette_report": "studio-palette.json",
@@ -1154,6 +1302,91 @@ impl PaletteProbe for StudioApp {
     }
 }
 
+/// Queue an accepted native-menu action on Slint's event-loop thread.  The
+/// native adapter may receive callbacks from a platform bridge thread, while
+/// every Studio callback and document mutation must stay on the UI thread.
+fn schedule_studio_menu_action(
+    app_ref: &slint::Weak<StudioApp>,
+    action: CommandAction,
+) -> Result<(), loom_desktop::DesktopError> {
+    let id = action.id;
+    let error_id = id.clone();
+    app_ref
+        .upgrade_in_event_loop(move |app| {
+            let handled = match id.as_str() {
+                "file.new" => {
+                    app.invoke_new_song();
+                    true
+                }
+                "file.open" => {
+                    app.invoke_open_song();
+                    true
+                }
+                "file.save" => {
+                    app.invoke_save_song();
+                    true
+                }
+                "file.save_as" => {
+                    app.invoke_save_as_song();
+                    true
+                }
+                "edit.undo" => {
+                    app.invoke_undo();
+                    true
+                }
+                "edit.redo" => {
+                    app.invoke_redo();
+                    true
+                }
+                "app.palette" => {
+                    app.invoke_open_palette();
+                    true
+                }
+                "file.export_wav" => {
+                    app.invoke_export_mix(app.get_export_path());
+                    true
+                }
+                "track.new" => {
+                    app.invoke_add_track();
+                    true
+                }
+                "transport.play_pause" => {
+                    app.invoke_play_pause();
+                    true
+                }
+                "transport.record" => {
+                    app.invoke_toggle_record();
+                    true
+                }
+                "transport.metronome" => {
+                    app.invoke_toggle_metronome();
+                    true
+                }
+                "view.zoom_in" => {
+                    app.set_timeline_zoom((app.get_timeline_zoom() + 0.25).min(4.0));
+                    true
+                }
+                "view.zoom_out" => {
+                    app.set_timeline_zoom((app.get_timeline_zoom() - 0.25).max(0.5));
+                    true
+                }
+                "view.zoom_actual" => {
+                    app.set_timeline_zoom(1.0);
+                    true
+                }
+                _ => false,
+            };
+            if !handled {
+                app.set_status_right(format!("Unsupported menu command: {id}").into());
+            }
+        })
+        .map_err(|error| {
+            loom_desktop::DesktopError::InvalidRequest(format!(
+                "failed to schedule Studio menu command {error_id}: {error}"
+            ))
+        })
+}
+
 fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
     macro_rules! edit_project {
         ($callback:ident, $body:expr) => {{
@@ -1168,7 +1401,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     });
                     drop(session);
                     match result {
-                        Ok(()) => refresh(&app, &state),
+                        Ok(()) => {
+                            record_recovery_snapshot(&state);
+                            refresh(&app, &state);
+                        }
                         Err(StudioEditError::NoOp) => {}
                         Err(error) => {
                             app.set_status_left(format_edit_error("Edit", &error).into());
@@ -1184,6 +1420,7 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_new_song(move || {
             if let Some(app) = weak.upgrade() {
+                clear_transient_state(&state);
                 let (session, assets) = empty_session();
                 *state.session.borrow_mut() = session;
                 *state.assets.borrow_mut() = assets;
@@ -1209,7 +1446,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                         .and_then(|bytes| load_studio_bundle(&bytes))
                     {
                         Ok((project, assets)) => {
-                            *state.session.borrow_mut() = StudioSession::new(project);
+                            clear_transient_state(&state);
+                            *state.session.borrow_mut() =
+                                StudioSession::with_assets(project, assets.clone());
                             *state.assets.borrow_mut() = assets;
                             *state.save_path.borrow_mut() = Some(path.clone());
                             refresh(&app, &state);
@@ -1329,7 +1568,12 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_undo(move || {
             if let Some(app) = weak.upgrade() {
-                state.session.borrow_mut().undo();
+                let changed = state.session.borrow_mut().undo();
+                if changed {
+                    let assets = state.session.borrow().assets.clone();
+                    *state.assets.borrow_mut() = assets;
+                    record_recovery_snapshot(&state);
+                }
                 refresh(&app, &state);
             }
         });
@@ -1339,7 +1583,12 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_redo(move || {
             if let Some(app) = weak.upgrade() {
-                state.session.borrow_mut().redo();
+                let changed = state.session.borrow_mut().redo();
+                if changed {
+                    let assets = state.session.borrow().assets.clone();
+                    *state.assets.borrow_mut() = assets;
+                    record_recovery_snapshot(&state);
+                }
                 refresh(&app, &state);
             }
         });
@@ -1407,7 +1656,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 });
                 drop(session);
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => {
                         app.set_status_left(format_edit_error("Workspace mode", &error).into())
@@ -1442,7 +1694,6 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     app.set_status_left("Region gesture failed: region was not found".into());
                     return;
                 }
-                session.project.active_track_index = track;
                 session.selection =
                     loom_studio_core::TimelineSelection::region(track, region_id.to_string());
                 let baseline = session.project.clone();
@@ -1451,6 +1702,7 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     track_index: track,
                     region_id: region_id.to_string(),
                     kind,
+                    accumulated_delta_samples: 0,
                 });
                 drop(session);
                 refresh(&app, &state);
@@ -1462,35 +1714,44 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_move_region(move |track_index, region_id, delta_seconds| {
             if let Some(app) = weak.upgrade() {
-                let gesture = state.gesture.borrow().clone();
-                let active_gesture = gesture.as_ref().filter(|gesture| {
-                    gesture.track_index == usize::try_from(track_index).unwrap_or(usize::MAX)
+                let track = usize::try_from(track_index).unwrap_or(usize::MAX);
+                let active = state.gesture.borrow().as_ref().map(|gesture| {
+                    gesture.track_index == track
                         && gesture.region_id == region_id.as_str()
                         && gesture.kind == GestureKind::Move
                 });
-                let mut session = state.session.borrow_mut();
-                let result = if active_gesture.is_some() {
-                    apply_region_delta(
-                        &mut session,
-                        track_index,
-                        region_id.as_str(),
-                        GestureKind::Move,
-                        delta_seconds,
-                        true,
-                    )
-                } else {
-                    apply_region_delta(
-                        &mut session,
+                let result = match active {
+                    Some(true) => {
+                        let mut gesture = state.gesture.borrow_mut();
+                        let gesture = gesture.as_mut().expect("active gesture disappeared");
+                        apply_region_gesture_delta(
+                            &mut state.session.borrow_mut(),
+                            gesture,
+                            delta_seconds,
+                        )
+                    }
+                    Some(false) => Err(StudioEditError::NoOp),
+                    None => apply_region_delta(
+                        &mut state.session.borrow_mut(),
                         track_index,
                         region_id.as_str(),
                         GestureKind::Move,
                         delta_seconds,
                         false,
-                    )
+                    ),
                 };
-                drop(session);
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        // Pointer gestures update the live document on every
+                        // frame, then persist one durable snapshot when the
+                        // gesture ends.  Keyboard/accessibility actions use
+                        // the direct path (`active == None`) and still record
+                        // their mutation boundary immediately.
+                        if !matches!(active, Some(true)) {
+                            record_recovery_snapshot(&state);
+                        }
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => {
                         app.set_status_left(format_edit_error("Move region", &error).into())
@@ -1504,24 +1765,39 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_trim_region_start(move |track_index, region_id, delta_seconds| {
             if let Some(app) = weak.upgrade() {
-                let gesture = state.gesture.borrow().clone();
-                let active_gesture = gesture.as_ref().filter(|gesture| {
-                    gesture.track_index == usize::try_from(track_index).unwrap_or(usize::MAX)
+                let track = usize::try_from(track_index).unwrap_or(usize::MAX);
+                let active = state.gesture.borrow().as_ref().map(|gesture| {
+                    gesture.track_index == track
                         && gesture.region_id == region_id.as_str()
                         && gesture.kind == GestureKind::TrimStart
                 });
-                let mut session = state.session.borrow_mut();
-                let result = apply_region_delta(
-                    &mut session,
-                    track_index,
-                    region_id.as_str(),
-                    GestureKind::TrimStart,
-                    delta_seconds,
-                    active_gesture.is_some(),
-                );
-                drop(session);
+                let result = match active {
+                    Some(true) => {
+                        let mut gesture = state.gesture.borrow_mut();
+                        let gesture = gesture.as_mut().expect("active gesture disappeared");
+                        apply_region_gesture_delta(
+                            &mut state.session.borrow_mut(),
+                            gesture,
+                            delta_seconds,
+                        )
+                    }
+                    Some(false) => Err(StudioEditError::NoOp),
+                    None => apply_region_delta(
+                        &mut state.session.borrow_mut(),
+                        track_index,
+                        region_id.as_str(),
+                        GestureKind::TrimStart,
+                        delta_seconds,
+                        false,
+                    ),
+                };
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        if !matches!(active, Some(true)) {
+                            record_recovery_snapshot(&state);
+                        }
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => {
                         app.set_status_left(format_edit_error("Trim region start", &error).into())
@@ -1535,24 +1811,39 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_trim_region_end(move |track_index, region_id, delta_seconds| {
             if let Some(app) = weak.upgrade() {
-                let gesture = state.gesture.borrow().clone();
-                let active_gesture = gesture.as_ref().filter(|gesture| {
-                    gesture.track_index == usize::try_from(track_index).unwrap_or(usize::MAX)
+                let track = usize::try_from(track_index).unwrap_or(usize::MAX);
+                let active = state.gesture.borrow().as_ref().map(|gesture| {
+                    gesture.track_index == track
                         && gesture.region_id == region_id.as_str()
                         && gesture.kind == GestureKind::TrimEnd
                 });
-                let mut session = state.session.borrow_mut();
-                let result = apply_region_delta(
-                    &mut session,
-                    track_index,
-                    region_id.as_str(),
-                    GestureKind::TrimEnd,
-                    delta_seconds,
-                    active_gesture.is_some(),
-                );
-                drop(session);
+                let result = match active {
+                    Some(true) => {
+                        let mut gesture = state.gesture.borrow_mut();
+                        let gesture = gesture.as_mut().expect("active gesture disappeared");
+                        apply_region_gesture_delta(
+                            &mut state.session.borrow_mut(),
+                            gesture,
+                            delta_seconds,
+                        )
+                    }
+                    Some(false) => Err(StudioEditError::NoOp),
+                    None => apply_region_delta(
+                        &mut state.session.borrow_mut(),
+                        track_index,
+                        region_id.as_str(),
+                        GestureKind::TrimEnd,
+                        delta_seconds,
+                        false,
+                    ),
+                };
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        if !matches!(active, Some(true)) {
+                            record_recovery_snapshot(&state);
+                        }
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => {
                         app.set_status_left(format_edit_error("Trim region end", &error).into())
@@ -1572,6 +1863,7 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 };
                 let changed = state.session.borrow_mut().commit_gesture(gesture.baseline);
                 if changed {
+                    record_recovery_snapshot(&state);
                     refresh(&app, &state);
                 }
             }
@@ -1630,7 +1922,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                         )
                     });
                 match result {
-                    Ok((_left, _right)) => refresh(&app, &state),
+                    Ok((_left, _right)) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(error) => {
                         app.set_status_left(format_edit_error("Split region", &error).into())
                     }
@@ -1648,7 +1943,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     .borrow_mut()
                     .delete_region(track_index, region_id.as_str());
                 match result {
-                    Ok(_) => refresh(&app, &state),
+                    Ok(_) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(error) => {
                         app.set_status_left(format_edit_error("Delete region", &error).into())
                     }
@@ -1721,8 +2019,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                                         state.assets.borrow().names().count() + 1
                                     );
                                     let frames = buffer.frames();
+                                    let mut candidate_assets = state.assets.borrow().clone();
                                     if let Err(error) =
-                                        state.assets.borrow_mut().insert(name.clone(), buffer)
+                                        candidate_assets.insert(name.clone(), buffer)
                                     {
                                         app.set_status_left(
                                             format!("Recording failed: {error}").into(),
@@ -1733,25 +2032,45 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                                         * target_rate as f32)
                                         as u64;
                                     let mut session = state.session.borrow_mut();
-                                    session.checkpoint();
-                                    let active = session.project.active_track_index;
-                                    if let Some(track) = session.project.tracks.get_mut(active) {
-                                        track.add_region(AudioRegion {
-                                            id: format!("recording-{}", track.regions.len() + 1),
-                                            name,
-                                            start_sample,
-                                            length_samples: frames,
-                                        });
-                                    }
-                                    drop(session);
-                                    refresh(&app, &state);
-                                    app.set_status_left(
-                                        format!(
-                                            "Recorded {:.2} seconds · {overruns} dropped samples",
-                                            frames as f64 / target_rate as f64
-                                        )
-                                        .into(),
+                                    let active = active_track_index(&session);
+                                    let result = session.apply_edit_with_assets(
+                                        candidate_assets,
+                                        |project| {
+                                            let track = project
+                                                .tracks
+                                                .get_mut(active)
+                                                .ok_or(StudioEditError::InvalidTrackIndex)?;
+                                            track.add_region(AudioRegion {
+                                                id: format!(
+                                                    "recording-{}",
+                                                    track.regions.len() + 1
+                                                ),
+                                                name: name.clone(),
+                                                start_sample,
+                                                length_samples: frames,
+                                            });
+                                            Ok(())
+                                        },
                                     );
+                                    drop(session);
+                                    match result {
+                                        Ok(()) => {
+                                            let assets = state.session.borrow().assets.clone();
+                                            *state.assets.borrow_mut() = assets;
+                                            record_recovery_snapshot(&state);
+                                            refresh(&app, &state);
+                                            app.set_status_left(
+                                                format!(
+                                                    "Recorded {:.2} seconds · {overruns} dropped samples",
+                                                    frames as f64 / target_rate as f64
+                                                )
+                                                .into(),
+                                            );
+                                        }
+                                        Err(error) => app.set_status_left(
+                                            format!("Recording failed: {error}").into(),
+                                        ),
+                                    }
                                 }
                                 Err(error) => app.set_status_left(
                                     format!("Recording conversion failed: {error}").into(),
@@ -1827,7 +2146,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 });
                 drop(session);
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => app.set_status_left(format_edit_error("Tempo", &error).into()),
                 }
@@ -1846,7 +2168,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     })
                 };
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(error) => app.set_status_left(format_edit_error("Mute", &error).into()),
                 }
             }
@@ -1864,7 +2189,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     })
                 };
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(error) => app.set_status_left(format_edit_error("Solo", &error).into()),
                 }
             }
@@ -1884,6 +2212,7 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 if let Err(error) = result {
                     app.set_status_left(format!("Record arm failed: {error}").into());
                 } else {
+                    record_recovery_snapshot(&state);
                     refresh(&app, &state);
                 }
             }
@@ -1901,7 +2230,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     })
                 };
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => app.set_status_left(format_edit_error("Volume", &error).into()),
                 }
@@ -1920,7 +2252,10 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                     })
                 };
                 match result {
-                    Ok(()) => refresh(&app, &state),
+                    Ok(()) => {
+                        record_recovery_snapshot(&state);
+                        refresh(&app, &state);
+                    }
                     Err(StudioEditError::NoOp) => {}
                     Err(error) => app.set_status_left(format_edit_error("Pan", &error).into()),
                 }
@@ -1965,15 +2300,33 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 let worker_cancellation = cancellation.clone();
                 let worker_path = chosen_path.clone();
                 let worker_name = name.clone();
+                let generation = {
+                    let mut job = state.job.borrow_mut();
+                    job.generation = job.generation.wrapping_add(1);
+                    job.state = StudioJobState::Running {
+                        kind: "Import WAV".into(),
+                        progress: 0.0,
+                    };
+                    job.warnings.clear();
+                    job.cancellation = Some(cancellation);
+                    job.receiver = Some(receiver);
+                    job.generation
+                };
                 let worker = move || {
-                    let _ = sender.send(StudioJobEvent::Progress(0.05));
+                    let _ = sender.send(StudioJobEvent::Progress {
+                        generation,
+                        progress: 0.05,
+                    });
                     let result = (|| {
                         if worker_cancellation.is_cancelled() {
                             return Err("import cancelled".to_string());
                         }
                         let bytes =
                             std::fs::read(&worker_path).map_err(|error| error.to_string())?;
-                        let _ = sender.send(StudioJobEvent::Progress(0.35));
+                        let _ = sender.send(StudioJobEvent::Progress {
+                            generation,
+                            progress: 0.35,
+                        });
                         if worker_cancellation.is_cancelled() {
                             return Err("import cancelled".to_string());
                         }
@@ -1988,20 +2341,12 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                         Ok(buffer)
                     })();
                     let _ = sender.send(StudioJobEvent::ImportFinished {
+                        generation,
                         path: worker_path,
                         name: worker_name,
                         result,
                     });
                 };
-                {
-                    let mut job = state.job.borrow_mut();
-                    job.state = StudioJobState::Running {
-                        kind: "Import WAV".into(),
-                        progress: 0.0,
-                    };
-                    job.cancellation = Some(cancellation);
-                    job.receiver = Some(receiver);
-                }
                 refresh(&app, &state);
                 app.set_status_left(format!("Importing {}…", chosen_path.display()).into());
                 thread::spawn(worker);
@@ -2045,6 +2390,18 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                 let cancellation = StudioCancellation::default();
                 let worker_cancellation = cancellation.clone();
                 let worker_destination = chosen_path.clone();
+                let generation = {
+                    let mut job = state.job.borrow_mut();
+                    job.generation = job.generation.wrapping_add(1);
+                    job.state = StudioJobState::Running {
+                        kind: "Bounce mix".into(),
+                        progress: 0.0,
+                    };
+                    job.warnings.clear();
+                    job.cancellation = Some(cancellation);
+                    job.receiver = Some(receiver);
+                    job.generation
+                };
                 let worker = move || {
                     // Give the UI a bounded cancellation window after the
                     // running state becomes visible (also makes headless
@@ -2056,24 +2413,19 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                         &worker_destination,
                         &worker_cancellation,
                         |progress| {
-                            let _ = sender.send(StudioJobEvent::Progress(progress));
+                            let _ = sender.send(StudioJobEvent::Progress {
+                                generation,
+                                progress,
+                            });
                         },
                     )
-                    .map(|_| ());
+                    .map(|mix| mix.warnings);
                     let _ = sender.send(StudioJobEvent::BounceFinished {
+                        generation,
                         destination: worker_destination,
                         result,
                     });
                 };
-                {
-                    let mut job = state.job.borrow_mut();
-                    job.state = StudioJobState::Running {
-                        kind: "Bounce mix".into(),
-                        progress: 0.0,
-                    };
-                    job.cancellation = Some(cancellation);
-                    job.receiver = Some(receiver);
-                }
                 refresh(&app, &state);
                 app.set_status_left(format!("Bouncing {}…", chosen_path.display()).into());
                 thread::spawn(worker);
@@ -2147,7 +2499,10 @@ fn main() -> Result<(), String> {
             .as_deref()
             .and_then(|bytes| load_studio_bundle(bytes).ok())
         {
-            Some((project, assets)) => ((StudioSession::new(project), assets), None),
+            Some((project, assets)) => (
+                (StudioSession::with_assets(project, assets.clone()), assets),
+                None,
+            ),
             None => initial_session(&args)?,
         }
     };
@@ -2205,7 +2560,7 @@ fn main() -> Result<(), String> {
         });
     }
 
-    let menu_bar = build_standard_menu_bar(
+    let mut menu_bar = build_standard_menu_bar(
         "Loom Studio",
         vec![MenuItem::action_with_shortcut(
             "file.export_wav",
@@ -2241,8 +2596,36 @@ fn main() -> Result<(), String> {
             ),
         ],
     );
+    // Keep unsupported standard/extra entries visibly disabled until a real
+    // controller callback exists.  Every enabled entry below is routed to an
+    // existing Studio callback through the registered native-menu sink.
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "edit.undo",
+        "edit.redo",
+        "app.palette",
+        "file.export_wav",
+        "track.new",
+        "transport.play_pause",
+        "transport.record",
+        "transport.metronome",
+        "view.zoom_in",
+        "view.zoom_out",
+        "view.zoom_actual",
+    ]);
     let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
+    menu_service
+        .install_menu_bar(&menu_bar)
+        .map_err(|error| error.to_string())?;
+    let app_ref = app.as_weak();
+    let sink: MenuActionSink =
+        Arc::new(move |action| schedule_studio_menu_action(&app_ref, action));
+    menu_service
+        .register_action_sink(sink)
+        .map_err(|error| error.to_string())?;
 
     wire_palette(&app);
     refresh(&app, &state);
@@ -2725,6 +3108,91 @@ mod tests {
     }
 
     #[test]
+    fn order_changing_gesture_keeps_stable_region_identity() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        {
+            let mut session = state.session.borrow_mut();
+            let track = &mut session.project.tracks[0];
+            track.regions.clear();
+            track.add_region(AudioRegion {
+                id: "region-a".into(),
+                name: "A.wav".into(),
+                start_sample: 0,
+                length_samples: 4_800,
+            });
+            track.add_region(AudioRegion {
+                id: "region-b".into(),
+                name: "B.wav".into(),
+                start_sample: 24_000,
+                length_samples: 4_800,
+            });
+        }
+        refresh(&app, &state);
+
+        // The first update moves A past B, so the indexed repeater must
+        // re-order.  The second update still targets A by its captured id.
+        app.invoke_select_region(0, "region-a".into());
+        app.invoke_begin_region_gesture(0, "region-a".into(), "move".into());
+        app.invoke_move_region(0, "region-a".into(), 1.0);
+        app.invoke_move_region(0, "region-a".into(), 0.5);
+        app.invoke_end_region_gesture();
+
+        let session = state.session.borrow();
+        let track = &session.project.tracks[0];
+        assert_eq!(track.regions[0].id, "region-b");
+        assert_eq!(track.regions[0].start_sample, 24_000);
+        assert_eq!(track.regions[1].id, "region-a");
+        assert_eq!(track.regions[1].start_sample, 72_000);
+        assert_eq!(session.selection.region_id.as_deref(), Some("region-a"));
+        drop(session);
+
+        app.invoke_undo();
+        let session = state.session.borrow();
+        assert_eq!(session.project.tracks[0].regions[0].id, "region-a");
+        assert_eq!(session.project.tracks[0].regions[0].start_sample, 0);
+        assert_eq!(session.project.tracks[0].regions[1].id, "region-b");
+        assert_eq!(session.project.tracks[0].regions[1].start_sample, 24_000);
+    }
+
+    #[test]
+    fn arrangement_keyboard_dispatch_reaches_region_commands() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        let original_start = state.session.borrow().project.tracks[0].regions[0].start_sample;
+        app.invoke_select_region(0, "region-vocal".into());
+        app.invoke_focus_arrangement();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::RightArrow.into(),
+            });
+        assert_eq!(
+            state.session.borrow().project.tracks[0].regions[0].start_sample,
+            original_start + 4_800
+        );
+        assert!(state.session.borrow().can_undo());
+
+        // Split and delete are also routed through the same callbacks as the
+        // toolbar/accessibility actions, rather than being UI-only labels.
+        app.invoke_focus_arrangement();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "s".into() });
+        assert_eq!(state.session.borrow().project.tracks[0].regions.len(), 2);
+        assert_eq!(
+            state.session.borrow().selection.region_id.as_deref(),
+            Some("region-vocal-b")
+        );
+        app.invoke_focus_arrangement();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Delete.into(),
+            });
+        assert_eq!(state.session.borrow().project.tracks[0].regions.len(), 1);
+        assert_eq!(
+            state.session.borrow().selection,
+            loom_studio_core::TimelineSelection::track(0)
+        );
+    }
+
+    #[test]
     fn mixer_and_record_arm_callbacks_update_projection_and_reject_invalid_edits() {
         let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
         app.invoke_toggle_rec_arm(1);
@@ -2763,6 +3231,13 @@ mod tests {
         wait_for_job(&app, &state, Duration::from_secs(5)).unwrap();
         assert_eq!(state.session.borrow().project.total_regions(), before + 1);
         assert!(state.session.borrow().selection.is_region());
+        assert!(state.assets.borrow().get("input.wav").is_some());
+        app.invoke_undo();
+        assert_eq!(state.session.borrow().project.total_regions(), before);
+        assert!(state.assets.borrow().get("input.wav").is_none());
+        app.invoke_redo();
+        assert_eq!(state.session.borrow().project.total_regions(), before + 1);
+        assert!(state.assets.borrow().get("input.wav").is_some());
         app.invoke_play_pause();
         assert!(app.get_status_left().contains("No audio output device"));
         let _ = std::fs::remove_dir_all(&dir);
