@@ -713,18 +713,33 @@ fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) -> bool {
     configure_responsive_width(app, size.0)
 }
 
-fn configure_responsive_width(app: &PresentApp, width: u32) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResponsiveToolbarState {
+    icon_only: bool,
+    overflow: bool,
+    labeled: bool,
+}
+
+fn responsive_toolbar_state(app: &PresentApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
     let width = width as f32;
-    let inspector_available = width >= policy.get_priority_1_icon_only_below();
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
+}
+
+fn configure_responsive_width(app: &PresentApp, width: u32) -> bool {
+    let state = responsive_toolbar_state(app, width);
+    let inspector_available = !state.icon_only;
     app.set_show_inspector(inspector_available);
-    app.set_labeled_export(width >= policy.get_priority_2_overflow_below());
-    let overflow_toolbar = width < policy.get_priority_2_overflow_below();
-    if !overflow_toolbar && app.get_toolbar_overflow_open() {
+    app.set_labeled_export(state.labeled);
+    if !state.overflow && app.get_toolbar_overflow_open() {
         app.invoke_close_toolbar_overflow();
     }
-    app.set_overflow_toolbar(overflow_toolbar);
-    if !overflow_toolbar {
+    app.set_overflow_toolbar(state.overflow);
+    if !state.overflow {
         app.set_toolbar_overflow_open(false);
     }
     inspector_available
@@ -3016,6 +3031,30 @@ mod desktop_tests {
 
         assert!(!app.get_overflow_toolbar());
         assert!(!app.get_toolbar_overflow_open());
+    }
+
+    #[test]
+    fn responsive_policy_transition_probes_are_exact() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let expected = [
+            (1179, true, true, false),
+            (1180, false, true, false),
+            (1279, false, true, false),
+            (1280, false, true, false),
+            (1319, false, true, false),
+            (1320, false, false, true),
+        ];
+        for (width, icon_only, overflow, labeled) in expected {
+            assert_eq!(
+                responsive_toolbar_state(&app, width),
+                ResponsiveToolbarState {
+                    icon_only,
+                    overflow,
+                    labeled,
+                }
+            );
+        }
     }
 
     #[test]

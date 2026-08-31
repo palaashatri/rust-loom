@@ -155,6 +155,37 @@ export component SmokeWindow inherits Window {
     }
 }
 
+/// Stable LTR/RTL probe rows. HorizontalLayout preserves declaration order,
+/// so each row owns one explicit ordering and the window toggles visibility
+/// between them. Keeping the rows as named, always-addressable components
+/// also lets the Rust test inspect their actual computed child positions.
+component DirectionalProbeLtr inherits HorizontalLayout {
+    in property <length> leading-padding: 0px;
+    in property <length> trailing-padding: 0px;
+    out property <length> first_x: first.x;
+    out property <length> second_x: second.x;
+    alignment: stretch;
+    padding-left: root.leading-padding;
+    padding-right: root.trailing-padding;
+    spacing: 4px;
+    first := ToolbarButton { icon: "settings"; label: "Leading action"; }
+    second := ToolbarButton { icon: "export"; label: "Trailing action"; }
+}
+
+component DirectionalProbeRtl inherits HorizontalLayout {
+    in property <length> leading-padding: 0px;
+    in property <length> trailing-padding: 0px;
+    out property <length> first_x: first.x;
+    out property <length> second_x: second.x;
+    alignment: stretch;
+    // Logical leading/trailing insets are mirrored with the order.
+    padding-left: root.trailing-padding;
+    padding-right: root.leading-padding;
+    spacing: 4px;
+    second := ToolbarButton { icon: "export"; label: "Trailing action"; }
+    first := ToolbarButton { icon: "settings"; label: "Leading action"; }
+}
+
 /// Small executable probe for direction and localization-sensitive geometry.
 /// It is intentionally separate from the visual reference surface so a
 /// regression test can toggle both states without replacing an approved
@@ -165,22 +196,35 @@ export component DirectionalPropertyProbeWindow inherits Window {
     height: 180px;
     background: Theme.palette().canvas;
     in property <bool> rtl: false;
+    // Expose the actual child positions so the Rust probe can assert order,
+    // not merely compare two screenshots.
+    out property <length> first-x: root.rtl ? rtl_row.first_x : ltr_row.first_x;
+    out property <length> second-x: root.rtl ? rtl_row.second_x : ltr_row.second_x;
 
-    DirectionalLayout {
-        rtl: root.rtl;
+    ltr_row := DirectionalProbeLtr {
         width: 100%;
         height: 72px;
         leading-padding: 8px;
         trailing-padding: 28px;
-        cross-axis-alignment: center;
-        ToolbarButton { icon: "settings"; label: "Leading action"; }
-        ToolbarButton { icon: "export"; label: "Trailing action"; }
+        visible: !root.rtl;
     }
 
-    PropertyRow {
-        y: 82px;
+    rtl_row := DirectionalProbeRtl {
         width: 100%;
+        height: 72px;
+        leading-padding: 8px;
+        trailing-padding: 28px;
+        visible: root.rtl;
+    }
+
+    property-row := PropertyRow {
+        x: 8px;
+        y: 82px;
+        width: 180px;
         label: "A deliberately long localized property label";
         ToolbarButton { icon: "check"; label: "Value"; }
     }
+    out property <bool> property-row-stacked: property-row.resolved-stacked;
+    out property <length> property-row-label-height: property-row.resolved-label-height;
+    out property <length> property-row-control-y: property-row.resolved-control-y;
 }

@@ -412,11 +412,27 @@ fn configure_responsive_layout(app: &PhotoApp, size: (u32, u32)) {
     configure_responsive_width(app, size.0);
 }
 
-fn configure_responsive_width(app: &PhotoApp, width: u32) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResponsiveToolbarState {
+    icon_only: bool,
+    overflow: bool,
+    labeled: bool,
+}
+
+fn responsive_toolbar_state(app: &PhotoApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
     let width = width as f32;
-    app.set_inspector_available(width >= policy.get_priority_1_icon_only_below());
-    app.set_labeled_export(width >= policy.get_priority_2_overflow_below());
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
+}
+
+fn configure_responsive_width(app: &PhotoApp, width: u32) {
+    let state = responsive_toolbar_state(app, width);
+    app.set_inspector_available(!state.icon_only);
+    app.set_labeled_export(state.labeled);
 }
 
 fn configure_direction(app: &PhotoApp, rtl: bool) {
@@ -2271,6 +2287,30 @@ mod tests {
             )),
         )
         .expect("state")
+    }
+
+    #[test]
+    fn responsive_policy_transition_probes_are_exact() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let expected = [
+            (1179, true, true, false),
+            (1180, false, true, false),
+            (1279, false, true, false),
+            (1280, false, true, false),
+            (1319, false, true, false),
+            (1320, false, false, true),
+        ];
+        for (width, icon_only, overflow, labeled) in expected {
+            assert_eq!(
+                responsive_toolbar_state(&app, width),
+                ResponsiveToolbarState {
+                    icon_only,
+                    overflow,
+                    labeled,
+                }
+            );
+        }
     }
 
     #[test]

@@ -193,8 +193,39 @@ export component StudioApp inherits Window {
         DirectionalLayout {
             spacing: 0px;
             vertical-stretch: 1;
+            rtl: root.rtl;
 
-            StudioLibrary {
+            // HorizontalLayout is declaration ordered. Mirror the outer
+            // library/mixer siblings explicitly so RTL keeps the logical
+            // leading library and trailing mixer on opposite edges.
+            if root.rtl : StudioMixer {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 292px;
+                max-width: root.compact-layout ? 264px : 320px;
+                compact-layout: root.compact-layout;
+                active-track-index: root.active-track-index;
+                track-labels: root.track-labels;
+                track-volumes: root.track-volumes;
+                track-pans: root.track-pans;
+                track-mutes: root.track-mutes;
+                track-solos: root.track-solos;
+                track-arms: root.track-arms;
+                input-available: root.input-available;
+                selection-label: root.selection-label;
+                job-state: root.job-state;
+                job-progress: root.job-progress;
+                job-cancellable: root.job-cancellable;
+                export-path <=> root.export-path;
+                volume-changed(index, value) => { root.volume-changed(index, value); }
+                pan-changed(index, value) => { root.pan-changed(index, value); }
+                mute-toggled(index) => { root.toggle-mute(index); }
+                solo-toggled(index) => { root.toggle-solo(index); }
+                record-arm-toggled(index) => { root.toggle-rec-arm(index); }
+                export-mix(path) => { root.export-mix(path); }
+                cancel-job => { root.cancel-job(); }
+            }
+
+            if !root.rtl : StudioLibrary {
                 min-width: root.compact-layout ? 200px : 224px;
                 preferred-width: root.compact-layout ? 208px : 248px;
                 max-width: root.compact-layout ? 224px : 280px;
@@ -264,7 +295,7 @@ export component StudioApp inherits Window {
 
             Rectangle { width: 1px; background: Theme.palette().border; }
 
-            StudioMixer {
+            if !root.rtl : StudioMixer {
                 min-width: root.compact-layout ? 240px : 260px;
                 preferred-width: root.compact-layout ? 248px : 292px;
                 max-width: root.compact-layout ? 264px : 320px;
@@ -289,6 +320,23 @@ export component StudioApp inherits Window {
                 record-arm-toggled(index) => { root.toggle-rec-arm(index); }
                 export-mix(path) => { root.export-mix(path); }
                 cancel-job => { root.cancel-job(); }
+            }
+
+            if root.rtl : StudioLibrary {
+                min-width: root.compact-layout ? 200px : 224px;
+                preferred-width: root.compact-layout ? 208px : 248px;
+                max-width: root.compact-layout ? 224px : 280px;
+                compact-layout: root.compact-layout;
+                track-labels: root.track-labels;
+                midi-ports: root.midi-ports;
+                selected-midi-port <=> root.selected-midi-port;
+                import-path <=> root.import-path;
+                midi-status: root.midi-status;
+                output-device: root.output-device;
+                input-device: root.input-device;
+                import-audio(path) => { root.import-audio(path); }
+                connect-midi(index) => { root.connect-midi(index); }
+                add-track => { root.add-track(); }
             }
         }
 

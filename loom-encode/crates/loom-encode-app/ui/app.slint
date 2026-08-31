@@ -145,38 +145,12 @@ export component EncodeApp inherits Window {
         DirectionalLayout {
             spacing: 0px;
             vertical-stretch: 1;
+            rtl: root.rtl;
 
-            EncodeQueue {
-                min-width: root.compact-layout ? 280px : 320px;
-                preferred-width: root.compact-layout ? 296px : 360px;
-                max-width: root.compact-layout ? 320px : 392px;
-                compact-layout: root.compact-layout;
-                job-labels: root.job-labels;
-                job-details: root.job-details;
-                job-statuses: root.job-statuses;
-                job-progresses: root.job-progresses;
-                job-tones: root.job-tones;
-                job-running: root.job-running;
-                active-job-index: root.active-job-index;
-                batch-progress: root.batch-progress;
-                select-job(index) => { root.select-job(index); }
-                move-job(from, to) => { root.move-job(from, to); }
-            }
-            Rectangle { width: 1px; background: Theme.palette().border; }
-
-            EncodeProgress {
-                horizontal-stretch: 1;
-                compact-layout: root.compact-layout;
-                selected-job-text: root.selected-job-text;
-                selected-job-details: root.selected-job-details;
-                selected-output: root.selected-output;
-                active-job-progress: root.active-job-progress;
-                backend-available: root.backend-available;
-                backend-version: root.backend-version;
-            }
-
-            Rectangle { width: 1px; background: Theme.palette().border; }
-            EncodeInspector {
+            // HorizontalLayout preserves declaration order. Mirror the
+            // queue/inspector siblings explicitly for RTL while keeping the
+            // progress surface as the stretchable center.
+            if root.rtl : EncodeInspector {
                 min-width: root.compact-layout ? 240px : 260px;
                 preferred-width: root.compact-layout ? 248px : 330px;
                 max-width: root.compact-layout ? 272px : 360px;
@@ -213,6 +187,92 @@ export component EncodeApp inherits Window {
                 metadata-copy-changed(copy) => { root.metadata-copy-changed(copy); }
                 collision-policy-changed(policy) => { root.collision-policy-changed(policy); }
                 retry-job => { root.retry-job(); }
+            }
+
+            if !root.rtl : EncodeQueue {
+                min-width: root.compact-layout ? 280px : 320px;
+                preferred-width: root.compact-layout ? 296px : 360px;
+                max-width: root.compact-layout ? 320px : 392px;
+                compact-layout: root.compact-layout;
+                job-labels: root.job-labels;
+                job-details: root.job-details;
+                job-statuses: root.job-statuses;
+                job-progresses: root.job-progresses;
+                job-tones: root.job-tones;
+                job-running: root.job-running;
+                active-job-index: root.active-job-index;
+                batch-progress: root.batch-progress;
+                select-job(index) => { root.select-job(index); }
+                move-job(from, to) => { root.move-job(from, to); }
+            }
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            EncodeProgress {
+                horizontal-stretch: 1;
+                compact-layout: root.compact-layout;
+                selected-job-text: root.selected-job-text;
+                selected-job-details: root.selected-job-details;
+                selected-output: root.selected-output;
+                active-job-progress: root.active-job-progress;
+                backend-available: root.backend-available;
+                backend-version: root.backend-version;
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+            if !root.rtl : EncodeInspector {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 330px;
+                max-width: root.compact-layout ? 272px : 360px;
+                compact-layout: root.compact-layout;
+                running: root.running;
+                can-retry: root.can-retry;
+                inspector-tab <=> root.inspector-tab;
+                selected-source <=> root.selected-source;
+                selected-output <=> root.selected-output;
+                selected-preset: root.selected-preset;
+                selected-video: root.selected-video;
+                selected-audio: root.selected-audio;
+                selected-audio-codec: root.selected-audio-codec;
+                selected-subtitles: root.selected-subtitles;
+                selected-subtitle-mode: root.selected-subtitle-mode;
+                selected-metadata: root.selected-metadata;
+                metadata-copy: root.metadata-copy;
+                selected-destination: root.selected-destination;
+                collision-policy: root.collision-policy;
+                selected-status: root.selected-status;
+                report-summary: root.report-summary;
+                selected-job-details: root.selected-job-details;
+                status-left: root.status-left;
+                preset-changed(preset) => { root.preset-changed(preset); }
+                source-changed(path) => { root.source-changed(path); }
+                output-changed(path) => { root.output-changed(path); }
+                choose-source => { root.choose-source(); }
+                choose-output => { root.choose-output(); }
+                choose-subtitles => { root.choose-subtitles(); }
+                source-dropped(path) => { root.source-dropped(path); }
+                output-dropped(path) => { root.output-dropped(path); }
+                audio-codec-changed(codec) => { root.audio-codec-changed(codec); }
+                subtitle-mode-changed(mode) => { root.subtitle-mode-changed(mode); }
+                metadata-copy-changed(copy) => { root.metadata-copy-changed(copy); }
+                collision-policy-changed(policy) => { root.collision-policy-changed(policy); }
+                retry-job => { root.retry-job(); }
+            }
+
+            if root.rtl : EncodeQueue {
+                min-width: root.compact-layout ? 280px : 320px;
+                preferred-width: root.compact-layout ? 296px : 360px;
+                max-width: root.compact-layout ? 320px : 392px;
+                compact-layout: root.compact-layout;
+                job-labels: root.job-labels;
+                job-details: root.job-details;
+                job-statuses: root.job-statuses;
+                job-progresses: root.job-progresses;
+                job-tones: root.job-tones;
+                job-running: root.job-running;
+                active-job-index: root.active-job-index;
+                batch-progress: root.batch-progress;
+                select-job(index) => { root.select-job(index); }
+                move-job(from, to) => { root.move-job(from, to); }
             }
         }
         ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }

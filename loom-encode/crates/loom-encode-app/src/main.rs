@@ -633,9 +633,26 @@ fn configure_responsive_layout(app: &EncodeApp, size: (u32, u32)) {
     configure_responsive_width(app, size.0);
 }
 
-fn configure_responsive_width(app: &EncodeApp, width: u32) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResponsiveToolbarState {
+    icon_only: bool,
+    overflow: bool,
+    labeled: bool,
+}
+
+fn responsive_toolbar_state(app: &EncodeApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
-    app.set_compact_layout((width as f32) < policy.get_priority_1_icon_only_below());
+    let width = width as f32;
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
+}
+
+fn configure_responsive_width(app: &EncodeApp, width: u32) {
+    let state = responsive_toolbar_state(app, width);
+    app.set_compact_layout(state.icon_only);
 }
 
 fn configure_direction(app: &EncodeApp, rtl: bool) {
@@ -2738,6 +2755,30 @@ mod tests {
 
         configure_responsive_layout(&app, (1180, 800));
         assert!(!app.get_compact_layout());
+    }
+
+    #[test]
+    fn responsive_policy_transition_probes_are_exact() {
+        set_platform();
+        let app = EncodeApp::new().expect("create EncodeApp");
+        let expected = [
+            (1179, true, true, false),
+            (1180, false, true, false),
+            (1279, false, true, false),
+            (1280, false, true, false),
+            (1319, false, true, false),
+            (1320, false, false, true),
+        ];
+        for (width, icon_only, overflow, labeled) in expected {
+            assert_eq!(
+                responsive_toolbar_state(&app, width),
+                ResponsiveToolbarState {
+                    icon_only,
+                    overflow,
+                    labeled,
+                }
+            );
+        }
     }
 
     #[test]

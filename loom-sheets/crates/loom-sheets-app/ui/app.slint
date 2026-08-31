@@ -1,5 +1,6 @@
 import {
-    TitleChrome, ContextToolbar, LabeledToolbar, ToolbarButton, StatusBar, TemplateCard
+    TitleChrome, ContextToolbar, LabeledToolbar, ToolbarButton, StatusBar, TemplateCard,
+    DirectionalLayout
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
@@ -282,9 +283,10 @@ export component SheetsApp inherits Window {
 
             // Action toolbar. The host is selected explicitly so a 40px
             // context row never stretches the labeled controls.
-            if root.wide-toolbar : LabeledToolbar {
-                SheetActionToolbar {
-                    wide: true;
+                if root.wide-toolbar : LabeledToolbar {
+                    SheetActionToolbar {
+                        rtl: root.rtl;
+                        wide: true;
                     overflow: root.overflow-toolbar;
                     inspector-available: root.inspector-available;
                     inspector-visible: root.inspector-visible;
@@ -301,8 +303,9 @@ export component SheetsApp inherits Window {
                     }
                 }
             }
-            if !root.wide-toolbar : ContextToolbar {
-                SheetActionToolbar {
+                if !root.wide-toolbar : ContextToolbar {
+                    SheetActionToolbar {
+                    rtl: root.rtl;
                     wide: false;
                     overflow: root.overflow-toolbar;
                     inspector-available: root.inspector-available;
@@ -341,9 +344,31 @@ export component SheetsApp inherits Window {
             // packs children, which would collapse the stretchable grid when
             // the inspector is visible; this surface must reserve the grid's
             // remaining width for a usable editing canvas.
-            HorizontalLayout {
+            DirectionalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
+                rtl: root.rtl;
+
+                // HorizontalLayout preserves declaration order. Put the
+                // inspector before the grid in RTL so the logical leading
+                // panel remains on the left without relying on an
+                // experimental layout-direction property.
+                if root.rtl && root.inspector-visible : SheetInspector {
+                    selection-range: root.selection-range;
+                    selection-value: root.selection-value;
+                    selection-formula: root.selection-formula;
+                    sheet-name: root.sheet-name;
+                    table-rows-label: root.table-rows-label;
+                    table-cols-label: root.table-cols-label;
+                    selected-row-height: root.selected-row-height;
+                    selected-col-width: root.selected-col-width;
+                    inspector-search <=> root.inspector-search;
+                    inspector-tab <=> root.inspector-tab;
+                    inspector-show-table: root.inspector-show-table;
+                    inspector-show-cell: root.inspector-show-cell;
+                    inspector-search-edited(query) => { root.inspector-search-edited(query); }
+                    inspector-context-changed(index) => { root.inspector-context-changed(index); }
+                }
 
                 grid-surface := SheetGridSurface {
                     horizontal-stretch: 1;
@@ -384,7 +409,7 @@ export component SheetsApp inherits Window {
                     extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
                 }
 
-                if root.inspector-visible : SheetInspector {
+                if !root.rtl && root.inspector-visible : SheetInspector {
                     selection-range: root.selection-range;
                     selection-value: root.selection-value;
                     selection-formula: root.selection-formula;

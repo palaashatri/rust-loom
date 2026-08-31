@@ -814,30 +814,36 @@ fn apply_theme(app: &SheetsApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
-fn layout_breakpoints(app: &SheetsApp, width: u32) -> (bool, bool) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResponsiveToolbarState {
+    icon_only: bool,
+    overflow: bool,
+    labeled: bool,
+}
+
+fn layout_breakpoints(app: &SheetsApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
     let width = width as f32;
-    let labeled = width >= policy.get_priority_2_overflow_below();
-    // The P2 boundary is shared with the toolbar overflow decision; there is
-    // no separate 1280px host transition.
-    (labeled, labeled)
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
 }
 
 fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
-    let policy = ResponsivePolicy::get(app);
-    let (show_quick_formulas, labeled_export) = layout_breakpoints(app, width);
-    app.set_show_quick_formulas(show_quick_formulas);
-    app.set_wide_toolbar(show_quick_formulas);
-    app.set_labeled_export(labeled_export);
-    let overflow_toolbar = (width as f32) < policy.get_priority_2_overflow_below();
-    if !overflow_toolbar && app.get_toolbar_overflow_open() {
+    let state = layout_breakpoints(app, width);
+    app.set_show_quick_formulas(state.labeled);
+    app.set_wide_toolbar(state.labeled);
+    app.set_labeled_export(state.labeled);
+    if !state.overflow && app.get_toolbar_overflow_open() {
         app.invoke_close_toolbar_overflow();
     }
-    app.set_overflow_toolbar(overflow_toolbar);
-    if !overflow_toolbar {
+    app.set_overflow_toolbar(state.overflow);
+    if !state.overflow {
         app.set_toolbar_overflow_open(false);
     }
-    let inspector_available = (width as f32) >= policy.get_priority_1_icon_only_below();
+    let inspector_available = !state.icon_only;
     let was_inspector_available = app.get_inspector_available();
     app.set_inspector_available(inspector_available);
     if !inspector_available {
@@ -2293,12 +2299,24 @@ mod tests {
         let policy = ResponsivePolicy::get(&app);
         assert_eq!(policy.get_priority_1_icon_only_below(), 1180.0);
         assert_eq!(policy.get_priority_2_overflow_below(), 1320.0);
-        for width in [1024, 1179, 1180, 1199, 1279, 1280, 1319] {
-            assert_eq!(layout_breakpoints(&app, width), (false, false));
+        let expected = [
+            (1179, true, true, false),
+            (1180, false, true, false),
+            (1279, false, true, false),
+            (1280, false, true, false),
+            (1319, false, true, false),
+            (1320, false, false, true),
+        ];
+        for (width, icon_only, overflow, labeled) in expected {
+            assert_eq!(
+                layout_breakpoints(&app, width),
+                ResponsiveToolbarState {
+                    icon_only,
+                    overflow,
+                    labeled,
+                }
+            );
         }
-        assert_eq!(layout_breakpoints(&app, 1320), (true, true));
-        assert_eq!(layout_breakpoints(&app, 1440), (true, true));
-        assert_eq!(layout_breakpoints(&app, 1920), (true, true));
     }
 
     #[test]

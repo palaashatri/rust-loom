@@ -102,13 +102,31 @@ fn empty_session() -> (StudioSession, AudioAssetStore) {
     )
 }
 
-fn compact_layout_for_width(app: &StudioApp, width: u32) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResponsiveToolbarState {
+    icon_only: bool,
+    overflow: bool,
+    labeled: bool,
+}
+
+fn responsive_toolbar_state(app: &StudioApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
-    (width as f32) < policy.get_priority_1_icon_only_below()
+    let width = width as f32;
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
+}
+
+#[cfg(test)]
+fn compact_layout_for_width(app: &StudioApp, width: u32) -> bool {
+    responsive_toolbar_state(app, width).icon_only
 }
 
 fn configure_responsive_layout(app: &StudioApp, width: u32) {
-    app.set_compact_layout(compact_layout_for_width(app, width));
+    let state = responsive_toolbar_state(app, width);
+    app.set_compact_layout(state.icon_only);
 }
 
 fn configure_direction(app: &StudioApp, rtl: bool) {
@@ -3234,6 +3252,30 @@ mod tests {
         assert!(compact_layout_for_width(&app, 1179));
         assert!(!compact_layout_for_width(&app, 1180));
         assert!(!compact_layout_for_width(&app, 1440));
+    }
+
+    #[test]
+    fn responsive_policy_transition_probes_are_exact() {
+        set_platform();
+        let app = StudioApp::new().expect("create StudioApp");
+        let expected = [
+            (1179, true, true, false),
+            (1180, false, true, false),
+            (1279, false, true, false),
+            (1280, false, true, false),
+            (1319, false, true, false),
+            (1320, false, false, true),
+        ];
+        for (width, icon_only, overflow, labeled) in expected {
+            assert_eq!(
+                responsive_toolbar_state(&app, width),
+                ResponsiveToolbarState {
+                    icon_only,
+                    overflow,
+                    labeled,
+                }
+            );
+        }
     }
 
     #[test]

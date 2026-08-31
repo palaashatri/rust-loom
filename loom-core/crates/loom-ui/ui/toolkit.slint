@@ -9,19 +9,14 @@ import { Icon } from "icons.slint";
 
 /// Horizontal flow that follows the product's writing direction.
 ///
-/// Slint 1.17 keeps `FlexboxLayout` experimental, so the production toolkit
-/// uses the stable `HorizontalLayout` primitive instead. `rtl` changes the
-/// semantic leading/trailing insets; surfaces that need to swap distinct
-/// panels expose those panels in an explicit RTL branch.
+/// Slint 1.17's stable `HorizontalLayout` keeps the shared shell deterministic;
+/// callers mirror distinct child groups with explicit RTL branches. The host
+/// direction still controls logical insets and is observable in the probe.
 export component DirectionalLayout inherits HorizontalLayout {
     in property <bool> rtl: Theme.rtl;
     in property <length> leading-padding: 0px;
     in property <length> trailing-padding: 0px;
 
-    // Stretch is required for workspace children that declare
-    // `horizontal-stretch: 1`; start/end would fall back to preferred widths
-    // and collapse the primary canvas/grid. Child-order mirroring is owned by
-    // the app's explicit RTL branches, while edge padding remains live here.
     alignment: stretch;
     padding-left: root.rtl ? root.trailing-padding : root.leading-padding;
     padding-right: root.rtl ? root.leading-padding : root.trailing-padding;
@@ -826,7 +821,7 @@ export component PropertyRow inherits Rectangle {
             col: 0;
             text: root.label;
             min-width: root.stacked-layout ? 0px : 84px;
-            max-width: root.stacked-layout ? 10000px : 112px;
+            max-width: root.stacked-layout ? max(1px, root.width) : 112px;
             horizontal-stretch: root.stacked-layout ? 1 : 0;
             font-size: Theme.tokens.typography.caption;
             font-weight: 500;
@@ -854,6 +849,12 @@ export component PropertyRow inherits Rectangle {
     private property <bool> auto-stacked: label_text.preferred-width > 112px
         || (root.width > 0px && label_text.preferred-width + 120px + Theme.tokens.space.md > root.width);
     private property <bool> stacked-layout: root.stacked || root.auto-stacked;
+    // Expose resolved geometry for deterministic runtime probes. These are
+    // read-only observations, not alternate layout inputs, so tests can prove
+    // that long localized labels trigger the real stacked branch.
+    out property <bool> resolved-stacked: root.stacked-layout;
+    out property <length> resolved-label-height: label_text.preferred-height;
+    out property <length> resolved-control-y: control_cell.y;
     min-height: root.stacked-layout
         ? label_text.preferred-height + control_cell.preferred-height + Theme.tokens.space.sm
         : max(Theme.tokens.metrics.control-height, max(label_text.preferred-height, control_cell.preferred-height));

@@ -305,9 +305,32 @@ mod visual_tests {
         let window = DirectionalPropertyProbeWindow::new().expect("create direction probe");
 
         window.set_rtl(false);
+        assert!(
+            window.get_property_row_stacked(),
+            "long localized PropertyRow labels must switch to stacked layout"
+        );
+        assert!(
+            window.get_property_row_label_height() > 18.0,
+            "stacked PropertyRow labels must retain wrapped line height (height={})",
+            window.get_property_row_label_height()
+        );
+        assert!(
+            window.get_property_row_control_y() > 0.0,
+            "stacked PropertyRow controls must move below the wrapped label"
+        );
+        assert!(
+            window.get_first_x() < window.get_second_x(),
+            "LTR direction must preserve declaration order"
+        );
         let ltr = loom_test_support::capture::snapshot_component(&window, 420.0, 180.0, 1.0)
             .expect("capture LTR probe");
         window.set_rtl(true);
+        assert!(
+            window.get_first_x() > window.get_second_x(),
+            "RTL direction must reverse horizontal child order (first={}, second={})",
+            window.get_first_x(),
+            window.get_second_x()
+        );
         let rtl = loom_test_support::capture::snapshot_component(&window, 420.0, 180.0, 1.0)
             .expect("capture RTL probe");
         assert!(

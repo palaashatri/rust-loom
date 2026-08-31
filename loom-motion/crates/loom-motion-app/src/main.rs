@@ -634,13 +634,31 @@ fn rebuild_palette(app: &MotionApp, query: &str) {
     }
 }
 
-fn compact_layout_for_width(app: &MotionApp, width: u32) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResponsiveToolbarState {
+    icon_only: bool,
+    overflow: bool,
+    labeled: bool,
+}
+
+fn responsive_toolbar_state(app: &MotionApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
-    (width as f32) < policy.get_priority_1_icon_only_below()
+    let width = width as f32;
+    ResponsiveToolbarState {
+        icon_only: width < policy.get_priority_1_icon_only_below(),
+        overflow: width < policy.get_priority_2_overflow_below(),
+        labeled: width >= policy.get_priority_2_overflow_below(),
+    }
+}
+
+#[cfg(test)]
+fn compact_layout_for_width(app: &MotionApp, width: u32) -> bool {
+    responsive_toolbar_state(app, width).icon_only
 }
 
 fn configure_responsive_layout(app: &MotionApp, width: u32) {
-    app.set_compact_layout(compact_layout_for_width(app, width));
+    let state = responsive_toolbar_state(app, width);
+    app.set_compact_layout(state.icon_only);
 }
 
 fn configure_direction(app: &MotionApp, rtl: bool) {
@@ -1924,6 +1942,31 @@ mod product_tests {
             Rc::new(ScriptedFileDialogs::default()),
             Some(PathBuf::from("projects/demo.loommotion")),
         )
+    }
+
+    #[test]
+    fn responsive_policy_transition_probes_are_exact() {
+        set_platform();
+        let app = MotionApp::new().expect("create MotionApp");
+        let expected = [
+            (1179, true, true, false),
+            (1180, false, true, false),
+            (1279, false, true, false),
+            (1280, false, true, false),
+            (1319, false, true, false),
+            (1320, false, false, true),
+        ];
+        for (width, icon_only, overflow, labeled) in expected {
+            assert_eq!(
+                responsive_toolbar_state(&app, width),
+                ResponsiveToolbarState {
+                    icon_only,
+                    overflow,
+                    labeled,
+                }
+            );
+            assert_eq!(compact_layout_for_width(&app, width), icon_only);
+        }
     }
 
     #[test]

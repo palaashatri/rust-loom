@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 from dataclasses import dataclass
+from copy import deepcopy
 import json
 import re
 import sys
@@ -181,6 +182,79 @@ def source_geometry_signature(source: str) -> str:
     return hashlib.sha256("\n".join(geometry_lines).encode("utf-8")).hexdigest()
 
 
+def direct_geometry_properties(block: str) -> dict[str, float]:
+    """Read literal top-level geometry properties from one Slint block."""
+
+    opening = block.find("{")
+    closing = block.rfind("}")
+    if opening < 0 or closing <= opening:
+        return {}
+    values: dict[str, float] = {}
+    depth = 0
+    for line in block[opening + 1 : closing].splitlines():
+        if depth == 0:
+            match = re.match(
+                r"\s*(x|y|width|height|min-width|min-height|max-width|max-height|preferred-width|preferred-height)"
+                r"\s*:\s*([0-9]+(?:\.[0-9]+)?)px\s*;",
+                line,
+            )
+            if match:
+                values[match.group(1)] = float(match.group(2))
+        depth += line.count("{") - line.count("}")
+    return values
+
+
+def source_geometry_nodes(source: str) -> list[dict[str, object]]:
+    """Extract source-backed fixed geometry observations from the app tree.
+
+    Slint resolves percentages and layout expressions at runtime, which a
+    text-only audit cannot evaluate. Literal geometry is still valuable
+    evidence: it identifies every fixed-size node, records its source line,
+    and lets the manifest reject impossible dimensions before a native render.
+    """
+
+    pattern = re.compile(
+        r"(?m)^(?P<prefix>\s*(?:(?:if|for)[^\n{}]*:\s*)?(?:\w+\s*:=\s*)?)"
+        r"(?P<name>[A-Za-z_]\w*)\s*\{"
+    )
+    nodes: list[dict[str, object]] = []
+    for match in pattern.finditer(source):
+        prefix = match.group("prefix")
+        # Component declarations are not instances in the rendered tree.
+        if re.search(r"\bcomponent\s+", prefix):
+            continue
+        opening = source.find("{", match.start(), match.end())
+        block = balanced_slint_block(source, opening)
+        if not block:
+            continue
+        geometry = direct_geometry_properties(block)
+        if not geometry:
+            continue
+        nodes.append(
+            {
+                "name": match.group("name"),
+                "line": source.count("\n", 0, match.start()) + 1,
+                **geometry,
+            }
+        )
+    return nodes
+
+
+def source_rtl_branch(source: str) -> bool:
+    """Return whether the source has a conditional branch keyed by ``root.rtl``.
+
+    A branch may combine direction with another visibility predicate (for
+    example ``root.inspector-visible && root.rtl``).  Looking only for the
+    prefix ``if root.rtl`` silently misses those valid mirrored branches.
+    """
+
+    pattern = re.compile(
+        r"(?m)^\s*if\s+(?P<condition>[^\n{}]+?)\s*:\s*"
+        r"(?:\w+\s*:=\s*)?[A-Za-z_]\w*\s*\{"
+    )
+    return any(re.search(r"\broot\.rtl\b", match.group("condition")) for match in pattern.finditer(source))
+
+
 def app_shell_sequence(source: str) -> list[str]:
     """Extract shell owners in source order from the exported Window root."""
 
@@ -260,6 +334,53 @@ def numeric_widths(source: str, component: str) -> list[float]:
                 if match:
                     widths.append(float(match.group(1)))
             depth += line.count("{") - line.count("}")
+    return widths
+
+
+def inherited_numeric_widths(source: str, component: str) -> list[float]:
+    """Read fixed widths from wrappers that inherit a shared panel surface.
+
+    App entry points often instantiate a domain wrapper (``WriterInspector``
+    or ``SheetInspector``) rather than ``InspectorSurface`` directly.  A
+    width-only scan of the canonical primitive therefore reports zero even
+    though the reachable tree has an explicit 280px panel.  Follow the local
+    inheritance graph and inspect both wrapper declarations and their actual
+    instances, but only accept top-level literal ``width`` or
+    ``preferred-width`` values; child controls must not determine panel
+    geometry.
+    """
+
+    inheritance = component_inheritance_map(source)
+    names: set[str] = {component}
+    for candidate in inheritance:
+        current = candidate
+        seen: set[str] = set()
+        while current not in seen:
+            seen.add(current)
+            if current == component:
+                names.add(candidate)
+                break
+            current = inheritance.get(current, "")
+            if not current:
+                break
+
+    widths: list[float] = []
+
+    def collect(block: str) -> None:
+        geometry = direct_geometry_properties(block)
+        for key in ("width", "preferred-width"):
+            value = geometry.get(key)
+            if value is not None and value > 0:
+                widths.append(value)
+
+    for name in sorted(names):
+        # Exported wrapper declarations carry defaults such as
+        # ``SheetInspector { width: 280px; }``.
+        collect(exported_component_block(source, name))
+        # Root instances carry overrides such as Writer's
+        # ``preferred-width: 280px`` in each RTL branch.
+        for _, _, instance in slint_named_instance_blocks(source, (name,)):
+            collect(instance)
     return widths
 
 
@@ -403,18 +524,46 @@ def toolbar_source_metadata(source: str) -> dict[str, object]:
                 "accessible-label": literal_property(block, "accessible-label"),
             }
         )
+    # The responsive source keeps mutually exclusive LTR/RTL and compact/
+    # labeled branches in one include graph. Treat identical controls as one
+    # logical command so geometry is measured against the reachable toolbar,
+    # not the sum of every alternate declaration.
+    unique_toolbar_items: list[dict[str, str]] = []
+    seen_toolbar_items: set[tuple[str, str, str, str]] = set()
+    for item in toolbar_items:
+        key = (
+            str(item.get("component", "")),
+            str(item.get("icon", "")),
+            str(item.get("label", "")),
+            str(item.get("accessible-label", "")),
+        )
+        if key not in seen_toolbar_items:
+            seen_toolbar_items.add(key)
+            unique_toolbar_items.append(item)
+    toolbar_items = unique_toolbar_items
     labels = [item["label"] for item in toolbar_items if item["label"]]
+    icon_only_count = sum(
+        1
+        for item in toolbar_items
+        if item.get("component") in {"IconOnlyToolbarItem", "ToolbarIconButton"}
+    )
+    labeled_count = sum(
+        1
+        for item in toolbar_items
+        if item.get("component") in {"IconOverLabelToolbarItem", "AppleToolbarItem"}
+    )
+    overflow_count = sum(
+        1
+        for item in toolbar_items
+        if item.get("component") in {"Overflow", "ToolbarOverflowButton", "OverflowMenuButton"}
+    )
     return {
         "toolbar-component": toolbar_name,
         "toolbar-groups": visible_groups,
         "toolbar-group-declarations": group_declarations,
-        "toolbar-icon-only-items": slint_instance_count(toolbar_source, "IconOnlyToolbarItem")
-        + slint_instance_count(toolbar_source, "ToolbarIconButton"),
-        "toolbar-icon-over-label-items": slint_instance_count(toolbar_source, "IconOverLabelToolbarItem")
-        + slint_instance_count(toolbar_source, "AppleToolbarItem"),
-        "toolbar-overflow-items": slint_instance_count(toolbar_source, "Overflow")
-        + slint_instance_count(toolbar_source, "ToolbarOverflowButton")
-        + slint_instance_count(toolbar_source, "OverflowMenuButton"),
+        "toolbar-icon-only-items": icon_only_count,
+        "toolbar-icon-over-label-items": labeled_count,
+        "toolbar-overflow-items": overflow_count,
         "toolbar-labels": labels,
         "toolbar-items": toolbar_items,
         "labeled-slot-bindings": len(re.findall(r"\blabeled-slot\s*:", toolbar_source)),
@@ -434,6 +583,7 @@ def app_source_metadata(app: str, source: str) -> dict[str, object]:
             "source-grid-layouts": slint_instance_count(source, "GridLayout"),
             "source-property-rows": slint_instance_count(source, "PropertyRow"),
             "source-geometry-signature": source_geometry_signature(source),
+            "source-geometry-nodes": source_geometry_nodes(source),
         }
     )
     metadata.update(
@@ -442,14 +592,22 @@ def app_source_metadata(app: str, source: str) -> dict[str, object]:
             "status-component": "StatusBar" if component_used(source, "StatusBar") else "ToolkitStatusBar",
             "sidebar-count": slint_instance_count(source, "SidebarSurface"),
             "inspector-count": slint_instance_count(source, "InspectorSurface"),
-            "sidebar-width": max(numeric_widths(source, "SidebarSurface"), default=0.0),
-            "inspector-width": max(numeric_widths(source, "InspectorSurface"), default=0.0),
+            "sidebar-width": max(
+                numeric_widths(source, "SidebarSurface")
+                + inherited_numeric_widths(source, "SidebarSurface"),
+                default=0.0,
+            ),
+            "inspector-width": max(
+                numeric_widths(source, "InspectorSurface")
+                + inherited_numeric_widths(source, "InspectorSurface"),
+                default=0.0,
+            ),
             "directional-layout-count": slint_instance_count(source, "DirectionalLayout"),
             "rtl-binding": "Theme.rtl" in source,
             # DirectionalLayout swaps logical edge insets, but it cannot
             # reorder arbitrary children. Record whether this app's source
             # adds an explicit root.rtl branch for distinct panel placement.
-            "rtl-layout-branches": bool(re.search(r"\bif\s+root\.rtl\b", source)),
+            "rtl-layout-branches": source_rtl_branch(source),
         }
     )
     return metadata
@@ -605,6 +763,7 @@ def geometry_manifest(
             "grid-layouts": int(source_metadata.get("source-grid-layouts", 0)),
             "property-rows": int(source_metadata.get("source-property-rows", 0)),
         },
+        "source-geometry-nodes": list(source_metadata.get("source-geometry-nodes", [])),
         "rects": [rect.__dict__ for rect in rects],
         "optional-panels": {"left": left, "right": right},
         "primary-surface": {"width": primary_width, "height": work_height},
@@ -630,6 +789,35 @@ def assert_geometry_manifest(manifest: dict, geometry_contract: dict) -> list[st
     max_overlap = float(geometry_contract["max-overlap-px"])
     max_clipping = float(geometry_contract["max-clipping-px"])
     issues: list[str] = []
+    source_nodes = manifest.get("source-geometry-nodes", [])
+    if not isinstance(source_nodes, list) or not source_nodes:
+        issues.append("source geometry nodes are missing")
+    else:
+        for node in source_nodes:
+            if not isinstance(node, dict):
+                issues.append("source geometry node is not an object")
+                continue
+            name = str(node.get("name", "<unnamed>"))
+            line = node.get("line", "?")
+            for axis in ("width", "height", "min-width", "min-height", "max-width", "max-height"):
+                if axis in node:
+                    try:
+                        value = float(node[axis])
+                    except (TypeError, ValueError):
+                        issues.append(f"source geometry node {name}@{line} has non-numeric {axis}")
+                        continue
+                    if value <= 0:
+                        issues.append(f"source geometry node {name}@{line} has non-positive {axis}")
+            for axis in ("width", "height"):
+                minimum = node.get(f"min-{axis}")
+                maximum = node.get(f"max-{axis}")
+                preferred = node.get(f"preferred-{axis}")
+                if minimum is not None and maximum is not None and float(minimum) > float(maximum):
+                    issues.append(f"source geometry node {name}@{line} has {axis} min greater than max")
+                if preferred is not None and minimum is not None and float(preferred) < float(minimum):
+                    issues.append(f"source geometry node {name}@{line} has {axis} preferred below min")
+                if preferred is not None and maximum is not None and float(preferred) > float(maximum):
+                    issues.append(f"source geometry node {name}@{line} has {axis} preferred above max")
     rects = [GeometryRect(**rect) for rect in manifest["rects"]]
     for index, rect in enumerate(rects):
         if rect.x < -max_clipping or rect.y < -max_clipping:
@@ -663,6 +851,39 @@ def assert_geometry_manifest(manifest: dict, geometry_contract: dict) -> list[st
     if primary["height"] < float(geometry_contract["primary-surface-min-height"]):
         issues.append(f"primary surface starved vertically ({primary['height']:.1f}px)")
     return issues
+
+
+def geometry_assertion_regressions(manifest: dict, geometry_contract: dict) -> None:
+    """Keep the overlap/clipping guards live with deliberate mutations.
+
+    These probes are intentionally in-memory: they exercise the same
+    assertion used for generated manifests without touching checked-in or
+    evidence files. If a future refactor drops either guard, the audit fails
+    immediately instead of silently returning a green synthetic manifest.
+    """
+
+    baseline_rects = manifest.get("rects", [])
+    if len(baseline_rects) < 2:
+        require(False, "geometry manifest regression: baseline needs two rectangles")
+        return
+
+    overlap = deepcopy(manifest)
+    overlap["rects"] = [dict(rect) for rect in baseline_rects]
+    overlap["rects"][1]["y"] = overlap["rects"][0]["y"]
+    overlap_issues = assert_geometry_manifest(overlap, geometry_contract)
+    require(
+        any("overlaps" in issue for issue in overlap_issues),
+        "geometry manifest regression: deliberate overlap was not rejected",
+    )
+
+    clipping = deepcopy(manifest)
+    clipping["rects"] = [dict(rect) for rect in baseline_rects]
+    clipping["rects"][0]["width"] = float(manifest["viewport"][0]) + 1.0
+    clipping_issues = assert_geometry_manifest(clipping, geometry_contract)
+    require(
+        any("clips viewport bounds" in issue for issue in clipping_issues),
+        "geometry manifest regression: deliberate clipping was not rejected",
+    )
 
 
 def require(condition: bool, message: str) -> None:
@@ -1100,11 +1321,20 @@ def audit_design_contract() -> None:
 def write_geometry_manifest() -> None:
     """Generate the checked-in source manifest used by the geometry audit."""
 
+    def toml_scalar(value: object) -> str:
+        """Serialize a scalar without turning numeric geometry into strings."""
+
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return json.dumps(value)
+        return json.dumps(str(value))
+
     def toml_inline_table(value: dict[str, object]) -> str:
-        """Serialize one toolbar item using TOML, not JSON object syntax."""
+        """Serialize one inline table using TOML syntax."""
 
         fields = ", ".join(
-            f"{json.dumps(str(key))} = {json.dumps(str(item_value))}"
+            f"{json.dumps(str(key))} = {toml_scalar(item_value)}"
             for key, item_value in value.items()
         )
         return "{ " + fields + " }"
@@ -1178,6 +1408,11 @@ def write_geometry_manifest() -> None:
             toml_inline_table(item) for item in toolbar_items if isinstance(item, dict)
         ) + "]"
         lines.append(f"toolbar-items = {toolbar_items_toml}")
+        geometry_nodes = metadata.get("source-geometry-nodes", [])
+        geometry_nodes_toml = "[" + ", ".join(
+            toml_inline_table(node) for node in geometry_nodes if isinstance(node, dict)
+        ) + "]"
+        lines.append(f"source-geometry-nodes = {geometry_nodes_toml}")
         lines.append(f"root-shell = {json.dumps(metadata.get('root-shell', []))}")
         lines.append(f"source-geometry-signature = {json.dumps(metadata.get('source-geometry-signature', ''))}")
         lines.append("")
@@ -1217,6 +1452,10 @@ def audit_source_manifest(manifest: dict) -> dict[str, dict[str, object]]:
         require(
             int(actual.get("toolbar-groups", 0)) <= 3,
             f"geometry manifest: {app} source exposes more than three visible toolbar groups",
+        )
+        require(
+            entry.get("source-geometry-nodes") == actual.get("source-geometry-nodes"),
+            f"geometry manifest: {app} source geometry nodes are stale; regenerate from current Slint",
         )
         result[app] = actual
     return result
@@ -1316,6 +1555,24 @@ def audit_geometry_manifest() -> None:
             require(ltr["rects"] != rtl["rects"], f"geometry manifest: {app} RTL panel branch does not mirror source panels")
         else:
             require(ltr["rects"] == rtl["rects"], f"geometry manifest: {app} invented RTL panel mirroring without a source branch")
+
+    # Prove the assertion itself still catches the two defect classes that
+    # motivated the manifest. This is independent of whether current source
+    # happens to exercise a narrow viewport or a panel branch.
+    writer_contract = contract.get("app", {}).get("writer", {})
+    writer_metadata = source_metadata.get("writer", {})
+    regression_manifest = geometry_manifest(
+        1280,
+        800,
+        1.0,
+        "ltr",
+        writer_contract,
+        responsive,
+        geometry,
+        writer_metadata,
+        runtime_metrics,
+    )
+    geometry_assertion_regressions(regression_manifest, geometry)
 
 
 def audit_toolkit() -> None:
@@ -1668,16 +1925,23 @@ def audit_app(app: str) -> str:
     require("horizontal-stretch" in text or "CanvasSurface" in text, f"{app}: missing horizontal adaptive layout")
     require("vertical-stretch" in text or "CanvasSurface" in text, f"{app}: missing vertical adaptive layout")
 
-    if app in {"writer", "sheets", "present"}:
-        require("ResponsivePolicy::get" in main, f"{app}: responsive breakpoints are not read from ResponsivePolicy")
-        require(
-            not any(
-                re.search(r"(?:<|>|==|>=|<=)\s*(?:1180|1320)\b", line)
-                and not line.lstrip().startswith(("assert", "for width"))
-                for line in main.splitlines()
-            ),
-            f"{app}: production breakpoint logic contains a host-local 1180/1320 threshold",
-        )
+    require("ResponsivePolicy::get" in main, f"{app}: responsive breakpoints are not read from ResponsivePolicy")
+    require(
+        "get_priority_1_icon_only_below" in main,
+        f"{app}: responsive policy does not consume the P1 icon-only breakpoint",
+    )
+    require(
+        "get_priority_2_overflow_below" in main,
+        f"{app}: responsive policy does not consume the P2 overflow breakpoint",
+    )
+    require(
+        not any(
+            re.search(r"(?:<|>|==|>=|<=)\s*(?:1180|1320)\b", line)
+            and not line.lstrip().startswith(("assert", "for width"))
+            for line in main.splitlines()
+        ),
+        f"{app}: production breakpoint logic contains a host-local 1180/1320 threshold",
+    )
 
     require(not emoji.search(text), f"{app}: emoji/icon-font glyphs remain")
     require(not re.search(r"#[0-9a-fA-F]{6,8}", text), f"{app}: hard-coded color outside theme")
@@ -1692,17 +1956,43 @@ def audit_app(app: str) -> str:
 
 
 def toolbar_component_declarations(source: str) -> dict[str, str]:
-    """Return named toolbar-body declarations and their balanced source blocks."""
+    """Return every local wrapper that ultimately inherits a toolbar host.
+
+    A suffix-only scan (``*ToolbarBody``/``*ActionToolbar``) misses domain
+    wrappers such as ``PhotoToolbar`` and ``MotionToolbar``. Those wrappers
+    still own reachable ``ToolbarGroup`` objects and must be audited with the
+    same slot and three-group rules as an inline host.
+    """
 
     declarations: dict[str, str] = {}
+    inheritance = component_inheritance_map(source)
+
+    def toolbar_host(component: str) -> str:
+        current = component
+        seen: set[str] = set()
+        while current and current not in seen:
+            seen.add(current)
+            if current in {"LabeledToolbar", "ContextToolbar", "Toolbar"}:
+                return current
+            current = inheritance.get(current, "")
+        return ""
+
     pattern = re.compile(
-        r"(?m)^\s*(?:export\s+)?component\s+(\w+(?:ToolbarBody|ActionToolbar))\s+inherits\s+[^\{]+\{"
+        r"(?m)^\s*(?:export\s+)?component\s+(?P<name>\w+)\s+inherits\s+[^\{]+\{"
     )
     for match in pattern.finditer(source):
+        name = match.group("name")
+        # Body components (WriterToolbarBody, SheetActionToolbar, ...)
+        # intentionally inherit DirectionalLayout rather than the host so the
+        # same command groups can be projected into ContextToolbar and
+        # LabeledToolbar instances. Keep that established suffix contract in
+        # addition to wrappers that inherit a canonical host directly.
+        if not toolbar_host(name) and not re.search(r"(?:ToolbarBody|ActionToolbar)$", name):
+            continue
         opening = source.find("{", match.start(), match.end())
         block = balanced_slint_block(source, opening)
         if block:
-            declarations[match.group(1)] = source[match.start() : opening] + block
+            declarations[name] = source[match.start() : opening] + block
     return declarations
 
 
@@ -1747,6 +2037,73 @@ def toolbar_body_instances(block: str, declarations: dict[str, str]) -> list[tup
         (name, instance)
         for _, name, instance in slint_named_instance_blocks(block, names)
     ]
+
+
+def toolbar_host_for_component(component: str, source: str) -> str:
+    """Resolve a local component to its canonical toolbar host, if any."""
+
+    inheritance = component_inheritance_map(source)
+    current = component
+    seen: set[str] = set()
+    while current and current not in seen:
+        seen.add(current)
+        if current in {"LabeledToolbar", "ContextToolbar", "Toolbar"}:
+            return current
+        current = inheritance.get(current, "")
+    return ""
+
+
+def toolbar_literal_bindings(instance: str) -> dict[str, bool]:
+    """Read literal responsive selector bindings from one toolbar instance."""
+
+    bindings: dict[str, bool] = {}
+    for property_name in ("wide", "labeled", "overflow", "compact-layout"):
+        match = re.search(
+            rf"(?m)^\s*{re.escape(property_name)}\s*:\s*(true|false)\s*;",
+            instance,
+        )
+        if match:
+            bindings[property_name] = match.group(1) == "true"
+    return bindings
+
+
+def reachable_toolbar_groups(
+    block: str,
+    declarations: dict[str, str],
+    bindings: dict[str, bool] | None = None,
+    stack: tuple[str, ...] = (),
+) -> list[tuple[str, str]]:
+    """Collect selected groups through nested toolbar wrappers.
+
+    The returned tuples contain each group's declared ``labeled-slot`` and
+    its source block. Nested wrappers are evaluated with the literal selector
+    bindings on their instance, so mutually exclusive compact/labeled
+    branches are not charged as simultaneous groups.
+    """
+
+    known = dict(bindings or {})
+    groups: list[tuple[str, str]] = []
+    for group in slint_instance_blocks(block, "ToolbarGroup"):
+        condition = toolbar_condition(group)
+        if condition_can_be_true(condition, known):
+            groups.append((literal_property(group, "labeled-slot").lower(), group))
+
+    for name, instance in toolbar_body_instances(block, declarations):
+        if name in stack:
+            # A malformed cyclic wrapper graph must not make the audit recurse
+            # forever; the declaration itself is still checked at its host.
+            continue
+        nested_bindings = dict(known)
+        nested_bindings.update(toolbar_literal_bindings(instance))
+        groups.extend(
+            reachable_toolbar_groups(
+                declarations[name],
+                declarations,
+                nested_bindings,
+                stack + (name,),
+            )
+        )
+    return groups
 
 
 def audit_toolbar_body_slot(
@@ -1854,6 +2211,26 @@ def audit_toolbar_slot_hosts(app: str, source: str) -> None:
                     declarations[body_name],
                 )
 
+            # Count the groups that are actually reachable through this host,
+            # including nested wrappers. A host may declare many alternate
+            # branches, but no responsive state may expose more than the
+            # contract's three visible groups at once.
+            host_bindings = {
+                "wide": expected == "true",
+                "labeled": expected == "true",
+                "overflow": expected != "true",
+                # LTR/RTL branches are alternate trees. Evaluate one
+                # direction here; the geometry audit separately exercises
+                # both directions and the source branch check proves the
+                # mirror exists.
+                "rtl": False,
+            }
+            reachable = reachable_toolbar_groups(block, declarations, host_bindings)
+            require(
+                len(reachable) <= 3,
+                f"{app}: {host_kind} toolbar host exposes {len(reachable)} reachable groups (maximum is 3)",
+            )
+
     for block in slint_instance_blocks(source, "Toolbar"):
         require(
             not re.search(r"\b(?:AppleToolbarItem|IconOverLabelToolbarItem)\s*\{", block),
@@ -1871,58 +2248,96 @@ def audit_toolbar_slot_hosts(app: str, source: str) -> None:
             f"{app}: ToolbarGroup must declare its context/labeled slot",
         )
 
+    # Domain components frequently inherit LabeledToolbar directly and are
+    # instantiated from a product workspace wrapper rather than from a
+    # canonical host in app.slint (PhotoToolbar, MotionToolbar, VideoToolbar,
+    # and similar). Audit those reachable instances as first-class hosts.
+    for name, declaration in declarations.items():
+        host = toolbar_host_for_component(name, source)
+        if not host:
+            continue
+        expected = "false" if host == "ContextToolbar" else "true"
+        instances = slint_named_instance_blocks(source, (name,))
+        if not instances:
+            continue
+        for _, _, instance in instances:
+            groups = reachable_toolbar_groups(
+                declaration,
+                declarations,
+                {"rtl": False, **toolbar_literal_bindings(instance)},
+                (name,),
+            )
+            require(
+                bool(groups),
+                f"{app}: {name} toolbar host has no reachable ToolbarGroup",
+            )
+            require(
+                len(groups) <= 3,
+                f"{app}: {name} toolbar host exposes {len(groups)} reachable groups (maximum is 3)",
+            )
+            require(
+                all(slot == expected for slot, _ in groups),
+                f"{app}: {name} toolbar host can expose the opposite toolbar slot",
+            )
 
-if "--write-geometry-manifest" in sys.argv:
-    write_geometry_manifest()
-    print(f"wrote {GEOMETRY_MANIFEST_PATH.relative_to(ROOT)}")
-    sys.exit(0)
 
-audit_design_contract()
-audit_geometry_manifest()
-audit_toolkit()
-audit_icons()
-audit_shared_primitive_ownership()
-app_text = {app: audit_app(app) for app in APPS}
+def main() -> int:
+    if "--write-geometry-manifest" in sys.argv:
+        write_geometry_manifest()
+        print(f"wrote {GEOMETRY_MANIFEST_PATH.relative_to(ROOT)}")
+        return 0
 
-for app, required in {
-    "photo": ("canvas-pan := TouchArea", "pressed-x", "viewport-pan-x", "key-pressed(event)"),
-    "motion": ("drag := TouchArea", "pressed-x", "transform-changed", "key-pressed(event)"),
-    "video": ("ruler-scrub := TouchArea", "playhead-seconds", "root.seek(", "key-pressed(event)"),
-}.items():
-    for token in required:
-        require(token in app_text[app], f"{app}: missing direct-manipulation contract {token}")
+    audit_design_contract()
+    audit_geometry_manifest()
+    audit_toolkit()
+    audit_icons()
+    audit_shared_primitive_ownership()
+    app_text = {app: audit_app(app) for app in APPS}
 
-legacy = read("loom-core/crates/loom-ui/ui/components.slint")
-for component in ("WorkspaceToolbar", "PaneTabs", "CanvasBackdrop", "TransportButton"):
-    require(f"export component {component}" in legacy, f"legacy compatibility UI: missing {component}")
-for component in ("SidebarSurface", "InspectorSurface"):
-    require(
-        re.search(rf"\b{re.escape(component)}\b", legacy[legacy.find("// Re-export the canonical shared primitives") :])
-        is not None,
-        f"legacy compatibility UI: missing {component} re-export",
-    )
+    for app, required in {
+        "photo": ("canvas-pan := TouchArea", "pressed-x", "viewport-pan-x", "key-pressed(event)"),
+        "motion": ("drag := TouchArea", "pressed-x", "transform-changed", "key-pressed(event)"),
+        "video": ("ruler-scrub := TouchArea", "playhead-seconds", "root.seek(", "key-pressed(event)"),
+    }.items():
+        for token in required:
+            require(token in app_text[app], f"{app}: missing direct-manipulation contract {token}")
 
-native = read(".github/workflows/cross-platform.yml")
-for token in ("windows-2025", "macos-15", "macos-15-intel", "native-ui-matrix.py", "1024x720", "1440x900", "1920x1200", "upload-artifact"):
-    require(token in native, f"native UI validation: missing {token}")
+    legacy = read("loom-core/crates/loom-ui/ui/components.slint")
+    for component in ("WorkspaceToolbar", "PaneTabs", "CanvasBackdrop", "TransportButton"):
+        require(f"export component {component}" in legacy, f"legacy compatibility UI: missing {component}")
+    for component in ("SidebarSurface", "InspectorSurface"):
+        require(
+            re.search(rf"\b{re.escape(component)}\b", legacy[legacy.find("// Re-export the canonical shared primitives") :])
+            is not None,
+            f"legacy compatibility UI: missing {component} re-export",
+        )
 
-native_matrix = read("loom-bootstrap/scripts/native-ui-matrix.py")
-for token in ("png_dimensions", "find_sample", "generated-samples", "sample_open", "one or more theme/size captures are byte-identical"):
-    require(token in native_matrix, f"native UI matrix: missing evidence check {token}")
+    native = read(".github/workflows/cross-platform.yml")
+    for token in ("windows-2025", "macos-15", "macos-15-intel", "native-ui-matrix.py", "1024x720", "1440x900", "1920x1200", "upload-artifact"):
+        require(token in native, f"native UI validation: missing {token}")
 
-functional_matrix = read("loom-bootstrap/scripts/native-functional-matrix.py")
-for token in ("validate_package", "export-md", "render-demo", "sine", "recover", "native-functional-matrix.json"):
-    require(token in functional_matrix, f"native functional matrix: missing journey evidence {token}")
+    native_matrix = read("loom-bootstrap/scripts/native-ui-matrix.py")
+    for token in ("png_dimensions", "find_sample", "generated-samples", "sample_open", "one or more theme/size captures are byte-identical"):
+        require(token in native_matrix, f"native UI matrix: missing evidence check {token}")
 
-packaging = read("loom-bootstrap/packaging/release.py")
-for token in ("DOCUMENT_TYPES", "MimeType=", "RegistryValue", "CFBundleDocumentTypes"):
-    require(token in packaging, f"native packaging: missing {token}")
+    functional_matrix = read("loom-bootstrap/scripts/native-functional-matrix.py")
+    for token in ("validate_package", "export-md", "render-demo", "sine", "recover", "native-functional-matrix.json"):
+        require(token in functional_matrix, f"native functional matrix: missing journey evidence {token}")
 
-if failures:
-    print("Loom UI productisation audit failed:")
-    for failure in failures:
-        print(f"- {failure}")
-    sys.exit(1)
+    packaging = read("loom-bootstrap/packaging/release.py")
+    for token in ("DOCUMENT_TYPES", "MimeType=", "RegistryValue", "CFBundleDocumentTypes"):
+        require(token in packaging, f"native packaging: missing {token}")
 
-migrated = [app for app in APPS if 'from "toolkit.slint"' in app_text[app]]
-print(f"Loom UI productisation audit passed; toolkit-migrated apps: {', '.join(migrated) or 'none'}")
+    if failures:
+        print("Loom UI productisation audit failed:")
+        for failure in failures:
+            print(f"- {failure}")
+        return 1
+
+    migrated = [app for app in APPS if 'from "toolkit.slint"' in app_text[app]]
+    print(f"Loom UI productisation audit passed; toolkit-migrated apps: {', '.join(migrated) or 'none'}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

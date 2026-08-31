@@ -258,8 +258,9 @@ export component PresentApp inherits Window {
 
             // Keynote-style action toolbar. Select a concrete slot owner so a
             // context row never silently stretches icon-over-label controls.
-            if !root.is-preview-mode && root.labeled-export : LabeledToolbar {
-                PresentToolbarBody {
+                if !root.is-preview-mode && root.labeled-export : LabeledToolbar {
+                    PresentToolbarBody {
+                    rtl: root.rtl;
                     labeled: true;
                     overflow: root.overflow-toolbar;
                     toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
@@ -284,8 +285,9 @@ export component PresentApp inherits Window {
                     }
                 }
             }
-            if !root.is-preview-mode && !root.labeled-export : ContextToolbar {
-                PresentToolbarBody {
+                if !root.is-preview-mode && !root.labeled-export : ContextToolbar {
+                    PresentToolbarBody {
+                    rtl: root.rtl;
                     labeled: false;
                     overflow: root.overflow-toolbar;
                     toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
@@ -315,10 +317,35 @@ export component PresentApp inherits Window {
             DirectionalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
+                rtl: root.rtl;
 
                 // Slide strip owns thumbnail geometry and actions. The
                 // primary canvas remains the stretchable sibling.
-                if !root.is-preview-mode : PresentSlideStrip {
+                // HorizontalLayout preserves declaration order, therefore
+                // RTL places the inspector and slide strip before the canvas.
+                if root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
+                    preferred-width: 280px;
+                    inspector-tab <=> root.inspector-tab;
+                    active-template-index <=> root.active-template-index;
+                    transition-index <=> root.transition-index;
+                    slide-count-text: root.slide-count-text;
+                    aspect-ratio-wide: root.aspect-ratio-wide;
+                    active-element-label: root.active-element-label;
+                    active-element-content: root.active-element-content;
+                    active-element-index: root.active-element-index;
+                    element-count: root.element-labels.length;
+                    selection-count: root.selection-count;
+                    element-x-text: root.element-x-text;
+                    element-y-text: root.element-y-text;
+                    element-width-text: root.element-width-text;
+                    element-height-text: root.element-height-text;
+                    element-rotation-text: root.element-rotation-text;
+                    apply-template(idx) => { root.apply-template(idx); }
+                    update-element-content(value) => { root.update-element-content(value); }
+                    set-transition(idx) => { root.set-transition(idx); }
+                }
+
+                if root.rtl && !root.is-preview-mode : PresentSlideStrip {
                     preferred-width: 220px;
                     titles: root.slide-titles;
                     active-index: root.active-slide-index;
@@ -406,7 +433,16 @@ export component PresentApp inherits Window {
 
                 // Format inspector follows the selected slide element and
                 // uses stacked local property rows for translation safety.
-                if root.show-inspector && !root.is-preview-mode : PresentInspector {
+                if !root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                    preferred-width: 220px;
+                    titles: root.slide-titles;
+                    active-index: root.active-slide-index;
+                    select-slide(idx) => { root.select-slide(idx); }
+                    add-slide => { root.add-slide(); }
+                    delete-slide => { root.delete-slide(); }
+                }
+
+                if !root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
                     preferred-width: 280px;
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
