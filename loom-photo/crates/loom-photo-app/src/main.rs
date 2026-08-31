@@ -1327,6 +1327,10 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         }
     }
     set_status(&app, "Added active brightness adjustment");
+    app.set_inspector_scroll_y(-460.0);
+    if app.get_inspector_scroll_y() >= 0.0 {
+        return Err("journey inspector did not accept a lower-content scroll position".into());
+    }
     steps.push(capture_photo_journey_step(
         &app,
         &state,
@@ -1593,18 +1597,49 @@ fn crop_to_selection(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
     Ok(changed)
 }
 
+fn layer_crop_for_document_selection(
+    session: &PhotoSession,
+    index: usize,
+    selection: Rect,
+) -> Result<Rect, String> {
+    let document = &session.canvas.document;
+    let selection = selection.within(document.width, document.height)?;
+    let layer = document
+        .layers
+        .get(index)
+        .ok_or_else(|| format!("unknown layer index {index}"))?;
+    if layer.kind != loom_photo_core::LayerKind::Pixel {
+        return Err(format!("layer {index} does not support crops"));
+    }
+    let image = session
+        .canvas
+        .layer_image(&layer.id)
+        .ok_or_else(|| format!("layer '{}' has no pixel payload", layer.id))?;
+    let transform = document.canvas_transform.compose(layer.transform);
+    let inverse = transform
+        .inverse()
+        .ok_or_else(|| format!("layer '{}' transform has no finite inverse", layer.id))?;
+    let local_selection = selection
+        .transformed_bounds(inverse)
+        .ok_or_else(|| "selection does not map to finite layer coordinates".to_string())?;
+    clamp_rect_to_canvas(local_selection, image.width, image.height)
+        .ok_or_else(|| "selection does not intersect the active layer pixels".to_string())
+}
+
 fn crop_active_layer_to_selection(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
-    let (index, selection) = {
+    let (index, crop) = {
         let session = state.session.borrow();
         let Some(selection) = session.canvas.document.selection else {
             return Err("select a layer region before cropping the active layer".into());
         };
-        (session.canvas.document.active_layer_index, selection)
+        let index = session.canvas.document.active_layer_index;
+        let crop = layer_crop_for_document_selection(&session, index, selection)?;
+        (index, crop)
     };
     let changed = state
         .session
         .borrow_mut()
-        .set_layer_crop(index, Some(selection))?;
+        .set_layer_crop(index, Some(crop))?;
     if changed {
         refresh_photo_with_state(app, state)?;
     }
@@ -2323,6 +2358,108 @@ mod tests {
             canvas.layer_image(&layer.id).map(RgbaImage::pixel_digest)
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn transformed_layer_crop_callback_maps_document_selection_to_source_pixels() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let document = PhotoDocument::new("crop-callback", "Crop Callback", 4, 1);
+        let mut canvas = PhotoCanvas::new(document).expect("create canvas");
+        let mut source = RgbaImage::transparent(4, 1).expect("source image");
+        source.set_pixel(0, 0, [255, 0, 0, 255]);
+        source.set_pixel(1, 0, [0, 255, 0, 255]);
+        source.set_pixel(2, 0, [0, 0, 255, 255]);
+        source.set_pixel(3, 0, [255, 255, 255, 255]);
+        canvas
+            .set_layer_image("layer-bg", source)
+            .expect("attach source image");
+        let state = Rc::new(
+            new_gui_state(
+                PhotoSession::new(canvas),
+                None,
+                Rc::new(ScriptedFileDialogs::new(
+                    std::iter::empty::<Option<PathBuf>>(),
+                    std::iter::empty::<Option<PathBuf>>(),
+                )),
+            )
+            .expect("create state"),
+        );
+        wire_transform_callback(&app, &state);
+        wire_selection_callbacks(&app, &state);
+        refresh_photo_with_state(&app, &state).expect("initial refresh");
+
+        // A one-pixel document selection at x=1 is source x=0 after the
+        // layer's +1 translation. The crop callback must persist source-local
+        // coordinates rather than treating document coordinates as payload
+        // coordinates.
+        app.invoke_layer_transform_changed(1.0, 0.0, 100.0, 100.0, 0.0);
+        state
+            .session
+            .borrow_mut()
+            .set_selection(Some(Rect::new(1.0, 0.0, 1.0, 1.0)))
+            .expect("set document selection");
+        refresh_photo_with_state(&app, &state).expect("refresh selection");
+
+        app.invoke_crop_active_layer_to_selection();
+        assert_eq!(
+            state.session.borrow().canvas.document.layers[0].crop,
+            Some(Rect::new(0.0, 0.0, 1.0, 1.0))
+        );
+        let composite = state
+            .session
+            .borrow()
+            .canvas
+            .composite()
+            .expect("composite cropped layer");
+        assert_eq!(composite.pixel(0, 0), Some([0, 0, 0, 0]));
+        assert_eq!(composite.pixel(1, 0), Some([255, 0, 0, 255]));
+        assert_eq!(composite.pixel(2, 0), Some([0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn layer_bounds_selection_is_disabled_without_a_pixel_payload() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let document = PhotoDocument::new("no-payload", "No Payload", 4, 1);
+        let state = Rc::new(
+            new_gui_state(
+                PhotoSession::new(PhotoCanvas::new(document).expect("create canvas")),
+                None,
+                Rc::new(ScriptedFileDialogs::new(
+                    std::iter::empty::<Option<PathBuf>>(),
+                    std::iter::empty::<Option<PathBuf>>(),
+                )),
+            )
+            .expect("create state"),
+        );
+        wire_selection_callbacks(&app, &state);
+        refresh_photo_with_state(&app, &state).expect("initial refresh");
+
+        assert!(!app.get_has_selected_layer_bounds());
+        assert_eq!(state.session.borrow().canvas.document.selection, None);
+        app.invoke_select_layer_bounds();
+        assert!(!app.get_has_selected_layer_bounds());
+        assert_eq!(state.session.borrow().canvas.document.selection, None);
+        assert!(app
+            .get_status_left()
+            .as_str()
+            .contains("Selection failed: selected layer has no visible bounds"));
+        assert!(!state.session.borrow().can_undo());
+    }
+
+    #[test]
+    fn inspector_scroll_state_accepts_lower_content_positions() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        configure_responsive_layout(&app, (1280, 800));
+        let state = Rc::new(scripted_state());
+        refresh_photo_with_state(&app, &state).expect("initial refresh");
+
+        app.set_inspector_scroll_y(-460.0);
+        assert_eq!(app.get_inspector_scroll_y(), -460.0);
+        app.set_inspector_scroll_y(0.0);
+        assert_eq!(app.get_inspector_scroll_y(), 0.0);
     }
 
     #[test]

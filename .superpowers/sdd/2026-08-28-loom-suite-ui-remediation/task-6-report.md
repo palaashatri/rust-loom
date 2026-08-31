@@ -156,3 +156,90 @@ inspector, brightness changes the pixels, and the failure state is actionable.
 - Selection and crop geometry are persisted in the current Photo package, but
   native multi-selection, brush/mask editing, colour-managed ICC workflows,
   and full professional layer tooling remain outside this tranche.
+
+## Round-2 review fixes (2026-08-31)
+
+The scoped re-review identified five remaining Important findings; this pass
+closes each one without changing shared crates, other applications, score
+files, or `TRUTH.md`:
+
+- Active-layer crop now maps the document-space selection through the inverse
+  composed canvas/layer transform, clips it to the source payload, and stores
+  source-local coordinates. A pixel-level callback regression proves that a
+  translated 4×1 layer keeps the selected source pixel at its translated
+  destination and clears the adjacent pixels.
+- Document and session transform setters validate the composed affine before
+  mutation or `checkpoint()`. Overflowing but individually finite translations
+  are rejected, leave both transforms unchanged, and do not create undo
+  entries.
+- `PhotoDocument::validate` rejects non-pixel layers carrying crop or
+  non-identity transform state. A hand-built package with a valid manifest and
+  checksum is rejected by both `load_photo` and `load_photo_canvas` for each
+  malformed geometry variant.
+- Inspector bounds selection is derived from `active_layer_bounds()` and is
+  disabled when the active pixel layer has no payload. Invoking the callback in
+  that state leaves selection/history unchanged and reports the actionable
+  `Selection failed: selected layer has no visible bounds` status.
+- The inspector Flickable now derives its viewport extent from the named
+  content layout's preferred height, binds scroll state through the app, and
+  removes the fixed 720px extent and spacer. The journey and a focused app
+  regression exercise a negative lower-content scroll position.
+
+### Round-2 verification
+
+Commands were run from `loom-photo/` against the same `cline-implementation`
+working tree:
+
+```text
+cargo test -p loom-photo-core --locked composed_transform_overflow_is_rejected_without_mutating_or_checkpointing
+1 passed; 0 failed
+
+cargo test -p loom-photo-core --locked malformed_non_pixel_geometry_is_rejected_from_memory_and_packages
+1 passed; 0 failed
+
+cargo test -p loom-photo-app --locked transformed_layer_crop_callback_maps_document_selection_to_source_pixels
+1 passed; 0 failed
+
+cargo test -p loom-photo-app --locked layer_bounds_selection_is_disabled_without_a_pixel_payload
+1 passed; 0 failed
+
+cargo test -p loom-photo-app --locked inspector_scroll_state_accepts_lower_content_positions
+1 passed; 0 failed
+
+cargo fmt --all -- --check
+PASS (exit 0)
+
+cargo test --workspace --all-targets --locked
+PASS (exit 0): 16 `loom-photo-app` tests + 49 `loom-photo-core` tests; CLI
+target ran 0 tests; 0 failures
+
+cargo clippy --workspace --all-targets --locked -- -D warnings
+PASS (exit 0); generated Slint export/deprecation warnings only
+
+cargo build --workspace --release --locked
+PASS (exit 0): Finished release profile [optimized]
+
+./target/release/loom-photo --journey ../.work/evidence/ui/photo-task-6-release-review2-20260831 --size 1280x800 --theme dark
+PASS (exit 0): printed `keyboard journey: PASS` and `photo journey: PASS`
+```
+
+The generated evidence at
+`.work/evidence/ui/photo-task-6-release-review2-20260831/` was checked with
+the following results:
+
+- 17 `photo-vertical-*.png` captures are 1280×800 8-bit RGBA PNGs.
+- `photo-vertical.png` is a 480×300 8-bit RGBA PNG.
+- `photo.json` reports `passed=true`, `app=photo`, ten palette steps, and a
+  final `5-dismiss` step.
+- `unzip -t photo-vertical.loomphoto` reports all three entries `OK` and no
+  errors.
+- `photo-vertical.log` contains the invalid-import, directory-target PNG
+  export, and cancelled-import messages.
+- The adjustment-layer capture was visually inspected after generation; the
+  lower controls are visible while the inspector is scrolled.
+- `git diff --check` exited 0.
+
+The evidence remains bounded to deterministic Slint/software-renderer and
+scripted-dialog behavior. Native AppKit/Linux portal delivery, screen-reader
+runtime output, GPU rendering, and production operation-level recovery remain
+unverified roadmap work.

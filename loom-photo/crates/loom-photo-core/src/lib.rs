@@ -284,6 +284,14 @@ impl PhotoDocument {
                     layer.id
                 ));
             }
+            if layer.kind != LayerKind::Pixel
+                && (!layer.transform.is_identity() || layer.crop.is_some())
+            {
+                return Err(format!(
+                    "non-pixel layer '{}' must keep identity transform and no crop",
+                    layer.id
+                ));
+            }
             layer.transform.validate()?;
             self.canvas_transform.compose(layer.transform).validate()?;
             layer
@@ -315,19 +323,20 @@ impl PhotoDocument {
         layer_id: &str,
         transform: AffineTransform2D,
     ) -> Result<bool, String> {
-        let layer = self
+        let index = self
             .layers
-            .iter_mut()
-            .find(|layer| layer.id == layer_id)
+            .iter()
+            .position(|layer| layer.id == layer_id)
             .ok_or_else(|| format!("unknown layer {layer_id}"))?;
-        if layer.kind != LayerKind::Pixel {
+        if self.layers[index].kind != LayerKind::Pixel {
             return Err(format!("layer {layer_id} does not support transforms"));
         }
         transform.validate()?;
-        if layer.transform == transform {
+        self.canvas_transform.compose(transform).validate()?;
+        if self.layers[index].transform == transform {
             return Ok(false);
         }
-        layer.transform = transform;
+        self.layers[index].transform = transform;
         Ok(true)
     }
 
@@ -374,6 +383,9 @@ impl PhotoDocument {
 
     pub fn set_canvas_transform(&mut self, transform: AffineTransform2D) -> Result<bool, String> {
         transform.validate()?;
+        for layer in &self.layers {
+            transform.compose(layer.transform).validate()?;
+        }
         if self.canvas_transform == transform {
             return Ok(false);
         }
@@ -1973,6 +1985,11 @@ impl PhotoSession {
             return Ok(false);
         }
         transform.validate()?;
+        self.canvas
+            .document
+            .canvas_transform
+            .compose(transform)
+            .validate()?;
         self.checkpoint();
         self.canvas
             .document
@@ -2029,6 +2046,9 @@ impl PhotoSession {
             return Ok(false);
         }
         transform.validate()?;
+        for layer in &self.canvas.document.layers {
+            transform.compose(layer.transform).validate()?;
+        }
         self.checkpoint();
         self.canvas.document.set_canvas_transform(transform)
     }
@@ -4487,6 +4507,62 @@ mod tests {
     }
 
     #[test]
+    fn composed_transform_overflow_is_rejected_without_mutating_or_checkpointing() {
+        // Each translation is finite and individually invertible, but adding
+        // two f32::MAX translations overflows the composed affine. The
+        // document setter must reject the candidate before changing state.
+        let mut document = PhotoDocument::new("overflow", "Overflow", 8, 8);
+        document.canvas_transform = AffineTransform2D::translation(f32::MAX, 0.0);
+        let before_layer = document.layers[0].transform;
+        let before_canvas = document.canvas_transform;
+        let error = document
+            .set_layer_transform("layer-bg", AffineTransform2D::translation(f32::MAX, 0.0))
+            .expect_err("composed layer transform must reject overflow");
+        assert!(error.contains("finite"), "unexpected error: {error}");
+        assert_eq!(document.layers[0].transform, before_layer);
+        assert_eq!(document.canvas_transform, before_canvas);
+
+        // The converse setter must apply the same guard when an existing
+        // layer transform would overflow the candidate canvas composition.
+        let mut document = PhotoDocument::new("overflow-canvas", "Overflow Canvas", 8, 8);
+        document.layers[0].transform = AffineTransform2D::translation(f32::MAX, 0.0);
+        let before_layer = document.layers[0].transform;
+        let before_canvas = document.canvas_transform;
+        let error = document
+            .set_canvas_transform(AffineTransform2D::translation(f32::MAX, 0.0))
+            .expect_err("composed canvas transform must reject overflow");
+        assert!(error.contains("finite"), "unexpected error: {error}");
+        assert_eq!(document.layers[0].transform, before_layer);
+        assert_eq!(document.canvas_transform, before_canvas);
+
+        // Session wrappers validate before checkpoint(), so rejected edits do
+        // not create an undo entry or partially mutate the canvas.
+        let mut document = PhotoDocument::new("session-layer", "Session Layer", 8, 8);
+        document.canvas_transform = AffineTransform2D::translation(f32::MAX, 0.0);
+        let mut session = PhotoSession::new(PhotoCanvas::new(document).unwrap());
+        assert!(session
+            .set_layer_transform(0, AffineTransform2D::translation(f32::MAX, 0.0))
+            .is_err());
+        assert_eq!(
+            session.canvas.document.layers[0].transform,
+            AffineTransform2D::identity()
+        );
+        assert!(!session.can_undo());
+
+        let mut document = PhotoDocument::new("session-canvas", "Session Canvas", 8, 8);
+        document.layers[0].transform = AffineTransform2D::translation(f32::MAX, 0.0);
+        let mut session = PhotoSession::new(PhotoCanvas::new(document).unwrap());
+        assert!(session
+            .set_canvas_transform(AffineTransform2D::translation(f32::MAX, 0.0))
+            .is_err());
+        assert_eq!(
+            session.canvas.document.canvas_transform,
+            AffineTransform2D::identity()
+        );
+        assert!(!session.can_undo());
+    }
+
+    #[test]
     fn geometry_validation_rejects_overflow_and_unsafe_affines() {
         assert!(Rect::new(f32::MAX, 0.0, f32::MAX, 1.0).validate().is_err());
         assert!(Rect::new(0.0, f32::MAX, 1.0, f32::MAX).validate().is_err());
@@ -4527,6 +4603,64 @@ mod tests {
         let mut document = PhotoDocument::new("invalid", "Invalid", 4, 2);
         document.layers[0].crop = Some(Rect::new(0.0, 0.0, 9.0, 1.0));
         assert!(document.validate().is_err());
+    }
+
+    #[test]
+    fn malformed_non_pixel_geometry_is_rejected_from_memory_and_packages() {
+        // Build packages by hand: save_photo intentionally refuses malformed
+        // documents, while load_photo/load_photo_canvas must still defend the
+        // deserialization boundary when a bad package arrives from disk.
+        let package_for = |document: &PhotoDocument| {
+            let content = serde_json::to_vec(document).expect("serialize malformed document");
+            let manifest = Manifest {
+                schema: SchemaVersion::CURRENT,
+                kind: PackageKind::Photo,
+                id: document.id.clone(),
+                title: document.name.clone(),
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                entries: vec![ManifestEntry {
+                    path: "content/photo.json".into(),
+                    mime: MimeType::parse("application/vnd.loom.photo-content")
+                        .expect("built-in photo MIME"),
+                    size: content.len() as u64,
+                    sha256: Checksum::from_bytes(zip::sha256(&content)),
+                }],
+            };
+            let mut archive = PackageArchive::new();
+            archive
+                .add("content/photo.json", content)
+                .expect("content entry");
+            archive
+                .add("manifest.json", pkg_json::write(&manifest).into_bytes())
+                .expect("manifest entry");
+            archive.to_bytes().expect("serialize malformed package")
+        };
+
+        let mut malformed_transform = PhotoDocument::new("bad-transform", "Bad Transform", 4, 2);
+        malformed_transform.layers[0].kind = LayerKind::Adjustment;
+        malformed_transform.layers[0].adjustment_type = Some("brightness".into());
+        malformed_transform.layers[0].transform = AffineTransform2D::translation(1.0, 0.0);
+
+        let mut malformed_crop = PhotoDocument::new("bad-crop", "Bad Crop", 4, 2);
+        malformed_crop.layers[0].kind = LayerKind::Adjustment;
+        malformed_crop.layers[0].adjustment_type = Some("brightness".into());
+        malformed_crop.layers[0].crop = Some(Rect::new(0.0, 0.0, 1.0, 1.0));
+
+        for (label, document) in [("transform", malformed_transform), ("crop", malformed_crop)] {
+            assert!(
+                document.validate().is_err(),
+                "malformed {label} must reject"
+            );
+            let bytes = package_for(&document);
+            assert!(
+                load_photo(&bytes).is_err(),
+                "load_photo accepted malformed non-pixel {label} geometry"
+            );
+            assert!(
+                load_photo_canvas(&bytes).is_err(),
+                "load_photo_canvas accepted malformed non-pixel {label} geometry"
+            );
+        }
     }
 
     #[test]

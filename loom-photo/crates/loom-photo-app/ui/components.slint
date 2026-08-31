@@ -279,6 +279,7 @@ component PhotoLayerRow inherits Rectangle {
 /// pre-existing controller callback; no local state is synthesized here.
 export component PhotoInspector inherits InspectorSurface {
     in-out property <int> inspector-tab: 0;
+    in-out property <length> scroll-y: 0px;
     in property <[string]> layer-labels: [];
     in property <[bool]> layer-visibilities: [];
     in property <int> active-layer-index: 0;
@@ -309,6 +310,7 @@ export component PhotoInspector inherits InspectorSurface {
     in property <bool> has-selection: false;
     in property <bool> has-crop: false;
     in property <bool> has-active-layer-crop: false;
+    in property <bool> has-selected-layer-bounds: false;
 
     callback select-layer(int);
     callback toggle-layer-visibility(int);
@@ -348,11 +350,13 @@ export component PhotoInspector inherits InspectorSurface {
             horizontal-stretch: 1;
             vertical-stretch: 1;
             viewport-width: parent.width;
-            // Keep the inspector bounded to the window while allowing the
-            // full control stack (and long layer lists) to scroll.
-            viewport-height: max(parent.height, 720px);
+            viewport-y <=> root.scroll-y;
+            // Derive the scroll extent from the active tab's actual content,
+            // so new controls and layer rows remain reachable without a
+            // magic fixed height.
+            viewport-height: max(parent.height, inspector-content.preferred-height);
 
-            VerticalLayout {
+            inspector-content := VerticalLayout {
                 width: parent.width;
                 spacing: Theme.tokens.space.lg;
 
@@ -398,7 +402,7 @@ export component PhotoInspector inherits InspectorSurface {
             PropertyRow { label: "Layer crop"; Text { text: root.active-layer-crop-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
             HorizontalLayout {
                 spacing: Theme.tokens.space.sm;
-                ToolbarButton { label: "Select layer bounds"; enabled: root.has-preview; clicked => { root.select-layer-bounds(); } }
+                ToolbarButton { label: "Select layer bounds"; enabled: root.has-selected-layer-bounds; clicked => { root.select-layer-bounds(); } }
                 ToolbarButton { label: "Clear selection"; enabled: root.has-selection; clicked => { root.clear-selection(); } }
             }
             HorizontalLayout {
@@ -472,7 +476,6 @@ export component PhotoInspector inherits InspectorSurface {
             ToolbarButton { icon: "export"; label: "Export JPEG"; enabled: root.has-preview; clicked => { root.export-jpeg(); } }
         }
 
-                Rectangle { vertical-stretch: 1; background: transparent; }
             }
         }
     }
