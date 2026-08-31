@@ -20,16 +20,14 @@ export component MotionToolbar inherits LabeledToolbar {
     in property <bool> compact-layout: false;
     in-out property <bool> show-guides: true;
     in-out property <bool> show-safe-area: true;
-    in-out property <bool> is-playing: false;
-    in-out property <bool> is-looping: false;
-    in-out property <bool> curve-drawer-open: false;
+    in property <bool> is-playing: false;
+    in property <bool> is-looping: false;
     in-out property <float> zoom-value: 68.0;
     callback add-layer;
     callback play-pause;
     callback step-back;
     callback step-forward;
     callback toggle-loop;
-    callback toggle-curve-drawer;
     callback export-frame;
 
     ToolbarGroup { labeled-slot: true;
@@ -48,19 +46,19 @@ export component MotionToolbar inherits LabeledToolbar {
     ToolbarGroup { labeled-slot: true;
         if root.compact-layout : ToolbarIconButton { icon: "chevron-left"; label: "Step back"; clicked => { root.step-back(); } }
         if !root.compact-layout : AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
-        if root.compact-layout : ToolbarIconButton { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.is-playing = !root.is-playing; root.play-pause(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.is-playing = !root.is-playing; root.play-pause(); } }
+        if root.compact-layout : ToolbarIconButton { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.play-pause(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.play-pause(); } }
         if root.compact-layout : ToolbarIconButton { icon: "chevron-right"; label: "Step forward"; clicked => { root.step-forward(); } }
         if !root.compact-layout : AppleToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
-        if root.compact-layout : ToolbarIconButton { icon: "redo"; label: "Toggle loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "redo"; label: "Loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "redo"; label: "Toggle loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
+        if !root.compact-layout : AppleToolbarItem { icon: "redo"; label: "Loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
     }
 
     ToolbarSpacer { }
 
     ToolbarGroup { labeled-slot: true;
-        if root.compact-layout : ToolbarIconButton { icon: "timeline"; label: "Toggle curves"; checked: root.curve-drawer-open; clicked => { root.curve-drawer-open = !root.curve-drawer-open; root.toggle-curve-drawer(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "timeline"; label: "Curves"; checked: root.curve-drawer-open; clicked => { root.curve-drawer-open = !root.curve-drawer-open; root.toggle-curve-drawer(); } }
+        if root.compact-layout : ToolbarIconButton { icon: "timeline"; label: "Curves unavailable"; enabled: false; checked: false; }
+        if !root.compact-layout : AppleToolbarItem { icon: "timeline"; label: "Curves unavailable"; enabled: false; checked: false; }
         if root.compact-layout : ToolbarIconButton { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
         if !root.compact-layout : AppleToolbarItem { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
         if root.compact-layout : ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
@@ -126,6 +124,13 @@ export component MotionLayersPanel inherits SidebarSurface {
 export component MotionStage inherits CanvasBackdrop {
     in property <string> comp-name: "Untitled Composition";
     in property <[string]> layer-labels: [];
+    in property <[string]> layer-types: [];
+    in property <[float]> layer-pos-x: [];
+    in property <[float]> layer-pos-y: [];
+    in property <[float]> layer-scale: [];
+    in property <[float]> layer-rotation: [];
+    in property <[float]> layer-opacity: [];
+    in property <[bool]> layer-visible: [];
     in property <int> active-layer-index: 0;
     in-out property <float> pos-x: 960.0;
     in-out property <float> pos-y: 540.0;
@@ -135,7 +140,10 @@ export component MotionStage inherits CanvasBackdrop {
     in property <bool> show-guides: true;
     in property <bool> show-safe-area: true;
     in property <bool> compact-layout: false;
+    in property <bool> is-playing: false;
     callback transform-changed(string, float);
+    callback transform-begin;
+    callback transform-end;
 
     vertical-stretch: 1;
     stage-color: Theme.palette().media-stage;
@@ -171,7 +179,68 @@ export component MotionStage inherits CanvasBackdrop {
             if root.show-safe-area : Rectangle { x: parent.width * 0.05; y: parent.height * 0.05; width: parent.width * 0.90; height: parent.height * 0.90; border-width: 1px; border-color: Theme.palette().border-strong; background: transparent; }
             if root.show-safe-area : Rectangle { x: parent.width * 0.10; y: parent.height * 0.10; width: parent.width * 0.80; height: parent.height * 0.80; border-width: 1px; border-color: Theme.palette().grid-minor; background: transparent; }
 
+            // Every layer is projected from the controller's sampled frame.
+            // The active layer remains the dedicated transform target below.
+            for layer_x[idx] in root.layer-pos-x : Rectangle {
+                visible: root.layer-visible.length > idx && root.layer-visible[idx] && idx != root.active-layer-index;
+                property <string> layer-type: root.layer-types.length > idx ? root.layer-types[idx] : "";
+                property <float> layer-y: root.layer-pos-y.length > idx ? root.layer-pos-y[idx] : 0.0;
+                property <float> layer-scale-value: root.layer-scale.length > idx ? root.layer-scale[idx] : 1.0;
+                property <float> layer-rotation-value: root.layer-rotation.length > idx ? root.layer-rotation[idx] : 0.0;
+                property <float> layer-opacity-value: root.layer-opacity.length > idx ? root.layer-opacity[idx] : 1.0;
+                x: clamp(layer_x / 1920.0 * parent.width - self.width / 2, 0px, parent.width - self.width);
+                y: clamp(self.layer-y / 1080.0 * parent.height - self.height / 2, 0px, parent.height - self.height);
+                width: clamp(parent.width * 0.26 * self.layer-scale-value, 64px, parent.width * 0.56);
+                height: clamp(parent.height * 0.18 * self.layer-scale-value, 44px, parent.height * 0.42);
+                // The outer rectangle only owns sampled geometry and
+                // visibility. Concrete content is projected below by layer
+                // type instead of rendering every layer as the same card.
+                background: transparent;
+                opacity: self.layer-opacity-value;
+                transform-origin: { x: self.width / 2, y: self.height / 2 };
+                transform-rotation: self.layer-rotation-value * 1deg;
+                if self.layer-type == "Text" : Text {
+                    width: parent.width - 16px;
+                    x: 8px;
+                    y: parent.height / 2 - 10px;
+                    text: root.layer-labels.length > idx ? root.layer-labels[idx] : "Text layer";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body-large;
+                    font-weight: 650;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
+                if self.layer-type == "VectorShape" : Rectangle {
+                    x: parent.width * 0.08;
+                    y: parent.height * 0.12;
+                    width: parent.width * 0.84;
+                    height: parent.height * 0.76;
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().accent;
+                    background: Theme.palette().content-accent-soft;
+                }
+                if self.layer-type != "Text" && self.layer-type != "VectorShape" : Rectangle {
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().border-strong;
+                    background: Theme.palette().surface-raised;
+                    Text {
+                        width: parent.width - 16px;
+                        x: 8px;
+                        y: parent.height / 2 - 8px;
+                        text: root.layer-labels.length > idx ? root.layer-labels[idx] : "Motion layer";
+                        color: Theme.palette().ink-secondary;
+                        font-size: Theme.tokens.typography.caption;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+
             selected-object := Rectangle {
+                property <string> selected-layer-type: root.layer-types.length > root.active-layer-index ? root.layer-types[root.active-layer-index] : "";
+                visible: root.layer-labels.length == 0 || (root.layer-visible.length > root.active-layer-index && root.layer-visible[root.active-layer-index]);
                 x: clamp(root.pos-x / 1920.0 * parent.width - self.width / 2, 0px, parent.width - self.width);
                 y: clamp(root.pos-y / 1080.0 * parent.height - self.height / 2, 0px, parent.height - self.height);
                 width: clamp(parent.width * 0.46 * root.scale-val / 100.0, 88px, parent.width * 0.78);
@@ -179,18 +248,56 @@ export component MotionStage inherits CanvasBackdrop {
                 border-radius: Theme.tokens.metrics.radius-large;
                 border-width: root.layer-labels.length > 0 ? 2px : 1px;
                 border-color: drag.has-hover || transform-focus.has-focus ? Theme.palette().focus : root.layer-labels.length > 0 ? Theme.palette().accent : Theme.palette().border-strong;
-                background: Theme.palette().content-accent-soft;
+                background: self.selected-layer-type == "Text" || self.selected-layer-type == "VectorShape" ? transparent : Theme.palette().content-accent-soft;
                 opacity: root.opacity-val / 100.0;
-                animate x, y, width, height { duration: drag.pressed || Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+                animate x, y, width, height { duration: drag.pressed || root.is-playing || Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
                 animate border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
 
-                VerticalLayout {
-                    alignment: center;
-                    spacing: Theme.tokens.space.md;
-                    padding: Theme.tokens.space.xl;
-                    Text { text: root.comp-name; color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink; font-size: Theme.tokens.typography.heading; font-weight: 700; horizontal-alignment: center; overflow: elide; }
-                    Text { text: root.layer-labels.length > 0 ? root.layer-labels[root.active-layer-index] : "Add a layer to begin"; color: Theme.palette().content-accent; font-size: Theme.tokens.typography.body-large; font-weight: 650; horizontal-alignment: center; overflow: elide; }
-                    Text { text: "X " + Math.round(root.pos-x) + "   Y " + Math.round(root.pos-y) + "   ·   " + Math.round(root.scale-val) + "%   ·   " + Math.round(root.rotation-val) + "°"; color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-muted : Theme.palette().ink-secondary; font-size: Theme.tokens.typography.caption; horizontal-alignment: center; overflow: elide; }
+                // Project the active layer using the same type-specific
+                // content model as non-selected layers.  The outer rectangle
+                // owns sampled geometry, opacity, and transform handles;
+                // these children own the actual layer visual instead of a
+                // composition-wide placeholder card.
+                if self.selected-layer-type == "Text" : Text {
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    x: 12px;
+                    y: 0px;
+                    text: root.layer-labels.length > root.active-layer-index ? root.layer-labels[root.active-layer-index] : "Text layer";
+                    color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body-large;
+                    font-weight: 650;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if self.selected-layer-type == "VectorShape" : Rectangle {
+                    x: parent.width * 0.08;
+                    y: parent.height * 0.12;
+                    width: parent.width * 0.84;
+                    height: parent.height * 0.76;
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().accent;
+                    background: Theme.palette().content-accent-soft;
+                }
+
+                if self.selected-layer-type != "Text" && self.selected-layer-type != "VectorShape" : Rectangle {
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().border-strong;
+                    background: Theme.palette().surface-raised;
+                    Text {
+                        width: parent.width - 16px;
+                        x: 8px;
+                        y: parent.height / 2 - 8px;
+                        text: root.layer-labels.length > root.active-layer-index ? root.layer-labels[root.active-layer-index] : "Add a layer to begin";
+                        color: Theme.palette().ink-secondary;
+                        font-size: Theme.tokens.typography.caption;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
                 }
 
                 if root.layer-labels.length > 0 : Rectangle { x: -5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
@@ -215,7 +322,8 @@ export component MotionStage inherits CanvasBackdrop {
                     property <float> start-pos-x: 0.0;
                     property <float> start-pos-y: 0.0;
                     pointer-event(event) => {
-                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { self.start-pos-x = root.pos-x; self.start-pos-y = root.pos-y; transform-focus.focus(); }
+                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { self.start-pos-x = root.pos-x; self.start-pos-y = root.pos-y; transform-focus.focus(); root.transform-begin(); }
+                        if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { root.transform-end(); }
                     }
                     moved => {
                         if (self.pressed) {
@@ -295,8 +403,12 @@ export component MotionInspector inherits InspectorSurface {
     in-out property <float> opacity-val: 100.0;
     in property <string> timecode-display: "00:00:00:00";
     in property <string> timecode-text: "00:00:00:00 (60 fps)";
+    in property <float> duration-secs: 10.0;
+    in property <float> selected-keyframe-time: 0.0;
+    in property <string> selected-keyframe-property: "";
     callback toggle-expanded;
     callback transform-changed(string, float);
+    callback edit-keyframe-time(string, float);
 
     width: root.expanded ? (root.compact-layout ? 240px : 304px) : 56px;
     min-panel-width: root.expanded ? 240px : 56px;
@@ -347,7 +459,20 @@ export component MotionInspector inherits InspectorSurface {
                 MetricChip { label: "Time"; value: root.timecode-display; }
                 MetricChip { label: "Rate"; value: root.timecode-text; }
                 Rectangle { height: 1px; background: Theme.palette().border; }
-                Text { text: "The property graph remains empty until keyed data is selected. Loom does not synthesize curves."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                if root.selected-keyframe-property != "" : VerticalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    Text { text: "KEYFRAME · " + root.selected-keyframe-property; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                    Text { text: "Time   " + Math.round(root.selected-keyframe-time * 1000) / 1000 + "s"; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                    Slider {
+                        label: "Keyframe time";
+                        minimum: 0.0;
+                        maximum: Math.max(0.001, root.duration-secs);
+                        value: root.selected-keyframe-time;
+                        changed(val) => { root.edit-keyframe-time(root.selected-keyframe-property, val); }
+                    }
+                    Text { text: "Drag the time slider or use Shift + Arrow in the timeline."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                }
+                if root.selected-keyframe-property == "" : Text { text: "Select a keyframe marker to edit its timing."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
             }
             Rectangle { vertical-stretch: 1; background: transparent; }
         }
@@ -360,9 +485,48 @@ export component MotionTimeline inherits Rectangle {
     in property <int> active-layer-index: 0;
     in property <length> layer-column-width: 246px;
     in property <string> timecode-display: "00:00:00:00";
+
+    in property <float> duration-secs: 10.0;
+    in property <float> current-time-secs: 0.0;
+    in property <float> frame-rate: 60.0;
+    in property <[float]> active-layer-keyframes: [];
+    in property <[string]> active-keyframe-properties: [];
+    in property <[float]> layer-start-secs: [];
+    in property <[float]> layer-duration-secs: [];
+    in property <float> selected-keyframe-time: 0.0;
+    in property <string> selected-keyframe-property: "";
+
     callback select-layer(int);
+    callback scrub-time(float);
+    callback select-keyframe(float, string);
+    callback edit-keyframe-time(string, float);
+
     height: 220px;
     background: Theme.palette().panel;
+
+    timeline-focus := FocusScope {
+        enabled: root.layer-labels.length > 0;
+        key-pressed(event) => {
+            let frame_step = 1.0 / Math.max(0.001, root.frame-rate);
+            if (event.text == Key.LeftArrow) {
+                if (event.modifiers.shift && root.selected-keyframe-property != "") {
+                    root.edit-keyframe-time(root.selected-keyframe-property, max(0.0, root.selected-keyframe-time - frame_step));
+                    return accept;
+                }
+                root.scrub-time(max(0.0, root.current-time-secs - frame_step));
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (event.modifiers.shift && root.selected-keyframe-property != "") {
+                    root.edit-keyframe-time(root.selected-keyframe-property, min(root.duration-secs, root.selected-keyframe-time + frame_step));
+                    return accept;
+                }
+                root.scrub-time(min(root.duration-secs, root.current-time-secs + frame_step));
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     VerticalLayout {
         spacing: 0px;
@@ -377,10 +541,45 @@ export component MotionTimeline inherits Rectangle {
                     background: Theme.palette().surface-sunken;
                     Text { x: 12px; text: "LAYER"; font-size: Theme.tokens.typography.micro; font-weight: 700; color: Theme.palette().ink-disabled; vertical-alignment: center; }
                 }
-                for marker in ["0s", "2s", "4s", "6s", "8s", "10s"] : Rectangle {
+                Rectangle {
                     horizontal-stretch: 1;
-                    Text { text: marker; font-size: Theme.tokens.typography.micro; color: Theme.palette().ink-disabled; horizontal-alignment: start; vertical-alignment: center; }
-                    Rectangle { x: 0px; y: parent.height - 8px; width: 1px; height: 8px; background: Theme.palette().grid-major; }
+                    clip: true;
+                    for i in 6 : Rectangle {
+                        property <length> tick-width: parent.width / 5.0;
+                        x: i == 5 ? parent.width - self.tick-width : parent.width * i / 5.0;
+                        width: self.tick-width;
+                        height: parent.height;
+                        Text {
+                            x: 2px;
+                            width: parent.width - 4px;
+                            text: Math.round(i / 5.0 * root.duration-secs * 10) / 10 + "s";
+                            font-size: Theme.tokens.typography.micro;
+                            color: Theme.palette().ink-disabled;
+                            horizontal-alignment: i == 5 ? right : start;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { x: 0px; y: parent.height - 8px; width: 1px; height: 8px; background: Theme.palette().grid-major; }
+                    }
+                    TouchArea {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                timeline-focus.focus();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.scrub-time(clamp(self.mouse-x / max(1px, self.width), 0.0, 1.0) * root.duration-secs);
+                            }
+                        }
+                        clicked => {
+                            root.scrub-time(clamp(self.mouse-x / max(1px, self.width), 0.0, 1.0) * root.duration-secs);
+                        }
+                    }
                 }
             }
         }
@@ -414,9 +613,12 @@ export component MotionTimeline inherits Rectangle {
                             horizontal-stretch: 1;
                             background: Theme.palette().canvas-alt;
                             Rectangle {
-                                x: 10px + idx * 14px;
+                                property <float> layer-start: root.layer-start-secs.length > idx ? root.layer-start-secs[idx] : 0.0;
+                                property <float> layer-duration: root.layer-duration-secs.length > idx ? root.layer-duration-secs[idx] : root.duration-secs;
+                                property <float> timeline-duration: Math.max(0.001, root.duration-secs);
+                                x: clamp(self.layer-start / self.timeline-duration * parent.width, 0px, max(0px, parent.width - 1px));
                                 y: 6px;
-                                width: max(120px, parent.width * 0.62 - idx * 18px);
+                                width: max(1px, min(self.layer-duration / self.timeline-duration * parent.width, max(1px, parent.width - self.x)));
                                 height: parent.height - 12px;
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 background: idx == root.active-layer-index ? Theme.palette().selection-soft : Theme.palette().surface-raised;
@@ -425,12 +627,39 @@ export component MotionTimeline inherits Rectangle {
                                 Text { x: 22px; width: parent.width - 30px; text: label; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink; vertical-alignment: center; overflow: elide; }
                                 Rectangle { x: 9px; y: parent.height / 2 - 4px; width: 8px; height: 8px; border-radius: 2px; background: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().border-strong; }
                             }
+                            if idx == root.active-layer-index : Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                for kf[idx] in root.active-layer-keyframes : Rectangle {
+                                    property <string> keyframe-property: root.active-keyframe-properties.length > idx ? root.active-keyframe-properties[idx] : "";
+                                    x: clamp((kf / Math.max(0.001, root.duration-secs)) * parent.width - 4px, 0px, max(0px, parent.width - 8px));
+                                    y: parent.height / 2 - 4px;
+                                    width: 8px;
+                                    height: 8px;
+                                    border-radius: 4px;
+                                    background: root.selected-keyframe-property == self.keyframe-property && Math.abs(root.selected-keyframe-time - kf) < 0.0001 ? Theme.palette().paper : Theme.palette().accent;
+                                    TouchArea {
+                                        x: 0px;
+                                        y: 0px;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        mouse-cursor: MouseCursor.grab;
+                                        clicked => { timeline-focus.focus(); root.select-keyframe(kf, parent.keyframe-property); }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-            Rectangle { x: root.layer-column-width; y: 0px; width: 1px; height: parent.height; background: Theme.palette().accent; }
-            Rectangle { x: root.layer-column-width - Theme.tokens.space.sm; y: 0px; width: Theme.tokens.space.md; height: Theme.tokens.space.md; border-radius: Theme.tokens.metrics.radius-small; background: Theme.palette().accent; }
+            Rectangle {
+                x: clamp(root.layer-column-width + (root.current-time-secs / Math.max(0.001, root.duration-secs)) * (parent.width - root.layer-column-width), root.layer-column-width, parent.width - 2px);
+                y: 0px; width: 2px; height: parent.height; background: Theme.palette().accent;
+            }
+            Rectangle {
+                x: clamp(root.layer-column-width + (root.current-time-secs / Math.max(0.001, root.duration-secs)) * (parent.width - root.layer-column-width) - Theme.tokens.space.sm / 2, root.layer-column-width, parent.width - Theme.tokens.space.sm);
+                y: 0px; width: Theme.tokens.space.md; height: Theme.tokens.space.md; border-radius: Theme.tokens.metrics.radius-small; background: Theme.palette().accent;
+            }
         }
     }
 }

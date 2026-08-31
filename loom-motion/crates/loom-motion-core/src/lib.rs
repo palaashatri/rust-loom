@@ -115,7 +115,22 @@ impl MotionLayer {
         }
     }
 
+    /// Returns whether a local keyframe timestamp belongs to this layer's
+    /// inclusive editing interval. Keyframes are stored in layer-local time,
+    /// so keeping this invariant at the core boundary prevents malformed
+    /// tracks from leaking into every controller and renderer.
+    fn keyframe_time_is_valid(&self, time: f32) -> bool {
+        time.is_finite()
+            && self.duration.is_finite()
+            && self.duration >= 0.0
+            && time >= 0.0
+            && time <= self.duration
+    }
+
     pub fn add_keyframe(&mut self, property: &str, time: f32, val: f32) {
+        if !self.keyframe_time_is_valid(time) || !val.is_finite() {
+            return;
+        }
         let kf = Keyframe {
             time_secs: time,
             value: val,
@@ -324,10 +339,56 @@ impl MotionLayer {
         before != keys.len()
     }
 
+    /// Moves one keyframe while preserving its value and easing.  The target
+    /// replaces an existing key at the same timestamp, matching insertion
+    /// semantics and keeping each channel strictly ordered.
+    pub fn move_keyframe(&mut self, property: &str, from_time: f32, to_time: f32) -> bool {
+        if !self.keyframe_time_is_valid(from_time) || !self.keyframe_time_is_valid(to_time) {
+            return false;
+        }
+        let keys = match property {
+            "x" => Some(&mut self.position_x_keys),
+            "y" => Some(&mut self.position_y_keys),
+            "opacity" => Some(&mut self.opacity_keys),
+            "scale" => Some(&mut self.scale_keys),
+            "rotation" => Some(&mut self.rotation_keys),
+            _ => None,
+        };
+        let Some(keys) = keys else {
+            return false;
+        };
+        let Some(index) = keys
+            .iter()
+            .position(|key| (key.time_secs - from_time).abs() <= f32::EPSILON)
+        else {
+            return false;
+        };
+        let mut key = keys.remove(index);
+        key.time_secs = to_time;
+        keys.retain(|existing| (existing.time_secs - to_time).abs() > f32::EPSILON);
+        keys.push(key);
+        keys.sort_by(|left, right| left.time_secs.total_cmp(&right.time_secs));
+        true
+    }
+
     /// Samples all animated properties at absolute composition time.
     pub fn sample(&self, time_secs: f32) -> LayerSample {
-        let local_time = time_secs - self.start_time;
-        let visible = local_time >= 0.0 && local_time <= self.duration.max(0.0);
+        let start_time = if self.start_time.is_finite() {
+            self.start_time.max(0.0)
+        } else {
+            0.0
+        };
+        let duration = if self.duration.is_finite() {
+            self.duration.max(0.0)
+        } else {
+            0.0
+        };
+        let local_time = if time_secs.is_finite() {
+            time_secs - start_time
+        } else {
+            0.0
+        };
+        let visible = duration > 0.0 && local_time >= 0.0 && local_time < duration;
         LayerSample {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -347,7 +408,12 @@ impl CompositionDocument {
         if !self.duration_secs.is_finite() || !self.frame_rate.is_finite() {
             return 0;
         }
-        (self.duration_secs.max(0.0) * self.frame_rate.max(0.0)).round() as u64
+        let frames = (self.duration_secs.max(0.0) * self.frame_rate.max(0.0)).round();
+        if !frames.is_finite() || frames >= u64::MAX as f32 {
+            u64::MAX
+        } else {
+            frames as u64
+        }
     }
 
     /// Converts a frame index to seconds.
@@ -361,7 +427,16 @@ impl CompositionDocument {
 
     /// Samples the entire composition at one time.
     pub fn frame_at(&self, time_secs: f32) -> CompositionFrame {
-        let time_secs = time_secs.max(0.0).min(self.duration_secs.max(0.0));
+        let duration = if self.duration_secs.is_finite() {
+            self.duration_secs.max(0.0)
+        } else {
+            0.0
+        };
+        let time_secs = if time_secs.is_finite() {
+            time_secs.clamp(0.0, duration)
+        } else {
+            0.0
+        };
         let frame_index = if self.frame_rate > 0.0 && self.frame_rate.is_finite() {
             (time_secs * self.frame_rate).round() as u64
         } else {
@@ -479,6 +554,20 @@ impl CompositionDocument {
                     issues.push(MotionIssue {
                         layer_id: Some(layer.id.clone()),
                         message: format!("{property} track contains a non-finite keyframe"),
+                    });
+                }
+                if layer.duration.is_finite()
+                    && layer.duration >= 0.0
+                    && keys.iter().any(|key| {
+                        key.time_secs.is_finite()
+                            && (key.time_secs < 0.0 || key.time_secs > layer.duration)
+                    })
+                {
+                    issues.push(MotionIssue {
+                        layer_id: Some(layer.id.clone()),
+                        message: format!(
+                            "{property} keyframe time is outside the layer interval [0, duration]"
+                        ),
                     });
                 }
                 if keys
@@ -865,17 +954,25 @@ pub struct CompositionClock {
     pub out_frame: u64,
     pub is_playing: bool,
     pub loop_playback: bool,
+    pub time_accumulator: f64,
 }
 
 impl CompositionClock {
     pub fn new(fps: f64, out_frame: u64) -> Self {
         Self {
-            fps: if fps > 0.0 { fps } else { 60.0 },
+            fps: if fps.is_finite() && fps > 0.0 {
+                fps
+            } else {
+                60.0
+            },
             current_frame: 0,
             in_frame: 0,
-            out_frame: out_frame.max(1),
+            // `out_frame` is an exclusive end/count.  A zero-length
+            // composition is represented as `0..0` and remains stopped.
+            out_frame,
             is_playing: false,
             loop_playback: true,
+            time_accumulator: 0.0,
         }
     }
 
@@ -884,25 +981,64 @@ impl CompositionClock {
         frame as f64 / self.fps
     }
 
+    /// Returns the current transport time in seconds.
+    pub fn current_time_seconds(&self) -> f64 {
+        self.frame_to_seconds(self.current_frame)
+    }
+
     /// Converts seconds to closest frame number.
     pub fn seconds_to_frame(&self, seconds: f64) -> u64 {
-        (seconds.max(0.0) * self.fps).round() as u64
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return 0;
+        }
+        let frames = (seconds * self.fps).round();
+        if !frames.is_finite() || frames >= u64::MAX as f64 {
+            u64::MAX
+        } else {
+            frames as u64
+        }
+    }
+
+    /// Starts or pauses playback and clears an incomplete frame on pause.
+    pub fn set_playing(&mut self, playing: bool) {
+        self.is_playing = playing;
+        if !playing {
+            self.time_accumulator = 0.0;
+        }
+    }
+
+    /// Toggles playback and returns the new state.
+    pub fn toggle_playing(&mut self) -> bool {
+        self.set_playing(!self.is_playing);
+        self.is_playing
+    }
+
+    /// Sets loop playback behavior.
+    pub fn set_loop_playback(&mut self, looping: bool) {
+        self.loop_playback = looping;
+    }
+
+    /// Toggles loop playback and returns the new state.
+    pub fn toggle_loop_playback(&mut self) -> bool {
+        self.loop_playback = !self.loop_playback;
+        self.loop_playback
     }
 
     /// Steps forward by 1 frame, respecting in/out points and loop mode.
     pub fn step_forward(&mut self) -> u64 {
-        if self.current_frame >= self.out_frame {
-            if self.loop_playback {
-                self.current_frame = self.in_frame;
-            }
+        self.time_accumulator = 0.0;
+        if self.empty_range() {
+            self.current_frame = self.in_frame.min(self.out_frame);
+            self.is_playing = false;
         } else {
-            self.current_frame += 1;
+            self.advance_frames(1);
         }
         self.current_frame
     }
 
     /// Steps backward by 1 frame, bounded by in point.
     pub fn step_backward(&mut self) -> u64 {
+        self.time_accumulator = 0.0;
         if self.current_frame > self.in_frame {
             self.current_frame -= 1;
         }
@@ -911,13 +1047,102 @@ impl CompositionClock {
 
     /// Seeks to a specific frame number clamped within composition bounds.
     pub fn seek_frame(&mut self, frame: u64) {
-        self.current_frame = frame.clamp(self.in_frame, self.out_frame);
+        if self.empty_range() {
+            self.current_frame = self.in_frame.min(self.out_frame);
+            self.is_playing = false;
+        } else {
+            self.current_frame = frame.clamp(self.in_frame, self.out_frame - 1);
+        }
+        self.time_accumulator = 0.0;
     }
 
     /// Seeks to a timestamp in seconds.
     pub fn seek_seconds(&mut self, seconds: f64) {
         let frame = self.seconds_to_frame(seconds);
         self.seek_frame(frame);
+    }
+
+    /// Advances the clock by a fractional duration.
+    pub fn advance_seconds(&mut self, dt: f64) {
+        if !self.is_playing || !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+
+        if self.empty_range() {
+            self.current_frame = self.in_frame.min(self.out_frame);
+            self.is_playing = false;
+            self.time_accumulator = 0.0;
+            return;
+        }
+
+        let elapsed = self.time_accumulator + dt;
+        if !elapsed.is_finite() {
+            self.time_accumulator = 0.0;
+            if self.loop_playback {
+                self.current_frame = self.in_frame;
+            } else {
+                self.current_frame = self.out_frame - 1;
+                self.is_playing = false;
+            }
+            return;
+        }
+        let frame_units = elapsed * self.fps;
+        if !frame_units.is_finite() {
+            self.time_accumulator = 0.0;
+            if self.loop_playback {
+                self.current_frame = self.in_frame;
+            } else {
+                self.current_frame = self.out_frame - 1;
+                self.is_playing = false;
+            }
+            return;
+        }
+        let whole_frames = frame_units.floor();
+        self.time_accumulator = (frame_units - whole_frames) / self.fps;
+        if whole_frames > 0.0 {
+            let frames = if whole_frames >= u64::MAX as f64 {
+                u64::MAX
+            } else {
+                whole_frames as u64
+            };
+            self.advance_frames(frames);
+        }
+    }
+
+    fn advance_frames(&mut self, frames: u64) {
+        if frames == 0 || self.empty_range() {
+            return;
+        }
+        if self.loop_playback {
+            // Keep the span in u128 so subtraction remains safe for malformed
+            // public field values and very large compositions.
+            let span = u128::from(self.out_frame)
+                .saturating_sub(u128::from(self.in_frame))
+                .max(1);
+            let relative = u128::from(self.current_frame.clamp(self.in_frame, self.out_frame - 1))
+                .saturating_sub(u128::from(self.in_frame))
+                % span;
+            let offset = u128::from(frames) % span;
+            // Perform the modular addition in a wider integer so extreme
+            // public field values cannot wrap before the modulo operation.
+            let next = (relative + offset) % span;
+            self.current_frame =
+                (u128::from(self.in_frame) + next).min(u128::from(u64::MAX)) as u64;
+        } else {
+            let last = self.out_frame - 1;
+            let next = self.current_frame.saturating_add(frames);
+            if next >= self.out_frame {
+                self.current_frame = last;
+                self.is_playing = false;
+                self.time_accumulator = 0.0;
+            } else {
+                self.current_frame = next.max(self.in_frame);
+            }
+        }
+    }
+
+    fn empty_range(&self) -> bool {
+        self.out_frame <= self.in_frame
     }
 }
 
@@ -1874,6 +2099,183 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_composition_clock_play_step_seek() {
+        let mut clock = CompositionClock::new(60.0, 120);
+        assert_eq!(clock.current_frame, 0);
+        assert_eq!(clock.in_frame, 0);
+        assert_eq!(clock.out_frame, 120);
+
+        // Seek to 1 second
+        clock.seek_seconds(1.0);
+        assert_eq!(clock.current_frame, 60);
+
+        // Step forward
+        clock.step_forward();
+        assert_eq!(clock.current_frame, 61);
+
+        // Step backward
+        clock.step_backward();
+        assert_eq!(clock.current_frame, 60);
+
+        // Advance seconds while not playing (should not advance)
+        clock.advance_seconds(1.0);
+        assert_eq!(clock.current_frame, 60);
+
+        // Advance seconds while playing; the exclusive end is never a valid
+        // frame and playback wraps when it is reached.
+        clock.set_playing(true);
+        clock.advance_seconds(1.0); // 1.0s = 60 frames
+        assert_eq!(clock.current_frame, 0);
+
+        // Non-looping playback clamps to the final valid frame and stops.
+        clock.set_loop_playback(false);
+        clock.seek_frame(119);
+        clock.set_playing(true);
+        clock.step_forward();
+        assert_eq!(clock.current_frame, 119);
+        assert!(!clock.is_playing);
+    }
+
+    #[test]
+    fn composition_clock_clears_accumulator_on_auto_stop() {
+        let mut clock = CompositionClock::new(60.0, 10);
+        clock.set_loop_playback(false);
+        clock.seek_frame(8);
+        clock.set_playing(true);
+        clock.advance_seconds(2.5 / 60.0);
+        assert_eq!(clock.current_frame, 9);
+        assert!(!clock.is_playing);
+        assert_eq!(clock.time_accumulator, 0.0);
+
+        // Restart directly from the final frame. `seek_frame` clears the
+        // accumulator itself, so using it here would mask a stale remainder
+        // left behind by the non-looping auto-stop.
+        clock.set_playing(true);
+        clock.set_loop_playback(true);
+        clock.advance_seconds(0.7 / 60.0);
+        assert_eq!(clock.current_frame, 9);
+        assert!(clock.is_playing);
+        assert!((clock.time_accumulator - 0.7 / 60.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn composition_clock_rejects_invalid_elapsed_time_and_preserves_fractional_frames() {
+        let mut clock = CompositionClock::new(60.0, 120);
+        clock.set_playing(true);
+
+        clock.advance_seconds(1.0 / 120.0);
+        assert_eq!(clock.current_frame, 0);
+        assert!((clock.time_accumulator - 1.0 / 120.0).abs() < 1e-12);
+        clock.advance_seconds(1.0 / 120.0);
+        assert_eq!(clock.current_frame, 1);
+        assert!(clock.time_accumulator.abs() < 1e-12);
+
+        let before_invalid = clock.clone();
+        clock.advance_seconds(f64::NAN);
+        clock.advance_seconds(f64::INFINITY);
+        clock.advance_seconds(-1.0);
+        assert_eq!(clock, before_invalid);
+    }
+
+    #[test]
+    fn composition_clock_advances_looped_frames_without_drifting() {
+        let mut clock = CompositionClock::new(30.0, 3);
+        clock.set_playing(true);
+        clock.seek_frame(2);
+        clock.advance_seconds(2.0 / 30.0);
+        // A three-frame exclusive range contains frames 0, 1, and 2;
+        // advancing two frames from frame 2 wraps to frame 1.
+        assert_eq!(clock.current_frame, 1);
+
+        clock.set_loop_playback(false);
+        clock.seek_frame(2);
+        clock.advance_seconds(2.0 / 30.0);
+        assert_eq!(clock.current_frame, 2);
+        assert!(!clock.is_playing);
+    }
+
+    #[test]
+    fn test_time_normalized_keyframe_insertion() {
+        let mut layer = MotionLayer::new("l1", "Shape", "VectorShape");
+        layer.add_keyframe("x", 1.5, 100.0);
+        assert_eq!(layer.position_x_keys.len(), 1);
+        assert_eq!(layer.position_x_keys[0].time_secs, 1.5);
+        assert_eq!(layer.position_x_keys[0].value, 100.0);
+
+        // Replace at exact time
+        layer.add_keyframe("x", 1.5, 200.0);
+        assert_eq!(layer.position_x_keys.len(), 1);
+        assert_eq!(layer.position_x_keys[0].value, 200.0);
+
+        // Invalid values must not poison an otherwise valid track.
+        layer.add_keyframe("x", f32::NAN, 300.0);
+        layer.add_keyframe("x", 2.0, f32::INFINITY);
+        assert_eq!(layer.position_x_keys.len(), 1);
+        assert_eq!(layer.position_x_keys[0].value, 200.0);
+    }
+
+    #[test]
+    fn keyframe_times_obey_layer_interval_for_insert_and_move() {
+        let mut layer = MotionLayer::new("l1", "Shape", "VectorShape");
+        layer.duration = 2.0;
+        layer.add_keyframe("x", 0.0, 10.0);
+        layer.add_keyframe("x", 2.0, 20.0);
+        layer.add_keyframe("x", -0.1, 30.0);
+        layer.add_keyframe("x", 2.1, 40.0);
+
+        // Both interval boundaries are valid; out-of-range insertions are
+        // ignored rather than poisoning the track.
+        assert_eq!(
+            layer
+                .position_x_keys
+                .iter()
+                .map(|key| key.time_secs)
+                .collect::<Vec<_>>(),
+            vec![0.0, 2.0]
+        );
+        assert!(!layer.move_keyframe("x", 0.0, -0.1));
+        assert!(!layer.move_keyframe("x", 0.0, 2.1));
+        assert!(layer.move_keyframe("x", 0.0, 1.0));
+        assert_eq!(
+            layer
+                .position_x_keys
+                .iter()
+                .map(|key| key.time_secs)
+                .collect::<Vec<_>>(),
+            vec![1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn composition_clock_loop_math_handles_extreme_bounds() {
+        let mut clock = CompositionClock {
+            fps: 60.0,
+            current_frame: u64::MAX - 1,
+            in_frame: u64::MAX - 2,
+            out_frame: u64::MAX,
+            is_playing: true,
+            loop_playback: true,
+            time_accumulator: 0.0,
+        };
+        clock.step_forward();
+        assert_eq!(clock.current_frame, u64::MAX - 2);
+        clock.step_forward();
+        assert_eq!(clock.current_frame, u64::MAX - 1);
+
+        let mut full_range = CompositionClock {
+            fps: 60.0,
+            current_frame: u64::MAX,
+            in_frame: 0,
+            out_frame: u64::MAX,
+            is_playing: true,
+            loop_playback: true,
+            time_accumulator: 0.0,
+        };
+        full_range.step_forward();
+        assert_eq!(full_range.current_frame, 0);
+    }
+
+    #[test]
     fn motion_integrity_digest_stability() {
         let mut doc = CompositionDocument::new("comp-digest", "Digest Composition");
         let mut background = MotionLayer::new("l1", "Background", "VectorShape");
@@ -2087,6 +2489,33 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.message.contains("not strictly ordered")));
+    }
+
+    #[test]
+    fn motion_validation_reports_keyframes_outside_layer_interval() {
+        let mut doc = CompositionDocument::new("comp-invalid-interval", "Invalid interval");
+        let mut layer = MotionLayer::new("layer-invalid", "Invalid Layer", "Text");
+        layer.duration = 1.0;
+        layer.position_x_keys = vec![
+            Keyframe {
+                time_secs: -0.1,
+                value: 0.0,
+                easing: "linear".into(),
+            },
+            Keyframe {
+                time_secs: 1.5,
+                value: 1.0,
+                easing: "linear".into(),
+            },
+        ];
+        doc.add_layer(layer);
+
+        let issues = doc.validate();
+        assert!(issues.iter().any(|issue| {
+            issue
+                .message
+                .contains("keyframe time is outside the layer interval")
+        }));
     }
 
     #[test]
@@ -2316,10 +2745,29 @@ mod tests {
         assert_eq!(clock.step_backward(), 1);
 
         clock.seek_frame(120);
-        assert_eq!(clock.current_frame, 120);
+        assert_eq!(clock.current_frame, 119);
 
-        // Step forward from out_frame with loop_playback = true should wrap to in_frame (0)
+        // Step forward from the final valid frame wraps to in_frame (0).
         assert_eq!(clock.step_forward(), 0);
+    }
+
+    #[test]
+    fn composition_clock_uses_exclusive_end_and_stops_at_last_frame() {
+        let mut clock = CompositionClock::new(60.0, 600);
+        assert_eq!(clock.out_frame, 600);
+        clock.seek_frame(600);
+        assert_eq!(clock.current_frame, 599);
+        clock.set_loop_playback(false);
+        clock.set_playing(true);
+        clock.advance_seconds(1.0 / 60.0);
+        assert_eq!(clock.current_frame, 599);
+        assert!(!clock.is_playing);
+
+        let mut empty = CompositionClock::new(60.0, 0);
+        empty.set_playing(true);
+        empty.advance_seconds(1.0);
+        assert_eq!(empty.current_frame, 0);
+        assert!(!empty.is_playing);
     }
 
     #[test]

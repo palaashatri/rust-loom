@@ -3,7 +3,7 @@ import {
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
-    MotionToolbar, MotionLayersPanel, MotionStage, MotionCurveDrawer,
+    MotionToolbar, MotionLayersPanel, MotionStage,
     MotionInspector, MotionTimeline, MotionStatusBar
 } from "components.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
@@ -26,10 +26,12 @@ export component MotionApp inherits Window {
     in property <string> timecode-text: "00:00:00:00 (60 fps)";
     in-out property <string> timecode-display: "00:00:00:00";
     in property <[string]> layer-labels: [];
+    in property <[string]> layer-types: [];
     in property <int> active-layer-index: 0;
-    in-out property <bool> is-playing: false;
-    in-out property <bool> is-looping: false;
-    in-out property <bool> curve-drawer-open: false;
+    // Transport state is projected from the controller; toolbar controls only
+    // dispatch callbacks and cannot become a second source of truth.
+    in property <bool> is-playing: false;
+    in property <bool> is-looping: false;
     in-out property <int> inspector-tab: 0;
     in-out property <float> zoom-value: 68.0;
 
@@ -65,7 +67,27 @@ export component MotionApp inherits Window {
     callback toggle-loop;
     callback select-layer(int);
     callback transform-changed(string, float);
-    callback toggle-curve-drawer;
+    callback transform-begin;
+    callback transform-end;
+    callback scrub-time(float);
+    callback select-keyframe(float, string);
+    callback edit-keyframe-time(string, float);
+
+    in property <float> duration-secs: 10.0;
+    in property <float> current-time-secs: 0.0;
+    in property <float> frame-rate: 60.0;
+    in property <[float]> active-layer-keyframes: [];
+    in property <[string]> active-keyframe-properties: [];
+    in property <[float]> layer-start-secs: [];
+    in property <[float]> layer-duration-secs: [];
+    in property <[float]> layer-pos-x: [];
+    in property <[float]> layer-pos-y: [];
+    in property <[float]> layer-scale: [];
+    in property <[float]> layer-rotation: [];
+    in property <[float]> layer-opacity: [];
+    in property <[bool]> layer-visible: [];
+    in property <string> selected-keyframe-property: "";
+    in property <float> selected-keyframe-time: 0.0;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -109,6 +131,18 @@ export component MotionApp inherits Window {
                     return accept;
                 }
             }
+            if (event.text == Key.LeftArrow) {
+                root.step-back();
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.step-forward();
+                return accept;
+            }
+            if (event.text == " ") {
+                root.play-pause();
+                return accept;
+            }
             return reject;
         }
 
@@ -124,16 +158,14 @@ export component MotionApp inherits Window {
             compact-layout: root.compact-layout;
             show-guides <=> root.show-guides;
             show-safe-area <=> root.show-safe-area;
-            is-playing <=> root.is-playing;
-            is-looping <=> root.is-looping;
-            curve-drawer-open <=> root.curve-drawer-open;
+            is-playing: root.is-playing;
+            is-looping: root.is-looping;
             zoom-value <=> root.zoom-value;
             add-layer => { root.add-layer(); }
             play-pause => { root.play-pause(); }
             step-back => { root.step-back(); }
             step-forward => { root.step-forward(); }
             toggle-loop => { root.toggle-loop(); }
-            toggle-curve-drawer => { root.toggle-curve-drawer(); }
             export-frame => { root.export-frame(); }
         }
 
@@ -164,8 +196,12 @@ export component MotionApp inherits Window {
                 opacity-val <=> root.opacity-val;
                 timecode-display: root.timecode-display;
                 timecode-text: root.timecode-text;
+                duration-secs: root.duration-secs;
+                selected-keyframe-time: root.selected-keyframe-time;
+                selected-keyframe-property: root.selected-keyframe-property;
                 toggle-expanded => { root.inspector-expanded = !root.inspector-expanded; }
                 transform-changed(property, value) => { root.transform-changed(property, value); }
+                edit-keyframe-time(property, value) => { root.edit-keyframe-time(property, value); }
             }
 
             if root.rtl : Rectangle { width: 1px; background: Theme.palette().border; }
@@ -178,6 +214,7 @@ export component MotionApp inherits Window {
                     vertical-stretch: 1;
                     comp-name: root.comp-name;
                     layer-labels: root.layer-labels;
+                    layer-types: root.layer-types;
                     active-layer-index: root.active-layer-index;
                     pos-x <=> root.pos-x;
                     pos-y <=> root.pos-y;
@@ -186,14 +223,19 @@ export component MotionApp inherits Window {
                     opacity-val <=> root.opacity-val;
                     show-guides: root.show-guides;
                     show-safe-area: root.show-safe-area;
+                    is-playing: root.is-playing;
+                    layer-pos-x: root.layer-pos-x;
+                    layer-pos-y: root.layer-pos-y;
+                    layer-scale: root.layer-scale;
+                    layer-rotation: root.layer-rotation;
+                    layer-opacity: root.layer-opacity;
+                    layer-visible: root.layer-visible;
                     compact-layout: root.compact-layout;
                     transform-changed(property, value) => { root.transform-changed(property, value); }
+                    transform-begin => { root.transform-begin(); }
+                    transform-end => { root.transform-end(); }
                 }
 
-                MotionCurveDrawer {
-                    horizontal-stretch: 1;
-                    open <=> root.curve-drawer-open;
-                }
             }
 
             if root.rtl : Rectangle { width: 1px; background: Theme.palette().border; }
@@ -218,8 +260,12 @@ export component MotionApp inherits Window {
                 opacity-val <=> root.opacity-val;
                 timecode-display: root.timecode-display;
                 timecode-text: root.timecode-text;
+                duration-secs: root.duration-secs;
+                selected-keyframe-time: root.selected-keyframe-time;
+                selected-keyframe-property: root.selected-keyframe-property;
                 toggle-expanded => { root.inspector-expanded = !root.inspector-expanded; }
                 transform-changed(property, value) => { root.transform-changed(property, value); }
+                edit-keyframe-time(property, value) => { root.edit-keyframe-time(property, value); }
             }
         }
 
@@ -229,7 +275,19 @@ export component MotionApp inherits Window {
             active-layer-index: root.active-layer-index;
             layer-column-width: root.layer-column-width;
             timecode-display: root.timecode-display;
+            duration-secs: root.duration-secs;
+            current-time-secs: root.current-time-secs;
+            frame-rate: root.frame-rate;
+            active-layer-keyframes: root.active-layer-keyframes;
+            active-keyframe-properties: root.active-keyframe-properties;
+            layer-start-secs: root.layer-start-secs;
+            layer-duration-secs: root.layer-duration-secs;
+            selected-keyframe-time: root.selected-keyframe-time;
+            selected-keyframe-property: root.selected-keyframe-property;
             select-layer(index) => { root.select-layer(index); }
+            scrub-time(time) => { root.scrub-time(time); }
+            select-keyframe(time, property) => { root.select-keyframe(time, property); }
+            edit-keyframe-time(property, time) => { root.edit-keyframe-time(property, time); }
         }
 
         MotionStatusBar {
