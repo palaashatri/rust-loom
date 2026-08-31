@@ -1,12 +1,17 @@
 //! Loom Video desktop application with local FFmpeg media workflows.
 
 use std::collections::VecDeque;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{process::Command, thread};
+use std::{
+    process::{Child, Command, Stdio},
+    thread,
+};
 
 use loom_desktop::{
     build_standard_menu_bar, CommandAction, FileDialogService, FileFilter, Menu, MenuActionSink,
@@ -161,6 +166,7 @@ struct AppState {
     preview_in_flight: AtomicBool,
     preview_cache: Mutex<PreviewCache>,
     preview_cache_hits: AtomicU64,
+    waveform_cache_hits: AtomicU64,
     gesture: Mutex<Option<TimelineGesture>>,
     playback_clock: Mutex<Option<PlaybackClock>>,
 }
@@ -175,6 +181,7 @@ enum CacheState {
 #[derive(Debug, Clone)]
 struct PreviewCacheEntry {
     clip_id: String,
+    source_identity: String,
     frame_time: f64,
     thumbnail: CacheState,
     waveform: CacheState,
@@ -190,15 +197,21 @@ struct PreviewCache {
 impl PreviewCache {
     const LIMIT: usize = 8;
 
-    #[cfg(test)]
-    fn mark_pending(&mut self, clip_id: &str) {
-        self.mark_pending_at(clip_id, 0.0);
-    }
-
-    fn mark_pending_at(&mut self, clip_id: &str, frame_time: f64) {
+    fn mark_pending_at(&mut self, clip_id: &str, source_identity: &str, frame_time: f64) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.clip_id == clip_id && entry.source_identity == source_identity)
+        {
+            entry.frame_time = frame_time;
+            entry.thumbnail = CacheState::Pending;
+            entry.frame = None;
+            return;
+        }
         self.entries.retain(|entry| entry.clip_id != clip_id);
         self.entries.push_front(PreviewCacheEntry {
             clip_id: clip_id.to_string(),
+            source_identity: source_identity.to_string(),
             frame_time,
             thumbnail: CacheState::Pending,
             waveform: CacheState::Pending,
@@ -208,16 +221,17 @@ impl PreviewCache {
         self.entries.truncate(Self::LIMIT);
     }
 
-    #[cfg(test)]
-    fn mark_ready(&mut self, clip_id: &str, frame: VideoFrame) {
-        self.mark_thumbnail_ready_at(clip_id, 0.0, frame);
-    }
-
-    fn mark_thumbnail_ready_at(&mut self, clip_id: &str, frame_time: f64, frame: VideoFrame) {
+    fn mark_thumbnail_ready_at(
+        &mut self,
+        clip_id: &str,
+        source_identity: &str,
+        frame_time: f64,
+        frame: VideoFrame,
+    ) {
         if let Some(entry) = self
             .entries
             .iter_mut()
-            .find(|entry| entry.clip_id == clip_id)
+            .find(|entry| entry.clip_id == clip_id && entry.source_identity == source_identity)
         {
             entry.frame_time = frame_time;
             entry.thumbnail = CacheState::Ready;
@@ -226,6 +240,7 @@ impl PreviewCache {
         }
         self.entries.push_front(PreviewCacheEntry {
             clip_id: clip_id.to_string(),
+            source_identity: source_identity.to_string(),
             frame_time,
             thumbnail: CacheState::Ready,
             waveform: CacheState::Pending,
@@ -235,46 +250,53 @@ impl PreviewCache {
         self.entries.truncate(Self::LIMIT);
     }
 
-    fn mark_failed(&mut self, clip_id: &str) {
-        self.mark_thumbnail_failed(clip_id);
-    }
-
-    fn mark_thumbnail_failed(&mut self, clip_id: &str) {
+    fn mark_thumbnail_failed(&mut self, clip_id: &str, source_identity: &str) {
         if let Some(entry) = self
             .entries
             .iter_mut()
-            .find(|entry| entry.clip_id == clip_id)
+            .find(|entry| entry.clip_id == clip_id && entry.source_identity == source_identity)
         {
             entry.thumbnail = CacheState::Failed;
             entry.frame = None;
         }
     }
 
-    fn mark_waveform_ready(&mut self, clip_id: &str, peaks: Vec<(f32, f32)>) {
+    fn mark_waveform_ready(
+        &mut self,
+        clip_id: &str,
+        source_identity: &str,
+        peaks: Vec<(f32, f32)>,
+    ) {
         if let Some(entry) = self
             .entries
             .iter_mut()
-            .find(|entry| entry.clip_id == clip_id)
+            .find(|entry| entry.clip_id == clip_id && entry.source_identity == source_identity)
         {
             entry.waveform = CacheState::Ready;
             entry.waveform_peaks = Some(peaks);
         }
     }
 
-    fn mark_waveform_failed(&mut self, clip_id: &str) {
+    fn mark_waveform_failed(&mut self, clip_id: &str, source_identity: &str) {
         if let Some(entry) = self
             .entries
             .iter_mut()
-            .find(|entry| entry.clip_id == clip_id)
+            .find(|entry| entry.clip_id == clip_id && entry.source_identity == source_identity)
         {
             entry.waveform = CacheState::Failed;
             entry.waveform_peaks = None;
         }
     }
 
-    fn cached_frame(&mut self, clip_id: &str, frame_time: f64) -> Option<VideoFrame> {
+    fn cached_frame(
+        &mut self,
+        clip_id: &str,
+        source_identity: &str,
+        frame_time: f64,
+    ) -> Option<VideoFrame> {
         let index = self.entries.iter().position(|entry| {
             entry.clip_id == clip_id
+                && entry.source_identity == source_identity
                 && entry.thumbnail == CacheState::Ready
                 && entry
                     .frame
@@ -288,6 +310,31 @@ impl PreviewCache {
         frame
     }
 
+    fn cached_waveform(&mut self, clip_id: &str, source_identity: &str) -> Option<Vec<(f32, f32)>> {
+        // Keep the immutable lookup as the single source of truth for both
+        // status and production reads, then touch the entry for LRU serving.
+        let peaks = self.waveform_for(clip_id, source_identity)?.to_vec();
+        let index = self.entries.iter().position(|entry| {
+            entry.clip_id == clip_id && entry.source_identity == source_identity
+        })?;
+        let entry = self.entries.remove(index)?;
+        self.entries.push_front(entry);
+        self.entries.truncate(Self::LIMIT);
+        Some(peaks)
+    }
+
+    fn waveform_for(&self, clip_id: &str, source_identity: &str) -> Option<&[(f32, f32)]> {
+        self.entries
+            .iter()
+            .find(|entry| {
+                entry.clip_id == clip_id
+                    && entry.source_identity == source_identity
+                    && entry.waveform == CacheState::Ready
+            })
+            .and_then(|entry| entry.waveform_peaks.as_deref())
+            .filter(|peaks| !peaks.is_empty())
+    }
+
     fn status_for(&self, clip: &Clip) -> String {
         let source = clip.source_path.trim();
         if source.is_empty() {
@@ -296,37 +343,63 @@ impl PreviewCache {
         if !Path::new(source).is_file() {
             return "Source missing · relink required".to_string();
         }
-        match self.entries.iter().find(|entry| entry.clip_id == clip.id) {
-            Some(entry) => match (entry.thumbnail, entry.waveform) {
-                (CacheState::Ready, CacheState::Ready) => "Thumbnail ready · waveform ready".into(),
-                (CacheState::Ready, CacheState::Pending) => {
-                    "Thumbnail ready · waveform pending".into()
+        let identity = source_identity(Path::new(source));
+        match self
+            .entries
+            .iter()
+            .find(|entry| entry.clip_id == clip.id && entry.source_identity == identity)
+        {
+            Some(entry) => {
+                let waveform_state = if self.waveform_for(&clip.id, &identity).is_some() {
+                    CacheState::Ready
+                } else {
+                    entry.waveform
+                };
+                match (entry.thumbnail, waveform_state) {
+                    (CacheState::Ready, CacheState::Ready) => {
+                        "Thumbnail ready · waveform ready".into()
+                    }
+                    (CacheState::Ready, CacheState::Pending) => {
+                        "Thumbnail ready · waveform pending".into()
+                    }
+                    (CacheState::Ready, CacheState::Failed) => {
+                        "Thumbnail ready · waveform failed · retry on demand".into()
+                    }
+                    (CacheState::Pending, CacheState::Ready) => {
+                        "Thumbnail pending · waveform ready".into()
+                    }
+                    (CacheState::Pending, CacheState::Failed) => {
+                        "Thumbnail pending · waveform failed".into()
+                    }
+                    (CacheState::Failed, CacheState::Ready) => {
+                        "Thumbnail failed · waveform ready · retry on demand".into()
+                    }
+                    (CacheState::Failed, CacheState::Failed) => {
+                        "Thumbnail failed · waveform failed · retry on demand".into()
+                    }
+                    (CacheState::Failed, CacheState::Pending) => {
+                        "Thumbnail failed · waveform pending · retry on demand".into()
+                    }
+                    (CacheState::Pending, CacheState::Pending) => {
+                        "Thumbnail pending · waveform pending".into()
+                    }
                 }
-                (CacheState::Ready, CacheState::Failed) => {
-                    "Thumbnail ready · waveform failed · retry on demand".into()
-                }
-                (CacheState::Pending, CacheState::Ready) => {
-                    "Thumbnail pending · waveform ready".into()
-                }
-                (CacheState::Pending, CacheState::Failed) => {
-                    "Thumbnail pending · waveform failed".into()
-                }
-                (CacheState::Failed, CacheState::Ready) => {
-                    "Thumbnail failed · waveform ready · retry on demand".into()
-                }
-                (CacheState::Failed, CacheState::Failed) => {
-                    "Thumbnail failed · waveform failed · retry on demand".into()
-                }
-                (CacheState::Failed, CacheState::Pending) => {
-                    "Thumbnail failed · waveform pending · retry on demand".into()
-                }
-                (CacheState::Pending, CacheState::Pending) => {
-                    "Thumbnail pending · waveform pending".into()
-                }
-            },
+            }
             None => "Thumbnail pending · waveform pending".into(),
         }
     }
+}
+
+fn source_identity(path: &Path) -> String {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let metadata = std::fs::metadata(path).ok();
+    let size = metadata.as_ref().map(std::fs::Metadata::len).unwrap_or(0);
+    let modified = metadata
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| format!("{}.{:09}", duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or_default();
+    format!("{}:{size}:{modified}", canonical.to_string_lossy())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,42 +423,280 @@ enum ClockSource {
     MonotonicFallback,
 }
 
+const AUDIO_CONSUMER_CHUNK_SAMPLES: usize = 2048;
+const AUDIO_CONSUMER_QUEUE_CHUNKS: usize = 8;
+const AUDIO_CONSUMER_TICK_HZ: u64 = 30;
+
+/// Bounded local PCM decoder used as the audio-master source when no realtime
+/// output device is available. The worker decodes mono f32 samples through
+/// FFmpeg and sends only bounded sample-count chunks; the playback timer
+/// consumes one fixed sample budget per tick.
+#[derive(Debug)]
+struct DecodedAudioSampleConsumer {
+    sample_rate: u32,
+    tools: MediaTools,
+    path: PathBuf,
+    start_time: f64,
+    pending_samples: u64,
+    receiver: Receiver<u64>,
+    cancellation: PreviewCancellation,
+    process: Arc<Mutex<Child>>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl DecodedAudioSampleConsumer {
+    fn spawn(
+        tools: &MediaTools,
+        path: &Path,
+        start_time: f64,
+        sample_rate: u32,
+    ) -> Result<Self, String> {
+        if sample_rate == 0 {
+            return Err("decoded audio sample rate must be non-zero".into());
+        }
+        if !path.is_file() {
+            return Err(format!("audio source does not exist: {}", path.display()));
+        }
+        let mut child = Command::new(&tools.ffmpeg)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                &format!("{:.6}", start_time.max(0.0)),
+                "-i",
+            ])
+            .arg(path)
+            .args([
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                &sample_rate.to_string(),
+                "-f",
+                "f32le",
+                "pipe:1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("start FFmpeg audio consumer: {error}"))?;
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("FFmpeg audio consumer stdout was not captured".into());
+            }
+        };
+        let process = Arc::new(Mutex::new(child));
+        let worker_process = Arc::clone(&process);
+        let (sender, receiver) = mpsc::sync_channel(AUDIO_CONSUMER_QUEUE_CHUNKS);
+        let cancellation = PreviewCancellation::default();
+        let worker_cancellation = cancellation.clone();
+        let worker = thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut bytes = vec![0_u8; AUDIO_CONSUMER_CHUNK_SAMPLES * 4];
+            let mut carry = [0_u8; std::mem::size_of::<f32>()];
+            let mut carry_len = 0_usize;
+            loop {
+                if worker_cancellation.is_cancelled() {
+                    if let Ok(mut process) = worker_process.lock() {
+                        let _ = process.kill();
+                    }
+                    break;
+                }
+                let read = match reader.read(&mut bytes) {
+                    Ok(read) => read,
+                    Err(_) => break,
+                };
+                if read == 0 {
+                    break;
+                }
+                let mut sample_count = 0_u64;
+                let mut offset = 0_usize;
+                if carry_len > 0 {
+                    let needed = carry.len() - carry_len;
+                    let copied = needed.min(read);
+                    carry[carry_len..carry_len + copied].copy_from_slice(&bytes[..copied]);
+                    carry_len += copied;
+                    offset = copied;
+                    if carry_len == carry.len() {
+                        sample_count += 1;
+                        carry_len = 0;
+                    }
+                }
+                while offset + carry.len() <= read {
+                    sample_count += 1;
+                    offset += carry.len();
+                }
+                if offset < read {
+                    // A valid FFmpeg f32le stream is four-byte aligned. Keep
+                    // the tail until the next read instead of counting a
+                    // partial sample; if the process ends with a tail it is
+                    // intentionally ignored as malformed output.
+                    carry[..read - offset].copy_from_slice(&bytes[offset..read]);
+                    carry_len = read - offset;
+                }
+                let mut samples = sample_count;
+                while samples > 0 {
+                    let chunk = samples.min(AUDIO_CONSUMER_CHUNK_SAMPLES as u64);
+                    loop {
+                        match sender.try_send(chunk) {
+                            Ok(()) => break,
+                            Err(TrySendError::Full(value)) => {
+                                samples = value;
+                                if worker_cancellation.is_cancelled() {
+                                    if let Ok(mut process) = worker_process.lock() {
+                                        let _ = process.kill();
+                                    }
+                                    return;
+                                }
+                                thread::sleep(Duration::from_millis(2));
+                            }
+                            Err(TrySendError::Disconnected(_)) => {
+                                if let Ok(mut process) = worker_process.lock() {
+                                    let _ = process.kill();
+                                }
+                                return;
+                            }
+                        }
+                    }
+                    samples = samples.saturating_sub(chunk);
+                }
+            }
+            if let Ok(mut process) = worker_process.lock() {
+                let _ = process.wait();
+            }
+        });
+        Ok(Self {
+            sample_rate,
+            tools: tools.clone(),
+            path: path.to_path_buf(),
+            start_time: start_time.max(0.0),
+            pending_samples: 0,
+            receiver,
+            cancellation,
+            process,
+            worker: Some(worker),
+        })
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn start_time(&self) -> f64 {
+        self.start_time
+    }
+
+    fn consume_samples(&mut self, budget: u64) -> u64 {
+        if budget == 0 {
+            return 0;
+        }
+        while self.pending_samples < budget {
+            match self.receiver.try_recv() {
+                Ok(samples) => {
+                    self.pending_samples = self.pending_samples.saturating_add(samples);
+                }
+                // The decoder runs asynchronously. If no chunk is ready for
+                // this timer tick, leave the audio-master clock parked until
+                // a later tick observes decoded samples. A disconnected
+                // worker likewise means there can be no more samples; do not
+                // spin forever waiting for a budget that can never be met.
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        let consumed = self.pending_samples.min(budget);
+        self.pending_samples -= consumed;
+        consumed
+    }
+
+    fn stop_worker(&mut self) {
+        self.cancellation.cancel();
+        if let Ok(mut process) = self.process.lock() {
+            let _ = process.kill();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+
+    fn seek(&mut self, position: f64) -> bool {
+        let tools = self.tools.clone();
+        let path = self.path.clone();
+        let sample_rate = self.sample_rate;
+        self.stop_worker();
+        match Self::spawn(&tools, &path, position, sample_rate) {
+            Ok(replacement) => {
+                *self = replacement;
+                true
+            }
+            Err(_) => {
+                self.pending_samples = 0;
+                false
+            }
+        }
+    }
+}
+
+impl Drop for DecodedAudioSampleConsumer {
+    fn drop(&mut self) {
+        self.stop_worker();
+    }
+}
+
+fn spawn_decoded_audio_consumer(
+    tools: &MediaTools,
+    path: &Path,
+    start_time: f64,
+    sample_rate: u32,
+) -> Result<DecodedAudioSampleConsumer, String> {
+    DecodedAudioSampleConsumer::spawn(tools, path, start_time, sample_rate)
+}
+
 #[derive(Debug)]
 struct AudioSampleSource {
     sample_rate: u32,
-    sample_cursor: u64,
-    fractional_samples: f64,
+    timeline_cursor: f64,
+    playback_rate: f64,
+    fractional_source_samples: f64,
+    consumer: DecodedAudioSampleConsumer,
 }
 
 impl AudioSampleSource {
-    fn new(position: f64, sample_rate: u32) -> Self {
-        let sample_rate = sample_rate.max(1);
+    fn new(position: f64, consumer: DecodedAudioSampleConsumer, playback_rate: f64) -> Self {
+        let sample_rate = consumer.sample_rate().max(1);
         Self {
             sample_rate,
-            sample_cursor: (position.max(0.0) * f64::from(sample_rate)).round() as u64,
-            fractional_samples: 0.0,
+            timeline_cursor: position.max(0.0) * f64::from(sample_rate),
+            playback_rate: playback_rate.max(0.001),
+            fractional_source_samples: 0.0,
+            consumer,
         }
     }
 
     fn position(&self) -> f64 {
-        (self.sample_cursor as f64 + self.fractional_samples) / f64::from(self.sample_rate)
+        self.timeline_cursor / f64::from(self.sample_rate)
     }
 
-    fn advance_samples(&mut self, samples: u64) {
-        self.sample_cursor = self.sample_cursor.saturating_add(samples);
+    fn consume_for_tick(&mut self) -> u64 {
+        let exact_source_samples = f64::from(self.sample_rate) / AUDIO_CONSUMER_TICK_HZ as f64
+            * self.playback_rate
+            + self.fractional_source_samples;
+        let source_budget = exact_source_samples.floor() as u64;
+        self.fractional_source_samples = exact_source_samples - source_budget as f64;
+        let consumed = self.consumer.consume_samples(source_budget);
+        self.timeline_cursor += consumed as f64 / self.playback_rate;
+        consumed
     }
 
-    fn advance_elapsed(&mut self, elapsed: Duration) -> u64 {
-        let exact_samples =
-            elapsed.as_secs_f64() * f64::from(self.sample_rate) + self.fractional_samples;
-        let whole_samples = exact_samples.floor().max(0.0);
-        self.fractional_samples = exact_samples - whole_samples;
-        whole_samples as u64
-    }
-
-    fn seek(&mut self, position: f64) {
-        self.sample_cursor = (position.max(0.0) * f64::from(self.sample_rate)).round() as u64;
-        self.fractional_samples = 0.0;
+    fn seek(&mut self, timeline_position: f64, source_position: f64) -> bool {
+        self.timeline_cursor = timeline_position.max(0.0) * f64::from(self.sample_rate);
+        self.fractional_source_samples = 0.0;
+        self.consumer.seek(source_position)
     }
 }
 
@@ -395,34 +706,46 @@ struct PlaybackClock {
     anchor: Instant,
     anchor_position: f64,
     audio: Option<AudioSampleSource>,
-    last_tick: Instant,
+    audio_clip_id: Option<String>,
 }
 
 impl PlaybackClock {
-    fn start(source: ClockSource, position: f64) -> Self {
-        let now = Instant::now();
+    fn start(position: f64) -> Self {
         Self {
-            source,
-            anchor: now,
+            source: ClockSource::MonotonicFallback,
+            anchor: Instant::now(),
             anchor_position: position.max(0.0),
             audio: None,
-            last_tick: now,
+            audio_clip_id: None,
         }
     }
 
-    fn start_audio(position: f64, sample_rate: u32) -> Self {
-        let now = Instant::now();
+    #[cfg(test)]
+    fn start_audio(position: f64, consumer: DecodedAudioSampleConsumer) -> Self {
+        Self::start_audio_for_clip(position, consumer, None, 1.0)
+    }
+
+    fn start_audio_for_clip(
+        position: f64,
+        consumer: DecodedAudioSampleConsumer,
+        clip_id: Option<String>,
+        playback_rate: f64,
+    ) -> Self {
         Self {
             source: ClockSource::AudioMaster,
-            anchor: now,
+            anchor: Instant::now(),
             anchor_position: position.max(0.0),
-            audio: Some(AudioSampleSource::new(position, sample_rate)),
-            last_tick: now,
+            audio: Some(AudioSampleSource::new(position, consumer, playback_rate)),
+            audio_clip_id: clip_id,
         }
     }
 
     fn source(&self) -> ClockSource {
         self.source
+    }
+
+    fn audio_clip_id(&self) -> Option<&str> {
+        self.audio_clip_id.as_deref()
     }
 
     fn position(&self) -> f64 {
@@ -433,33 +756,31 @@ impl PlaybackClock {
     }
 
     fn tick(&mut self) -> f64 {
-        let samples = if let Some(audio) = self.audio.as_mut() {
-            let elapsed = self.last_tick.elapsed();
-            self.last_tick = Instant::now();
-            Some(audio.advance_elapsed(elapsed))
-        } else {
-            None
-        };
-        if let Some(samples) = samples {
-            self.advance_audio_samples(samples);
+        if let Some(audio) = self.audio.as_mut() {
+            audio.consume_for_tick();
         }
         self.position()
     }
 
-    fn advance_audio_samples(&mut self, samples: u64) {
-        if let Some(audio) = self.audio.as_mut() {
-            audio.advance_samples(samples);
-        }
+    #[cfg(test)]
+    fn seek(&mut self, position: f64) {
+        self.seek_with_source(position, position);
     }
 
-    fn seek(&mut self, position: f64) {
-        let now = Instant::now();
-        self.last_tick = now;
-        if let Some(audio) = self.audio.as_mut() {
-            audio.seek(position);
+    fn seek_with_source(&mut self, timeline_position: f64, source_position: f64) {
+        let audio_seeked = if let Some(audio) = self.audio.as_mut() {
+            audio.seek(timeline_position, source_position)
         } else {
-            self.anchor = now;
-            self.anchor_position = position.max(0.0);
+            self.anchor = Instant::now();
+            self.anchor_position = timeline_position.max(0.0);
+            true
+        };
+        if !audio_seeked {
+            self.audio = None;
+            self.source = ClockSource::MonotonicFallback;
+            self.audio_clip_id = None;
+            self.anchor = Instant::now();
+            self.anchor_position = timeline_position.max(0.0);
         }
     }
 }
@@ -865,6 +1186,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         preview_in_flight: AtomicBool::new(false),
         preview_cache: Mutex::new(PreviewCache::default()),
         preview_cache_hits: AtomicU64::new(0),
+        waveform_cache_hits: AtomicU64::new(0),
         gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     };
@@ -1017,6 +1339,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         preview_in_flight: AtomicBool::new(false),
         preview_cache: Mutex::new(PreviewCache::default()),
         preview_cache_hits: AtomicU64::new(0),
+        waveform_cache_hits: AtomicU64::new(0),
         gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     });
@@ -1169,12 +1492,44 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         return Err("playback did not select the audio-master clock".into());
     }
     app.invoke_seek((playback_start + 0.25) as f32);
-    let seek_position = lock(&state.playback_clock)
-        .as_ref()
-        .map(PlaybackClock::position)
-        .ok_or("seek cleared the active playback clock")?;
+    let seek_timeline = playback_start + 0.25;
+    let expected_source_time = reopened.tracks[0].clips[imported_index].in_point
+        + (seek_timeline - reopened.tracks[0].clips[imported_index].start_time)
+            * reopened.tracks[0].clips[imported_index].playback_rate;
+    let (seek_position, consumer_source_time) = {
+        let clock = lock(&state.playback_clock);
+        let clock = clock
+            .as_ref()
+            .ok_or("seek cleared the active playback clock")?;
+        let consumer_source_time = clock
+            .audio
+            .as_ref()
+            .map(|audio| audio.consumer.start_time())
+            .ok_or("source-aware seek dropped the audio consumer")?;
+        (clock.position(), consumer_source_time)
+    };
     if (seek_position - playback_start - 0.25).abs() > 0.08 {
         return Err(format!("seek position drifted to {seek_position:.3}"));
+    }
+    if (consumer_source_time - expected_source_time).abs() > 0.08 {
+        return Err(format!(
+            "source-aware seek restarted audio at {consumer_source_time:.3}, expected {expected_source_time:.3}"
+        ));
+    }
+    let seek_deadline = Instant::now() + Duration::from_secs(4);
+    let mut resumed_position = seek_position;
+    while Instant::now() < seek_deadline {
+        resumed_position = lock(&state.playback_clock)
+            .as_mut()
+            .map(PlaybackClock::tick)
+            .unwrap_or(seek_position);
+        if resumed_position > seek_position {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    if resumed_position <= seek_position {
+        return Err("audio-master clock did not resume after source-aware seek".into());
     }
     app.invoke_play_pause();
     capture_workflow_step(
@@ -1315,9 +1670,20 @@ fn request_preview_internal(
         show_synthetic_preview(&state, &weak);
         return;
     };
+    let cache_identity = source_identity(&path);
+    let cached_waveform_bins = {
+        let mut preview_cache = lock(&state.preview_cache);
+        let cached = preview_cache.cached_waveform(&clip_id, &cache_identity);
+        if let Some(peaks) = cached.as_ref() {
+            state.waveform_cache_hits.fetch_add(1, Ordering::AcqRel);
+            Some(peaks.len())
+        } else {
+            None
+        }
+    };
     let cached_frame = {
         let mut preview_cache = lock(&state.preview_cache);
-        preview_cache.cached_frame(&clip_id, source_time)
+        preview_cache.cached_frame(&clip_id, &cache_identity, source_time)
     };
     if let Some(frame) = cached_frame {
         let _ = lock(&state.preview_cancel).take();
@@ -1330,7 +1696,12 @@ fn request_preview_internal(
             app.set_preview_image(frame_image(&frame));
             app.set_has_preview(true);
             app.set_preview_synthetic(false);
-            app.set_status_left(format!("Preview cache hit at {timeline_time:.2}s").into());
+            let waveform_status = cached_waveform_bins
+                .map(|bins| format!(" · waveform {bins} bins"))
+                .unwrap_or_default();
+            app.set_status_left(
+                format!("Preview cache hit at {timeline_time:.2}s{waveform_status}").into(),
+            );
         }
         return;
     }
@@ -1340,7 +1711,7 @@ fn request_preview_internal(
         show_synthetic_preview(&state, &weak);
         return;
     };
-    lock(&state.preview_cache).mark_pending_at(&clip_id, source_time);
+    lock(&state.preview_cache).mark_pending_at(&clip_id, &cache_identity, source_time);
     if let Some(app) = weak.upgrade() {
         refresh_preview_surface(&app, &state);
     }
@@ -1356,20 +1727,32 @@ fn request_preview_internal(
                 *lock(&state.preview) = Some(frame.clone());
                 lock(&state.preview_cache).mark_thumbnail_ready_at(
                     &clip_id,
+                    &cache_identity,
                     source_time,
                     frame.clone(),
                 );
                 state.preview_synthetic.store(false, Ordering::Relaxed);
-                let waveform_result =
-                    decode_audio_waveform_with_cancel(&tools, &path, 256, &cancellation);
-                if !state.preview_generation.is_current(generation) {
-                    return;
-                }
-                if let Ok(peaks) = waveform_result {
-                    lock(&state.preview_cache).mark_waveform_ready(&clip_id, peaks);
+                let waveform_bins = if let Some(bins) = cached_waveform_bins {
+                    Some(bins)
                 } else {
-                    lock(&state.preview_cache).mark_waveform_failed(&clip_id);
-                }
+                    let waveform_result =
+                        decode_audio_waveform_with_cancel(&tools, &path, 256, &cancellation);
+                    if !state.preview_generation.is_current(generation) {
+                        return;
+                    }
+                    if let Ok(peaks) = waveform_result {
+                        let bins = peaks.len();
+                        lock(&state.preview_cache).mark_waveform_ready(
+                            &clip_id,
+                            &cache_identity,
+                            peaks,
+                        );
+                        Some(bins)
+                    } else {
+                        lock(&state.preview_cache).mark_waveform_failed(&clip_id, &cache_identity);
+                        None
+                    }
+                };
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     if !callback_state.preview_generation.is_current(generation) {
                         return;
@@ -1378,7 +1761,12 @@ fn request_preview_internal(
                     app.set_preview_image(frame_image(&frame));
                     app.set_has_preview(true);
                     app.set_preview_synthetic(false);
-                    app.set_status_left(format!("Decoded preview at {timeline_time:.2}s").into());
+                    let waveform_status = waveform_bins
+                        .map(|bins| format!(" · waveform {bins} bins"))
+                        .unwrap_or_default();
+                    app.set_status_left(
+                        format!("Decoded preview at {timeline_time:.2}s{waveform_status}").into(),
+                    );
                     callback_state
                         .preview_in_flight
                         .store(false, Ordering::Release);
@@ -1388,7 +1776,7 @@ fn request_preview_internal(
                 if !state.preview_generation.is_current(generation) {
                     return;
                 }
-                lock(&state.preview_cache).mark_failed(&clip_id);
+                lock(&state.preview_cache).mark_thumbnail_failed(&clip_id, &cache_identity);
                 let frame = procedural_preview();
                 *lock(&state.preview) = Some(frame);
                 state.preview_synthetic.store(true, Ordering::Release);
@@ -2222,8 +2610,44 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 app.set_timecode_display(
                     timecode(seconds, lock(&state.session).project.frame_rate).into(),
                 );
+                let sought_source = {
+                    let session = lock(&state.session);
+                    timeline_clips(&session.project)
+                        .into_iter()
+                        .find(|clip| seconds >= clip.start_time && seconds < clip.end_time())
+                        .map(|clip| {
+                            (
+                                clip.id.clone(),
+                                clip.in_point + (seconds - clip.start_time) * clip.playback_rate,
+                            )
+                        })
+                };
                 if let Some(clock) = lock(&state.playback_clock).as_mut() {
-                    clock.seek(seconds);
+                    let was_audio_master = clock.source() == ClockSource::AudioMaster;
+                    let clip_matches = !was_audio_master
+                        || clock.audio_clip_id()
+                            == sought_source.as_ref().map(|(clip_id, _)| clip_id.as_str());
+                    if clip_matches {
+                        clock.seek_with_source(
+                            seconds,
+                            sought_source
+                                .as_ref()
+                                .map(|(_, source_time)| *source_time)
+                                .unwrap_or(seconds),
+                        );
+                        if was_audio_master && clock.source() != ClockSource::AudioMaster {
+                            app.set_playback_clock_source("Monotonic fallback".into());
+                            app.set_audio_output_status(
+                                "Audio seek unavailable · monotonic fallback clock".into(),
+                            );
+                        }
+                    } else {
+                        *clock = PlaybackClock::start(seconds);
+                        app.set_playback_clock_source("Monotonic fallback".into());
+                        app.set_audio_output_status(
+                            "Audio source changed · monotonic fallback clock".into(),
+                        );
+                    }
                 }
                 request_preview(state.clone(), app.as_weak(), seconds);
             }
@@ -2250,35 +2674,76 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     return;
                 }
                 let playhead = f64::from(app.get_playhead_seconds());
-                let (source_path, audio_sample_rate) = {
+                let (source_clip_id, source_path, source_time, playback_rate, audio_sample_rate) = {
                     let session = lock(&state.session);
-                    let source_path = timeline_clips(&session.project)
+                    let source = timeline_clips(&session.project)
                         .into_iter()
                         .find(|clip| playhead >= clip.start_time && playhead < clip.end_time())
-                        .map(|clip| clip.source_path.clone());
-                    let audio_sample_rate = source_path
-                        .as_deref()
+                        .map(|clip| {
+                            (
+                                clip.id.clone(),
+                                clip.source_path.clone(),
+                                clip.in_point
+                                    + (playhead - clip.start_time) * clip.playback_rate,
+                                clip.playback_rate,
+                            )
+                    });
+                    let audio_sample_rate = source
+                        .as_ref()
                         .zip(state.tools.as_ref())
-                        .and_then(|(path, tools)| {
+                        .and_then(|((_, path, _, _), tools)| {
                             let path = Path::new(path);
                             path.is_file().then(|| probe_media(tools, path).ok())
                         })
                         .flatten()
                         .filter(|probe| probe.has_audio)
                         .and_then(|probe| probe.audio_sample_rate);
-                    (source_path, audio_sample_rate)
+                    (
+                        source.as_ref().map(|(clip_id, _, _, _)| clip_id.clone()),
+                        source.as_ref().map(|(_, path, _, _)| path.clone()),
+                        source.as_ref().map(|(_, _, time, _)| *time),
+                        source.as_ref().map(|(_, _, _, rate)| *rate).unwrap_or(1.0),
+                        audio_sample_rate,
+                    )
                 };
-                let has_audio = audio_sample_rate.is_some();
-                let source = if has_audio {
-                    ClockSource::AudioMaster
-                } else {
-                    ClockSource::MonotonicFallback
+                let mut has_audio = false;
+                let playback_clock = match (
+                    audio_sample_rate,
+                    source_path.as_deref(),
+                    source_time,
+                    source_clip_id.as_deref(),
+                    playback_rate,
+                    state.tools.as_ref(),
+                ) {
+                    (
+                        Some(sample_rate),
+                        Some(path),
+                        Some(source_time),
+                        Some(clip_id),
+                        playback_rate,
+                        Some(tools),
+                    ) => {
+                        match spawn_decoded_audio_consumer(
+                            tools,
+                            Path::new(path),
+                            source_time,
+                            sample_rate,
+                        ) {
+                            Ok(consumer) => {
+                                has_audio = true;
+                                PlaybackClock::start_audio_for_clip(
+                                    playhead,
+                                    consumer,
+                                    Some(clip_id.to_string()),
+                                    playback_rate,
+                                )
+                            }
+                            Err(_) => PlaybackClock::start(playhead),
+                        }
+                    }
+                    _ => PlaybackClock::start(playhead),
                 };
-                *lock(&state.playback_clock) = Some(if let Some(sample_rate) = audio_sample_rate {
-                    PlaybackClock::start_audio(playhead, sample_rate)
-                } else {
-                    PlaybackClock::start(source, playhead)
-                });
+                *lock(&state.playback_clock) = Some(playback_clock);
                 app.set_playback_clock_source(
                     if has_audio {
                         "Audio master"
@@ -2290,6 +2755,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 app.set_audio_output_status(
                     if has_audio {
                         "Audio stream detected · output device unavailable; clock is audio-master"
+                    } else if audio_sample_rate.is_some() {
+                        "Audio stream detected · decoded consumer unavailable; monotonic fallback clock"
                     } else {
                         "No audio stream · monotonic fallback clock"
                     }
@@ -2321,6 +2788,34 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                             let Some(position) = position else {
                                 return;
                             };
+                            let current_clip_id = {
+                                let session = lock(&timer_state.session);
+                                timeline_clips(&session.project)
+                                    .into_iter()
+                                    .find(|clip| {
+                                        position >= clip.start_time && position < clip.end_time()
+                                    })
+                                    .map(|clip| clip.id.clone())
+                            };
+                            let audio_source_changed = {
+                                let clock = lock(&timer_state.playback_clock);
+                                clock.as_ref().is_some_and(|clock| {
+                                    clock.source() == ClockSource::AudioMaster
+                                        && clock.audio_clip_id() != current_clip_id.as_deref()
+                                })
+                            };
+                            if audio_source_changed {
+                                // The sample consumer is tied to the clip it
+                                // decoded. At a clip boundary, stop claiming
+                                // audio-master timing until a source-aware
+                                // consumer can be attached to the next clip.
+                                *lock(&timer_state.playback_clock) =
+                                    Some(PlaybackClock::start(position));
+                                app.set_playback_clock_source("Monotonic fallback".into());
+                                app.set_audio_output_status(
+                                    "Audio source changed · monotonic fallback clock".into(),
+                                );
+                            }
                             let duration = timeline_duration(&lock(&timer_state.session).project);
                             if position >= duration {
                                 app.set_playhead_seconds(duration as f32);
@@ -2600,6 +3095,7 @@ fn main() -> Result<(), String> {
         preview_in_flight: AtomicBool::new(false),
         preview_cache: Mutex::new(PreviewCache::default()),
         preview_cache_hits: AtomicU64::new(0),
+        waveform_cache_hits: AtomicU64::new(0),
         gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     });
@@ -2934,6 +3430,7 @@ mod tests {
             preview_in_flight: AtomicBool::new(false),
             preview_cache: Mutex::new(PreviewCache::default()),
             preview_cache_hits: AtomicU64::new(0),
+            waveform_cache_hits: AtomicU64::new(0),
             gesture: Mutex::new(None),
             playback_clock: Mutex::new(None),
         });
@@ -3144,18 +3641,21 @@ mod tests {
         std::fs::write(&source, b"fixture").unwrap();
         let mut clip = Clip::new("clip", "Clip", 2.0);
         clip.source_path = source.to_string_lossy().into_owned();
+        let identity = source_identity(&source);
         let mut cache = PreviewCache::default();
         assert_eq!(
             cache.status_for(&clip),
             "Thumbnail pending · waveform pending"
         );
-        cache.mark_pending(&clip.id);
+        cache.mark_pending_at(&clip.id, &identity, 0.0);
         assert_eq!(
             cache.status_for(&clip),
             "Thumbnail pending · waveform pending"
         );
-        cache.mark_ready(
+        cache.mark_thumbnail_ready_at(
             &clip.id,
+            &identity,
+            0.0,
             VideoFrame {
                 width: 2,
                 height: 2,
@@ -3166,7 +3666,7 @@ mod tests {
             cache.status_for(&clip),
             "Thumbnail ready · waveform pending"
         );
-        cache.mark_failed(&clip.id);
+        cache.mark_thumbnail_failed(&clip.id, &identity);
         assert_eq!(
             cache.status_for(&clip),
             "Thumbnail failed · waveform pending · retry on demand"
@@ -3242,9 +3742,9 @@ mod tests {
     }
 
     #[test]
-    fn playback_clock_exposes_audio_master_and_seek_position() {
-        let mut clock = PlaybackClock::start(ClockSource::AudioMaster, 2.0);
-        assert_eq!(clock.source(), ClockSource::AudioMaster);
+    fn monotonic_fallback_clock_exposes_seek_position() {
+        let mut clock = PlaybackClock::start(2.0);
+        assert_eq!(clock.source(), ClockSource::MonotonicFallback);
         assert!(clock.position() >= 2.0);
         clock.seek(4.5);
         assert!((clock.position() - 4.5).abs() < 0.05);
@@ -3260,7 +3760,7 @@ mod tests {
     }
 
     #[test]
-    fn audio_master_clock_advances_decoded_preview_frames_from_samples() {
+    fn audio_master_clock_tick_consumes_decoded_samples_and_stalls_without_them() {
         let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
         let dir =
             std::env::temp_dir().join(format!("loom-video-audio-clock-{}", std::process::id()));
@@ -3272,18 +3772,95 @@ mod tests {
             .audio_sample_rate
             .expect("audio fixture must expose a sample rate");
 
-        let mut clock = PlaybackClock::start_audio(0.0, sample_rate);
+        let stalled_consumer = spawn_decoded_audio_consumer(&tools, &source, 999.0, sample_rate)
+            .expect("spawn bounded local audio consumer");
+        let mut stalled_clock = PlaybackClock::start_audio(0.0, stalled_consumer);
+        std::thread::sleep(Duration::from_millis(100));
+        let stalled_position = stalled_clock.position();
+        assert_eq!(stalled_clock.tick(), stalled_position);
+
+        let consumer = spawn_decoded_audio_consumer(&tools, &source, 0.0, sample_rate)
+            .expect("spawn bounded local audio consumer");
+        let mut clock = PlaybackClock::start_audio(0.0, consumer);
         assert_eq!(clock.source(), ClockSource::AudioMaster);
         let first_frame = decode_preview_frame(&tools, &source, clock.position(), 320, 180)
             .expect("decode first preview frame");
-        clock.advance_audio_samples(u64::from(sample_rate) / 2);
-        assert!((clock.position() - 0.5).abs() < 1e-6);
+        let initial_position = clock.position();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut advanced_position = initial_position;
+        while Instant::now() < deadline {
+            advanced_position = clock.tick();
+            if advanced_position > initial_position {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            advanced_position > initial_position,
+            "decoded sample consumer never advanced the audio clock"
+        );
         let second_frame = decode_preview_frame(&tools, &source, clock.position(), 320, 180)
             .expect("decode advanced preview frame");
         assert_ne!(first_frame.pixels, second_frame.pixels);
+        clock.seek_with_source(1.0, 0.5);
+        assert_eq!(clock.source(), ClockSource::AudioMaster);
+        assert!((clock.position() - 1.0).abs() < 1e-6);
+        assert!(
+            (clock
+                .audio
+                .as_ref()
+                .expect("audio clock should retain its consumer after seek")
+                .consumer
+                .start_time()
+                - 0.5)
+                .abs()
+                < 1e-6
+        );
+        let seek_position = clock.position();
+        let seek_deadline = Instant::now() + Duration::from_secs(4);
+        let mut seek_advanced = seek_position;
+        while Instant::now() < seek_deadline {
+            seek_advanced = clock.tick();
+            if seek_advanced > seek_position {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            seek_advanced > seek_position,
+            "audio clock did not resume after source-aware seek"
+        );
+        drop(clock);
+        drop(stalled_clock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
-        let fallback = PlaybackClock::start(ClockSource::MonotonicFallback, 0.0);
-        assert_eq!(fallback.source(), ClockSource::MonotonicFallback);
+    #[test]
+    fn waveform_cache_survives_thumbnail_seek_and_invalidates_source() {
+        let dir =
+            std::env::temp_dir().join(format!("loom-video-waveform-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source_a = dir.join("source-a.mp4");
+        let source_b = dir.join("source-b.mp4");
+        std::fs::write(&source_a, b"a").unwrap();
+        std::fs::write(&source_b, b"b").unwrap();
+        let identity_a = source_identity(&source_a);
+        let identity_b = source_identity(&source_b);
+        let mut cache = PreviewCache::default();
+        let peaks = vec![(-0.5, 0.5), (-0.25, 0.25)];
+
+        cache.mark_pending_at("clip", &identity_a, 0.0);
+        cache.mark_waveform_ready("clip", &identity_a, peaks.clone());
+        assert_eq!(
+            cache.cached_waveform("clip", &identity_a),
+            Some(peaks.clone())
+        );
+
+        cache.mark_pending_at("clip", &identity_a, 0.75);
+        assert_eq!(cache.cached_waveform("clip", &identity_a), Some(peaks));
+
+        cache.mark_pending_at("clip", &identity_b, 0.0);
+        assert!(cache.cached_waveform("clip", &identity_b).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3317,6 +3894,7 @@ mod tests {
             preview_in_flight: AtomicBool::new(false),
             preview_cache: Mutex::new(PreviewCache::default()),
             preview_cache_hits: AtomicU64::new(0),
+            waveform_cache_hits: AtomicU64::new(0),
             gesture: Mutex::new(None),
             playback_clock: Mutex::new(None),
         });
@@ -3345,14 +3923,59 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         let cached = lock(&state.preview_cache)
-            .cached_frame(&clip.id, 0.0)
+            .cached_frame(&clip.id, &source_identity(&source), 0.0)
             .expect("generated preview frame should be cached");
         assert!(!cached.pixels.is_empty());
 
-        request_preview_internal(state.clone(), app.as_weak(), 0.0, true);
+        let identity = source_identity(&source);
+        let first_peaks = lock(&state.preview_cache)
+            .waveform_for(&clip.id, &identity)
+            .map(|peaks| peaks.to_vec())
+            .expect("generated waveform peaks should be available");
+        assert!(!first_peaks.is_empty());
+
+        request_preview_internal(state.clone(), app.as_weak(), 0.75, true);
+        let waveform_hit_deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let ready = lock(&state.preview_cache)
+                .entries
+                .iter()
+                .find(|entry| entry.clip_id == clip.id && entry.source_identity == identity)
+                .map(|entry| {
+                    entry.thumbnail == CacheState::Ready
+                        && (entry.frame_time - 0.75).abs() <= 1e-3
+                        && entry.waveform == CacheState::Ready
+                })
+                .unwrap_or(false);
+            if ready || Instant::now() >= waveform_hit_deadline {
+                assert!(ready, "seeked preview did not become ready");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(
+            lock(&state.preview_cache)
+                .waveform_for(&clip.id, &identity)
+                .expect("waveform should survive thumbnail seek"),
+            first_peaks.as_slice()
+        );
+        assert_eq!(state.waveform_cache_hits.load(Ordering::Acquire), 1);
+
+        // A second request at the same time serves both projections directly
+        // from cache; the status text is the user-visible waveform projection.
+        request_preview_internal(state.clone(), app.as_weak(), 0.75, true);
         assert_eq!(state.preview_cache_hits.load(Ordering::Acquire), 1);
+        assert_eq!(state.waveform_cache_hits.load(Ordering::Acquire), 2);
         assert!(!state.preview_in_flight.load(Ordering::Acquire));
-        assert_eq!(lock(&state.preview).as_ref(), Some(&cached));
+        let served = lock(&state.preview)
+            .as_ref()
+            .cloned()
+            .expect("cached seek frame should be served");
+        assert_ne!(served.pixels, cached.pixels);
+        assert!(app
+            .get_status_left()
+            .to_string()
+            .contains(&format!("waveform {} bins", first_peaks.len())));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
