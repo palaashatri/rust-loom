@@ -7,11 +7,11 @@ use std::rc::Rc;
 use loom_desktop::{
     build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
     FileDialogService, FileFilter, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut,
-    NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest, ScriptedFileDialogs,
 };
 use loom_photo_core::{
     decode_raster, encode_jpeg, encode_png, load_photo, load_photo_canvas, save_photo_canvas,
-    BlendMode, Layer, PhotoCanvas, PhotoDocument, PhotoSession, RgbaImage,
+    AffineTransform2D, BlendMode, Layer, PhotoCanvas, PhotoDocument, PhotoSession, Rect, RgbaImage,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -92,8 +92,10 @@ fn blank_canvas() -> Result<PhotoCanvas, String> {
 }
 
 fn sample_canvas() -> Result<PhotoCanvas, String> {
-    let width = 960;
-    let height = 540;
+    let source = sample_raster_payload()?;
+    let image = decode_raster(&source)?;
+    let width = image.width;
+    let height = image.height;
     let mut document = PhotoDocument::new("photo-sample", "Copper Light Study", width, height);
     document.dpi = 144;
     document.add_layer(Layer::new_adjustment(
@@ -116,29 +118,41 @@ fn sample_canvas() -> Result<PhotoCanvas, String> {
     ));
     document.active_layer_index = 0;
     let mut canvas = PhotoCanvas::new(document)?;
-    let mut image = RgbaImage::transparent(width, height)?;
-    for y in 0..height {
-        for x in 0..width {
-            let nx = x as f32 / width as f32;
-            let ny = y as f32 / height as f32;
-            let glow = ((1.0 - ((nx - 0.72).powi(2) + (ny - 0.34).powi(2)).sqrt()).clamp(0.0, 1.0)
-                * 110.0) as u8;
-            let copper = ((nx * 70.0 + glow as f32 * 0.55).clamp(0.0, 255.0)) as u8;
-            let blue = ((36.0 + (1.0 - ny) * 46.0).clamp(0.0, 255.0)) as u8;
-            image.set_pixel(
-                x,
-                y,
-                [
-                    24u8.saturating_add(copper),
-                    30u8.saturating_add(glow / 3),
-                    blue,
-                    255,
-                ],
-            );
-        }
-    }
     canvas.set_layer_image("layer-bg", image)?;
     Ok(canvas)
+}
+
+/// Encodes the deterministic sample as an actual PNG payload, then exercises the same decode
+/// path as an imported file. The payload is a small still-life card rather than a calibration
+/// gradient, so the primary journey always renders real raster content.
+fn sample_raster_payload() -> Result<Vec<u8>, String> {
+    let width = 480;
+    let height = 300;
+    let mut image = RgbaImage::solid(width, height, [24, 29, 39, 255])?;
+    for y in 34..266 {
+        for x in 28..452 {
+            let edge = !(40..440).contains(&x) || !(46..254).contains(&y);
+            let band = ((x / 28 + y / 24) % 2) == 0;
+            let color = if edge {
+                [194, 113, 66, 255]
+            } else if band {
+                [53, 67, 79, 255]
+            } else {
+                [39, 49, 61, 255]
+            };
+            image.set_pixel(x, y, color);
+        }
+    }
+    for y in 84..216 {
+        for x in 148..332 {
+            let dx = x as i32 - 240;
+            let dy = y as i32 - 150;
+            if dx * dx + dy * dy <= 66 * 66 {
+                image.set_pixel(x, y, [224, 150, 72, 255]);
+            }
+        }
+    }
+    encode_png(&image)
 }
 
 fn load_project(path: &Path) -> Result<PhotoCanvas, String> {
@@ -160,10 +174,14 @@ fn load_raster_canvas(path: &Path) -> Result<PhotoCanvas, String> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("Imported Image");
+    let digest = image.pixel_digest();
+    let layer_id = format!("layer-imported-{digest:016x}");
     let mut document = PhotoDocument::new("imported-photo", name, image.width, image.height);
     document.dpi = 144;
+    document.layers[0] = Layer::new_pixel(layer_id.clone(), format!("Imported · {name}"));
+    document.layers[0].source_digest = Some(digest);
     let mut canvas = PhotoCanvas::new(document)?;
-    canvas.set_layer_image("layer-bg", image)?;
+    canvas.set_layer_image(&layer_id, image)?;
     Ok(canvas)
 }
 
@@ -183,6 +201,62 @@ fn adjustment_value(document: &PhotoDocument, kind: &str) -> f32 {
         .unwrap_or(0.0)
 }
 
+fn transform_components(transform: AffineTransform2D) -> (f32, f32, f32, f32, f32) {
+    let scale_x = (transform.a * transform.a + transform.b * transform.b)
+        .sqrt()
+        .max(0.01);
+    let scale_y = (transform.c * transform.c + transform.d * transform.d)
+        .sqrt()
+        .max(0.01);
+    let rotation = transform.b.atan2(transform.a).to_degrees();
+    (
+        transform.tx,
+        transform.ty,
+        scale_x * 100.0,
+        scale_y * 100.0,
+        rotation,
+    )
+}
+
+fn transform_from_components(
+    x: f32,
+    y: f32,
+    scale_x_percent: f32,
+    scale_y_percent: f32,
+    rotation_degrees: f32,
+) -> AffineTransform2D {
+    let (sin, cos) = rotation_degrees.to_radians().sin_cos();
+    let scale_x = (scale_x_percent / 100.0).clamp(0.01, 8.0);
+    let scale_y = (scale_y_percent / 100.0).clamp(0.01, 8.0);
+    AffineTransform2D {
+        a: cos * scale_x,
+        b: sin * scale_x,
+        c: -sin * scale_y,
+        d: cos * scale_y,
+        tx: x,
+        ty: y,
+    }
+}
+
+fn format_rect(rect: Option<Rect>) -> String {
+    rect.map(|rect| {
+        format!(
+            "x {:.1}, y {:.1}, {:.1} × {:.1}",
+            rect.x, rect.y, rect.width, rect.height
+        )
+    })
+    .unwrap_or_else(|| "None".to_string())
+}
+
+fn layer_kind_label(layer: &Layer) -> &'static str {
+    match layer.kind {
+        loom_photo_core::LayerKind::Pixel => "Pixel",
+        loom_photo_core::LayerKind::Adjustment => "Adjustment",
+        loom_photo_core::LayerKind::Text => "Text",
+        loom_photo_core::LayerKind::Vector => "Vector",
+    }
+}
+
 fn slint_image(image: &RgbaImage) -> Image {
     let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
         image.pixels.as_slice(),
@@ -195,6 +269,8 @@ fn slint_image(image: &RgbaImage) -> Image {
 fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
     let document = &session.canvas.document;
     app.set_project_name(document.name.as_str().into());
+    app.set_document_width(document.width as f32);
+    app.set_document_height(document.height as f32);
     app.set_dimensions_text(SharedString::from(format!(
         "{} × {} · {} DPI · {}",
         document.width, document.height, document.dpi, document.color_space
@@ -217,7 +293,39 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
     app.set_contrast_value(adjustment_value(document, "contrast") * 100.0);
     app.set_saturation_value(adjustment_value(document, "saturation") * 100.0);
 
+    app.set_selection_geometry(SharedString::from(format_rect(document.selection)));
+    app.set_crop_geometry(SharedString::from(format_rect(document.crop)));
+    app.set_has_selection(document.selection.is_some());
+    app.set_has_crop(document.crop.is_some());
+
     if let Some(active) = document.layers.get(document.active_layer_index) {
+        let (x, y, scale_x, scale_y, rotation) = transform_components(active.transform);
+        app.set_active_layer_id(active.id.as_str().into());
+        app.set_active_layer_kind(layer_kind_label(active).into());
+        app.set_active_layer_transform_enabled(matches!(
+            active.kind,
+            loom_photo_core::LayerKind::Pixel
+        ));
+        app.set_active_layer_x(x);
+        app.set_active_layer_y(y);
+        app.set_active_layer_scale_x(scale_x);
+        app.set_active_layer_scale_y(scale_y);
+        app.set_active_layer_rotation(rotation);
+        let bounds = session.canvas.active_layer_bounds();
+        app.set_active_layer_bounds(SharedString::from(format_rect(bounds)));
+        if let Some(bounds) = bounds {
+            let width = document.width.max(1) as f32;
+            let height = document.height.max(1) as f32;
+            app.set_selected_layer_bounds_x(bounds.x / width);
+            app.set_selected_layer_bounds_y(bounds.y / height);
+            app.set_selected_layer_bounds_width(bounds.width / width);
+            app.set_selected_layer_bounds_height(bounds.height / height);
+        } else {
+            app.set_selected_layer_bounds_x(0.0);
+            app.set_selected_layer_bounds_y(0.0);
+            app.set_selected_layer_bounds_width(1.0);
+            app.set_selected_layer_bounds_height(1.0);
+        }
         app.set_active_blend_mode(
             match active.blend_mode {
                 BlendMode::Normal => "Normal",
@@ -232,6 +340,11 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
             .into(),
         );
         app.set_active_layer_opacity(active.opacity * 100.0);
+    } else {
+        app.set_active_layer_id("".into());
+        app.set_active_layer_kind("None".into());
+        app.set_active_layer_transform_enabled(false);
+        app.set_active_layer_bounds("—".into());
     }
 
     let composite = session.canvas.composite()?;
@@ -247,7 +360,7 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
         composite
     };
     app.set_preview_image(slint_image(&preview));
-    app.set_has_preview(true);
+    app.set_has_preview(session.canvas.pixel_payload_count() > 0);
     app.set_status_left(SharedString::from(format!(
         "{} layers · {} pixel payloads · nondestructive preview",
         document.layers.len(),
@@ -952,29 +1065,267 @@ fn wire_inspector_callback(app: &PhotoApp, state: &Rc<GuiState>) {
     });
 }
 
-/// Record the keyboard command-palette journey with per-step screenshots.
+fn capture_photo_journey_step(
+    app: &PhotoApp,
+    state: &GuiState,
+    args: &Args,
+    out_dir: &Path,
+    index: usize,
+    name: &str,
+) -> Result<String, String> {
+    let image = snapshot_component(app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| error.to_string())?;
+    let file_name = format!("photo-vertical-{index:02}-{name}.png");
+    let path = out_dir.join(&file_name);
+    loom_test_support::png::save_png(&path, &image).map_err(|error| error.to_string())?;
+    let session = state.session.borrow();
+    let active = session.canvas.document.active_layer();
+    Ok(format!(
+        "{index:02} {name} status={:?} active={} transform={:?} selection={} crop={} undo={} pixels={}",
+        app.get_status_left().as_str(),
+        active.map(|layer| layer.id.as_str()).unwrap_or("none"),
+        active.map(|layer| layer.transform),
+        format_rect(session.canvas.document.selection),
+        format_rect(session.canvas.document.crop),
+        session.can_undo(),
+        session.canvas.pixel_payload_count(),
+    ))
+}
+
+/// Record the controller-backed Photo editing journey with per-step screenshots. The existing
+/// keyboard palette recorder remains a separate regression at the end of this journey.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
+    let out_dir = Path::new(out_dir);
+    std::fs::create_dir_all(out_dir)
+        .map_err(|error| format!("create journey directory: {error}"))?;
+
+    let source_path = out_dir.join("photo-import-source.png");
+    let invalid_path = out_dir.join("photo-import-invalid.png");
+    std::fs::write(&source_path, sample_raster_payload()?)
+        .map_err(|error| format!("write journey source: {error}"))?;
+    std::fs::write(&invalid_path, b"not a raster image")
+        .map_err(|error| format!("write invalid journey source: {error}"))?;
+    let save_path = out_dir.join("photo-vertical.loomphoto");
+    let export_path = out_dir.join("photo-vertical.png");
+    let failing_export_path = out_dir.join("photo-export-failure.png");
+    if failing_export_path.exists() {
+        std::fs::remove_dir_all(&failing_export_path)
+            .map_err(|error| format!("remove stale failure target: {error}"))?;
+    }
+    std::fs::create_dir(&failing_export_path)
+        .map_err(|error| format!("create failure target: {error}"))?;
+
     let app = PhotoApp::new().map_err(|error| error.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
-    let session = PhotoSession::new(initial_canvas(args)?);
-    refresh_photo(&app, &session)?;
-    wire_palette(&app);
-    rebuild_palette(&app, "");
+    let dialogs = Rc::new(ScriptedFileDialogs::new(
+        [Some(source_path.clone()), Some(invalid_path.clone()), None],
+        [
+            Some(save_path.clone()),
+            Some(export_path.clone()),
+            Some(failing_export_path.clone()),
+        ],
+    ));
+    let state = Rc::new(new_gui_state(
+        PhotoSession::new(initial_canvas(args)?),
+        None,
+        dialogs,
+    )?);
+    wire_transform_callback(&app, &state);
+    wire_selection_callbacks(&app, &state);
+    wire_adjustment_callbacks(&app, &state);
+    wire_import_callback(&app, &state);
+    wire_export_callbacks(&app, &state);
+    refresh_photo_with_state(&app, &state)?;
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let report = record_keyboard_palette_journey(&app, "photo", Path::new(out_dir), "layer")
+    let mut steps = Vec::new();
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 0, "initial",
+    )?);
+
+    app.invoke_import_image();
+    let imported_id = state
+        .session
+        .borrow()
+        .canvas
+        .document
+        .active_layer()
+        .map(|layer| layer.id.clone())
+        .ok_or("journey import has no layer")?;
+    if !imported_id.starts_with("layer-imported-")
+        || state.session.borrow().canvas.pixel_payload_count() != 1
+    {
+        return Err("journey import did not preserve a real identified payload".into());
+    }
+    refresh_photo_with_state(&app, &state)?;
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 1, "imported",
+    )?);
+
+    state.session.borrow_mut().canvas.document.select_layer(0);
+    set_status(&app, "Selected imported layer");
+    refresh_photo_with_state(&app, &state)?;
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 2, "selected",
+    )?);
+
+    app.invoke_layer_transform_changed(36.0, 20.0, 118.0, 96.0, 8.0);
+    set_status(&app, "Transformed selected layer");
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        3,
+        "transformed",
+    )?);
+    if state.session.borrow().canvas.document.layers[0]
+        .transform
+        .tx
+        .abs()
+        < f32::EPSILON
+    {
+        return Err("journey transform did not mutate the imported layer".into());
+    }
+
+    app.invoke_select_layer_bounds();
+    set_status(&app, "Selected transformed layer bounds");
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        4,
+        "selection",
+    )?);
+    app.invoke_crop_to_selection();
+    set_status(&app, "Cropped preview to selection");
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 5, "cropped",
+    )?);
+    app.invoke_brightness_changed(35.0);
+    set_status(&app, "Adjusted brightness");
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 6, "adjusted",
+    )?);
+    if (adjustment_value(&state.session.borrow().canvas.document, "brightness") - 0.35).abs()
+        > 0.001
+    {
+        return Err("journey adjustment did not mutate document state".into());
+    }
+
+    if !state.session.borrow_mut().undo() {
+        return Err("journey adjustment undo was unavailable".into());
+    }
+    set_status(&app, "Undid brightness adjustment");
+    refresh_photo_with_state(&app, &state)?;
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        7,
+        "undo-adjustment",
+    )?);
+    if adjustment_value(&state.session.borrow().canvas.document, "brightness").abs() > 0.001 {
+        return Err("journey undo did not restore brightness".into());
+    }
+
+    save_current_project(&app, &state, false)?;
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 8, "saved",
+    )?);
+    let saved_bytes =
+        std::fs::read(&save_path).map_err(|error| format!("read saved project: {error}"))?;
+    let saved_canvas = load_photo_canvas(&saved_bytes)?;
+    let saved_digest = saved_canvas.document.metadata_digest();
+    *state.session.borrow_mut() = PhotoSession::new(saved_canvas);
+    *state.save_path.borrow_mut() = Some(save_path.clone());
+    refresh_photo_with_state(&app, &state)?;
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 9, "reopened",
+    )?);
+    if state.session.borrow().canvas.document.metadata_digest() != saved_digest {
+        return Err("journey save/reopen changed persisted metadata".into());
+    }
+
+    app.invoke_export_png();
+    let exported =
+        std::fs::read(&export_path).map_err(|error| format!("read exported PNG: {error}"))?;
+    let decoded_export = decode_raster(&exported)?;
+    if (decoded_export.width, decoded_export.height)
+        != (
+            state.session.borrow().canvas.document.width,
+            state.session.borrow().canvas.document.height,
+        )
+    {
+        return Err("journey PNG export dimensions did not match the document".into());
+    }
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 10, "exported",
+    )?);
+
+    app.invoke_import_image();
+    if !app.get_status_left().as_str().contains("Import failed") {
+        return Err("journey invalid import did not produce actionable feedback".into());
+    }
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        11,
+        "import-failure",
+    )?);
+
+    app.invoke_export_png();
+    if !app.get_status_left().as_str().contains("PNG export failed") {
+        return Err("journey invalid export did not produce actionable feedback".into());
+    }
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        12,
+        "export-failure",
+    )?);
+
+    app.invoke_import_image();
+    if !app.get_status_left().as_str().contains("Import cancelled") {
+        return Err("journey import cancellation response was not observed".into());
+    }
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        13,
+        "import-cancel",
+    )?);
+
+    wire_palette(&app);
+    rebuild_palette(&app, "");
+    let report = record_keyboard_palette_journey(&app, "photo", out_dir, "layer")
         .map_err(|error| format!("journey failed: {error}"))?;
     println!(
         "keyboard journey: {} ({})",
         if report.passed { "PASS" } else { "FAIL" },
-        out_dir
+        out_dir.display()
     );
     if !report.passed {
         return Err("keyboard journey invariants failed".to_string());
     }
+    let log = format!(
+        "Photo vertical journey: PASS\njourney=import-select-transform-selection-crop-adjust-undo-save-reopen-export-failures\n{}\n",
+        steps.join("\n")
+    );
+    std::fs::write(out_dir.join("photo-vertical.log"), log)
+        .map_err(|error| format!("write journey log: {error}"))?;
+    println!("photo journey: PASS ({})", out_dir.display());
     Ok(())
 }
 
@@ -1032,6 +1383,240 @@ fn update_adjustment(state: &GuiState, app: &PhotoApp, kind: &str, display_name:
     drop(session);
     if let Err(error) = refresh_photo_with_state(app, state) {
         set_status(app, format!("Preview failed: {error}"));
+    }
+}
+
+fn apply_layer_transform(
+    state: &GuiState,
+    app: &PhotoApp,
+    x: f32,
+    y: f32,
+    scale_x: f32,
+    scale_y: f32,
+    rotation: f32,
+) -> Result<bool, String> {
+    let transform = transform_from_components(x, y, scale_x, scale_y, rotation);
+    let changed = {
+        let mut session = state.session.borrow_mut();
+        let index = session.canvas.document.active_layer_index;
+        session.set_layer_transform(index, transform)?
+    };
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn clamp_rect_to_canvas(rect: Rect, width: u32, height: u32) -> Option<Rect> {
+    let x0 = rect.x.max(0.0);
+    let y0 = rect.y.max(0.0);
+    let x1 = rect.right().min(width as f32);
+    let y1 = rect.bottom().min(height as f32);
+    (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
+}
+
+fn select_active_layer_bounds(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
+    let selection = {
+        let session = state.session.borrow();
+        let bounds = session.canvas.active_layer_bounds();
+        bounds.and_then(|bounds| {
+            clamp_rect_to_canvas(
+                bounds,
+                session.canvas.document.width,
+                session.canvas.document.height,
+            )
+        })
+    };
+    let Some(selection) = selection else {
+        return Err("selected layer has no visible bounds".into());
+    };
+    let changed = state.session.borrow_mut().set_selection(Some(selection))?;
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn crop_to_selection(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
+    let selection = state.session.borrow().canvas.document.selection;
+    let Some(selection) = selection else {
+        return Err("select a layer region before cropping".into());
+    };
+    let changed = state.session.borrow_mut().set_crop(Some(selection))?;
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn clear_selection(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
+    let changed = state.session.borrow_mut().set_selection(None)?;
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn clear_crop(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
+    let changed = state.session.borrow_mut().set_crop(None)?;
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn wire_transform_callback(app: &PhotoApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_layer_transform_changed(move |x, y, scale_x, scale_y, rotation| {
+        if let Some(app) = app_ref.upgrade() {
+            if let Err(error) =
+                apply_layer_transform(&state, &app, x, y, scale_x, scale_y, rotation)
+            {
+                set_status(&app, format!("Transform failed: {error}"));
+            }
+        }
+    });
+}
+
+fn wire_selection_callbacks(app: &PhotoApp, state: &Rc<GuiState>) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_layer_bounds(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = select_active_layer_bounds(&state, &app) {
+                    set_status(&app, format!("Selection failed: {error}"));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_crop_to_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = crop_to_selection(&state, &app) {
+                    set_status(&app, format!("Crop failed: {error}"));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_clear_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = clear_selection(&state, &app) {
+                    set_status(&app, format!("Clear selection failed: {error}"));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_clear_crop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = clear_crop(&state, &app) {
+                    set_status(&app, format!("Clear crop failed: {error}"));
+                }
+            }
+        });
+    }
+}
+
+fn wire_adjustment_callbacks(app: &PhotoApp, state: &Rc<GuiState>) {
+    for (kind, display) in [
+        ("brightness", "Brightness"),
+        ("contrast", "Contrast"),
+        ("saturation", "Saturation"),
+    ] {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        match kind {
+            "brightness" => app.on_brightness_changed(move |value| {
+                if let Some(app) = app_ref.upgrade() {
+                    update_adjustment(&state, &app, kind, display, value);
+                }
+            }),
+            "contrast" => app.on_contrast_changed(move |value| {
+                if let Some(app) = app_ref.upgrade() {
+                    update_adjustment(&state, &app, kind, display, value);
+                }
+            }),
+            _ => app.on_saturation_changed(move |value| {
+                if let Some(app) = app_ref.upgrade() {
+                    update_adjustment(&state, &app, kind, display, value);
+                }
+            }),
+        }
+    }
+}
+
+fn wire_import_callback(app: &PhotoApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_import_image(move || {
+        if let Some(app) = app_ref.upgrade() {
+            match state.dialogs.open_file(&import_image_request(&state)) {
+                Ok(Some(path)) => match load_raster_canvas(&path) {
+                    Ok(canvas) => {
+                        let layer_id = canvas
+                            .document
+                            .active_layer()
+                            .map(|layer| layer.id.clone())
+                            .unwrap_or_else(|| "unknown".into());
+                        *state.session.borrow_mut() = PhotoSession::new(canvas);
+                        *state.save_path.borrow_mut() = None;
+                        if let Err(error) = refresh_photo_with_state(&app, &state) {
+                            set_status(&app, format!("Import preview failed: {error}"));
+                        } else {
+                            set_status(
+                                &app,
+                                format!(
+                                    "Imported real raster layer {layer_id}; save as a Loom Photo project to preserve edits"
+                                ),
+                            );
+                        }
+                    }
+                    Err(error) => set_status(&app, format!("Import failed: {error}")),
+                },
+                Ok(None) => set_status(&app, "Import cancelled"),
+                Err(error) => set_status(&app, format!("Import dialog failed: {error}")),
+            }
+        }
+    });
+}
+
+fn wire_export_callbacks(app: &PhotoApp, state: &Rc<GuiState>) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_export_png(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = export_current_image(&app, &state, ExportKind::Png) {
+                    set_status(&app, format!("PNG export failed: {error}"));
+                }
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_export_jpeg(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = export_current_image(&app, &state, ExportKind::Jpeg) {
+                    set_status(&app, format!("JPEG export failed: {error}"));
+                }
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
+            }
+        });
     }
 }
 
@@ -1283,92 +1868,11 @@ fn main() -> Result<(), String> {
         });
     }
 
-    for (kind, display) in [
-        ("brightness", "Brightness"),
-        ("contrast", "Contrast"),
-        ("saturation", "Saturation"),
-    ] {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        match kind {
-            "brightness" => app.on_brightness_changed(move |value| {
-                if let Some(app) = app_ref.upgrade() {
-                    update_adjustment(&state, &app, kind, display, value);
-                }
-            }),
-            "contrast" => app.on_contrast_changed(move |value| {
-                if let Some(app) = app_ref.upgrade() {
-                    update_adjustment(&state, &app, kind, display, value);
-                }
-            }),
-            _ => app.on_saturation_changed(move |value| {
-                if let Some(app) = app_ref.upgrade() {
-                    update_adjustment(&state, &app, kind, display, value);
-                }
-            }),
-        }
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_import_image(move || {
-            if let Some(app) = app_ref.upgrade() {
-                match state.dialogs.open_file(&import_image_request(&state)) {
-                    Ok(Some(path)) => match load_raster_canvas(&path) {
-                        Ok(canvas) => {
-                            *state.session.borrow_mut() = PhotoSession::new(canvas);
-                            *state.save_path.borrow_mut() = None;
-                            if let Err(error) = refresh_photo_with_state(&app, &state) {
-                                set_status(&app, format!("Import preview failed: {error}"));
-                            } else {
-                                set_status(
-                                    &app,
-                                    format!(
-                                        "Imported {}; save as a Loom Photo project to preserve edits",
-                                        path.display()
-                                    ),
-                                );
-                            }
-                        }
-                        Err(error) => set_status(&app, format!("Import failed: {error}")),
-                    },
-                    Ok(None) => set_status(&app, "Import cancelled"),
-                    Err(error) => set_status(&app, format!("Import dialog failed: {error}")),
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_export_png(move || {
-            if let Some(app) = app_ref.upgrade() {
-                if let Err(error) = export_current_image(&app, &state, ExportKind::Png) {
-                    set_status(&app, format!("PNG export failed: {error}"));
-                }
-                if let Some(menu_service) = &state.menu_service {
-                    sync_menu_state(menu_service, &app, &state);
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_export_jpeg(move || {
-            if let Some(app) = app_ref.upgrade() {
-                if let Err(error) = export_current_image(&app, &state, ExportKind::Jpeg) {
-                    set_status(&app, format!("JPEG export failed: {error}"));
-                }
-                if let Some(menu_service) = &state.menu_service {
-                    sync_menu_state(menu_service, &app, &state);
-                }
-            }
-        });
-    }
+    wire_transform_callback(&app, &state);
+    wire_selection_callbacks(&app, &state);
+    wire_adjustment_callbacks(&app, &state);
+    wire_import_callback(&app, &state);
+    wire_export_callbacks(&app, &state);
 
     wire_responsive_layout(&app, state.clone());
     wire_add_layer_callback(&app, &state);
@@ -1597,6 +2101,82 @@ mod tests {
         assert_eq!(photo_tool_state("brush"), (1, false));
         assert_eq!(photo_tool_state("WAND"), (2, false));
         assert_eq!(photo_tool_state("unknown"), (0, false));
+    }
+
+    #[test]
+    fn imported_raster_canvas_preserves_payload_identity_through_reopen() {
+        let path =
+            std::env::temp_dir().join(format!("loom-photo-import-test-{}.png", std::process::id()));
+        let source = sample_raster_payload().expect("sample payload");
+        std::fs::write(&path, source).expect("write sample payload");
+        let canvas = load_raster_canvas(&path).expect("decode imported raster");
+        let layer = canvas.document.active_layer().expect("imported layer");
+        assert!(layer.id.starts_with("layer-imported-"));
+        assert_eq!(
+            layer.source_digest,
+            canvas.layer_image(&layer.id).map(RgbaImage::pixel_digest)
+        );
+        assert_eq!(canvas.pixel_payload_count(), 1);
+
+        let bytes = save_photo_canvas(&canvas).expect("save imported canvas");
+        let reopened = load_photo_canvas(&bytes).expect("reopen imported canvas");
+        let reopened_layer = reopened.document.active_layer().expect("reopened layer");
+        assert_eq!(reopened_layer.id, layer.id);
+        assert_eq!(reopened_layer.source_digest, layer.source_digest);
+        assert_eq!(reopened.pixel_payload_count(), 1);
+        assert_eq!(
+            reopened
+                .layer_image(&reopened_layer.id)
+                .map(RgbaImage::pixel_digest),
+            canvas.layer_image(&layer.id).map(RgbaImage::pixel_digest)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn photo_edit_callbacks_mutate_selection_transform_crop_and_adjustment() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let state = Rc::new(scripted_state());
+        wire_transform_callback(&app, &state);
+        wire_selection_callbacks(&app, &state);
+        wire_adjustment_callbacks(&app, &state);
+        refresh_photo_with_state(&app, &state).expect("initial refresh");
+
+        app.invoke_layer_transform_changed(12.0, 8.0, 125.0, 100.0, 4.0);
+        let transformed = state.session.borrow().canvas.document.layers[0].transform;
+        assert_eq!(transformed.tx, 12.0);
+        assert_eq!(transformed.ty, 8.0);
+        assert!(state.session.borrow().can_undo());
+
+        app.invoke_select_layer_bounds();
+        assert!(state.session.borrow().canvas.document.selection.is_some());
+        app.invoke_crop_to_selection();
+        assert!(state.session.borrow().canvas.document.crop.is_some());
+        app.invoke_brightness_changed(25.0);
+        assert!(
+            (adjustment_value(&state.session.borrow().canvas.document, "brightness") - 0.25).abs()
+                < 0.001
+        );
+
+        assert!(state.session.borrow_mut().undo());
+        assert!(
+            adjustment_value(&state.session.borrow().canvas.document, "brightness").abs() < 0.001
+        );
+        let bytes = save_photo_canvas(&state.session.borrow().canvas).expect("save edits");
+        let reopened = load_photo_canvas(&bytes).expect("reopen edits");
+        assert_eq!(
+            reopened.document.layers[0].transform,
+            state.session.borrow().canvas.document.layers[0].transform
+        );
+        assert_eq!(
+            reopened.document.selection,
+            state.session.borrow().canvas.document.selection
+        );
+        assert_eq!(
+            reopened.document.crop,
+            state.session.borrow().canvas.document.crop
+        );
     }
 
     #[test]

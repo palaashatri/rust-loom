@@ -41,6 +41,25 @@ export component PhotoApp inherits Window {
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in property <bool> has-preview: false;
+    in property <float> document-width: 1.0;
+    in property <float> document-height: 1.0;
+    in property <string> active-layer-id: "";
+    in property <string> active-layer-kind: "Pixel";
+    in property <bool> active-layer-transform-enabled: true;
+    in property <string> active-layer-bounds: "—";
+    in property <float> active-layer-x: 0.0;
+    in property <float> active-layer-y: 0.0;
+    in property <float> active-layer-scale-x: 100.0;
+    in property <float> active-layer-scale-y: 100.0;
+    in property <float> active-layer-rotation: 0.0;
+    in property <float> selected-layer-bounds-x: 0.0;
+    in property <float> selected-layer-bounds-y: 0.0;
+    in property <float> selected-layer-bounds-width: 1.0;
+    in property <float> selected-layer-bounds-height: 1.0;
+    in property <string> selection-geometry: "None";
+    in property <string> crop-geometry: "None";
+    in property <bool> has-selection: false;
+    in property <bool> has-crop: false;
 
     in-out property <int> active-tool: 0;
     // Pan is a viewport mode, not a paint/select tool. Keep it separate from
@@ -77,6 +96,11 @@ export component PhotoApp inherits Window {
     callback brightness-changed(float);
     callback contrast-changed(float);
     callback saturation-changed(float);
+    callback layer-transform-changed(float, float, float, float, float);
+    callback select-layer-bounds;
+    callback crop-to-selection;
+    callback clear-selection;
+    callback clear-crop;
     callback import-image;
     callback export-png;
     callback export-jpeg;
@@ -152,6 +176,19 @@ export component PhotoApp inherits Window {
                     brightness-value: root.brightness-value;
                     contrast-value: root.contrast-value;
                     saturation-value: root.saturation-value;
+                    active-layer-id: root.active-layer-id;
+                    active-layer-kind: root.active-layer-kind;
+                    active-layer-transform-enabled: root.active-layer-transform-enabled;
+                    active-layer-bounds: root.active-layer-bounds;
+                    active-layer-x: root.active-layer-x;
+                    active-layer-y: root.active-layer-y;
+                    active-layer-scale-x: root.active-layer-scale-x;
+                    active-layer-scale-y: root.active-layer-scale-y;
+                    active-layer-rotation: root.active-layer-rotation;
+                    selection-geometry: root.selection-geometry;
+                    crop-geometry: root.crop-geometry;
+                    has-selection: root.has-selection;
+                    has-crop: root.has-crop;
                     has-preview: root.has-preview;
                     select-layer(index) => { root.select-layer(index); }
                     toggle-layer-visibility(index) => { root.toggle-layer-visibility(index); }
@@ -164,6 +201,11 @@ export component PhotoApp inherits Window {
                     brightness-changed(value) => { root.brightness-changed(value); }
                     contrast-changed(value) => { root.contrast-changed(value); }
                     saturation-changed(value) => { root.saturation-changed(value); }
+                    layer-transform-changed(x, y, scale-x, scale-y, rotation) => { root.layer-transform-changed(x, y, scale-x, scale-y, rotation); }
+                    select-layer-bounds => { root.select-layer-bounds(); }
+                    crop-to-selection => { root.crop-to-selection(); }
+                    clear-selection => { root.clear-selection(); }
+                    clear-crop => { root.clear-crop(); }
                     import-image => { root.import-image(); }
                     export-png => { root.export-png(); }
                     export-jpeg => { root.export-jpeg(); }
@@ -172,6 +214,12 @@ export component PhotoApp inherits Window {
                 photo-canvas := PhotoCanvas {
                     has-preview: root.has-preview;
                     preview-image: root.preview-image;
+                    document-width: root.document-width;
+                    document-height: root.document-height;
+                    selected-layer-bounds-x: root.selected-layer-bounds-x;
+                    selected-layer-bounds-y: root.selected-layer-bounds-y;
+                    selected-layer-bounds-width: root.selected-layer-bounds-width;
+                    selected-layer-bounds-height: root.selected-layer-bounds-height;
                     show-grid: root.show-grid;
                     active-tool: root.active-tool;
                     pan-mode <=> root.pan-mode;
@@ -193,6 +241,19 @@ export component PhotoApp inherits Window {
                     brightness-value: root.brightness-value;
                     contrast-value: root.contrast-value;
                     saturation-value: root.saturation-value;
+                    active-layer-id: root.active-layer-id;
+                    active-layer-kind: root.active-layer-kind;
+                    active-layer-transform-enabled: root.active-layer-transform-enabled;
+                    active-layer-bounds: root.active-layer-bounds;
+                    active-layer-x: root.active-layer-x;
+                    active-layer-y: root.active-layer-y;
+                    active-layer-scale-x: root.active-layer-scale-x;
+                    active-layer-scale-y: root.active-layer-scale-y;
+                    active-layer-rotation: root.active-layer-rotation;
+                    selection-geometry: root.selection-geometry;
+                    crop-geometry: root.crop-geometry;
+                    has-selection: root.has-selection;
+                    has-crop: root.has-crop;
                     has-preview: root.has-preview;
                     select-layer(index) => { root.select-layer(index); }
                     toggle-layer-visibility(index) => { root.toggle-layer-visibility(index); }
@@ -205,6 +266,11 @@ export component PhotoApp inherits Window {
                     brightness-changed(value) => { root.brightness-changed(value); }
                     contrast-changed(value) => { root.contrast-changed(value); }
                     saturation-changed(value) => { root.saturation-changed(value); }
+                    layer-transform-changed(x, y, scale-x, scale-y, rotation) => { root.layer-transform-changed(x, y, scale-x, scale-y, rotation); }
+                    select-layer-bounds => { root.select-layer-bounds(); }
+                    crop-to-selection => { root.crop-to-selection(); }
+                    clear-selection => { root.clear-selection(); }
+                    clear-crop => { root.clear-crop(); }
                     import-image => { root.import-image(); }
                     export-png => { root.export-png(); }
                     export-jpeg => { root.export-jpeg(); }

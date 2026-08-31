@@ -29,6 +29,81 @@ pub enum BlendMode {
     HardLight,
 }
 
+/// A finite, positive rectangle in document or layer coordinates.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Rect {
+    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    pub fn validate(self) -> Result<Self, String> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.width.is_finite()
+            || !self.height.is_finite()
+        {
+            return Err("rectangle coordinates must be finite".into());
+        }
+        if self.width <= 0.0 || self.height <= 0.0 {
+            return Err("rectangle dimensions must be positive".into());
+        }
+        Ok(self)
+    }
+
+    pub fn right(self) -> f32 {
+        self.x + self.width
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.y + self.height
+    }
+
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
+    }
+
+    pub fn within(self, width: u32, height: u32) -> Result<Self, String> {
+        let rect = self.validate()?;
+        if rect.x < 0.0
+            || rect.y < 0.0
+            || rect.right() > width as f32
+            || rect.bottom() > height as f32
+        {
+            return Err(format!(
+                "rectangle {rect:?} is outside {width}x{height} document bounds"
+            ));
+        }
+        Ok(rect)
+    }
+
+    pub fn transformed_bounds(self, transform: AffineTransform2D) -> Option<Self> {
+        let points = [
+            transform.transform_point(self.x, self.y),
+            transform.transform_point(self.right(), self.y),
+            transform.transform_point(self.x, self.bottom()),
+            transform.transform_point(self.right(), self.bottom()),
+        ];
+        let min_x = points.iter().map(|point| point.0).reduce(f32::min)?;
+        let max_x = points.iter().map(|point| point.0).reduce(f32::max)?;
+        let min_y = points.iter().map(|point| point.1).reduce(f32::min)?;
+        let max_y = points.iter().map(|point| point.1).reduce(f32::max)?;
+        let bounds = Self::new(min_x, min_y, max_x - min_x, max_y - min_y);
+        bounds.validate().ok()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layer {
     pub id: String,
@@ -39,6 +114,15 @@ pub struct Layer {
     pub blend_mode: BlendMode,
     pub adjustment_type: Option<String>,
     pub adjustment_value: f32,
+    /// Layer-local transform in document pixel coordinates.
+    #[serde(default)]
+    pub transform: AffineTransform2D,
+    /// Optional source crop in the layer's untransformed pixel coordinates.
+    #[serde(default)]
+    pub crop: Option<Rect>,
+    /// Stable digest for an imported payload, when the layer originated from a raster file.
+    #[serde(default)]
+    pub source_digest: Option<u64>,
 }
 
 impl Layer {
@@ -52,6 +136,9 @@ impl Layer {
             blend_mode: BlendMode::Normal,
             adjustment_type: None,
             adjustment_value: 0.0,
+            transform: AffineTransform2D::identity(),
+            crop: None,
+            source_digest: None,
         }
     }
 
@@ -70,6 +157,9 @@ impl Layer {
             blend_mode: BlendMode::Normal,
             adjustment_type: Some(adj_type.into()),
             adjustment_value: val,
+            transform: AffineTransform2D::identity(),
+            crop: None,
+            source_digest: None,
         }
     }
 }
@@ -84,6 +174,15 @@ pub struct PhotoDocument {
     pub color_space: String,
     pub layers: Vec<Layer>,
     pub active_layer_index: usize,
+    /// Optional nondestructive canvas transform in document pixel coordinates.
+    #[serde(default)]
+    pub canvas_transform: AffineTransform2D,
+    /// Current selection in document coordinates.
+    #[serde(default)]
+    pub selection: Option<Rect>,
+    /// Nondestructive crop window in document coordinates.
+    #[serde(default)]
+    pub crop: Option<Rect>,
 }
 
 impl PhotoDocument {
@@ -97,6 +196,9 @@ impl PhotoDocument {
             color_space: "sRGB".to_string(),
             layers: Vec::new(),
             active_layer_index: 0,
+            canvas_transform: AffineTransform2D::identity(),
+            selection: None,
+            crop: None,
         };
         doc.layers.push(Layer::new_pixel("layer-bg", "Background"));
         doc
@@ -121,6 +223,109 @@ impl PhotoDocument {
         }
         self.active_layer_index = index;
         true
+    }
+
+    pub fn active_layer(&self) -> Option<&Layer> {
+        self.layers.get(self.active_layer_index)
+    }
+
+    pub fn active_layer_mut(&mut self) -> Option<&mut Layer> {
+        self.layers.get_mut(self.active_layer_index)
+    }
+
+    pub fn set_layer_transform(
+        &mut self,
+        layer_id: &str,
+        transform: AffineTransform2D,
+    ) -> Result<bool, String> {
+        if [
+            transform.a,
+            transform.b,
+            transform.c,
+            transform.d,
+            transform.tx,
+            transform.ty,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+        {
+            return Err("layer transform values must be finite".into());
+        }
+        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
+            return Err("layer transform must be invertible".into());
+        }
+        let layer = self
+            .layers
+            .iter_mut()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| format!("unknown layer {layer_id}"))?;
+        if layer.transform == transform {
+            return Ok(false);
+        }
+        layer.transform = transform;
+        Ok(true)
+    }
+
+    pub fn set_layer_crop(&mut self, layer_id: &str, crop: Option<Rect>) -> Result<bool, String> {
+        let crop = crop
+            .map(|rect| rect.within(self.width, self.height))
+            .transpose()?;
+        let layer = self
+            .layers
+            .iter_mut()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| format!("unknown layer {layer_id}"))?;
+        if layer.crop == crop {
+            return Ok(false);
+        }
+        layer.crop = crop;
+        Ok(true)
+    }
+
+    pub fn set_selection(&mut self, selection: Option<Rect>) -> Result<bool, String> {
+        let selection = selection
+            .map(|rect| rect.within(self.width, self.height))
+            .transpose()?;
+        if self.selection == selection {
+            return Ok(false);
+        }
+        self.selection = selection;
+        Ok(true)
+    }
+
+    pub fn set_crop(&mut self, crop: Option<Rect>) -> Result<bool, String> {
+        let crop = crop
+            .map(|rect| rect.within(self.width, self.height))
+            .transpose()?;
+        if self.crop == crop {
+            return Ok(false);
+        }
+        self.crop = crop;
+        Ok(true)
+    }
+
+    pub fn set_canvas_transform(&mut self, transform: AffineTransform2D) -> Result<bool, String> {
+        if [
+            transform.a,
+            transform.b,
+            transform.c,
+            transform.d,
+            transform.tx,
+            transform.ty,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+        {
+            return Err("canvas transform values must be finite".into());
+        }
+        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
+            return Err("canvas transform must be invertible".into());
+        }
+        if self.canvas_transform == transform {
+            return Ok(false);
+        }
+        self.canvas_transform = transform;
+        Ok(true)
     }
 }
 
@@ -1214,6 +1419,37 @@ impl AffineTransform2D {
             self.b * x + self.d * y + self.ty,
         )
     }
+
+    pub fn is_identity(&self) -> bool {
+        *self == Self::identity()
+    }
+
+    /// Returns the inverse transform, or `None` for a singular/non-finite matrix.
+    pub fn inverse(&self) -> Option<Self> {
+        let determinant = self.a * self.d - self.b * self.c;
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let inverse_det = 1.0 / determinant;
+        let inverse = Self {
+            a: self.d * inverse_det,
+            b: -self.b * inverse_det,
+            c: -self.c * inverse_det,
+            d: self.a * inverse_det,
+            tx: (self.c * self.ty - self.d * self.tx) * inverse_det,
+            ty: (self.b * self.tx - self.a * self.ty) * inverse_det,
+        };
+        if [
+            inverse.a, inverse.b, inverse.c, inverse.d, inverse.tx, inverse.ty,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+        {
+            Some(inverse)
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for AffineTransform2D {
@@ -1435,6 +1671,31 @@ impl PhotoCanvas {
         self.layer_images.len()
     }
 
+    /// Returns the transformed bounds of a layer in document coordinates.
+    pub fn layer_bounds(&self, layer_id: &str) -> Option<Rect> {
+        let layer = self
+            .document
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)?;
+        let source = layer.crop.unwrap_or(Rect::new(
+            0.0,
+            0.0,
+            self.document.width as f32,
+            self.document.height as f32,
+        ));
+        source
+            .transformed_bounds(layer.transform)
+            .and_then(|bounds| bounds.transformed_bounds(self.document.canvas_transform))
+    }
+
+    /// Returns the transformed bounds of the active layer in document coordinates.
+    pub fn active_layer_bounds(&self) -> Option<Rect> {
+        self.document
+            .active_layer()
+            .and_then(|layer| self.layer_bounds(&layer.id))
+    }
+
     /// Composites all visible layers bottom-to-top.
     pub fn composite(&self) -> Result<RgbaImage, String> {
         let mut output = RgbaImage::transparent(self.document.width, self.document.height)?;
@@ -1448,7 +1709,13 @@ impl PhotoCanvas {
                         continue;
                     };
                     let mask = self.layer_masks.get(&layer.id);
-                    blend_image(&mut output, source, mask, layer.opacity, &layer.blend_mode);
+                    blend_transformed_image(
+                        &mut output,
+                        source,
+                        mask,
+                        layer,
+                        &self.document.canvas_transform,
+                    );
                 }
                 LayerKind::Adjustment => apply_adjustment(
                     &mut output,
@@ -1460,6 +1727,15 @@ impl PhotoCanvas {
                 LayerKind::Text | LayerKind::Vector => {
                     // Text and vector layers are represented by the document model; a
                     // future vector renderer rasterizes them before this compositor.
+                }
+            }
+        }
+        if let Some(crop) = self.document.crop {
+            for y in 0..output.height {
+                for x in 0..output.width {
+                    if !crop.contains(x as f32 + 0.5, y as f32 + 0.5) {
+                        let _ = output.set_pixel(x, y, [0, 0, 0, 0]);
+                    }
                 }
             }
         }
@@ -1575,6 +1851,111 @@ impl PhotoSession {
         self.canvas.document.layers.insert(to, layer);
         self.canvas.document.active_layer_index = to;
         true
+    }
+
+    pub fn set_layer_transform(
+        &mut self,
+        index: usize,
+        transform: AffineTransform2D,
+    ) -> Result<bool, String> {
+        let Some((layer_id, current_transform)) = self
+            .canvas
+            .document
+            .layers
+            .get(index)
+            .map(|layer| (layer.id.clone(), layer.transform))
+        else {
+            return Err(format!("unknown layer index {index}"));
+        };
+        if current_transform == transform {
+            return Ok(false);
+        }
+        if [
+            transform.a,
+            transform.b,
+            transform.c,
+            transform.d,
+            transform.tx,
+            transform.ty,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+        {
+            return Err("layer transform values must be finite".into());
+        }
+        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
+            return Err("layer transform must be invertible".into());
+        }
+        self.checkpoint();
+        self.canvas
+            .document
+            .set_layer_transform(&layer_id, transform)
+    }
+
+    pub fn set_layer_crop(&mut self, index: usize, crop: Option<Rect>) -> Result<bool, String> {
+        let Some((layer_id, current_crop)) = self
+            .canvas
+            .document
+            .layers
+            .get(index)
+            .map(|layer| (layer.id.clone(), layer.crop))
+        else {
+            return Err(format!("unknown layer index {index}"));
+        };
+        if current_crop == crop {
+            return Ok(false);
+        }
+        if let Some(rect) = crop {
+            rect.within(self.canvas.document.width, self.canvas.document.height)?;
+        }
+        self.checkpoint();
+        self.canvas.document.set_layer_crop(&layer_id, crop)
+    }
+
+    pub fn set_selection(&mut self, selection: Option<Rect>) -> Result<bool, String> {
+        if self.canvas.document.selection == selection {
+            return Ok(false);
+        }
+        if let Some(rect) = selection {
+            rect.within(self.canvas.document.width, self.canvas.document.height)?;
+        }
+        self.checkpoint();
+        self.canvas.document.set_selection(selection)
+    }
+
+    pub fn set_crop(&mut self, crop: Option<Rect>) -> Result<bool, String> {
+        if self.canvas.document.crop == crop {
+            return Ok(false);
+        }
+        if let Some(rect) = crop {
+            rect.within(self.canvas.document.width, self.canvas.document.height)?;
+        }
+        self.checkpoint();
+        self.canvas.document.set_crop(crop)
+    }
+
+    pub fn set_canvas_transform(&mut self, transform: AffineTransform2D) -> Result<bool, String> {
+        if self.canvas.document.canvas_transform == transform {
+            return Ok(false);
+        }
+        if [
+            transform.a,
+            transform.b,
+            transform.c,
+            transform.d,
+            transform.tx,
+            transform.ty,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+        {
+            return Err("canvas transform values must be finite".into());
+        }
+        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
+            return Err("canvas transform must be invertible".into());
+        }
+        self.checkpoint();
+        self.canvas.document.set_canvas_transform(transform)
     }
 }
 
@@ -1753,41 +2134,85 @@ pub fn encode_jpeg(image: &RgbaImage, quality: u8) -> Result<Vec<u8>, String> {
     Ok(output)
 }
 
-fn blend_image(
+fn blend_transformed_image(
     destination: &mut RgbaImage,
     source: &RgbaImage,
     mask: Option<&Vec<u8>>,
+    layer: &Layer,
+    canvas_transform: &AffineTransform2D,
+) {
+    let Some(layer_inverse) = layer.transform.inverse() else {
+        return;
+    };
+    let Some(canvas_inverse) = canvas_transform.inverse() else {
+        return;
+    };
+    let source_crop = layer.crop.unwrap_or(Rect::new(
+        0.0,
+        0.0,
+        source.width as f32,
+        source.height as f32,
+    ));
+    for y in 0..destination.height {
+        for x in 0..destination.width {
+            let canvas_point = canvas_inverse.transform_point(x as f32 + 0.5, y as f32 + 0.5);
+            let source_point = layer_inverse.transform_point(canvas_point.0, canvas_point.1);
+            if !source_crop.contains(source_point.0, source_point.1)
+                || source_point.0 < 0.0
+                || source_point.1 < 0.0
+                || source_point.0 >= source.width as f32
+                || source_point.1 >= source.height as f32
+            {
+                continue;
+            }
+            let source_pixel =
+                bilinear_sample(source, f64::from(source_point.0), f64::from(source_point.1));
+            let mask_alpha = mask
+                .and_then(|mask| {
+                    let sx = source_point.0.floor() as u32;
+                    let sy = source_point.1.floor() as u32;
+                    let index = sy as usize * source.width as usize + sx as usize;
+                    mask.get(index).copied()
+                })
+                .map(|value| value as f32 / 255.0)
+                .unwrap_or(1.0);
+            let index = (y as usize * destination.width as usize + x as usize) * 4;
+            blend_pixel(
+                &mut destination.pixels[index..index + 4],
+                source_pixel,
+                mask_alpha,
+                layer.opacity,
+                &layer.blend_mode,
+            );
+        }
+    }
+}
+
+fn blend_pixel(
+    destination: &mut [u8],
+    source: [u8; 4],
+    mask_alpha: f32,
     opacity: f32,
     mode: &BlendMode,
 ) {
-    for (pixel_index, (dst, src)) in destination
-        .pixels
-        .chunks_exact_mut(4)
-        .zip(source.pixels.chunks_exact(4))
-        .enumerate()
-    {
-        let mask_alpha = mask
-            .map(|mask| mask[pixel_index] as f32 / 255.0)
-            .unwrap_or(1.0);
-        let source_alpha = src[3] as f32 / 255.0 * opacity.clamp(0.0, 1.0) * mask_alpha;
-        let destination_alpha = dst[3] as f32 / 255.0;
-        let out_alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
-        if out_alpha <= f32::EPSILON {
-            dst.copy_from_slice(&[0, 0, 0, 0]);
-            continue;
-        }
-        for channel in 0..3 {
-            let source_channel = src[channel] as f32 / 255.0;
-            let destination_channel = dst[channel] as f32 / 255.0;
-            let blended = blend_channel(source_channel, destination_channel, mode);
-            let premultiplied = blended * source_alpha
-                + destination_channel * destination_alpha * (1.0 - source_alpha);
-            dst[channel] = (premultiplied / out_alpha * 255.0)
-                .round()
-                .clamp(0.0, 255.0) as u8;
-        }
-        dst[3] = (out_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    let source_alpha = source[3] as f32 / 255.0 * opacity.clamp(0.0, 1.0) * mask_alpha;
+    let destination_alpha = destination[3] as f32 / 255.0;
+    let out_alpha = source_alpha + destination_alpha * (1.0 - source_alpha);
+    if out_alpha <= f32::EPSILON {
+        destination.copy_from_slice(&[0, 0, 0, 0]);
+        return;
     }
+    for channel in 0..3 {
+        let source_channel = source[channel] as f32 / 255.0;
+        let destination_channel = destination[channel] as f32 / 255.0;
+        let blended = blend_channel(source_channel, destination_channel, mode);
+        let premultiplied =
+            blended * source_alpha + destination_channel * destination_alpha * (1.0 - source_alpha);
+        destination[channel] = (premultiplied / out_alpha * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+    }
+    destination[3] = (out_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
 }
 
 fn blend_channel(source: f32, destination: f32, mode: &BlendMode) -> f32 {
@@ -2665,19 +3090,23 @@ fn blend_mode_marker(mode: &BlendMode) -> &'static str {
 
 impl PhotoDocument {
     /// Integrity digest over document metadata only: geometry (width, height, dpi, colour
-    /// space), layer metadata (id, name, kind, visibility, opacity, blend mode, adjustment
-    /// type and value) in document order, and the active layer index.
+    /// space), canvas/selection/crop geometry, layer metadata (id, name, kind, visibility,
+    /// opacity, blend mode, adjustment type/value, transform, crop, and source identity) in
+    /// document order, and the active layer index.
     ///
     /// Pixels are deliberately NOT hashed here — they live in [`RgbaImage::pixel_digest`] —
     /// so this digest stays constant while raster content changes underneath a document.
     pub fn metadata_digest(&self) -> u64 {
         let mut feed = format!(
-            "doc:{width}x{height}:dpi:{dpi}:cs:{color_space}:layers:{layer_count}\n",
+            "doc:{width}x{height}:dpi:{dpi}:cs:{color_space}:layers:{layer_count}:canvas:{canvas_transform:?}:selection:{selection:?}:crop:{crop:?}\n",
             width = self.width,
             height = self.height,
             dpi = self.dpi,
             color_space = self.color_space,
             layer_count = self.layers.len(),
+            canvas_transform = self.canvas_transform,
+            selection = self.selection,
+            crop = self.crop,
         );
         for layer in &self.layers {
             let id = &layer.id;
@@ -2689,7 +3118,10 @@ impl PhotoDocument {
             let opacity = layer.opacity;
             let adjustment_value = layer.adjustment_value;
             feed.push_str(&format!(
-                "layer:{id}:{name}:{kind}:{visible}:opacity:{opacity}:blend:{blend}:adj:{adjustment}:{adjustment_value}\n"
+                "layer:{id}:{name}:{kind}:{visible}:opacity:{opacity}:blend:{blend}:adj:{adjustment}:{adjustment_value}:transform:{:?}:crop:{:?}:source:{:?}\n",
+                layer.transform,
+                layer.crop,
+                layer.source_digest,
             ));
         }
         let active = self.active_layer_index;
@@ -3835,5 +4267,149 @@ mod tests {
         over.opacity = 4.0;
         doc.add_layer(over);
         assert!(doc.to_openraster_stack_xml().contains("opacity=\"1.00\""));
+    }
+
+    #[test]
+    fn transformed_layer_bounds_and_pixels_follow_persisted_geometry() {
+        let mut document = PhotoDocument::new("transform", "Transform", 3, 1);
+        document.layers[0].transform = AffineTransform2D::translation(1.0, 0.0);
+        let mut canvas = PhotoCanvas::new(document).unwrap();
+        canvas
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(3, 1, [220, 40, 20, 255]).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            canvas.active_layer_bounds(),
+            Some(Rect::new(1.0, 0.0, 3.0, 1.0))
+        );
+        let composite = canvas.composite().unwrap();
+        assert_eq!(composite.pixel(0, 0), Some([0, 0, 0, 0]));
+        assert_eq!(composite.pixel(1, 0), Some([220, 40, 20, 255]));
+
+        let bytes = save_photo_canvas(&canvas).unwrap();
+        let loaded = load_photo_canvas(&bytes).unwrap();
+        assert_eq!(
+            loaded.document.layers[0].transform,
+            AffineTransform2D::translation(1.0, 0.0)
+        );
+        assert_eq!(loaded.active_layer_bounds(), canvas.active_layer_bounds());
+        assert_eq!(loaded.composite().unwrap(), composite);
+    }
+
+    #[test]
+    fn canvas_transform_is_applied_to_every_layer_and_round_trips() {
+        let mut document = PhotoDocument::new("canvas-transform", "Canvas Transform", 3, 1);
+        document.canvas_transform = AffineTransform2D::translation(1.0, 0.0);
+        let mut canvas = PhotoCanvas::new(document).unwrap();
+        canvas
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(3, 1, [20, 80, 160, 255]).unwrap(),
+            )
+            .unwrap();
+        let rendered = canvas.composite().unwrap();
+        assert_eq!(rendered.pixel(0, 0), Some([0, 0, 0, 0]));
+        assert_eq!(rendered.pixel(1, 0), Some([20, 80, 160, 255]));
+        assert_eq!(
+            canvas.active_layer_bounds(),
+            Some(Rect::new(1.0, 0.0, 3.0, 1.0))
+        );
+
+        let bytes = save_photo_canvas(&canvas).unwrap();
+        let loaded = load_photo_canvas(&bytes).unwrap();
+        assert_eq!(
+            loaded.document.canvas_transform,
+            canvas.document.canvas_transform
+        );
+        assert_eq!(loaded.composite().unwrap(), rendered);
+    }
+
+    #[test]
+    fn selection_crop_and_adjustment_edits_are_validated_and_undoable() {
+        let document = PhotoDocument::new("geometry", "Geometry", 4, 2);
+        let mut canvas = PhotoCanvas::new(document).unwrap();
+        canvas
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(4, 2, [100, 120, 140, 255]).unwrap(),
+            )
+            .unwrap();
+        let mut session = PhotoSession::new(canvas);
+        assert!(session
+            .set_selection(Some(Rect::new(1.0, 0.0, 2.0, 2.0)))
+            .unwrap());
+        assert!(session
+            .set_crop(Some(Rect::new(1.0, 0.0, 2.0, 2.0)))
+            .unwrap());
+        assert!(session
+            .set_layer_transform(0, AffineTransform2D::translation(1.0, 0.0))
+            .unwrap());
+        assert!(session
+            .canvas
+            .document
+            .set_layer_crop("layer-bg", Some(Rect::new(0.0, 0.0, 3.0, 2.0)))
+            .unwrap());
+        assert!(session
+            .canvas
+            .document
+            .set_layer_transform("layer-bg", AffineTransform2D::translation(2.0, 0.0))
+            .unwrap());
+        assert!(session
+            .canvas
+            .document
+            .set_selection(Some(Rect::new(0.0, 0.0, 1.0, 1.0)))
+            .unwrap());
+        assert!(session.can_undo());
+        assert!(session.undo());
+        assert_eq!(
+            session.canvas.document.selection,
+            Some(Rect::new(1.0, 0.0, 2.0, 2.0))
+        );
+
+        let bytes = save_photo_canvas(&session.canvas).unwrap();
+        let reopened = load_photo_canvas(&bytes).unwrap();
+        assert_eq!(
+            reopened.document.selection,
+            session.canvas.document.selection
+        );
+        assert_eq!(reopened.document.crop, session.canvas.document.crop);
+        assert_eq!(
+            reopened.document.layers[0].crop,
+            session.canvas.document.layers[0].crop
+        );
+        assert!(reopened.composite().unwrap().pixel(0, 0).unwrap()[3] == 0);
+
+        assert!(session
+            .set_selection(Some(Rect::new(-1.0, 0.0, 2.0, 1.0)))
+            .is_err());
+        assert!(session
+            .set_crop(Some(Rect::new(0.0, 0.0, 0.0, 1.0)))
+            .is_err());
+    }
+
+    #[test]
+    fn rejected_geometry_edits_do_not_create_history_entries() {
+        let document = PhotoDocument::new("invalid", "Invalid", 8, 8);
+        let canvas = PhotoCanvas::new(document).unwrap();
+        let mut session = PhotoSession::new(canvas);
+        assert!(session
+            .set_layer_transform(0, AffineTransform2D::translation(f32::NAN, 0.0))
+            .is_err());
+        assert!(!session.can_undo());
+        assert!(session
+            .set_selection(Some(Rect::new(-1.0, 0.0, 2.0, 2.0)))
+            .is_err());
+        assert!(!session.can_undo());
+        assert!(session
+            .set_crop(Some(Rect::new(0.0, 0.0, 9.0, 2.0)))
+            .is_err());
+        assert!(!session.can_undo());
+        assert!(session
+            .set_canvas_transform(AffineTransform2D::scale(f32::INFINITY, 1.0))
+            .is_err());
+        assert!(!session.can_undo());
     }
 }

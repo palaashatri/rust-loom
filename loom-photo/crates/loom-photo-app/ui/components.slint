@@ -85,6 +85,12 @@ export component PhotoToolbar inherits LabeledToolbar {
 export component PhotoCanvas inherits CanvasSurface {
     in property <bool> has-preview: false;
     in property <image> preview-image;
+    in property <float> document-width: 1.0;
+    in property <float> document-height: 1.0;
+    in property <float> selected-layer-bounds-x: 0.0;
+    in property <float> selected-layer-bounds-y: 0.0;
+    in property <float> selected-layer-bounds-width: 1.0;
+    in property <float> selected-layer-bounds-height: 1.0;
     in property <bool> show-grid: true;
     in property <int> active-tool: 0;
     in-out property <bool> pan-mode: false;
@@ -131,6 +137,16 @@ export component PhotoCanvas inherits CanvasSurface {
                     width: parent.width;
                     height: parent.height;
                     image-fit: contain;
+                }
+                Rectangle {
+                    x: parent.width * root.selected-layer-bounds-x;
+                    y: parent.height * root.selected-layer-bounds-y;
+                    width: max(2px, parent.width * root.selected-layer-bounds-width);
+                    height: max(2px, parent.height * root.selected-layer-bounds-height);
+                    border-width: 2px;
+                    border-color: Theme.palette().selection;
+                    background: transparent;
+                    accessible-role: AccessibleRole.none;
                 }
                 for corner in [0, 1, 2, 3] : Rectangle {
                     x: corner == 1 || corner == 3 ? parent.width - 4px : -4px;
@@ -261,6 +277,19 @@ export component PhotoInspector inherits InspectorSurface {
     in property <float> contrast-value: 0.0;
     in property <float> saturation-value: 0.0;
     in property <bool> has-preview: false;
+    in property <string> active-layer-id: "";
+    in property <string> active-layer-kind: "Pixel";
+    in property <bool> active-layer-transform-enabled: true;
+    in property <string> active-layer-bounds: "—";
+    in-out property <float> active-layer-x: 0.0;
+    in-out property <float> active-layer-y: 0.0;
+    in-out property <float> active-layer-scale-x: 100.0;
+    in-out property <float> active-layer-scale-y: 100.0;
+    in-out property <float> active-layer-rotation: 0.0;
+    in property <string> selection-geometry: "None";
+    in property <string> crop-geometry: "None";
+    in property <bool> has-selection: false;
+    in property <bool> has-crop: false;
 
     callback select-layer(int);
     callback toggle-layer-visibility(int);
@@ -273,6 +302,11 @@ export component PhotoInspector inherits InspectorSurface {
     callback brightness-changed(float);
     callback contrast-changed(float);
     callback saturation-changed(float);
+    callback layer-transform-changed(float, float, float, float, float);
+    callback select-layer-bounds;
+    callback crop-to-selection;
+    callback clear-selection;
+    callback clear-crop;
     callback import-image;
     callback export-png;
     callback export-jpeg;
@@ -291,6 +325,53 @@ export component PhotoInspector inherits InspectorSurface {
 
         if root.inspector-tab == 0 : VerticalLayout {
             spacing: Theme.tokens.space.lg;
+            SectionHeader { title: "Selected layer"; }
+            Text {
+                text: root.active-layer-id == "" ? "No layer selected" : root.active-layer-id + " · " + root.active-layer-kind;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                overflow: elide;
+            }
+            if !root.active-layer-transform-enabled : Text {
+                text: "Transforms apply to pixel layers only.";
+                font-size: Theme.tokens.typography.micro;
+                color: Theme.palette().ink-disabled;
+                wrap: word-wrap;
+            }
+            PropertyRow {
+                label: "Position X";
+                RangeSlider { label: "Position X"; minimum: -100; maximum: 100; enabled: root.active-layer-transform-enabled; value <=> root.active-layer-x; changed(value) => { root.layer-transform-changed(value, root.active-layer-y, root.active-layer-scale-x, root.active-layer-scale-y, root.active-layer-rotation); } }
+            }
+            PropertyRow {
+                label: "Position Y";
+                RangeSlider { label: "Position Y"; minimum: -100; maximum: 100; enabled: root.active-layer-transform-enabled; value <=> root.active-layer-y; changed(value) => { root.layer-transform-changed(root.active-layer-x, value, root.active-layer-scale-x, root.active-layer-scale-y, root.active-layer-rotation); } }
+            }
+            PropertyRow {
+                label: "Scale X";
+                RangeSlider { label: "Scale X"; minimum: 25; maximum: 200; enabled: root.active-layer-transform-enabled; value <=> root.active-layer-scale-x; changed(value) => { root.layer-transform-changed(root.active-layer-x, root.active-layer-y, value, root.active-layer-scale-y, root.active-layer-rotation); } }
+            }
+            PropertyRow {
+                label: "Scale Y";
+                RangeSlider { label: "Scale Y"; minimum: 25; maximum: 200; enabled: root.active-layer-transform-enabled; value <=> root.active-layer-scale-y; changed(value) => { root.layer-transform-changed(root.active-layer-x, root.active-layer-y, root.active-layer-scale-x, value, root.active-layer-rotation); } }
+            }
+            PropertyRow {
+                label: "Rotation";
+                RangeSlider { label: "Rotation"; minimum: -180; maximum: 180; enabled: root.active-layer-transform-enabled; value <=> root.active-layer-rotation; changed(value) => { root.layer-transform-changed(root.active-layer-x, root.active-layer-y, root.active-layer-scale-x, root.active-layer-scale-y, value); } }
+            }
+            PropertyRow { label: "Layer bounds"; Text { text: root.active-layer-bounds; color: Theme.palette().ink-secondary; overflow: elide; } }
+            SectionHeader { title: "Selection and crop"; }
+            PropertyRow { label: "Selection"; Text { text: root.selection-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
+            PropertyRow { label: "Crop"; Text { text: root.crop-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                ToolbarButton { label: "Select layer bounds"; enabled: root.has-preview; clicked => { root.select-layer-bounds(); } }
+                ToolbarButton { label: "Clear selection"; enabled: root.has-selection; clicked => { root.clear-selection(); } }
+            }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                ToolbarButton { label: "Crop to selection"; primary: true; enabled: root.has-selection; clicked => { root.crop-to-selection(); } }
+                ToolbarButton { label: "Clear crop"; enabled: root.has-crop; clicked => { root.clear-crop(); } }
+            }
             SectionHeader { title: "Color adjustments"; }
             PhotoAdjustmentRow { label: "Brightness"; value: root.brightness-value; changed(value) => { root.brightness-changed(value); } }
             PhotoAdjustmentRow { label: "Contrast"; value: root.contrast-value; changed(value) => { root.contrast-changed(value); } }
