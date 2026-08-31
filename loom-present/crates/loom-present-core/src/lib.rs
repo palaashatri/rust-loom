@@ -1806,6 +1806,7 @@ pub struct PresentationSession {
     pub selected_elements: Vec<String>,
     undo: Vec<PresentationDocument>,
     redo: Vec<PresentationDocument>,
+    checkpoint_redo: Option<Vec<PresentationDocument>>,
     history_limit: usize,
 }
 
@@ -1819,17 +1820,18 @@ impl PresentationSession {
             selected_elements: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
+            checkpoint_redo: None,
             history_limit: 64,
         }
     }
 
     /// Records the current document before a mutation.
     pub fn checkpoint(&mut self) {
+        self.checkpoint_redo = Some(std::mem::take(&mut self.redo));
         self.undo.push(self.document.clone());
         if self.undo.len() > self.history_limit {
             self.undo.remove(0);
         }
-        self.redo.clear();
     }
 
     /// Cancels the most recent checkpoint and restores the document state it
@@ -1841,12 +1843,13 @@ impl PresentationSession {
             return false;
         };
         self.document = previous;
-        self.redo.clear();
+        self.redo = self.checkpoint_redo.take().unwrap_or_default();
         true
     }
 
     /// Restores the previous document snapshot.
     pub fn undo(&mut self) -> bool {
+        self.checkpoint_redo = None;
         let Some(previous) = self.undo.pop() else {
             return false;
         };
@@ -1857,6 +1860,7 @@ impl PresentationSession {
 
     /// Reapplies the next document snapshot.
     pub fn redo(&mut self) -> bool {
+        self.checkpoint_redo = None;
         let Some(next) = self.redo.pop() else {
             return false;
         };
@@ -2778,6 +2782,11 @@ mod tests {
         let doc = PresentationDocument::new("deck-pdf", "PDF Test");
         let pdf_bytes = export_pdf(&doc);
         assert!(!pdf_bytes.is_empty());
+        let pdf_text = String::from_utf8_lossy(&pdf_bytes);
+        assert!(
+            pdf_text.contains("BT 1 0 0 -1"),
+            "scene-transformed PDF text must cancel the y-axis flip"
+        );
     }
 
     #[test]
@@ -3043,6 +3052,30 @@ mod tests {
         );
         assert!(!session.can_undo());
         assert!(!session.cancel_checkpoint());
+    }
+
+    #[test]
+    fn cancelled_checkpoint_preserves_redo_after_undo() {
+        let mut session = PresentationSession::new(PresentationDocument::new(
+            "deck-cancel-redo",
+            "Cancelled gesture redo",
+        ));
+        assert!(session.transform_element("elem-1", 150.0, 200.0, 320.0, 90.0));
+        assert!(session.undo());
+        assert!(session.can_redo());
+        let before = session.document.integrity_digest();
+
+        session.checkpoint();
+        assert!(session.transform_element_no_checkpoint("elem-1", 220.0, 240.0, 320.0, 90.0));
+        assert!(session.cancel_checkpoint());
+
+        assert_eq!(session.document.integrity_digest(), before);
+        assert!(session.can_redo(), "cancelled gesture must preserve redo");
+        assert!(session.redo());
+        assert_eq!(
+            session.document.active_slide().unwrap().elements[0].x,
+            150.0
+        );
     }
 
     #[test]

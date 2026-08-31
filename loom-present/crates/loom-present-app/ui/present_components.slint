@@ -301,6 +301,7 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
                     pointer-event(event) => {
                         if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                            slide-focus.focus();
                             root.element-pressed(idx, event.modifiers.shift);
                         } else if (event.kind == PointerEventKind.cancel) {
                             root.element-cancelled(idx);
@@ -326,12 +327,12 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     border-color: Theme.palette().accent;
                     accessible-role: button;
                     accessible-label: "Resize " + root.element-labels[idx] + " top left";
-                    accessible-action-default => { root.handle-pressed(idx, "nw", false); }
+                    accessible-action-default => { slide-focus.focus(); root.handle-pressed(idx, "nw", false); }
                     TouchArea {
                         width: 100%;
                         height: 100%;
                         pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "nw", event.modifiers.shift); }
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "nw", event.modifiers.shift); }
                             if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "nw"); }
                             if (event.kind == PointerEventKind.up) { root.handle-released(idx, "nw"); }
                         }
@@ -349,12 +350,12 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     border-color: Theme.palette().accent;
                     accessible-role: button;
                     accessible-label: "Resize " + root.element-labels[idx] + " top right";
-                    accessible-action-default => { root.handle-pressed(idx, "ne", false); }
+                    accessible-action-default => { slide-focus.focus(); root.handle-pressed(idx, "ne", false); }
                     TouchArea {
                         width: 100%;
                         height: 100%;
                         pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "ne", event.modifiers.shift); }
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "ne", event.modifiers.shift); }
                             if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "ne"); }
                             if (event.kind == PointerEventKind.up) { root.handle-released(idx, "ne"); }
                         }
@@ -372,12 +373,12 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     border-color: Theme.palette().accent;
                     accessible-role: button;
                     accessible-label: "Resize " + root.element-labels[idx] + " bottom left";
-                    accessible-action-default => { root.handle-pressed(idx, "sw", false); }
+                    accessible-action-default => { slide-focus.focus(); root.handle-pressed(idx, "sw", false); }
                     TouchArea {
                         width: 100%;
                         height: 100%;
                         pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "sw", event.modifiers.shift); }
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "sw", event.modifiers.shift); }
                             if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "sw"); }
                             if (event.kind == PointerEventKind.up) { root.handle-released(idx, "sw"); }
                         }
@@ -395,12 +396,12 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     border-color: Theme.palette().accent;
                     accessible-role: button;
                     accessible-label: "Resize " + root.element-labels[idx] + " bottom right";
-                    accessible-action-default => { root.handle-pressed(idx, "se", false); }
+                    accessible-action-default => { slide-focus.focus(); root.handle-pressed(idx, "se", false); }
                     TouchArea {
                         width: 100%;
                         height: 100%;
                         pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "se", event.modifiers.shift); }
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "se", event.modifiers.shift); }
                             if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "se"); }
                             if (event.kind == PointerEventKind.up) { root.handle-released(idx, "se"); }
                         }
@@ -416,12 +417,12 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     background: Theme.palette().accent;
                     accessible-role: button;
                     accessible-label: "Rotate " + root.element-labels[idx];
-                    accessible-action-default => { root.handle-pressed(idx, "rotate", false); }
+                    accessible-action-default => { slide-focus.focus(); root.handle-pressed(idx, "rotate", false); }
                     TouchArea {
                         width: 100%;
                         height: 100%;
                         pointer-event(event) => {
-                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "rotate", event.modifiers.shift); }
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "rotate", event.modifiers.shift); }
                             if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "rotate"); }
                             if (event.kind == PointerEventKind.up) { root.handle-released(idx, "rotate"); }
                         }

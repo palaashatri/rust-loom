@@ -176,7 +176,7 @@ impl PdfDocument {
         let p = self.page_mut(page);
         p.font = font.to_string();
         p.ops.push(format!(
-            "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg /F1 {:.2} Tf BT 1 0 0 1 {:.2} {:.2} Tm ({}) Tj ET Q",
+            "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg /F1 {:.2} Tf BT 1 0 0 -1 {:.2} {:.2} Tm ({}) Tj ET Q",
             a,
             b_matrix,
             c,
@@ -526,6 +526,26 @@ mod tests {
         // via the BaseFont in the font object. Here we assert the content
         // stream emitted the font size.
         assert!(text.contains("Tf BT"));
+    }
+
+    #[test]
+    fn transformed_text_keeps_glyph_y_axis_upright() {
+        let mut doc = PdfDocument::new();
+        let p = doc.add_page(100.0, 100.0);
+        doc.draw_text_with_transform(
+            p,
+            0.0,
+            0.0,
+            "upright",
+            &TextStyle::default(),
+            [1.0, 0.0, 0.0, -1.0, 10.0, 20.0],
+        );
+        let bytes = doc.serialize();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            text.contains("BT 1 0 0 -1 0.00 0.00 Tm (upright) Tj"),
+            "transformed text must invert the local text y-axis exactly once"
+        );
     }
 }
 
