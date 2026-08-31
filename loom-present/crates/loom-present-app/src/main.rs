@@ -10,11 +10,12 @@ use loom_desktop::{
     NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
-    export_pdf, load_presentation_session, save_presentation_session, ElementType,
-    PresentationDocument, PresentationSession, SlideElement, TransitionKind,
+    calculate_smart_snapping, export_pdf, load_presentation_session, save_presentation_session,
+    ElementType, PresentationDocument, PresentationSession, SlideElement, SnapGuide,
+    TransitionKind,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
+use loom_test_support::journey::PaletteProbe;
 use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
@@ -103,6 +104,7 @@ fn text_element(
         y,
         width,
         height,
+        rotation_deg: 0.0,
         action: None,
     }
 }
@@ -189,6 +191,72 @@ fn initial_session(args: &Args) -> Result<PresentationSession, String> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum HandleKind {
+    #[default]
+    Move,
+    ResizeNorthWest,
+    ResizeNorthEast,
+    ResizeSouthWest,
+    ResizeSouthEast,
+    Rotate,
+    Marquee,
+}
+
+#[derive(Debug, Clone)]
+struct DragElement {
+    id: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    rotation_deg: f32,
+}
+
+type TransformTarget = (String, f32, f32, f32, f32);
+
+impl DragElement {
+    fn transformed_bounds(&self) -> (f32, f32, f32, f32) {
+        let radians = self.rotation_deg.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let cx = self.x + self.width / 2.0;
+        let cy = self.y + self.height / 2.0;
+        let corners = [
+            (self.x - cx, self.y - cy),
+            (self.x + self.width - cx, self.y - cy),
+            (self.x + self.width - cx, self.y + self.height - cy),
+            (self.x - cx, self.y + self.height - cy),
+        ];
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for (x, y) in corners {
+            let rotated_x = cx + x * cos - y * sin;
+            let rotated_y = cy + x * sin + y * cos;
+            min_x = min_x.min(rotated_x);
+            min_y = min_y.min(rotated_y);
+            max_x = max_x.max(rotated_x);
+            max_y = max_y.max(rotated_y);
+        }
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+}
+
+#[derive(Default, Clone)]
+struct DragState {
+    mode: Option<HandleKind>,
+    start_mouse_x: f32,
+    start_mouse_y: f32,
+    elements: Vec<DragElement>,
+    checkpointed: bool,
+    guides: Vec<SnapGuide>,
+    marquee_x: f32,
+    marquee_y: f32,
+    marquee_width: f32,
+    marquee_height: f32,
+}
+
 struct GuiState {
     session: RefCell<PresentationSession>,
     selected_element: Cell<usize>,
@@ -198,6 +266,7 @@ struct GuiState {
     deck_filter: FileFilter,
     pdf_filter: FileFilter,
     menu_service: Option<Rc<NativeMenuBar>>,
+    drag_state: RefCell<DragState>,
 }
 
 fn active_body(session: &PresentationSession) -> String {
@@ -228,6 +297,177 @@ fn element_type_index(element_type: &ElementType) -> i32 {
     }
 }
 
+fn handle_kind(value: &str) -> HandleKind {
+    match value {
+        "nw" => HandleKind::ResizeNorthWest,
+        "ne" => HandleKind::ResizeNorthEast,
+        "sw" => HandleKind::ResizeSouthWest,
+        "se" => HandleKind::ResizeSouthEast,
+        "rotate" => HandleKind::Rotate,
+        _ => HandleKind::Move,
+    }
+}
+
+fn drag_snapshots(session: &PresentationSession) -> Vec<DragElement> {
+    let Some(slide) = session.document.active_slide() else {
+        return Vec::new();
+    };
+    slide
+        .elements
+        .iter()
+        .filter(|element| session.selected_elements.iter().any(|id| id == &element.id))
+        .map(|element| DragElement {
+            id: element.id.clone(),
+            x: element.x,
+            y: element.y,
+            width: element.width,
+            height: element.height,
+            rotation_deg: element.rotation_deg,
+        })
+        .collect()
+}
+
+fn reference_bounds(
+    session: &PresentationSession,
+    selected: &[DragElement],
+) -> Vec<(f32, f32, f32, f32)> {
+    let Some(slide) = session.document.active_slide() else {
+        return Vec::new();
+    };
+    slide
+        .elements
+        .iter()
+        .filter(|element| !selected.iter().any(|item| item.id == element.id))
+        .map(SlideElement::transformed_bounds)
+        .collect()
+}
+
+fn move_targets(
+    session: &PresentationSession,
+    drag: &[DragElement],
+    dx: f32,
+    dy: f32,
+) -> (Vec<TransformTarget>, Vec<SnapGuide>) {
+    if drag.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for element in drag {
+        let (x, y, width, height) = element.transformed_bounds();
+        min_x = min_x.min(x + dx);
+        min_y = min_y.min(y + dy);
+        max_x = max_x.max(x + width + dx);
+        max_y = max_y.max(y + height + dy);
+    }
+    let snap = calculate_smart_snapping(
+        (min_x, min_y, max_x - min_x, max_y - min_y),
+        &reference_bounds(session, drag),
+        8.0,
+    );
+    let correction_x = snap.snapped_x - min_x;
+    let correction_y = snap.snapped_y - min_y;
+    (
+        drag.iter()
+            .map(|element| {
+                (
+                    element.id.clone(),
+                    element.x + dx + correction_x,
+                    element.y + dy + correction_y,
+                    element.width,
+                    element.height,
+                )
+            })
+            .collect(),
+        snap.guides,
+    )
+}
+
+fn resize_target(
+    element: &DragElement,
+    handle: HandleKind,
+    dx: f32,
+    dy: f32,
+) -> (f32, f32, f32, f32) {
+    let right = element.x + element.width;
+    let bottom = element.y + element.height;
+    let mut x = element.x;
+    let mut y = element.y;
+    let mut width = element.width;
+    let mut height = element.height;
+    if matches!(
+        handle,
+        HandleKind::ResizeNorthWest | HandleKind::ResizeSouthWest
+    ) {
+        x = (element.x + dx).min(right - 1.0);
+        width = right - x;
+    }
+    if matches!(
+        handle,
+        HandleKind::ResizeNorthEast | HandleKind::ResizeSouthEast
+    ) {
+        width = (element.width + dx).max(1.0);
+    }
+    if matches!(
+        handle,
+        HandleKind::ResizeNorthWest | HandleKind::ResizeNorthEast
+    ) {
+        y = (element.y + dy).min(bottom - 1.0);
+        height = bottom - y;
+    }
+    if matches!(
+        handle,
+        HandleKind::ResizeSouthWest | HandleKind::ResizeSouthEast
+    ) {
+        height = (element.height + dy).max(1.0);
+    }
+    (x, y, width.max(1.0), height.max(1.0))
+}
+
+fn resize_targets(
+    session: &PresentationSession,
+    element: &DragElement,
+    handle: HandleKind,
+    dx: f32,
+    dy: f32,
+) -> ((f32, f32, f32, f32), Vec<SnapGuide>) {
+    let (x, y, width, height) = resize_target(element, handle, dx, dy);
+    let snap = calculate_smart_snapping(
+        (x, y, width, height),
+        &reference_bounds(session, std::slice::from_ref(element)),
+        8.0,
+    );
+    ((snap.snapped_x, snap.snapped_y, width, height), snap.guides)
+}
+
+fn nudge_selected(session: &mut PresentationSession, dx: f32, dy: f32) -> bool {
+    let selected = drag_snapshots(session);
+    let (targets, _) = move_targets(session, &selected, dx, dy);
+    let changed = targets.iter().any(|(id, x, y, width, height)| {
+        session
+            .document
+            .active_slide()
+            .and_then(|slide| slide.elements.iter().find(|element| element.id == *id))
+            .map(|element| {
+                (element.x - *x).abs() > f32::EPSILON
+                    || (element.y - *y).abs() > f32::EPSILON
+                    || (element.width - *width).abs() > f32::EPSILON
+                    || (element.height - *height).abs() > f32::EPSILON
+            })
+            .unwrap_or(false)
+    });
+    if !changed {
+        return false;
+    }
+    session.checkpoint();
+    for (id, x, y, width, height) in targets {
+        session.transform_element_no_checkpoint(&id, x, y, width, height);
+    }
+    true
+}
+
 fn refresh(app: &PresentApp, state: &GuiState) {
     let session = state.session.borrow();
     let document = &session.document;
@@ -251,7 +491,12 @@ fn refresh(app: &PresentApp, state: &GuiState) {
             .elements
             .iter()
             .map(|element| {
-                SharedString::from(format!("{:?} · {}", element.element_type, element.content))
+                let selected = session.selected_elements.iter().any(|id| id == &element.id);
+                SharedString::from(if selected {
+                    format!("Selected {:?} · {}", element.element_type, element.content)
+                } else {
+                    format!("{:?} · {}", element.element_type, element.content)
+                })
             })
             .collect::<Vec<_>>();
         app.set_element_labels(ModelRc::new(VecModel::from(labels)));
@@ -290,11 +535,26 @@ fn refresh(app: &PresentApp, state: &GuiState) {
                 .map(|element| element.height)
                 .collect::<Vec<_>>(),
         )));
+        app.set_element_rotations(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| element.rotation_deg)
+                .collect::<Vec<_>>(),
+        )));
         app.set_element_types(ModelRc::new(VecModel::from(
             slide
                 .elements
                 .iter()
                 .map(|element| element_type_index(&element.element_type))
+                .collect::<Vec<_>>(),
+        )));
+        let selected_ids = &session.selected_elements;
+        app.set_element_selected(ModelRc::new(VecModel::from(
+            slide
+                .elements
+                .iter()
+                .map(|element| selected_ids.contains(&element.id))
                 .collect::<Vec<_>>(),
         )));
         let selected = state
@@ -314,6 +574,7 @@ fn refresh(app: &PresentApp, state: &GuiState) {
             app.set_element_y_text(format!("{:.0} pt", element.y).into());
             app.set_element_width_text(format!("{:.0} pt", element.width).into());
             app.set_element_height_text(format!("{:.0} pt", element.height).into());
+            app.set_element_rotation_text(format!("{:.0}°", element.rotation_deg).into());
         } else {
             app.set_active_element_label("No element selected".into());
             app.set_active_element_content("".into());
@@ -321,6 +582,7 @@ fn refresh(app: &PresentApp, state: &GuiState) {
             app.set_element_y_text("—".into());
             app.set_element_width_text("—".into());
             app.set_element_height_text("—".into());
+            app.set_element_rotation_text("—".into());
         }
         app.set_transition_index(match session.transition_for(&slide.id) {
             TransitionKind::None => 0,
@@ -341,6 +603,26 @@ fn refresh(app: &PresentApp, state: &GuiState) {
         }
     )));
     app.set_status_right("Local deck engine".into());
+    let drag = state.drag_state.borrow();
+    app.set_snap_guides_x(ModelRc::new(VecModel::from(
+        drag.guides
+            .iter()
+            .filter(|guide| guide.is_vertical)
+            .map(|guide| guide.position)
+            .collect::<Vec<_>>(),
+    )));
+    app.set_snap_guides_y(ModelRc::new(VecModel::from(
+        drag.guides
+            .iter()
+            .filter(|guide| !guide.is_vertical)
+            .map(|guide| guide.position)
+            .collect::<Vec<_>>(),
+    )));
+    app.set_marquee_x(drag.marquee_x);
+    app.set_marquee_y(drag.marquee_y);
+    app.set_marquee_width(drag.marquee_width);
+    app.set_marquee_height(drag.marquee_height);
+    app.set_marquee_visible(drag.mode == Some(HandleKind::Marquee));
     if let Ok(bytes) = save_presentation_session(&session) {
         let _ = record_snapshot_recovery("presentation state", bytes);
     }
@@ -417,6 +699,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
             .map_err(|error| error.to_string())?,
         pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
         menu_service: None,
+        drag_state: RefCell::new(DragState::default()),
     };
     refresh(&app, &state);
     if args.palette {
@@ -525,40 +808,320 @@ fn save_current_deck(
     Ok(true)
 }
 
-/// Record the keyboard command-palette journey with per-step screenshots.
+fn capture_present_journey_step(
+    app: &PresentApp,
+    args: &Args,
+    out_dir: &Path,
+    name: &str,
+) -> Result<String, String> {
+    let image = snapshot_component(app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| format!("capture {name}: {error}"))?;
+    let file_name = format!("present-manipulation-{name}.png");
+    let path = out_dir.join(&file_name);
+    loom_test_support::png::save_png(&path, &image)
+        .map_err(|error| format!("save {file_name}: {error}"))?;
+    let decoded = loom_test_support::png::load_png(&path)
+        .map_err(|error| format!("validate {file_name}: {error}"))?;
+    if decoded.dimensions() != (args.size.0, args.size.1) {
+        return Err(format!(
+            "invalid {file_name} dimensions: {:?}",
+            decoded.dimensions()
+        ));
+    }
+    Ok(file_name)
+}
+
+fn presentation_documents_match(left: &PresentationDocument, right: &PresentationDocument) -> bool {
+    left.id == right.id
+        && left.title == right.title
+        && left.author == right.author
+        && left.theme == right.theme
+        && left.active_index == right.active_index
+        && left.slides.len() == right.slides.len()
+        && left.slides.iter().zip(&right.slides).all(|(left, right)| {
+            left.id == right.id
+                && left.title == right.title
+                && left.layout == right.layout
+                && left.elements == right.elements
+                && left.speaker_notes == right.speaker_notes
+                && left.bg_color == right.bg_color
+        })
+}
+
+/// Record the controller-backed direct manipulation journey with per-step
+/// screenshots and serialized/reopened/exported artifacts.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
+    let out_dir = Path::new(out_dir);
+    std::fs::create_dir_all(out_dir)
+        .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let inspector_available = configure_responsive_layout(&app, args.size);
-    let state = GuiState {
+    let save_path = out_dir.join("present-manipulation.loomdeck");
+    let export_path = out_dir.join("present-manipulation.pdf");
+    let dialogs: Rc<dyn FileDialogService> = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [Some(save_path.clone())],
+        [Some(save_path.clone()), Some(export_path.clone())],
+    ));
+    let state = Rc::new(GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
-        save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
-        dialogs: Rc::new(NativeFileDialogs),
+        save_path: RefCell::new(None),
+        dialogs,
         deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
             .map_err(|error| error.to_string())?,
         pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
         menu_service: None,
-    };
+        drag_state: RefCell::new(DragState::default()),
+    });
 
     refresh(&app, &state);
+    wire_app_callbacks(&app, &state);
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let report = record_keyboard_palette_journey(&app, "present", Path::new(out_dir), "template")
-        .map_err(|error| format!("journey failed: {error}"))?;
-    println!(
-        "keyboard journey: {} ({})",
-        if report.passed { "PASS" } else { "FAIL" },
-        out_dir
-    );
-    if !report.passed {
-        return Err("keyboard journey invariants failed".to_string());
+
+    let mut screenshots = Vec::new();
+    screenshots.push(capture_present_journey_step(
+        &app, args, out_dir, "initial",
+    )?);
+
+    // Add a real shape through the same callback used by the toolbar and
+    // palette, then select it through the public selection callback.
+    app.invoke_add_shape();
+    let shape_index = {
+        let session = state.session.borrow();
+        let slide = session
+            .document
+            .active_slide()
+            .ok_or("journey has no active slide after adding a shape")?;
+        slide
+            .elements
+            .len()
+            .checked_sub(1)
+            .ok_or("shape was not added")?
+    };
+    app.invoke_select_element(shape_index as i32);
+    let shape_id = {
+        let session = state.session.borrow();
+        let slide = session
+            .document
+            .active_slide()
+            .ok_or("journey slide disappeared")?;
+        let element = slide
+            .elements
+            .get(shape_index)
+            .ok_or("journey shape index is invalid")?;
+        if !session.selected_elements.contains(&element.id) {
+            return Err("journey shape was not selected".into());
+        }
+        element.id.clone()
+    };
+    screenshots.push(capture_present_journey_step(
+        &app,
+        args,
+        out_dir,
+        "add-select",
+    )?);
+
+    // Move near the title/body edges. The controller applies the correction
+    // and keeps the guides visible until pointer release.
+    app.invoke_element_pressed(shape_index as i32, false);
+    app.invoke_element_moved(shape_index as i32, -27.0, -29.0);
+    if state.drag_state.borrow().guides.is_empty() {
+        return Err("journey move did not produce snap guides".into());
     }
+    screenshots.push(capture_present_journey_step(
+        &app,
+        args,
+        out_dir,
+        "move-snap-guides",
+    )?);
+    app.invoke_element_released(shape_index as i32);
+    let moved = {
+        let session = state.session.borrow();
+        session
+            .document
+            .active_slide()
+            .and_then(|slide| slide.elements.iter().find(|element| element.id == shape_id))
+            .cloned()
+            .ok_or("journey moved shape disappeared")?
+    };
+    if (moved.x - 90.0).abs() > 0.001 || (moved.y - 230.0).abs() > 0.001 {
+        return Err(format!(
+            "journey snap landed at ({:.3}, {:.3}), expected (90, 230)",
+            moved.x, moved.y
+        ));
+    }
+
+    // Resize from the lower-right handle, retaining one undo transaction for
+    // the entire gesture and capturing the visible guides before release.
+    app.invoke_handle_pressed(shape_index as i32, "se".into(), false);
+    app.invoke_handle_moved(shape_index as i32, "se".into(), 60.0, 40.0);
+    screenshots.push(capture_present_journey_step(&app, args, out_dir, "resize")?);
+    app.invoke_handle_released(shape_index as i32, "se".into());
+    let resized = {
+        let session = state.session.borrow();
+        session
+            .document
+            .active_slide()
+            .and_then(|slide| slide.elements.iter().find(|element| element.id == shape_id))
+            .cloned()
+            .ok_or("journey resized shape disappeared")?
+    };
+    if (resized.width - 360.0).abs() > 0.001 || (resized.height - 180.0).abs() > 0.001 {
+        return Err(format!(
+            "journey resize landed at {:.3}x{:.3}, expected 360x180",
+            resized.width, resized.height
+        ));
+    }
+
+    app.invoke_handle_pressed(shape_index as i32, "rotate".into(), false);
+    app.invoke_handle_moved(shape_index as i32, "rotate".into(), 60.0, 0.0);
+    screenshots.push(capture_present_journey_step(&app, args, out_dir, "rotate")?);
+    app.invoke_handle_released(shape_index as i32, "rotate".into());
+    let rotated = {
+        let session = state.session.borrow();
+        session
+            .document
+            .active_slide()
+            .and_then(|slide| slide.elements.iter().find(|element| element.id == shape_id))
+            .cloned()
+            .ok_or("journey rotated shape disappeared")?
+    };
+    if (rotated.rotation_deg - 30.0).abs() > 0.001 {
+        return Err(format!(
+            "journey rotation landed at {:.3}, expected 30",
+            rotated.rotation_deg
+        ));
+    }
+
+    // Undo is routed through the same controller callback as the menu and
+    // keyboard shortcut. It should revert only the latest rotation gesture.
+    app.invoke_undo();
+    let undone = {
+        let session = state.session.borrow();
+        session
+            .document
+            .active_slide()
+            .and_then(|slide| slide.elements.iter().find(|element| element.id == shape_id))
+            .cloned()
+            .ok_or("journey undo removed the shape")?
+    };
+    if (undone.x - resized.x).abs() > 0.001
+        || (undone.y - resized.y).abs() > 0.001
+        || (undone.width - resized.width).abs() > 0.001
+        || (undone.height - resized.height).abs() > 0.001
+        || undone.rotation_deg.abs() > 0.001
+    {
+        return Err(format!(
+            "journey undo did not restore resized geometry: ({:.3}, {:.3}, {:.3}, {:.3}, {:.3})",
+            undone.x, undone.y, undone.width, undone.height, undone.rotation_deg
+        ));
+    }
+    screenshots.push(capture_present_journey_step(&app, args, out_dir, "undo")?);
+
+    let saved_document = state.session.borrow().document.clone();
+    app.invoke_save_deck();
+    if !save_path.is_file() {
+        return Err(format!(
+            "journey save did not create {}",
+            save_path.display()
+        ));
+    }
+    let saved_bytes = std::fs::read(&save_path)
+        .map_err(|error| format!("read journey deck '{}': {error}", save_path.display()))?;
+    let reopened_from_bytes = load_presentation_session(&saved_bytes)
+        .map_err(|error| format!("load journey deck '{}': {error}", save_path.display()))?;
+    if !presentation_documents_match(&reopened_from_bytes.document, &saved_document) {
+        return Err("journey package bytes did not preserve the saved document".into());
+    }
+    screenshots.push(capture_present_journey_step(&app, args, out_dir, "save")?);
+
+    app.invoke_open_deck();
+    if !presentation_documents_match(&state.session.borrow().document, &saved_document) {
+        return Err("journey save/reopen did not preserve document geometry".into());
+    }
+    screenshots.push(capture_present_journey_step(&app, args, out_dir, "reopen")?);
+
+    app.invoke_toggle_preview_mode();
+    if !app.get_is_preview_mode() {
+        return Err("journey Present mode toggle was not applied".into());
+    }
+    screenshots.push(capture_present_journey_step(
+        &app,
+        args,
+        out_dir,
+        "present-mode",
+    )?);
+
+    app.invoke_export_pdf();
+    if !export_path.is_file() {
+        return Err(format!(
+            "journey export did not create {}",
+            export_path.display()
+        ));
+    }
+    let pdf_bytes = std::fs::read(&export_path)
+        .map_err(|error| format!("read journey PDF '{}': {error}", export_path.display()))?;
+    if !pdf_bytes.starts_with(b"%PDF") {
+        return Err("journey export did not produce a PDF payload".into());
+    }
+    screenshots.push(capture_present_journey_step(
+        &app,
+        args,
+        out_dir,
+        "export-pdf",
+    )?);
+
+    // Each capture validates its own dimensions; repeat the check over the
+    // output directory so stale or extra PNGs cannot hide an invalid artifact.
+    for entry in std::fs::read_dir(out_dir)
+        .map_err(|error| format!("read journey output '{}': {error}", out_dir.display()))?
+    {
+        let path = entry
+            .map_err(|error| format!("read journey output entry: {error}"))?
+            .path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("png") {
+            let image = loom_test_support::png::load_png(&path)
+                .map_err(|error| format!("validate journey PNG '{}': {error}", path.display()))?;
+            if image.dimensions() != args.size {
+                return Err(format!(
+                    "journey PNG '{}' has dimensions {:?}, expected {:?}",
+                    path.display(),
+                    image.dimensions(),
+                    args.size
+                ));
+            }
+        }
+    }
+
+    let step_json = screenshots
+        .iter()
+        .map(|screenshot| format!("{{\"screenshot\":\"{screenshot}\"}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let transcript = format!(
+        "{{\n  \"app\": \"present\",\n  \"journey\": \"add-shape-select-move-snap-resize-rotate-undo-save-reopen-present-export\",\n  \"passed\": true,\n  \"size\": [ {}, {} ],\n  \"saved_package\": \"{}\",\n  \"exported_pdf\": \"{}\",\n  \"steps\": [ {} ]\n}}\n",
+        args.size.0,
+        args.size.1,
+        save_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("present-manipulation.loomdeck"),
+        export_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("present-manipulation.pdf"),
+        step_json
+    );
+    std::fs::write(out_dir.join("present.json"), transcript)
+        .map_err(|error| format!("write journey transcript: {error}"))?;
+    println!("present journey: PASS ({})", out_dir.display());
     Ok(())
 }
 
@@ -630,6 +1193,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         deck_filter,
         pdf_filter,
         menu_service: Some(menu_service.clone()),
+        drag_state: RefCell::new(DragState::default()),
     });
 
     wire_app_callbacks(&app, &state);
@@ -926,6 +1490,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         170.0,
                     ));
                 }
+                session.clear_selection();
                 state.selected_element.set(0);
                 drop(session);
                 refresh(&app, &state);
@@ -938,8 +1503,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         app.on_duplicate_slide(move || {
             if let Some(app) = app_ref.upgrade() {
                 let index = state.session.borrow().document.active_index;
-                state.session.borrow_mut().duplicate_slide(index);
+                let mut session = state.session.borrow_mut();
+                if session.duplicate_slide(index) {
+                    session.clear_selection();
+                }
                 state.selected_element.set(0);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -950,8 +1519,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         app.on_delete_slide(move || {
             if let Some(app) = app_ref.upgrade() {
                 let index = state.session.borrow().document.active_index;
-                state.session.borrow_mut().remove_slide(index);
+                let mut session = state.session.borrow_mut();
+                if session.remove_slide(index) {
+                    session.clear_selection();
+                }
                 state.selected_element.set(0);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -961,8 +1534,11 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
-                state.session.borrow_mut().undo();
+                let mut session = state.session.borrow_mut();
+                session.undo();
+                session.prune_selection();
                 state.selected_element.set(0);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -972,8 +1548,11 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
-                state.session.borrow_mut().redo();
+                let mut session = state.session.borrow_mut();
+                session.redo();
+                session.prune_selection();
                 state.selected_element.set(0);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -984,11 +1563,10 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         app.on_select_slide(move |index| {
             if let Some(app) = app_ref.upgrade() {
                 if index >= 0 {
-                    state
-                        .session
-                        .borrow_mut()
-                        .document
-                        .select_slide(index as usize);
+                    let mut session = state.session.borrow_mut();
+                    if session.document.select_slide(index as usize) {
+                        session.clear_selection();
+                    }
                     state.selected_element.set(0);
                     refresh(&app, &state);
                 }
@@ -1000,8 +1578,19 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_select_element(move |index| {
             if let Some(app) = app_ref.upgrade() {
-                if index >= 0 {
+                if index < 0 {
+                    return;
+                }
+                let mut session = state.session.borrow_mut();
+                let id = session
+                    .document
+                    .active_slide()
+                    .and_then(|slide| slide.elements.get(index as usize))
+                    .map(|element| element.id.clone());
+                if let Some(id) = id {
+                    session.select_element(&id, false);
                     state.selected_element.set(index as usize);
+                    drop(session);
                     refresh(&app, &state);
                 }
             }
@@ -1028,6 +1617,14 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         300.0,
                         140.0,
                     ));
+                    if let Some(id) = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.last())
+                        .map(|element| element.id.clone())
+                    {
+                        session.select_element(&id, false);
+                    }
                     state.selected_element.set(count - 1);
                     drop(session);
                     refresh(&app, &state);
@@ -1051,6 +1648,14 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                         520.0,
                         100.0,
                     ));
+                    if let Some(id) = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.last())
+                        .map(|element| element.id.clone())
+                    {
+                        session.select_element(&id, false);
+                    }
                     state.selected_element.set(count - 1);
                     drop(session);
                     refresh(&app, &state);
@@ -1096,38 +1701,300 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_transform_element(move |property, value| {
+        app.on_transform_element(move |id, x, y, width, height| {
             if let Some(app) = app_ref.upgrade() {
-                let (id, mut x, mut y, mut width, mut height) = {
-                    let session = state.session.borrow();
-                    let selected = state.selected_element.get();
-                    let Some(element) = session
-                        .document
-                        .active_slide()
-                        .and_then(|slide| slide.elements.get(selected))
-                    else {
-                        return;
-                    };
-                    (
-                        element.id.clone(),
-                        element.x,
-                        element.y,
-                        element.width,
-                        element.height,
-                    )
-                };
-                match property.as_str() {
-                    "x" => x = value,
-                    "y" => y = value,
-                    "width" => width = value,
-                    "height" => height = value,
-                    _ => {}
-                }
                 state
                     .session
                     .borrow_mut()
-                    .transform_element(&id, x, y, width, height);
+                    .transform_element(id.as_str(), x, y, width, height);
                 refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_set_element_rotation(move |id, rot| {
+            if let Some(app) = app_ref.upgrade() {
+                state
+                    .session
+                    .borrow_mut()
+                    .set_element_rotation(id.as_str(), rot);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_element_pressed(move |index, shift| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                let mut session = state.session.borrow_mut();
+                let Some(id) = session
+                    .document
+                    .active_slide()
+                    .and_then(|slide| slide.elements.get(index as usize))
+                    .map(|element| element.id.clone())
+                else {
+                    return;
+                };
+                session.select_element(&id, shift);
+                state.selected_element.set(index as usize);
+                drag.mode = (!session.selected_elements.is_empty()).then_some(HandleKind::Move);
+                drag.checkpointed = false;
+                drag.guides.clear();
+                drag.elements = drag_snapshots(&session);
+                drop(session);
+                drop(drag);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_element_moved(move |_, dx, dy| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                if drag.mode != Some(HandleKind::Move) {
+                    return;
+                }
+                let (targets, guides) = {
+                    let session = state.session.borrow();
+                    move_targets(&session, &drag.elements, dx, dy)
+                };
+                let changed = {
+                    let session = state.session.borrow();
+                    targets.iter().any(|(id, x, y, width, height)| {
+                        session
+                            .document
+                            .active_slide()
+                            .and_then(|slide| {
+                                slide.elements.iter().find(|element| element.id == *id)
+                            })
+                            .map(|element| {
+                                (element.x - *x).abs() > f32::EPSILON
+                                    || (element.y - *y).abs() > f32::EPSILON
+                                    || (element.width - *width).abs() > f32::EPSILON
+                                    || (element.height - *height).abs() > f32::EPSILON
+                            })
+                            .unwrap_or(false)
+                    })
+                };
+                if changed {
+                    let mut session = state.session.borrow_mut();
+                    if !drag.checkpointed {
+                        session.checkpoint();
+                        drag.checkpointed = true;
+                    }
+                    for (id, x, y, width, height) in targets {
+                        session.transform_element_no_checkpoint(&id, x, y, width, height);
+                    }
+                    drag.guides = guides;
+                }
+                drop(drag);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_element_released(move |_| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                drag.mode = None;
+                drag.elements.clear();
+                drag.guides.clear();
+                drag.checkpointed = false;
+                drop(drag);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_handle_pressed(move |index, kind, shift| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                let Some(id) = session
+                    .document
+                    .active_slide()
+                    .and_then(|slide| slide.elements.get(index as usize))
+                    .map(|element| element.id.clone())
+                else {
+                    return;
+                };
+                if !session.selected_elements.contains(&id) {
+                    session.select_element(&id, shift);
+                }
+                state.selected_element.set(index as usize);
+                let mut drag = state.drag_state.borrow_mut();
+                drag.mode = Some(handle_kind(kind.as_str()));
+                drag.start_mouse_x = 0.0;
+                drag.start_mouse_y = 0.0;
+                drag.checkpointed = false;
+                drag.guides.clear();
+                drag.elements = drag_snapshots(&session);
+                drop(drag);
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_handle_moved(move |_, kind, dx, dy| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                let mode = handle_kind(kind.as_str());
+                if drag.mode != Some(mode) {
+                    return;
+                }
+                let Some(element) = drag.elements.first().cloned() else {
+                    return;
+                };
+                let mut session = state.session.borrow_mut();
+                let (x, y, width, height) = if mode == HandleKind::Rotate {
+                    let rotation = element.rotation_deg + dx * 0.5;
+                    if !drag.checkpointed {
+                        session.checkpoint();
+                        drag.checkpointed = true;
+                    }
+                    session.set_element_rotation_no_checkpoint(&element.id, rotation);
+                    (element.x, element.y, element.width, element.height)
+                } else {
+                    let ((x, y, width, height), guides) =
+                        resize_targets(&session, &element, mode, dx, dy);
+                    if !drag.checkpointed {
+                        let changed = (element.x - x).abs() > f32::EPSILON
+                            || (element.y - y).abs() > f32::EPSILON
+                            || (element.width - width).abs() > f32::EPSILON
+                            || (element.height - height).abs() > f32::EPSILON;
+                        if changed {
+                            session.checkpoint();
+                            drag.checkpointed = true;
+                        }
+                    }
+                    drag.guides = guides;
+                    (x, y, width, height)
+                };
+                if mode != HandleKind::Rotate && drag.checkpointed {
+                    session.transform_element_no_checkpoint(&element.id, x, y, width, height);
+                }
+                drop(session);
+                drop(drag);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_handle_released(move |_, _| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                drag.mode = None;
+                drag.elements.clear();
+                drag.guides.clear();
+                drag.checkpointed = false;
+                drop(drag);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_canvas_pressed(move |x, y, shift| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                if !shift {
+                    session.clear_selection();
+                }
+                let mut drag = state.drag_state.borrow_mut();
+                drag.mode = Some(HandleKind::Marquee);
+                drag.start_mouse_x = x;
+                drag.start_mouse_y = y;
+                drag.marquee_x = x;
+                drag.marquee_y = y;
+                drag.marquee_width = 0.0;
+                drag.marquee_height = 0.0;
+                drag.guides.clear();
+                drop(drag);
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_canvas_moved(move |x, y| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                if drag.mode == Some(HandleKind::Marquee) {
+                    drag.marquee_x = drag.start_mouse_x.min(x);
+                    drag.marquee_y = drag.start_mouse_y.min(y);
+                    drag.marquee_width = (x - drag.start_mouse_x).abs();
+                    drag.marquee_height = (y - drag.start_mouse_y).abs();
+                    drop(drag);
+                    refresh(&app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_canvas_released(move |x, y| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut drag = state.drag_state.borrow_mut();
+                if drag.mode == Some(HandleKind::Marquee) {
+                    let x0 = drag.start_mouse_x;
+                    let y0 = drag.start_mouse_y;
+                    let width = x - x0;
+                    let height = y - y0;
+                    let mut session = state.session.borrow_mut();
+                    session.marquee_select(x0, y0, width, height, false);
+                    if let Some(id) = session.selected_elements.first().cloned() {
+                        if let Some(index) = session.document.active_slide().and_then(|slide| {
+                            slide.elements.iter().position(|element| element.id == id)
+                        }) {
+                            state.selected_element.set(index);
+                        }
+                    }
+                }
+                drag.mode = None;
+                drag.marquee_width = 0.0;
+                drag.marquee_height = 0.0;
+                drag.guides.clear();
+                drop(drag);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_canvas_key_pressed(move |key, _shift| {
+            if let Some(app) = app_ref.upgrade() {
+                let (dx, dy) = match key.as_str() {
+                    "Left" => (-10.0, 0.0),
+                    "Right" => (10.0, 0.0),
+                    "Up" => (0.0, -10.0),
+                    "Down" => (0.0, 10.0),
+                    _ => (0.0, 0.0),
+                };
+                if (dx, dy) != (0.0, 0.0) {
+                    let mut session = state.session.borrow_mut();
+                    nudge_selected(&mut session, dx, dy);
+                    drop(session);
+                    refresh(&app, &state);
+                }
             }
         });
     }
@@ -1598,6 +2465,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
             menu_service: None,
+            drag_state: RefCell::new(DragState::default()),
         }
     }
 
@@ -1633,6 +2501,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
             menu_service: None,
+            drag_state: RefCell::new(DragState::default()),
         };
 
         refresh(&app, &state);
@@ -1697,6 +2566,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
             menu_service: None,
+            drag_state: RefCell::new(DragState::default()),
         };
         configure_responsive_width(&app, 900);
         refresh(&app, &state);
@@ -1813,6 +2683,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
             menu_service: None,
+            drag_state: RefCell::new(DragState::default()),
         };
         let menu = NativeMenuBar::new();
         let bar = build_present_menu_bar();
@@ -1912,6 +2783,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
             menu_service: None,
+            drag_state: RefCell::new(DragState::default()),
         });
         wire_app_callbacks(&app, &state);
         let menu = NativeMenuBar::new();
@@ -1955,6 +2827,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
             menu_service: Some(menu_service.clone()),
+            drag_state: RefCell::new(DragState::default()),
         });
         let bar = build_present_menu_bar();
         menu_service.install_menu_bar(&bar).expect("install menu");
@@ -2027,6 +2900,7 @@ mod desktop_tests {
             deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
             menu_service: Some(menu_service.clone()),
+            drag_state: RefCell::new(DragState::default()),
         });
         menu_service
             .install_menu_bar(&build_present_menu_bar())

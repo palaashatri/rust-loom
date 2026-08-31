@@ -54,7 +54,16 @@ export component PresentApp inherits Window {
     in property <[float]> element-ys: [];
     in property <[float]> element-widths: [];
     in property <[float]> element-heights: [];
+    in property <[float]> element-rotations: [];
     in property <[int]> element-types: [];
+    in property <[bool]> element-selected: [];
+    in property <[float]> snap-guides-x: [];
+    in property <[float]> snap-guides-y: [];
+    in property <float> marquee-x: 0;
+    in property <float> marquee-y: 0;
+    in property <float> marquee-width: 0;
+    in property <float> marquee-height: 0;
+    in property <bool> marquee-visible: false;
     in property <float> element-x: 100;
     in property <float> element-y: 100;
     in property <float> element-width: 400;
@@ -63,6 +72,7 @@ export component PresentApp inherits Window {
     in property <string> element-y-text: "100";
     in property <string> element-width-text: "400";
     in property <string> element-height-text: "100";
+    in property <string> element-rotation-text: "0°";
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
@@ -94,7 +104,18 @@ export component PresentApp inherits Window {
     callback select-element(int);
     callback add-text;
     callback add-shape;
-    callback transform-element(string, float);
+    callback transform-element(string, float, float, float, float);
+    callback set-element-rotation(string, float);
+    callback canvas-pressed(float, float, bool);
+    callback canvas-moved(float, float);
+    callback canvas-released(float, float);
+    callback canvas-key-pressed(string, bool);
+    callback element-pressed(int, bool);
+    callback element-moved(int, float, float);
+    callback element-released(int);
+    callback handle-pressed(int, string, bool);
+    callback handle-moved(int, string, float, float);
+    callback handle-released(int, string);
     callback update-element-content(string);
     callback export-pdf;
     callback notes-edited(string);
@@ -315,9 +336,28 @@ export component PresentApp inherits Window {
                         element-ys: root.element-ys;
                         element-widths: root.element-widths;
                         element-heights: root.element-heights;
+                        element-rotations: root.element-rotations;
                         element-types: root.element-types;
+                        element-selected: root.element-selected;
+                        snap-guides-x: root.snap-guides-x;
+                        snap-guides-y: root.snap-guides-y;
+                        marquee-x: root.marquee-x;
+                        marquee-y: root.marquee-y;
+                        marquee-width: root.marquee-width;
+                        marquee-height: root.marquee-height;
+                        marquee-visible: root.marquee-visible;
                         active-element-index: root.active-element-index;
                         select-element(idx) => { root.select-element(idx); }
+                        canvas-pressed(x, y, shift) => { root.canvas-pressed(x, y, shift); }
+                        canvas-moved(x, y) => { root.canvas-moved(x, y); }
+                        canvas-released(x, y) => { root.canvas-released(x, y); }
+                        canvas-key-pressed(k, shift) => { root.canvas-key-pressed(k, shift); }
+                        element-pressed(idx, shift) => { root.element-pressed(idx, shift); }
+                        element-moved(idx, dx, dy) => { root.element-moved(idx, dx, dy); }
+                        element-released(idx) => { root.element-released(idx); }
+                        handle-pressed(idx, kind, shift) => { root.handle-pressed(idx, kind, shift); }
+                        handle-moved(idx, kind, dx, dy) => { root.handle-moved(idx, kind, dx, dy); }
+                        handle-released(idx, kind) => { root.handle-released(idx, kind); }
                     }
 
                     // Speaker Notes Collapsible Drawer
@@ -372,6 +412,7 @@ export component PresentApp inherits Window {
                     element-y-text: root.element-y-text;
                     element-width-text: root.element-width-text;
                     element-height-text: root.element-height-text;
+                    element-rotation-text: root.element-rotation-text;
                     apply-template(idx) => { root.apply-template(idx); }
                     update-element-content(value) => { root.update-element-content(value); }
                     set-transition(idx) => { root.set-transition(idx); }

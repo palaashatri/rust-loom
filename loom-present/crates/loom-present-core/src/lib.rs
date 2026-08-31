@@ -6,6 +6,10 @@ use loom_package::manifest::{
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 
+/// Authoring-plane dimensions used by Present's scene and transform APIs.
+pub const SLIDE_WIDTH: f32 = 1000.0;
+pub const SLIDE_HEIGHT: f32 = 562.5;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ElementType {
     Title,
@@ -27,7 +31,7 @@ pub enum SlideActionTrigger {
     OpenUrl(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SlideElement {
     pub id: String,
     pub element_type: ElementType,
@@ -37,7 +41,29 @@ pub struct SlideElement {
     pub width: f32,
     pub height: f32,
     #[serde(default)]
+    pub rotation_deg: f32,
+    #[serde(default)]
     pub action: Option<SlideActionTrigger>,
+}
+
+impl SlideElement {
+    /// Returns the axis-aligned bounds of this element after rotation.
+    pub fn transformed_bounds(&self) -> (f32, f32, f32, f32) {
+        transformed_bounds((self.x, self.y, self.width, self.height), self.rotation_deg)
+    }
+
+    /// Returns whether an authoring-plane point is inside this element.
+    pub fn contains_point(&self, x: f32, y: f32) -> bool {
+        point_in_rotated_rect(
+            x,
+            y,
+            self.x,
+            self.y,
+            self.width,
+            self.height,
+            self.rotation_deg,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +308,7 @@ impl Slide {
                     y: 250.0,
                     width: 1720.0,
                     height: 120.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
                 self.add_element(SlideElement {
@@ -292,6 +319,7 @@ impl Slide {
                     y: 400.0,
                     width: 1720.0,
                     height: 80.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
             }
@@ -305,6 +333,7 @@ impl Slide {
                     y: 60.0,
                     width: 1760.0,
                     height: 100.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
                 self.add_element(SlideElement {
@@ -315,6 +344,7 @@ impl Slide {
                     y: 200.0,
                     width: 1760.0,
                     height: 780.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
             }
@@ -328,6 +358,7 @@ impl Slide {
                     y: 60.0,
                     width: 1760.0,
                     height: 100.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
                 self.add_element(SlideElement {
@@ -338,6 +369,7 @@ impl Slide {
                     y: 200.0,
                     width: 850.0,
                     height: 780.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
                 self.add_element(SlideElement {
@@ -348,6 +380,7 @@ impl Slide {
                     y: 200.0,
                     width: 850.0,
                     height: 780.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
             }
@@ -361,6 +394,7 @@ impl Slide {
                     y: 350.0,
                     width: 1620.0,
                     height: 200.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
             }
@@ -374,6 +408,7 @@ impl Slide {
                     y: 200.0,
                     width: 1520.0,
                     height: 250.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
                 self.add_element(SlideElement {
@@ -384,6 +419,7 @@ impl Slide {
                     y: 500.0,
                     width: 1520.0,
                     height: 100.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
             }
@@ -556,12 +592,73 @@ impl Default for DropShadowConfig {
 
 /// Normalizes an angle in degrees into the standard `[0.0, 360.0)` range.
 pub fn normalize_angle_degrees(degrees: f32) -> f32 {
+    if !degrees.is_finite() {
+        return 0.0;
+    }
     let rem = degrees % 360.0;
     if rem < 0.0 {
         rem + 360.0
     } else {
         rem
     }
+}
+
+fn transformed_bounds(rect: (f32, f32, f32, f32), rotation_deg: f32) -> (f32, f32, f32, f32) {
+    let (x, y, width, height) = rect;
+    let cx = x + width / 2.0;
+    let cy = y + height / 2.0;
+    let radians = normalize_angle_degrees(rotation_deg).to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let corners = [
+        (x - cx, y - cy),
+        (x + width - cx, y - cy),
+        (x + width - cx, y + height - cy),
+        (x - cx, y + height - cy),
+    ];
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for (local_x, local_y) in corners {
+        let rotated_x = cx + local_x * cos - local_y * sin;
+        let rotated_y = cy + local_x * sin + local_y * cos;
+        min_x = min_x.min(rotated_x);
+        min_y = min_y.min(rotated_y);
+        max_x = max_x.max(rotated_x);
+        max_y = max_y.max(rotated_y);
+    }
+    (min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
+fn point_in_rotated_rect(
+    point_x: f32,
+    point_y: f32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    rotation_deg: f32,
+) -> bool {
+    if !point_x.is_finite()
+        || !point_y.is_finite()
+        || !x.is_finite()
+        || !y.is_finite()
+        || !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+    {
+        return false;
+    }
+    let cx = x + width / 2.0;
+    let cy = y + height / 2.0;
+    let radians = -normalize_angle_degrees(rotation_deg).to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let dx = point_x - cx;
+    let dy = point_y - cy;
+    let local_x = dx * cos - dy * sin;
+    let local_y = dx * sin + dy * cos;
+    local_x.abs() <= width / 2.0 && local_y.abs() <= height / 2.0
 }
 
 /// Slide master template for uniform slide deck styling and layouts.
@@ -992,6 +1089,7 @@ impl PresentationDocument {
             y: 200.0,
             width: 800.0,
             height: 100.0,
+            rotation_deg: 0.0,
             action: None,
         });
         doc.slides.push(cover);
@@ -1248,6 +1346,7 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                     y: 200.0,
                     width: 1760.0,
                     height: 780.0,
+                    rotation_deg: 0.0,
                     action: None,
                 });
             }
@@ -1263,6 +1362,7 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                 y: 60.0,
                 width: 1760.0,
                 height: 100.0,
+                rotation_deg: 0.0,
                 action: None,
             });
             slides.push(slide);
@@ -1586,6 +1686,8 @@ pub struct RenderElement {
     pub width: f32,
     /// Normalized height.
     pub height: f32,
+    /// Rotation in degrees around the element center.
+    pub rotation_deg: f32,
 }
 
 /// A validated render scene for one slide.
@@ -1621,6 +1723,8 @@ pub struct PresentationSession {
     pub theme: DeckTheme,
     /// Per-slide outgoing transitions.
     pub transitions: std::collections::BTreeMap<String, TransitionKind>,
+    /// Selected element IDs on the active slide.
+    pub selected_elements: Vec<String>,
     undo: Vec<PresentationDocument>,
     redo: Vec<PresentationDocument>,
     history_limit: usize,
@@ -1633,6 +1737,7 @@ impl PresentationSession {
             document,
             theme: DeckTheme::default(),
             transitions: std::collections::BTreeMap::new(),
+            selected_elements: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             history_limit: 64,
@@ -1770,6 +1875,44 @@ impl PresentationSession {
         width: f32,
         height: f32,
     ) -> bool {
+        let Some(element) = self.document.active_slide().and_then(|slide| {
+            slide
+                .elements
+                .iter()
+                .find(|element| element.id == element_id)
+        }) else {
+            return false;
+        };
+        if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite() {
+            return false;
+        }
+        let next_width = width.clamp(1.0, SLIDE_WIDTH);
+        let next_height = height.clamp(1.0, SLIDE_HEIGHT);
+        let next_x = x.clamp(0.0, SLIDE_WIDTH - next_width);
+        let next_y = y.clamp(0.0, SLIDE_HEIGHT - next_height);
+        if (element.x - next_x).abs() <= f32::EPSILON
+            && (element.y - next_y).abs() <= f32::EPSILON
+            && (element.width - next_width).abs() <= f32::EPSILON
+            && (element.height - next_height).abs() <= f32::EPSILON
+        {
+            return false;
+        }
+        self.checkpoint();
+        self.transform_element_no_checkpoint(element_id, x, y, width, height)
+    }
+
+    /// Moves and resizes an element without creating an undo checkpoint.
+    pub fn transform_element_no_checkpoint(
+        &mut self,
+        element_id: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    ) -> bool {
+        if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite() {
+            return false;
+        }
         let Some(slide) = self.document.active_slide() else {
             return false;
         };
@@ -1780,7 +1923,6 @@ impl PresentationSession {
         {
             return false;
         }
-        self.checkpoint();
         let element = self
             .document
             .active_slide_mut()
@@ -1789,11 +1931,187 @@ impl PresentationSession {
             .iter_mut()
             .find(|element| element.id == element_id)
             .expect("element remains");
-        element.width = width.clamp(1.0, 1000.0);
-        element.height = height.clamp(1.0, 562.5);
-        element.x = x.clamp(0.0, 1000.0 - element.width);
-        element.y = y.clamp(0.0, 562.5 - element.height);
+        let next_width = width.clamp(1.0, SLIDE_WIDTH);
+        let next_height = height.clamp(1.0, SLIDE_HEIGHT);
+        let next_x = x.clamp(0.0, SLIDE_WIDTH - next_width);
+        let next_y = y.clamp(0.0, SLIDE_HEIGHT - next_height);
+        let changed = (element.x - next_x).abs() > f32::EPSILON
+            || (element.y - next_y).abs() > f32::EPSILON
+            || (element.width - next_width).abs() > f32::EPSILON
+            || (element.height - next_height).abs() > f32::EPSILON;
+        element.x = next_x;
+        element.y = next_y;
+        element.width = next_width;
+        element.height = next_height;
+        changed
+    }
+
+    /// Sets the rotation of an element.
+    pub fn set_element_rotation(&mut self, element_id: &str, rotation_deg: f32) -> bool {
+        if !rotation_deg.is_finite() {
+            return false;
+        }
+        let Some(current) = self
+            .document
+            .active_slide()
+            .and_then(|slide| {
+                slide
+                    .elements
+                    .iter()
+                    .find(|element| element.id == element_id)
+            })
+            .map(|element| element.rotation_deg)
+        else {
+            return false;
+        };
+        let rotation_deg = normalize_angle_degrees(rotation_deg);
+        if (current - rotation_deg).abs() <= f32::EPSILON {
+            return false;
+        }
+        self.checkpoint();
+        self.set_element_rotation_no_checkpoint(element_id, rotation_deg)
+    }
+
+    /// Sets rotation without adding a history entry, for a live drag preview.
+    pub fn set_element_rotation_no_checkpoint(
+        &mut self,
+        element_id: &str,
+        rotation_deg: f32,
+    ) -> bool {
+        if !rotation_deg.is_finite() {
+            return false;
+        }
+        let Some(slide) = self.document.active_slide() else {
+            return false;
+        };
+        if !slide
+            .elements
+            .iter()
+            .any(|element| element.id == element_id)
+        {
+            return false;
+        }
+        let rotation_deg = normalize_angle_degrees(rotation_deg);
+        let element = self
+            .document
+            .active_slide_mut()
+            .expect("active slide remains")
+            .elements
+            .iter_mut()
+            .find(|element| element.id == element_id)
+            .expect("element remains");
+        let changed = (element.rotation_deg - rotation_deg).abs() > f32::EPSILON;
+        element.rotation_deg = rotation_deg;
+        changed
+    }
+
+    /// Selects an element by id. If `multi` is true, toggles the selection.
+    pub fn select_element(&mut self, element_id: &str, multi: bool) -> bool {
+        let Some(slide) = self.document.active_slide() else {
+            return false;
+        };
+        if !slide
+            .elements
+            .iter()
+            .any(|element| element.id == element_id)
+        {
+            return false;
+        }
+
+        if multi {
+            if let Some(pos) = self
+                .selected_elements
+                .iter()
+                .position(|id| id == element_id)
+            {
+                self.selected_elements.remove(pos);
+            } else {
+                self.selected_elements.push(element_id.to_string());
+            }
+        } else {
+            self.selected_elements.clear();
+            self.selected_elements.push(element_id.to_string());
+        }
         true
+    }
+
+    /// Clears the current selection.
+    pub fn clear_selection(&mut self) {
+        self.selected_elements.clear();
+    }
+
+    /// Removes ids that no longer exist on the active slide after a document
+    /// mutation or undo/reopen operation.
+    pub fn prune_selection(&mut self) {
+        let Some(slide) = self.document.active_slide() else {
+            self.selected_elements.clear();
+            return;
+        };
+        self.selected_elements
+            .retain(|id| slide.elements.iter().any(|element| element.id == *id));
+    }
+
+    /// Returns the axis-aligned bounds containing every selected element.
+    pub fn selection_bounds(&self) -> Option<(f32, f32, f32, f32)> {
+        let slide = self.document.active_slide()?;
+        let mut selected = slide
+            .elements
+            .iter()
+            .filter(|element| self.selected_elements.iter().any(|id| id == &element.id))
+            .map(SlideElement::transformed_bounds);
+        let (first_x, first_y, first_width, first_height) = selected.next()?;
+        let mut min_x = first_x;
+        let mut min_y = first_y;
+        let mut max_x = first_x + first_width;
+        let mut max_y = first_y + first_height;
+        for (x, y, width, height) in selected {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x + width);
+            max_y = max_y.max(y + height);
+        }
+        Some((min_x, min_y, max_x - min_x, max_y - min_y))
+    }
+
+    /// Returns the topmost element id at the given coordinates.
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<String> {
+        let slide = self.document.active_slide()?;
+        // Elements are rendered back to front, so iterate in reverse
+        for element in slide.elements.iter().rev() {
+            if element.contains_point(x, y) {
+                return Some(element.id.clone());
+            }
+        }
+        None
+    }
+
+    /// Selects all elements fully contained within the given rectangle.
+    pub fn marquee_select(&mut self, x: f32, y: f32, width: f32, height: f32, multi: bool) {
+        if !multi {
+            self.selected_elements.clear();
+        }
+        let Some(slide) = self.document.active_slide() else {
+            return;
+        };
+        let min_x = x.min(x + width);
+        let max_x = x.max(x + width);
+        let min_y = y.min(y + height);
+        let max_y = y.max(y + height);
+
+        let mut new_selection = Vec::new();
+        for element in &slide.elements {
+            let (element_x, element_y, element_width, element_height) =
+                element.transformed_bounds();
+            if element_x >= min_x
+                && element_x + element_width <= max_x
+                && element_y >= min_y
+                && element_y + element_height <= max_y
+                && !self.selected_elements.contains(&element.id)
+            {
+                new_selection.push(element.id.clone());
+            }
+        }
+        self.selected_elements.extend(new_selection);
     }
 
     /// Sets the outgoing transition for a slide.
@@ -1820,10 +2138,11 @@ impl PresentationSession {
                 id: element.id.clone(),
                 element_type: element.element_type.clone(),
                 content: element.content.clone(),
-                x: (element.x / 1000.0).clamp(0.0, 1.0),
-                y: (element.y / 562.5).clamp(0.0, 1.0),
-                width: (element.width / 1000.0).clamp(0.0, 1.0),
-                height: (element.height / 562.5).clamp(0.0, 1.0),
+                x: (element.x / SLIDE_WIDTH).clamp(0.0, 1.0),
+                y: (element.y / SLIDE_HEIGHT).clamp(0.0, 1.0),
+                width: (element.width / SLIDE_WIDTH).clamp(0.0, 1.0),
+                height: (element.height / SLIDE_HEIGHT).clamp(0.0, 1.0),
+                rotation_deg: normalize_angle_degrees(element.rotation_deg),
             })
             .collect();
         Some(SlideScene {
@@ -2382,6 +2701,7 @@ mod tests {
             y: 20.0,
             width: 300.0,
             height: 60.0,
+            rotation_deg: 0.0,
             action: None,
         }));
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
@@ -2389,6 +2709,198 @@ mod tests {
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 1);
         assert!(session.redo());
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
+    }
+
+    #[test]
+    fn test_hit_testing() {
+        let mut doc = PresentationDocument::new("deck", "Test Hit Testing");
+        doc.active_slide_mut().unwrap().elements.push(SlideElement {
+            id: "elem-1".into(),
+            element_type: ElementType::BodyText,
+            content: "Text".into(),
+            x: 100.0,
+            y: 100.0,
+            width: 100.0,
+            height: 50.0,
+            rotation_deg: 0.0,
+            action: None,
+        });
+        doc.active_slide_mut().unwrap().elements.push(SlideElement {
+            id: "elem-2".into(),
+            element_type: ElementType::ShapeRectangle,
+            content: "".into(),
+            x: 150.0,
+            y: 120.0,
+            width: 50.0,
+            height: 50.0,
+            rotation_deg: 0.0,
+            action: None,
+        });
+
+        let session = PresentationSession::new(doc);
+
+        assert_eq!(session.hit_test(90.0, 90.0), None);
+        assert_eq!(session.hit_test(110.0, 110.0).as_deref(), Some("elem-1"));
+        // Overlapping area should hit the topmost element (elem-2 is after elem-1)
+        assert_eq!(session.hit_test(160.0, 130.0).as_deref(), Some("elem-2"));
+    }
+
+    #[test]
+    fn hit_testing_and_marquee_follow_rotation() {
+        let mut doc = PresentationDocument::new("deck", "Rotated selection");
+        doc.active_slide_mut().unwrap().elements[0] = SlideElement {
+            id: "rotated".into(),
+            element_type: ElementType::ShapeRectangle,
+            content: "Rotated".into(),
+            x: 200.0,
+            y: 200.0,
+            width: 120.0,
+            height: 40.0,
+            rotation_deg: 90.0,
+            action: None,
+        };
+        let mut session = PresentationSession::new(doc);
+        assert_eq!(session.hit_test(210.0, 205.0), None);
+        assert_eq!(session.hit_test(260.0, 220.0).as_deref(), Some("rotated"));
+        session.marquee_select(185.0, 155.0, 150.0, 130.0, false);
+        assert_eq!(session.selected_elements, vec!["rotated"]);
+    }
+
+    #[test]
+    fn test_single_multi_marquee_selection() {
+        let mut doc = PresentationDocument::new("deck", "Test Selection");
+        doc.active_slide_mut().unwrap().elements.push(SlideElement {
+            id: "elem-1".into(),
+            element_type: ElementType::BodyText,
+            content: "Text".into(),
+            x: 100.0,
+            y: 100.0,
+            width: 100.0,
+            height: 50.0,
+            rotation_deg: 0.0,
+            action: None,
+        });
+        doc.active_slide_mut().unwrap().elements.push(SlideElement {
+            id: "elem-2".into(),
+            element_type: ElementType::ShapeRectangle,
+            content: "".into(),
+            x: 300.0,
+            y: 300.0,
+            width: 50.0,
+            height: 50.0,
+            rotation_deg: 0.0,
+            action: None,
+        });
+
+        let mut session = PresentationSession::new(doc);
+
+        // Single selection
+        assert!(session.select_element("elem-1", false));
+        assert_eq!(session.selected_elements, vec!["elem-1".to_string()]);
+
+        // Multi selection
+        assert!(session.select_element("elem-2", true));
+        assert_eq!(
+            session.selected_elements,
+            vec!["elem-1".to_string(), "elem-2".to_string()]
+        );
+
+        // Toggle multi selection
+        assert!(session.select_element("elem-1", true));
+        assert_eq!(session.selected_elements, vec!["elem-2".to_string()]);
+
+        // Clear selection
+        session.clear_selection();
+        assert!(session.selected_elements.is_empty());
+
+        // Marquee selection
+        session.marquee_select(50.0, 50.0, 400.0, 400.0, false);
+        assert_eq!(session.selected_elements.len(), 2);
+
+        session.marquee_select(50.0, 50.0, 100.0, 100.0, false);
+        assert!(session.selected_elements.is_empty()); // None fully contained
+    }
+
+    #[test]
+    fn test_snap_calculation() {
+        let reference_bounds = vec![
+            (100.0, 100.0, 100.0, 50.0), // center is 150, 125
+        ];
+
+        // Snap left-to-left
+        let snap = calculate_smart_snapping((98.0, 200.0, 50.0, 50.0), &reference_bounds, 5.0);
+        assert_eq!(snap.snapped_x, 100.0);
+
+        // Snap center-to-center
+        let _snap2 = calculate_smart_snapping((248.0, 300.0, 50.0, 50.0), &reference_bounds, 5.0);
+        // reference right is 200. Moving element is 248. Right is 298. Center is 273. Not matching.
+        // Let's match center: ref center = 150. moving w = 50. so we want moving center = 150 => x = 125
+        let snap3 = calculate_smart_snapping((122.0, 300.0, 50.0, 50.0), &reference_bounds, 5.0);
+        assert_eq!(snap3.snapped_x, 125.0);
+        assert_eq!(snap3.guides.len(), 1);
+    }
+
+    #[test]
+    fn test_transform_operations_and_undo() {
+        let mut doc = PresentationDocument::new("deck", "Test Transform");
+        doc.active_slide_mut().unwrap().elements.push(SlideElement {
+            id: "elem-1".into(),
+            element_type: ElementType::BodyText,
+            content: "Text".into(),
+            x: 100.0,
+            y: 100.0,
+            width: 100.0,
+            height: 50.0,
+            rotation_deg: 0.0,
+            action: None,
+        });
+
+        let mut session = PresentationSession::new(doc);
+
+        // Transform
+        assert!(session.transform_element("elem-1", 150.0, 200.0, 120.0, 60.0));
+
+        let el = &session.document.active_slide().unwrap().elements[0];
+        assert_eq!(el.x, 150.0);
+        assert_eq!(el.y, 200.0);
+
+        // Undo
+        assert!(session.undo());
+        let el_undo = &session.document.active_slide().unwrap().elements[0];
+        assert_eq!(el_undo.x, 100.0);
+
+        // Redo
+        assert!(session.redo());
+        let el_redo = &session.document.active_slide().unwrap().elements[0];
+        assert_eq!(el_redo.x, 150.0);
+
+        // Rotate
+        assert!(session.set_element_rotation("elem-1", 45.0));
+        let el_rot = &session.document.active_slide().unwrap().elements[0];
+        assert_eq!(el_rot.rotation_deg, 45.0);
+        assert!(session.undo());
+        assert_eq!(
+            session.document.active_slide().unwrap().elements[0].rotation_deg,
+            0.0
+        );
+    }
+
+    #[test]
+    fn failed_or_noop_transform_does_not_create_history() {
+        let mut session = PresentationSession::new(PresentationDocument::new("deck", "History"));
+        assert!(!session.transform_element("missing", 1.0, 1.0, 10.0, 10.0));
+        assert!(!session.can_undo());
+        let element = session.document.active_slide().unwrap().elements[0].clone();
+        assert!(!session.transform_element(
+            &element.id,
+            element.x,
+            element.y,
+            element.width,
+            element.height,
+        ));
+        assert!(!session.can_undo());
+        assert!(!session.set_element_rotation(&element.id, 0.0));
+        assert!(!session.can_undo());
     }
 
     #[test]
@@ -2402,6 +2914,7 @@ mod tests {
             y: 281.25,
             width: 250.0,
             height: 100.0,
+            rotation_deg: 0.0,
             action: None,
         });
 
@@ -2429,6 +2942,22 @@ mod tests {
     }
 
     #[test]
+    fn transformed_elements_survive_save_reopen() {
+        let mut session = PresentationSession::new(PresentationDocument::new("deck", "Reopen"));
+        let id = session.document.slides[0].elements[0].id.clone();
+        assert!(session.transform_element(&id, 320.0, 180.0, 240.0, 90.0));
+        assert!(session.set_element_rotation(&id, -25.0));
+        let bytes = save_presentation_session(&session).expect("save");
+        let reopened = load_presentation_session(&bytes).expect("reopen");
+        let element = &reopened.document.slides[0].elements[0];
+        assert_eq!(
+            (element.x, element.y, element.width, element.height),
+            (320.0, 180.0, 240.0, 90.0)
+        );
+        assert_eq!(element.rotation_deg, 335.0);
+    }
+
+    #[test]
     fn history_capabilities_track_mutations() {
         let mut session = PresentationSession::new(PresentationDocument::new("deck", "Deck"));
         assert!(!session.can_undo());
@@ -2449,6 +2978,7 @@ mod tests {
             y: 100.0,
             width: 200.0,
             height: 50.0,
+            rotation_deg: 0.0,
             action: None,
         });
         slide.add_element(SlideElement {
@@ -2459,6 +2989,7 @@ mod tests {
             y: 200.0,
             width: 200.0,
             height: 50.0,
+            rotation_deg: 0.0,
             action: None,
         });
 
@@ -2494,6 +3025,7 @@ mod tests {
                 y,
                 width,
                 height,
+                rotation_deg: 0.0,
                 action: None,
             }
         };
@@ -2604,6 +3136,7 @@ mod tests {
             y: 100.0,
             width: 200.0,
             height: 100.0,
+            rotation_deg: 0.0,
             action: None,
         });
         slide.add_element(SlideElement {
@@ -2614,6 +3147,7 @@ mod tests {
             y: 150.0,
             width: 150.0,
             height: 100.0,
+            rotation_deg: 0.0,
             action: None,
         });
 
@@ -3083,6 +3617,7 @@ Hiring Plan
             y: 500.0,
             width: 300.0,
             height: 150.0,
+            rotation_deg: 0.0,
             action: None,
         };
         fit_element_to_box(&mut elem, 0.0, 0.0, 600.0, 600.0).expect("fit failed");
@@ -3102,6 +3637,7 @@ Hiring Plan
             y: -100.0,
             width: 10.0,
             height: 10.0,
+            rotation_deg: 0.0,
             action: None,
         };
         let mut slide = Slide::new("slide-grid", "Grid", "blank");
@@ -3254,6 +3790,7 @@ Hiring Plan
             y: 0.0,
             width: 200.0,
             height: 40.0,
+            rotation_deg: 0.0,
             action: None,
         };
         let shape = |id: &str, ty: ElementType, content: &str| SlideElement {
@@ -3264,6 +3801,7 @@ Hiring Plan
             y: 10.0,
             width: 100.0,
             height: 100.0,
+            rotation_deg: 0.0,
             action: None,
         };
 
@@ -3338,6 +3876,7 @@ Hiring Plan
             y: 60.0,
             width: 320.0,
             height: 80.0,
+            rotation_deg: 0.0,
             action: None,
         });
         doc.slides[1].add_element(SlideElement {
@@ -3348,6 +3887,7 @@ Hiring Plan
             y: 20.0,
             width: 300.0,
             height: 120.0,
+            rotation_deg: 0.0,
             action: None,
         });
         doc.slides[1].add_element(SlideElement {
@@ -3358,6 +3898,7 @@ Hiring Plan
             y: 20.0,
             width: 120.0,
             height: 90.0,
+            rotation_deg: 0.0,
             action: None,
         });
         doc.slides[1].speaker_notes = "Walk through the chart slowly.".into();
