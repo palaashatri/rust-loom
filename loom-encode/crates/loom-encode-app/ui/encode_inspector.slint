@@ -1,4 +1,4 @@
-import { InspectorSurface, PaneTabs, Field, SegmentedControl } from "components.slint";
+import { InspectorSurface, Field, SegmentedControl, Toggle } from "components.slint";
 import { ToolbarButton } from "toolkit.slint";
 import { Theme } from "theme.slint";
 
@@ -8,16 +8,37 @@ import { Theme } from "theme.slint";
 export component EncodeInspector inherits InspectorSurface {
     in property <bool> compact-layout: false;
     in property <bool> running: false;
+    in property <bool> can-retry: false;
     in-out property <int> inspector-tab: 0;
     in-out property <string> selected-source: "";
     in-out property <string> selected-output: "";
     in property <string> selected-preset: "Web 1080p";
+    in property <string> selected-video: "";
+    in property <string> selected-audio: "";
+    in property <string> selected-audio-codec: "aac";
+    in property <string> selected-subtitles: "";
+    in property <int> selected-subtitle-mode: 0;
+    in property <string> selected-metadata: "";
+    in-out property <bool> metadata-copy: true;
+    in property <string> selected-destination: "";
+    in property <int> collision-policy: 0;
+    in property <string> selected-status: "";
+    in property <string> report-summary: "Conformance pending";
     in property <string> selected-job-details: "";
     in property <string> status-left: "Ready";
 
     callback preset-changed(string);
     callback source-changed(string);
     callback output-changed(string);
+    callback choose-source;
+    callback choose-output;
+    callback choose-subtitles;
+    callback source-dropped(data-transfer);
+    callback output-dropped(data-transfer);
+    callback audio-codec-changed(string);
+    callback subtitle-mode-changed(int);
+    callback metadata-copy-changed(bool);
+    callback collision-policy-changed(int);
     callback retry-job;
 
     title: "Job Inspector";
@@ -26,9 +47,29 @@ export component EncodeInspector inherits InspectorSurface {
     VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: 0px;
-        PaneTabs {
-            items: ["Source", "Preset", "Activity"];
-            current <=> root.inspector-tab;
+        // Seven inspector contexts do not fit in the 300px content column as
+        // one horizontal strip. Keep every context visible and keyboard/
+        // accessibility reachable instead of letting the last tabs paint
+        // outside the inspector bounds.
+        VerticalLayout {
+            spacing: Theme.tokens.space.xs;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                ToolbarButton { text: "Source"; checked: root.inspector-tab == 0; horizontal-stretch: 1; clicked => { root.inspector-tab = 0; } }
+                ToolbarButton { text: "Video"; checked: root.inspector-tab == 1; horizontal-stretch: 1; clicked => { root.inspector-tab = 1; } }
+                ToolbarButton { text: "Audio"; checked: root.inspector-tab == 2; horizontal-stretch: 1; clicked => { root.inspector-tab = 2; } }
+            }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                ToolbarButton { text: "Subtitles"; checked: root.inspector-tab == 3; horizontal-stretch: 1; clicked => { root.inspector-tab = 3; } }
+                ToolbarButton { text: "Metadata"; checked: root.inspector-tab == 4; horizontal-stretch: 1; clicked => { root.inspector-tab = 4; } }
+                ToolbarButton { text: "Destination"; checked: root.inspector-tab == 5; horizontal-stretch: 1; clicked => { root.inspector-tab = 5; } }
+            }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                ToolbarButton { text: "Activity"; checked: root.inspector-tab == 6; horizontal-stretch: 1; clicked => { root.inspector-tab = 6; } }
+                Rectangle { horizontal-stretch: 2; }
+            }
         }
         Rectangle { height: 1px; background: Theme.palette().border; }
         VerticalLayout {
@@ -48,22 +89,102 @@ export component EncodeInspector inherits InspectorSurface {
                 Field {
                     label: "Input path";
                     placeholder: "Choose a source file…";
+                    enabled: !root.running;
                     value <=> root.selected-source;
                     edited(value) => { root.source-changed(value); }
+                }
+                ToolbarButton {
+                    icon: "folder-open";
+                    text: "Choose source…";
+                    label: "Choose source file";
+                    horizontal-stretch: 1;
+                    enabled: !root.running;
+                    clicked => { root.choose-source(); }
+                }
+                drop-source := Rectangle {
+                    min-height: 44px;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    background: drop-source-area.has-drag ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                    accessible-role: button;
+                    accessible-label: "Drop source file here";
+                    accessible-description: "Drop a media file from the file manager to replace the selected job source, or use Choose source file";
+                    Text {
+                        text: "Drop source file here";
+                        width: parent.width;
+                        height: parent.height;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    drop-source-area := DropArea {
+                        enabled: !root.running;
+                        can-drop(event) => { DragAction.copy }
+                        dropped(event) => {
+                            root.source-dropped(event.data);
+                            event.proposed-action
+                        }
+                    }
+                    TouchArea {
+                        enabled: !root.running;
+                        clicked => { root.choose-source(); }
+                    }
                 }
                 Text { text: "Output path"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
                 Field {
                     label: "Output path";
                     placeholder: "Choose an output file…";
+                    enabled: !root.running;
                     value <=> root.selected-output;
                     edited(value) => { root.output-changed(value); }
+                }
+                ToolbarButton {
+                    icon: "folder-open";
+                    text: "Choose destination…";
+                    label: "Choose output file";
+                    horizontal-stretch: 1;
+                    enabled: !root.running;
+                    clicked => { root.choose-output(); }
+                }
+                drop-output := Rectangle {
+                    min-height: 44px;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    background: drop-output-area.has-drag ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                    accessible-role: button;
+                    accessible-label: "Drop destination file here";
+                    accessible-description: "Drop a destination path from the file manager to replace the selected job destination, or use Choose destination";
+                    Text {
+                        text: "Drop destination file here";
+                        width: parent.width;
+                        height: parent.height;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    drop-output-area := DropArea {
+                        enabled: !root.running;
+                        can-drop(event) => { DragAction.copy }
+                        dropped(event) => {
+                            root.output-dropped(event.data);
+                            event.proposed-action
+                        }
+                    }
+                    TouchArea {
+                        enabled: !root.running;
+                        clicked => { root.choose-output(); }
+                    }
                 }
             }
 
             if root.inspector-tab == 1 : VerticalLayout {
                 spacing: Theme.tokens.space.sm;
                 Text {
-                    text: "DELIVERY PRESET";
+                    text: "VIDEO";
                     font-size: Theme.tokens.typography.caption;
                     font-weight: 700;
                     color: Theme.palette().ink-secondary;
@@ -82,15 +203,81 @@ export component EncodeInspector inherits InspectorSurface {
                         clicked => { root.preset-changed(preset); }
                     }
                 }
-                Text {
-                    text: root.selected-job-details;
+                    Text {
+                        text: root.selected-job-details;
                     wrap: word-wrap;
                     font-size: Theme.tokens.typography.body;
                     color: Theme.palette().ink-secondary;
-                }
+                    }
+                    Text { text: root.selected-video; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; }
             }
 
             if root.inspector-tab == 2 : VerticalLayout {
+                spacing: Theme.tokens.space.sm;
+                Text { text: "AUDIO"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                Text { text: root.selected-audio; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                SegmentedControl {
+                    label: "Audio codec";
+                    items: ["AAC", "Opus", "MP3", "FLAC"];
+                    current: root.selected-audio-codec == "opus" ? 1 : root.selected-audio-codec == "mp3" ? 2 : root.selected-audio-codec == "flac" ? 3 : 0;
+                    enabled: !root.running;
+                    selected(index) => {
+                        root.audio-codec-changed(index == 1 ? "opus" : index == 2 ? "mp3" : index == 3 ? "flac" : "aac");
+                    }
+                }
+                Text { text: "Codec changes are persisted with this job and applied to the next encode."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+            }
+
+            if root.inspector-tab == 3 : VerticalLayout {
+                spacing: Theme.tokens.space.sm;
+                Text { text: "SUBTITLES"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                Text { text: root.selected-subtitles; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                SegmentedControl {
+                    label: "Subtitle mode";
+                    items: ["None", "Burn in", "Passthrough", "Convert SRT"];
+                    current: root.selected-subtitle-mode;
+                    enabled: !root.running;
+                    selected(index) => { root.subtitle-mode-changed(index); }
+                }
+                ToolbarButton {
+                    icon: "folder-open";
+                    text: "Choose subtitle file…";
+                    label: "Choose subtitle file";
+                    horizontal-stretch: 1;
+                    enabled: !root.running;
+                    clicked => { root.choose-subtitles(); }
+                }
+                Text { text: "Burn-in and conversion are only applied when the selected mode has a source subtitle path."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+            }
+
+            if root.inspector-tab == 4 : VerticalLayout {
+                spacing: Theme.tokens.space.sm;
+                Text { text: "METADATA"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                Text { text: root.selected-metadata; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                Toggle {
+                    label: "Copy source metadata";
+                    checked <=> root.metadata-copy;
+                    enabled: !root.running;
+                    toggled(value) => { root.metadata-copy-changed(value); }
+                }
+                Text { text: "Metadata is copied by the active encode plan when supported by the container."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+            }
+
+            if root.inspector-tab == 5 : VerticalLayout {
+                spacing: Theme.tokens.space.sm;
+                Text { text: "DESTINATION"; font-size: Theme.tokens.typography.caption; font-weight: 700; color: Theme.palette().ink-secondary; }
+                Text { text: root.selected-destination; wrap: word-wrap; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; }
+                SegmentedControl {
+                    label: "Collision policy";
+                    items: ["Fail", "Rename", "Overwrite"];
+                    current: root.collision-policy;
+                    enabled: !root.running;
+                    selected(index) => { root.collision-policy-changed(index); }
+                }
+                Text { text: "Output commits atomically; failed or cancelled encodes preserve an existing destination."; wrap: word-wrap; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+            }
+
+            if root.inspector-tab == 6 : VerticalLayout {
                 spacing: Theme.tokens.space.sm;
                 Text {
                     text: "QUEUE ACTIVITY";
@@ -99,16 +286,22 @@ export component EncodeInspector inherits InspectorSurface {
                     color: Theme.palette().ink-secondary;
                 }
                 Text {
-                    text: root.status-left;
+                    text: root.selected-status != "" ? root.selected-status : root.status-left;
                     wrap: word-wrap;
                     font-size: Theme.tokens.typography.body;
                     color: Theme.palette().ink;
+                }
+                Text {
+                    text: root.report-summary;
+                    wrap: word-wrap;
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink-secondary;
                 }
                 ToolbarButton {
                     icon: "redo";
                     text: "Retry selected job";
                     horizontal-stretch: 1;
-                    enabled: !root.running;
+                    enabled: !root.running && root.can-retry;
                     clicked => { root.retry-job(); }
                 }
                 Text {

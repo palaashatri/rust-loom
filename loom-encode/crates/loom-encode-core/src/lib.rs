@@ -5,16 +5,141 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum JobStatus {
     Queued,
-    Encoding { progress: f32 },
+    Encoding {
+        progress: f32,
+    },
+    /// The user cancelled this job before it completed.  Cancellation is
+    /// intentionally distinct from a process failure so the UI can offer a
+    /// retry without presenting a failed encode as successful output.
+    Cancelled,
+    /// A failed or cancelled job that has been explicitly re-queued.  The
+    /// worker treats this as runnable while the UI can still show retry state.
+    Retrying {
+        attempt: u32,
+    },
     Complete,
     Failed(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Typed source-track selection for a queue job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct EncodeSourceSettings {
+    pub video_track: Option<u32>,
+    pub audio_track: Option<u32>,
+    pub subtitle_track: Option<u32>,
+}
+
+/// Typed video settings projected into the job inspector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodeVideoSettings {
+    pub codec: String,
+    pub bitrate_kbps: u32,
+}
+
+impl Default for EncodeVideoSettings {
+    fn default() -> Self {
+        Self {
+            codec: "h264".into(),
+            bitrate_kbps: 8_000,
+        }
+    }
+}
+
+/// Typed audio settings projected into the job inspector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodeAudioSettings {
+    pub codec: String,
+    pub bitrate_kbps: u32,
+}
+
+impl Default for EncodeAudioSettings {
+    fn default() -> Self {
+        Self {
+            codec: "aac".into(),
+            bitrate_kbps: 192,
+        }
+    }
+}
+
+/// Typed subtitle settings.  A path is optional when subtitles are disabled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct EncodeSubtitleSettings {
+    pub mode: SubtitleMode,
+    pub path: Option<String>,
+}
+
+/// Typed metadata policy projected into the inspector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodeMetadataSettings {
+    pub copy: bool,
+}
+
+impl Default for EncodeMetadataSettings {
+    fn default() -> Self {
+        Self { copy: true }
+    }
+}
+
+/// Destination collision behavior for queue outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DestinationCollisionPolicy {
+    /// Reject an output if it already exists or collides with another job.
+    #[default]
+    Fail,
+    /// Append ` - 2`, ` - 3`, ... before the extension.
+    Rename,
+    /// Replace an existing output only after a successful temporary encode.
+    Overwrite,
+}
+
+/// Typed destination settings projected into the inspector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodeDestinationSettings {
+    pub collision_policy: DestinationCollisionPolicy,
+}
+
+impl Default for EncodeDestinationSettings {
+    fn default() -> Self {
+        Self {
+            collision_policy: DestinationCollisionPolicy::Fail,
+        }
+    }
+}
+
+// Legacy queue packages predate typed inspector projections. Keep the public
+// `Default` implementations useful for new callers while using empty
+// migration sentinels when an entire projection is absent from persisted JSON.
+fn missing_video_settings() -> EncodeVideoSettings {
+    EncodeVideoSettings {
+        codec: String::new(),
+        bitrate_kbps: 0,
+    }
+}
+
+fn missing_audio_settings() -> EncodeAudioSettings {
+    EncodeAudioSettings {
+        codec: String::new(),
+        bitrate_kbps: 0,
+    }
+}
+
+// Short aliases keep the domain vocabulary readable for callers that use the
+// inspector sections directly.
+pub type SourceSettings = EncodeSourceSettings;
+pub type VideoSettings = EncodeVideoSettings;
+pub type AudioSettings = EncodeAudioSettings;
+pub type SubtitleSettings = EncodeSubtitleSettings;
+pub type MetadataSettings = EncodeMetadataSettings;
+pub type DestinationSettings = EncodeDestinationSettings;
+pub type CollisionPolicy = DestinationCollisionPolicy;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncodePreset {
     pub name: String,
     pub container: String,
@@ -85,12 +210,33 @@ impl EncodePreset {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EncodeJob {
     pub id: String,
     pub source_file: String,
     pub output_file: String,
     pub preset: EncodePreset,
+    /// Source track mapping and inspector options.
+    #[serde(default)]
+    pub source: EncodeSourceSettings,
+    /// Video codec and bitrate values shown in the Video inspector section.
+    #[serde(default = "missing_video_settings")]
+    pub video: EncodeVideoSettings,
+    /// Audio codec and bitrate values shown in the Audio inspector section.
+    #[serde(default = "missing_audio_settings")]
+    pub audio: EncodeAudioSettings,
+    /// Subtitle mode and optional sidecar path.
+    #[serde(default)]
+    pub subtitles: EncodeSubtitleSettings,
+    /// Metadata copy policy.
+    #[serde(default)]
+    pub metadata: EncodeMetadataSettings,
+    /// Output collision policy.
+    #[serde(default)]
+    pub destination: EncodeDestinationSettings,
+    /// Number of explicit retry requests for this job.
+    #[serde(default)]
+    pub retry_count: u32,
     pub status: JobStatus,
 }
 
@@ -105,19 +251,164 @@ impl EncodeJob {
             id: id.into(),
             source_file: source.into(),
             output_file: output.into(),
+            video: EncodeVideoSettings {
+                codec: preset.video_codec.clone(),
+                bitrate_kbps: preset.bitrate_kbps,
+            },
+            audio: EncodeAudioSettings {
+                codec: preset.audio_codec.clone(),
+                bitrate_kbps: if preset.video_codec.eq_ignore_ascii_case("none") {
+                    preset.bitrate_kbps
+                } else {
+                    192
+                },
+            },
             preset,
+            source: EncodeSourceSettings::default(),
+            subtitles: EncodeSubtitleSettings::default(),
+            metadata: EncodeMetadataSettings::default(),
+            destination: EncodeDestinationSettings::default(),
+            retry_count: 0,
             status: JobStatus::Queued,
         }
     }
+
+    /// Keeps typed inspector fields aligned when loading an older queue that
+    /// only stored `source_file`, `output_file`, and `preset`.
+    pub fn normalize_typed_fields(&mut self) {
+        if self.video.codec.trim().is_empty() {
+            self.video.codec = self.preset.video_codec.clone();
+        }
+        if self.video.bitrate_kbps == 0 {
+            self.video.bitrate_kbps = self.preset.bitrate_kbps;
+        }
+        if self.audio.codec.trim().is_empty() {
+            self.audio.codec = self.preset.audio_codec.clone();
+        }
+        if self.audio.bitrate_kbps == 0 && !self.audio.codec.eq_ignore_ascii_case("none") {
+            self.audio.bitrate_kbps = 192;
+        }
+    }
+
+    /// Updates the source path through the domain model.
+    pub fn set_source_file(&mut self, path: impl Into<String>) {
+        self.source_file = path.into();
+        self.status = JobStatus::Queued;
+    }
+
+    /// Selects an optional source video track. `None` restores automatic
+    /// stream selection.
+    pub fn set_video_track(&mut self, track: Option<u32>) {
+        self.source.video_track = track;
+        self.status = JobStatus::Queued;
+    }
+
+    /// Selects an optional source audio track. `None` restores automatic
+    /// stream selection.
+    pub fn set_audio_track(&mut self, track: Option<u32>) {
+        self.source.audio_track = track;
+        self.status = JobStatus::Queued;
+    }
+
+    /// Selects an optional source subtitle track. `None` restores automatic
+    /// stream selection.
+    pub fn set_subtitle_track(&mut self, track: Option<u32>) {
+        self.source.subtitle_track = track;
+        self.status = JobStatus::Queued;
+    }
+
+    /// Updates the destination path through the domain model.
+    pub fn set_output_file(&mut self, path: impl Into<String>) {
+        self.output_file = path.into();
+        self.status = JobStatus::Queued;
+    }
+
+    /// Updates the preset and the typed inspector projections together.
+    pub fn set_preset(&mut self, preset: EncodePreset) {
+        self.video.codec = preset.video_codec.clone();
+        self.video.bitrate_kbps = preset.bitrate_kbps;
+        self.audio.codec = preset.audio_codec.clone();
+        self.audio.bitrate_kbps = if preset.video_codec.eq_ignore_ascii_case("none") {
+            preset.bitrate_kbps
+        } else {
+            192
+        };
+        self.preset = preset;
+        self.status = JobStatus::Queued;
+    }
+
+    /// Updates the audio codec while keeping the preset and inspector fields
+    /// consistent.
+    pub fn set_audio_codec(&mut self, codec: impl Into<String>) -> Result<(), String> {
+        let codec = codec.into();
+        let normalized = match codec.trim().to_ascii_lowercase().as_str() {
+            "aac" => "aac",
+            "opus" | "libopus" => "opus",
+            "mp3" | "libmp3lame" => "mp3",
+            "flac" => "flac",
+            "pcm_s16le" => "pcm_s16le",
+            "pcm_s24le" => "pcm_s24le",
+            "copy" => "copy",
+            other => return Err(format!("unsupported audio codec {other:?}")),
+        };
+        self.audio.codec = normalized.into();
+        self.preset.audio_codec = normalized.into();
+        self.status = JobStatus::Queued;
+        Ok(())
+    }
+
+    /// Selects the subtitle strategy for this job.
+    pub fn set_subtitle_mode(&mut self, mode: SubtitleMode) {
+        self.subtitles.mode = mode;
+        if mode == SubtitleMode::None {
+            self.subtitles.path = None;
+        }
+        self.status = JobStatus::Queued;
+    }
+
+    /// Enables or disables source metadata copying.
+    pub fn set_metadata_copy(&mut self, copy: bool) {
+        self.metadata.copy = copy;
+        self.status = JobStatus::Queued;
+    }
+
+    /// Sets the destination collision policy.
+    pub fn set_collision_policy(&mut self, policy: DestinationCollisionPolicy) {
+        self.destination.collision_policy = policy;
+        self.status = JobStatus::Queued;
+    }
+
+    /// Returns true when a job can be retried without discarding a successful
+    /// output.
+    pub fn can_retry(&self) -> bool {
+        matches!(self.status, JobStatus::Failed(_) | JobStatus::Cancelled)
+    }
+
+    /// Marks this job as explicitly retried.  The queue worker treats the
+    /// transient `Retrying` state as runnable.
+    pub fn mark_retry(&mut self) -> bool {
+        if !self.can_retry() {
+            return false;
+        }
+        self.retry_count = self.retry_count.saturating_add(1);
+        self.status = JobStatus::Retrying {
+            attempt: self.retry_count,
+        };
+        true
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EncodeQueue {
     pub id: String,
     pub name: String,
     pub jobs: Vec<EncodeJob>,
     #[serde(default)]
     pub active_job_index: usize,
+    /// Runtime multi-selection.  Selection is intentionally not persisted in
+    /// the package because it is view state, not queue content.
+    #[serde(skip)]
+    pub selected_job_indices: Vec<usize>,
 }
 
 impl EncodeQueue {
@@ -127,6 +418,7 @@ impl EncodeQueue {
             name: name.into(),
             jobs: Vec::new(),
             active_job_index: 0,
+            selected_job_indices: Vec::new(),
         };
         q.jobs.push(EncodeJob::new(
             "job-1",
@@ -134,16 +426,21 @@ impl EncodeQueue {
             "Master_Cut_01_Web.mp4",
             EncodePreset::h264_1080p(),
         ));
+        q.selected_job_indices.push(0);
         q
     }
 
     pub fn add_job(&mut self, job: EncodeJob) {
         self.jobs.push(job);
+        if self.selected_job_indices.is_empty() {
+            self.selected_job_indices.push(self.jobs.len() - 1);
+        }
     }
 
     pub fn select_job(&mut self, index: usize) -> bool {
         if index < self.jobs.len() {
             self.active_job_index = index;
+            self.selected_job_indices = vec![index];
             true
         } else {
             false
@@ -153,14 +450,30 @@ impl EncodeQueue {
     pub fn pending_count(&self) -> usize {
         self.jobs
             .iter()
-            .filter(|j| matches!(j.status, JobStatus::Queued))
+            .filter(|j| matches!(j.status, JobStatus::Queued | JobStatus::Retrying { .. }))
             .count()
     }
 
     pub fn remove_job(&mut self, index: usize) -> Option<EncodeJob> {
         if index < self.jobs.len() {
             let job = self.jobs.remove(index);
+            self.selected_job_indices = self
+                .selected_job_indices
+                .iter()
+                .filter_map(|selected| {
+                    if *selected == index {
+                        None
+                    } else if *selected > index {
+                        Some(*selected - 1)
+                    } else {
+                        Some(*selected)
+                    }
+                })
+                .collect();
             self.active_job_index = self.active_job_index.min(self.jobs.len().saturating_sub(1));
+            if self.selected_job_indices.is_empty() && !self.jobs.is_empty() {
+                self.selected_job_indices.push(self.active_job_index);
+            }
             Some(job)
         } else {
             None
@@ -173,26 +486,124 @@ impl EncodeQueue {
         }
         let job = self.jobs.remove(from);
         self.jobs.insert(to, job);
+        self.selected_job_indices = self
+            .selected_job_indices
+            .iter()
+            .map(|selected| {
+                if *selected == from {
+                    to
+                } else if from < to && *selected > from && *selected <= to {
+                    *selected - 1
+                } else if to < from && *selected >= to && *selected < from {
+                    *selected + 1
+                } else {
+                    *selected
+                }
+            })
+            .collect();
         self.active_job_index = to;
+        true
+    }
+
+    /// Selects a sorted, de-duplicated set of queue jobs for batch actions.
+    pub fn select_jobs(&mut self, indices: impl IntoIterator<Item = usize>) -> bool {
+        let mut selected = indices
+            .into_iter()
+            .filter(|index| *index < self.jobs.len())
+            .collect::<Vec<_>>();
+        selected.sort_unstable();
+        selected.dedup();
+        if selected.is_empty() {
+            return false;
+        }
+        self.active_job_index = selected[0];
+        self.selected_job_indices = selected;
+        true
+    }
+
+    /// Moves the currently selected jobs as one stable block.  `to` is the
+    /// destination index before removal; invalid or no-op requests are rejected.
+    pub fn move_selected_jobs(&mut self, to: usize) -> bool {
+        if self.selected_job_indices.is_empty() || to >= self.jobs.len() {
+            return false;
+        }
+        let selected = self.selected_job_indices.clone();
+        if selected.contains(&to) {
+            return false;
+        }
+        let first = selected[0];
+        let mut moving = Vec::with_capacity(selected.len());
+        let mut remaining = Vec::with_capacity(self.jobs.len());
+        for (index, job) in self.jobs.drain(..).enumerate() {
+            if selected.contains(&index) {
+                moving.push(job);
+            } else {
+                remaining.push(job);
+            }
+        }
+        let insertion = if to > first {
+            to.saturating_sub(selected.iter().filter(|index| **index < to).count())
+        } else {
+            to
+        };
+        let insertion = insertion.min(remaining.len());
+        remaining.splice(insertion..insertion, moving);
+        self.jobs = remaining;
+        self.selected_job_indices = (insertion..insertion + selected.len()).collect();
+        self.active_job_index = insertion;
         true
     }
 
     pub fn retry_failed_jobs(&mut self) -> usize {
         let mut retried = 0;
         for job in &mut self.jobs {
-            if matches!(job.status, JobStatus::Failed(_)) {
-                job.status = JobStatus::Queued;
+            if job.mark_retry() {
                 retried += 1;
             }
         }
         retried
     }
 
+    /// Explicitly retries one failed or cancelled job.
+    pub fn retry_job(&mut self, index: usize) -> bool {
+        let retried = self
+            .jobs
+            .get_mut(index)
+            .map(|job| job.mark_retry())
+            .unwrap_or(false);
+        if !retried {
+            return false;
+        }
+        self.select_job(index);
+        true
+    }
+
     pub fn clear_completed_jobs(&mut self) -> usize {
         let before = self.jobs.len();
-        self.jobs
-            .retain(|j| !matches!(j.status, JobStatus::Complete));
-        self.active_job_index = self.active_job_index.min(self.jobs.len().saturating_sub(1));
+        let selected = self.selected_job_indices.clone();
+        let old_active = self.active_job_index;
+        let mut next_selected = Vec::new();
+        let mut next_active = None;
+        let mut next_jobs = Vec::with_capacity(before);
+        for (old_index, job) in self.jobs.drain(..).enumerate() {
+            if matches!(job.status, JobStatus::Complete) {
+                continue;
+            }
+            if selected.contains(&old_index) {
+                next_selected.push(next_jobs.len());
+            }
+            if old_index == old_active {
+                next_active = Some(next_jobs.len());
+            }
+            next_jobs.push(job);
+        }
+        self.jobs = next_jobs;
+        self.selected_job_indices = next_selected;
+        self.active_job_index =
+            next_active.unwrap_or_else(|| old_active.min(self.jobs.len().saturating_sub(1)));
+        if self.selected_job_indices.is_empty() && !self.jobs.is_empty() {
+            self.selected_job_indices.push(self.active_job_index);
+        }
         before - self.jobs.len()
     }
 
@@ -213,6 +624,159 @@ impl EncodeQueue {
             );
             self.jobs
                 .push(EncodeJob::new(id, source.clone(), out_file, preset.clone()));
+        }
+    }
+
+    /// Resolve every output according to each job's destination policy.  The
+    /// operation is deterministic and mutates paths only for `Rename` jobs;
+    /// `Fail` rejects both existing files and duplicate paths.
+    pub fn apply_destination_policies(&mut self) -> Result<(), String> {
+        let outputs = self
+            .jobs
+            .iter()
+            .map(|job| job.output_file.clone())
+            .collect::<Vec<_>>();
+        let mut claimed = std::collections::HashSet::new();
+        for (index, job) in self.jobs.iter_mut().enumerate() {
+            let output = outputs[index].clone();
+            if output.trim().is_empty() {
+                return Err(format!("output path is empty for job {}", job.id));
+            }
+            // A completed job already owns its destination. Do not treat its
+            // durable artifact as a fresh collision when resuming a queue,
+            // but reserve the path so a later `Fail` job cannot overwrite it.
+            if matches!(job.status, JobStatus::Complete) {
+                claimed.insert(output.to_lowercase());
+                continue;
+            }
+            match job.destination.collision_policy {
+                DestinationCollisionPolicy::Overwrite => {
+                    claimed.insert(output.to_lowercase());
+                }
+                DestinationCollisionPolicy::Fail => {
+                    let key = output.to_lowercase();
+                    if Path::new(&output).exists() || !claimed.insert(key) {
+                        return Err(format!("output collision for job {}: {}", job.id, output));
+                    }
+                }
+                DestinationCollisionPolicy::Rename => {
+                    let mut candidate = output.clone();
+                    let mut resolved = candidate.clone();
+                    let mut attempt = 1;
+                    while Path::new(&resolved).exists()
+                        || claimed.contains(&resolved.to_lowercase())
+                    {
+                        attempt += 1;
+                        let path = Path::new(&candidate);
+                        let stem = path
+                            .file_stem()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or(&candidate);
+                        let extension = path
+                            .extension()
+                            .and_then(|name| name.to_str())
+                            .filter(|value| !value.is_empty());
+                        let file_name = match extension {
+                            Some(extension) => format!("{stem} - {attempt}.{extension}"),
+                            None => format!("{stem} - {attempt}"),
+                        };
+                        resolved = path
+                            .parent()
+                            .filter(|parent| !parent.as_os_str().is_empty())
+                            .map(|parent| parent.join(&file_name))
+                            .unwrap_or_else(|| PathBuf::from(file_name))
+                            .to_string_lossy()
+                            .into_owned();
+                    }
+                    candidate = resolved;
+                    claimed.insert(candidate.to_lowercase());
+                    job.output_file = candidate;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A per-job conformance result emitted after queue execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobConformanceReport {
+    pub job_id: String,
+    pub output_file: String,
+    pub status: String,
+    pub passed: bool,
+    pub checks: Vec<String>,
+}
+
+/// Final queue conformance report.  The report is deliberately serializable
+/// so journeys and later UI consumers can retain the exact result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodeConformanceReport {
+    pub queue_id: String,
+    pub passed: bool,
+    pub jobs: Vec<JobConformanceReport>,
+}
+
+pub type QueueConformanceReport = EncodeConformanceReport;
+
+impl EncodeQueue {
+    /// Produces a deterministic report from durable job state and output
+    /// existence.  Media-specific probes remain an explicit future check; a
+    /// completed job with no output is never reported as passing.
+    pub fn conformance_report(&self) -> EncodeConformanceReport {
+        let jobs = self
+            .jobs
+            .iter()
+            .map(|job| {
+                let output_exists = Path::new(&job.output_file).is_file();
+                let (status, passed, checks) = match &job.status {
+                    JobStatus::Complete if output_exists => (
+                        "complete".to_string(),
+                        true,
+                        vec!["output exists".to_string()],
+                    ),
+                    JobStatus::Complete => (
+                        "failed".to_string(),
+                        false,
+                        vec!["completed job has no output artifact".to_string()],
+                    ),
+                    JobStatus::Cancelled => (
+                        "cancelled".to_string(),
+                        false,
+                        vec!["cancelled jobs are not conforming".to_string()],
+                    ),
+                    JobStatus::Failed(reason) => {
+                        ("failed".to_string(), false, vec![reason.clone()])
+                    }
+                    JobStatus::Retrying { .. } => (
+                        "retrying".to_string(),
+                        false,
+                        vec!["retry is pending".to_string()],
+                    ),
+                    JobStatus::Encoding { .. } => (
+                        "running".to_string(),
+                        false,
+                        vec!["encode is still running".to_string()],
+                    ),
+                    JobStatus::Queued => (
+                        "queued".to_string(),
+                        false,
+                        vec!["encode has not run".to_string()],
+                    ),
+                };
+                JobConformanceReport {
+                    job_id: job.id.clone(),
+                    output_file: job.output_file.clone(),
+                    status,
+                    passed,
+                    checks,
+                }
+            })
+            .collect::<Vec<_>>();
+        EncodeConformanceReport {
+            queue_id: self.id.clone(),
+            passed: !jobs.is_empty() && jobs.iter().all(|job| job.passed),
+            jobs,
         }
     }
 }
@@ -932,7 +1496,12 @@ impl AudioDownmixMatrix {
 }
 
 pub fn save_encode_queue(q: &EncodeQueue) -> Result<Vec<u8>, String> {
-    let json = serde_json::to_vec_pretty(q).map_err(|e| e.to_string())?;
+    let mut persisted = q.clone();
+    persisted.selected_job_indices.clear();
+    for job in &mut persisted.jobs {
+        job.normalize_typed_fields();
+    }
+    let json = serde_json::to_vec_pretty(&persisted).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
     arch.add("content/queue.json", json.clone())
         .map_err(|e| e.to_string())?;
@@ -972,7 +1541,25 @@ pub fn load_encode_queue(bytes: &[u8]) -> Result<EncodeQueue, String> {
     let content = arch
         .get("content/queue.json")
         .ok_or_else(|| "missing queue.json".to_string())?;
-    serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
+    let mut queue: EncodeQueue =
+        serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))?;
+    if queue.jobs.is_empty() {
+        queue.active_job_index = 0;
+        queue.selected_job_indices.clear();
+    } else {
+        queue.active_job_index = queue.active_job_index.min(queue.jobs.len() - 1);
+        queue.selected_job_indices = vec![queue.active_job_index];
+    }
+    for job in &mut queue.jobs {
+        job.normalize_typed_fields();
+        // Queues written before the explicit cancellation state used a
+        // failure string.  Normalize that legacy spelling on load.
+        if matches!(job.status, JobStatus::Failed(ref reason) if reason.eq_ignore_ascii_case("cancelled"))
+        {
+            job.status = JobStatus::Cancelled;
+        }
+    }
+    Ok(queue)
 }
 
 /// External transcoder backend discovered on the local machine.
@@ -1094,6 +1681,7 @@ impl EncodePreset {
     /// Resolves the user-facing video codec into an FFmpeg encoder name.
     pub fn ffmpeg_video_encoder(&self) -> Result<&'static str, EncodeError> {
         match self.video_codec.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok("none"),
             "h264" | "avc" | "libx264" => Ok("libx264"),
             "h265" | "hevc" | "libx265" => Ok("libx265"),
             "vp9" | "libvpx-vp9" => Ok("libvpx-vp9"),
@@ -1124,6 +1712,18 @@ impl EncodePreset {
 }
 
 impl EncodeJob {
+    /// Returns the preset projection used for planning. The persisted preset
+    /// remains the named delivery profile while the typed inspector values are
+    /// authoritative for the next invocation.
+    pub fn effective_preset(&self) -> EncodePreset {
+        EncodePreset {
+            video_codec: self.video.codec.clone(),
+            audio_codec: self.audio.codec.clone(),
+            bitrate_kbps: self.video.bitrate_kbps,
+            ..self.preset.clone()
+        }
+    }
+
     /// Validates paths and preset values.
     pub fn validate(&self) -> Result<(), EncodeError> {
         if self.id.trim().is_empty() {
@@ -1139,13 +1739,17 @@ impl EncodeJob {
                 "source and output paths must differ".into(),
             ));
         }
-        if self.preset.bitrate_kbps == 0 && self.preset.video_codec != "copy" {
+        if self.video.bitrate_kbps == 0
+            && !self.video.codec.eq_ignore_ascii_case("copy")
+            && !self.video.codec.eq_ignore_ascii_case("none")
+        {
             return Err(EncodeError::InvalidJob(
                 "video bitrate must be non-zero".into(),
             ));
         }
-        self.preset.ffmpeg_video_encoder()?;
-        self.preset.ffmpeg_audio_encoder()?;
+        let effective = self.effective_preset();
+        effective.ffmpeg_video_encoder()?;
+        effective.ffmpeg_audio_encoder()?;
         Ok(())
     }
 
@@ -1166,6 +1770,9 @@ impl EncodeJob {
                 self.preset.container
             )));
         }
+        let effective = self.effective_preset();
+        let video_encoder = effective.ffmpeg_video_encoder()?;
+        let audio_encoder = effective.ffmpeg_audio_encoder()?;
         let mut arguments = vec![
             "-hide_banner".into(),
             "-nostdin".into(),
@@ -1176,15 +1783,53 @@ impl EncodeJob {
             },
             "-i".into(),
             input.to_string_lossy().into_owned(),
-            "-map_metadata".into(),
-            "0".into(),
-            "-c:v".into(),
-            self.preset.ffmpeg_video_encoder()?.into(),
-            "-c:a".into(),
-            self.preset.ffmpeg_audio_encoder()?.into(),
         ];
-        if self.preset.ffmpeg_video_encoder()? != "copy" {
-            arguments.extend(["-b:v".into(), format!("{}k", self.preset.bitrate_kbps)]);
+        if self.metadata.copy {
+            arguments.extend(["-map_metadata".into(), "0".into()]);
+        } else {
+            arguments.extend(["-map_metadata".into(), "-1".into()]);
+        }
+        let map = StreamMapping {
+            video_track: self.source.video_track,
+            audio_track: self.source.audio_track,
+            subtitle_track: self.source.subtitle_track,
+        };
+        arguments.extend(map.generate_map_args());
+
+        if video_encoder != "none" {
+            arguments.extend(["-c:v".into(), video_encoder.into()]);
+            if video_encoder != "copy" {
+                arguments.extend(["-b:v".into(), format!("{}k", self.video.bitrate_kbps)]);
+            }
+        }
+        if audio_encoder != "none" {
+            arguments.extend(["-c:a".into(), audio_encoder.into()]);
+            if audio_encoder != "copy" && self.audio.bitrate_kbps > 0 {
+                arguments.extend(["-b:a".into(), format!("{}k", self.audio.bitrate_kbps)]);
+            }
+        }
+
+        // A sidecar subtitle path is a second FFmpeg input for passthrough or
+        // conversion. Burn-in reads the sidecar through the subtitles filter.
+        if let Some(path) = self.subtitles.path.as_deref() {
+            if matches!(
+                self.subtitles.mode,
+                SubtitleMode::PassthroughCopy | SubtitleMode::ConvertSrt
+            ) {
+                arguments.extend(["-i".into(), path.to_string()]);
+                arguments.extend(["-map".into(), "1:0".into()]);
+            }
+        }
+        let subtitle_args =
+            generate_subtitle_args(self.subtitles.mode, self.subtitles.path.as_deref());
+        arguments.extend(subtitle_args);
+        if self.subtitles.mode != SubtitleMode::None
+            && self.subtitles.path.is_none()
+            && self.source.subtitle_track.is_none()
+        {
+            return Err(EncodeError::InvalidJob(
+                "subtitle mode requires a subtitle path or source subtitle track".into(),
+            ));
         }
         arguments.extend([
             "-progress".into(),
@@ -1207,14 +1852,17 @@ impl EncodeQueue {
     pub fn next_queued_index(&self) -> Option<usize> {
         self.jobs
             .iter()
-            .position(|job| matches!(job.status, JobStatus::Queued))
+            .position(|job| matches!(job.status, JobStatus::Queued | JobStatus::Retrying { .. }))
     }
 
     /// Resets failed and in-progress jobs to queued state after a crash/restart.
     pub fn recover_interrupted(&mut self) -> usize {
         let mut reset = 0;
         for job in &mut self.jobs {
-            if matches!(job.status, JobStatus::Encoding { .. }) {
+            if matches!(
+                job.status,
+                JobStatus::Encoding { .. } | JobStatus::Retrying { .. }
+            ) {
                 job.status = JobStatus::Queued;
                 reset += 1;
             }
@@ -1231,7 +1879,10 @@ impl EncodeQueue {
             .jobs
             .iter()
             .map(|job| match job.status {
-                JobStatus::Queued | JobStatus::Failed(_) => 0.0,
+                JobStatus::Queued
+                | JobStatus::Retrying { .. }
+                | JobStatus::Cancelled
+                | JobStatus::Failed(_) => 0.0,
                 JobStatus::Encoding { progress } => progress.clamp(0.0, 1.0),
                 JobStatus::Complete => 1.0,
             })
@@ -1350,6 +2001,102 @@ where
     execute_job_with_cancel(job, plan, duration_secs, &cancel, on_progress)
 }
 
+static NEXT_EXEC_TEMP: AtomicU64 = AtomicU64::new(0);
+
+fn encode_temp_path(output: &Path) -> PathBuf {
+    let parent = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("loom-encode-output");
+    let extension = output
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or("tmp");
+    let nonce = NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(
+        ".{file_name}.loom-encode-{}-{nonce}.{extension}",
+        std::process::id()
+    ))
+}
+
+fn execution_arguments_with_output(plan: &EncodePlan, temporary: &Path) -> Vec<String> {
+    let mut arguments = plan.arguments.clone();
+    let final_output = plan.output.to_string_lossy();
+    let temporary = temporary.to_string_lossy().into_owned();
+    if arguments
+        .last()
+        .is_some_and(|argument| argument == final_output.as_ref())
+    {
+        if let Some(argument) = arguments.last_mut() {
+            *argument = temporary;
+        }
+    } else {
+        arguments.push(temporary);
+    }
+    arguments
+}
+
+struct TemporaryEncodeOutput {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl TemporaryEncodeOutput {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+}
+
+impl Drop for TemporaryEncodeOutput {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn commit_encode_output(
+    temporary: &Path,
+    output: &Path,
+    overwrite: bool,
+) -> Result<(), EncodeError> {
+    let backup = if overwrite && output.exists() {
+        let nonce = NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed);
+        Some(output.with_file_name(format!(
+            ".{}.loom-encode-backup-{}",
+            output
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("output"),
+            nonce
+        )))
+    } else {
+        None
+    };
+    if let Some(backup) = backup.as_deref() {
+        let _ = std::fs::remove_file(backup);
+        std::fs::rename(output, backup).map_err(EncodeError::Io)?;
+    }
+    if let Err(error) = std::fs::rename(temporary, output) {
+        if let Some(backup) = backup.as_deref() {
+            let _ = std::fs::rename(backup, output);
+        }
+        return Err(EncodeError::Io(error));
+    }
+    if let Some(backup) = backup {
+        let _ = std::fs::remove_file(backup);
+    }
+    Ok(())
+}
+
 /// Executes one job with a cooperative cancellation signal.
 pub fn execute_job_with_cancel<F>(
     job: &mut EncodeJob,
@@ -1361,7 +2108,7 @@ pub fn execute_job_with_cancel<F>(
 where
     F: FnMut(f32),
 {
-    use std::io::{BufRead, BufReader, Read};
+    use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
     use std::sync::atomic::Ordering;
     use std::thread;
@@ -1372,7 +2119,8 @@ where
         job.status = JobStatus::Failed(error.to_string());
         return Err(error);
     }
-    if plan.output.exists() && plan.arguments.iter().any(|argument| argument == "-n") {
+    let overwrite = plan.arguments.iter().any(|argument| argument == "-y");
+    if plan.output.exists() && !overwrite {
         let error =
             EncodeError::InvalidJob(format!("output already exists: {}", plan.output.display()));
         job.status = JobStatus::Failed(error.to_string());
@@ -1392,23 +2140,64 @@ where
             }
         }
     }
-    let mut child = Command::new(&plan.executable)
-        .args(&plan.arguments)
+    let temporary = encode_temp_path(&plan.output);
+    let _ = std::fs::remove_file(&temporary);
+    let mut temporary_output = TemporaryEncodeOutput::new(temporary.clone());
+    let arguments = execution_arguments_with_output(plan, &temporary);
+    let mut child = match Command::new(&plan.executable)
+        .args(arguments)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            let error = EncodeError::Io(error);
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+    };
     job.status = JobStatus::Encoding { progress: 0.0 };
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| EncodeError::InvalidJob("encoder stdout was not captured".into()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| EncodeError::InvalidJob("encoder stderr was not captured".into()))?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let error = EncodeError::InvalidJob("encoder stdout was not captured".into());
+            let _ = child.kill();
+            let _ = child.wait();
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let error = EncodeError::InvalidJob("encoder stderr was not captured".into());
+            let _ = child.kill();
+            let _ = child.wait();
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+    };
     let stderr_thread = thread::spawn(move || -> std::io::Result<String> {
+        const STDERR_LIMIT: usize = 16 * 1024 * 1024;
         let mut output = String::new();
-        stderr.take(16 * 1024 * 1024).read_to_string(&mut output)?;
+        let mut reader = BufReader::new(stderr);
+        let mut buffer = String::new();
+        loop {
+            buffer.clear();
+            let bytes = reader.read_line(&mut buffer)?;
+            if bytes == 0 {
+                break;
+            }
+            if output.len() < STDERR_LIMIT {
+                let remaining = STDERR_LIMIT - output.len();
+                if buffer.len() <= remaining {
+                    output.push_str(&buffer);
+                } else {
+                    output.push_str(&buffer[..remaining]);
+                }
+            }
+        }
         Ok(output)
     });
     let mut parser = ProgressParser::new(duration_secs);
@@ -1419,7 +2208,17 @@ where
             let _ = child.kill();
             break;
         }
-        let line = line?;
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stderr_thread.join();
+                let error = EncodeError::Io(error);
+                job.status = JobStatus::Failed(error.to_string());
+                return Err(error);
+            }
+        };
         if let Some(progress) = parser.push_line(&line) {
             job.status = JobStatus::Encoding { progress };
             on_progress(progress);
@@ -1429,15 +2228,46 @@ where
         cancelled = true;
         let _ = child.kill();
     }
-    let status = child.wait()?;
-    let stderr = stderr_thread
-        .join()
-        .map_err(|_| EncodeError::InvalidJob("encoder stderr reader panicked".into()))??;
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = stderr_thread.join();
+            let error = EncodeError::Io(error);
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+    };
+    let stderr = match stderr_thread.join() {
+        Ok(Ok(stderr)) => stderr,
+        Ok(Err(error)) => {
+            let error = EncodeError::Io(error);
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+        Err(_) => {
+            let error = EncodeError::InvalidJob("encoder stderr reader panicked".into());
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+    };
     if cancelled {
-        job.status = JobStatus::Failed("Cancelled".into());
+        job.status = JobStatus::Cancelled;
         return Err(EncodeError::Cancelled);
     }
     if status.success() {
+        if !temporary.is_file() {
+            let error = EncodeError::ProcessFailed {
+                code: status.code(),
+                stderr: "encoder exited successfully without producing an output artifact".into(),
+            };
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+        if let Err(error) = commit_encode_output(&temporary, &plan.output, overwrite) {
+            job.status = JobStatus::Failed(error.to_string());
+            return Err(error);
+        }
+        temporary_output.committed = true;
         job.status = JobStatus::Complete;
         on_progress(1.0);
         Ok(())
@@ -2012,20 +2842,30 @@ impl EncodeQueue {
             let state = match &job.status {
                 JobStatus::Queued => "queued".to_string(),
                 JobStatus::Encoding { progress } => format!("encoding:{}", progress.to_bits()),
+                JobStatus::Cancelled => "cancelled".to_string(),
+                JobStatus::Retrying { attempt } => format!("retrying:{attempt}"),
                 JobStatus::Complete => "complete".to_string(),
                 JobStatus::Failed(reason) => format!("failed:{reason}"),
             };
             input.push_str(&format!(
-                "job:{index}:{}:{}:preset:{}:{}:{}:{}:{}kbps:src:{}:out:{}\n",
+                "job:{index}:{}:{}:retry:{}:preset:{}:{}:{}:{}:{}kbps:src:{}:out:{}:tracks:{:?}:{:?}:{:?}:subs:{:?}:{:?}:meta:{}:collision:{:?}\n",
                 job.id,
                 state,
+                job.retry_count,
                 job.preset.name,
                 job.preset.container,
                 job.preset.video_codec,
                 job.preset.audio_codec,
                 job.preset.bitrate_kbps,
                 job.source_file,
-                job.output_file
+                job.output_file,
+                job.source.video_track,
+                job.source.audio_track,
+                job.source.subtitle_track,
+                job.subtitles.mode,
+                job.subtitles.path,
+                job.metadata.copy,
+                job.destination.collision_policy
             ));
         }
         fnv1a64(input.as_bytes())
@@ -2112,6 +2952,157 @@ mod tests {
         assert!(q.select_job(1));
         assert!(!q.select_job(2));
         assert_eq!(q.active_job_index, 1);
+        assert_eq!(q.selected_job_indices, vec![1]);
+    }
+
+    #[test]
+    fn queue_multi_selection_reorders_as_a_stable_block() {
+        let mut queue = EncodeQueue::new("queue", "Queue");
+        queue.jobs.clear();
+        for (index, name) in ["A", "B", "C", "D"].into_iter().enumerate() {
+            queue.add_job(EncodeJob::new(
+                format!("job-{name}"),
+                format!("{name}.mov"),
+                format!("{name}.mp4"),
+                EncodePreset::h264_1080p(),
+            ));
+            assert_eq!(queue.jobs[index].id, format!("job-{name}"));
+        }
+        assert!(queue.select_jobs([1, 3, 3, 99]));
+        assert_eq!(queue.selected_job_indices, vec![1, 3]);
+        assert!(queue.move_selected_jobs(0));
+        assert_eq!(
+            queue
+                .jobs
+                .iter()
+                .map(|job| job.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["job-B", "job-D", "job-A", "job-C"]
+        );
+        assert_eq!(queue.selected_job_indices, vec![0, 1]);
+        assert!(
+            !queue.move_selected_jobs(1),
+            "moving onto a selected row is a no-op"
+        );
+    }
+
+    #[test]
+    fn clearing_completed_jobs_remaps_selection() {
+        let mut queue = EncodeQueue::new("queue", "Queue");
+        queue.jobs[0].status = JobStatus::Complete;
+        queue.add_job(EncodeJob::new(
+            "job-2",
+            "B.mov",
+            "B.mp4",
+            EncodePreset::h264_1080p(),
+        ));
+        queue.add_job(EncodeJob::new(
+            "job-3",
+            "C.mov",
+            "C.mp4",
+            EncodePreset::h264_1080p(),
+        ));
+        assert!(queue.select_jobs([0, 2]));
+        assert_eq!(queue.clear_completed_jobs(), 1);
+        assert_eq!(queue.selected_job_indices, vec![1]);
+        assert_eq!(queue.jobs[1].id, "job-3");
+    }
+
+    #[test]
+    fn clearing_completed_jobs_remaps_active_index_after_prior_completion() {
+        let mut queue = EncodeQueue::new("queue", "Queue");
+        queue.add_job(EncodeJob::new(
+            "job-2",
+            "B.mov",
+            "B.mp4",
+            EncodePreset::h264_1080p(),
+        ));
+        queue.add_job(EncodeJob::new(
+            "job-3",
+            "C.mov",
+            "C.mp4",
+            EncodePreset::h264_1080p(),
+        ));
+        queue.select_job(2);
+        queue.jobs[0].status = JobStatus::Complete;
+
+        assert_eq!(queue.clear_completed_jobs(), 1);
+        assert_eq!(queue.active_job_index, 1);
+        assert_eq!(queue.selected_job_indices, vec![1]);
+        assert_eq!(queue.jobs[1].id, "job-3");
+    }
+
+    #[test]
+    fn destination_policies_reject_rename_and_overwrite_collisions_correctly() {
+        let root = std::env::temp_dir().join(format!(
+            "loom-encode-collision-{}-{}",
+            std::process::id(),
+            NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let existing = root.join("render.mp4");
+        std::fs::write(&existing, b"existing").unwrap();
+
+        let mut rename = EncodeQueue::new("queue", "Queue");
+        rename.jobs.clear();
+        let mut first = EncodeJob::new(
+            "one",
+            "a.mov",
+            existing.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        first.set_collision_policy(DestinationCollisionPolicy::Rename);
+        rename.add_job(first);
+        rename.apply_destination_policies().unwrap();
+        assert_eq!(
+            rename.jobs[0].output_file,
+            root.join("render - 2.mp4").to_string_lossy()
+        );
+
+        let mut fail = EncodeQueue::new("queue", "Queue");
+        fail.jobs.clear();
+        let mut first = EncodeJob::new(
+            "one",
+            "a.mov",
+            existing.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        first.set_collision_policy(DestinationCollisionPolicy::Fail);
+        fail.add_job(first);
+        assert!(fail.apply_destination_policies().is_err());
+
+        let mut overwrite = EncodeQueue::new("queue", "Queue");
+        overwrite.jobs.clear();
+        let mut first = EncodeJob::new(
+            "one",
+            "a.mov",
+            existing.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        first.set_collision_policy(DestinationCollisionPolicy::Overwrite);
+        overwrite.add_job(first);
+        overwrite.apply_destination_policies().unwrap();
+        assert_eq!(overwrite.jobs[0].output_file, existing.to_string_lossy());
+
+        let mut resumed = EncodeQueue::new("queue", "Queue");
+        resumed.jobs.clear();
+        let mut completed = EncodeJob::new(
+            "complete",
+            "a.mov",
+            existing.to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        completed.status = JobStatus::Complete;
+        resumed.add_job(completed);
+        resumed.add_job(EncodeJob::new(
+            "queued",
+            "b.mov",
+            root.join("next.mp4").to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        ));
+        resumed.apply_destination_policies().unwrap();
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2137,6 +3128,43 @@ mod tests {
     }
 
     #[test]
+    fn typed_job_fields_survive_save_and_reopen() {
+        let mut queue = EncodeQueue::new("typed-q", "Typed Queue");
+        let job = &mut queue.jobs[0];
+        job.set_video_track(Some(2));
+        job.set_audio_track(Some(1));
+        job.set_subtitle_track(Some(0));
+        job.set_audio_codec("opus").unwrap();
+        job.set_subtitle_mode(SubtitleMode::ConvertSrt);
+        job.subtitles.path = Some("captions.srt".into());
+        job.set_metadata_copy(false);
+        job.set_collision_policy(DestinationCollisionPolicy::Rename);
+        let before = job.clone();
+
+        let bytes = save_encode_queue(&queue).unwrap();
+        let reopened = load_encode_queue(&bytes).unwrap();
+        assert_eq!(reopened.jobs[0], before);
+        assert!(reopened.selected_job_indices.contains(&0));
+    }
+
+    #[test]
+    fn legacy_job_projection_defaults_follow_persisted_preset() {
+        let legacy = serde_json::json!({
+            "id": "legacy",
+            "source_file": "input.mov",
+            "output_file": "output.mov",
+            "preset": EncodePreset::prores_master(),
+            "status": "Queued"
+        });
+        let mut job: EncodeJob = serde_json::from_value(legacy).unwrap();
+        job.normalize_typed_fields();
+        assert_eq!(job.video.codec, "prores");
+        assert_eq!(job.video.bitrate_kbps, 220000);
+        assert_eq!(job.audio.codec, "pcm_s24le");
+        assert_eq!(job.audio.bitrate_kbps, 192);
+    }
+
+    #[test]
     fn ffmpeg_plan_is_deterministic_and_safe() {
         let job = EncodeJob::new("job", "input.mov", "output.mp4", EncodePreset::h264_1080p());
         let backend = EncoderBackend {
@@ -2150,6 +3178,62 @@ mod tests {
             .windows(2)
             .any(|pair| pair[0] == "-c:v" && pair[1] == "libx264"));
         assert_eq!(plan.arguments.last().unwrap(), "output.mp4");
+    }
+
+    #[test]
+    fn ffmpeg_plan_uses_typed_inspector_settings() {
+        let mut job = EncodeJob::new("job", "input.mov", "output.mp4", EncodePreset::h264_1080p());
+        job.video.bitrate_kbps = 4200;
+        job.set_audio_codec("opus").unwrap();
+        job.audio.bitrate_kbps = 128;
+        job.set_video_track(Some(1));
+        job.set_audio_track(Some(2));
+        job.set_subtitle_track(Some(0));
+        job.set_subtitle_mode(SubtitleMode::PassthroughCopy);
+        job.subtitles.path = Some("captions.srt".into());
+        job.set_metadata_copy(false);
+        let backend = EncoderBackend {
+            executable: "/usr/bin/ffmpeg".into(),
+            version: "test".into(),
+        };
+        let plan = job.plan(&backend, ExecutionPolicy::default()).unwrap();
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-c:v", "libx264"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-b:v", "4200k"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-c:a", "libopus"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-b:a", "128k"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-map", "0:v:1"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-map", "0:a:2"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-map", "0:s:0"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-map_metadata", "-1"]));
+        assert!(plan
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["-c:s", "copy"]));
+        assert!(plan.arguments.iter().any(|arg| arg == "captions.srt"));
     }
 
     #[test]
@@ -2363,6 +3447,166 @@ mod tests {
 
         let conv_args = generate_subtitle_args(SubtitleMode::ConvertSrt, None);
         assert_eq!(conv_args, vec!["-c:s", "mov_text"]);
+    }
+
+    #[cfg(unix)]
+    fn executable_fixture(script: &str, suffix: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "loom-encode-exec-{}-{}",
+            std::process::id(),
+            NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join(format!("encoder-{suffix}.sh"));
+        std::fs::write(&executable, script).unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        (root, executable)
+    }
+
+    #[cfg(unix)]
+    fn execution_fixture_job(root: &std::path::Path, output_name: &str) -> EncodeJob {
+        EncodeJob::new(
+            "job",
+            root.join("input.mov").to_string_lossy().to_string(),
+            root.join(output_name).to_string_lossy().to_string(),
+            EncodePreset::h264_1080p(),
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execution_commits_success_and_cleans_failed_partial_output() {
+        let script = "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\nprintf 'encoded' > \"$out\"\necho out_time_us=100000\necho progress=end\n";
+        let (root, executable) = executable_fixture(script, "success");
+        let input = root.join("input.mov");
+        std::fs::write(&input, b"input").unwrap();
+        let mut job = execution_fixture_job(&root, "success.mp4");
+        let backend = EncoderBackend {
+            executable,
+            version: "fixture".into(),
+        };
+        let plan = job.plan(&backend, ExecutionPolicy::default()).unwrap();
+        execute_job(&mut job, &plan, Some(1.0), |_| {}).unwrap();
+        assert!(matches!(job.status, JobStatus::Complete));
+        assert_eq!(std::fs::read(root.join("success.mp4")).unwrap(), b"encoded");
+        assert!(!std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".loom-encode-")));
+
+        let fail_script = "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\nprintf 'partial' > \"$out\"\necho progress=end\nexit 7\n";
+        let (fail_root, fail_executable) = executable_fixture(fail_script, "failure");
+        std::fs::write(fail_root.join("input.mov"), b"input").unwrap();
+        let mut failed = execution_fixture_job(&fail_root, "failed.mp4");
+        let fail_backend = EncoderBackend {
+            executable: fail_executable,
+            version: "fixture".into(),
+        };
+        let fail_plan = failed
+            .plan(&fail_backend, ExecutionPolicy::default())
+            .unwrap();
+        assert!(execute_job(&mut failed, &fail_plan, Some(1.0), |_| {}).is_err());
+        assert!(matches!(failed.status, JobStatus::Failed(_)));
+        assert!(!fail_root.join("failed.mp4").exists());
+        assert!(!std::fs::read_dir(&fail_root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".loom-encode-")));
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(fail_root);
+    }
+
+    #[test]
+    fn execution_spawn_failure_marks_job_failed() {
+        let root = std::env::temp_dir().join(format!(
+            "loom-encode-spawn-failure-{}-{}",
+            std::process::id(),
+            NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("input.mov"), b"input").unwrap();
+        let mut job = EncodeJob::new(
+            "job",
+            root.join("input.mov").to_string_lossy(),
+            root.join("output.mp4").to_string_lossy(),
+            EncodePreset::h264_1080p(),
+        );
+        let plan = job
+            .plan(
+                &EncoderBackend {
+                    executable: root.join("missing-encoder"),
+                    version: "fixture".into(),
+                },
+                ExecutionPolicy::default(),
+            )
+            .unwrap();
+
+        let result = execute_job(&mut job, &plan, Some(1.0), |_| {});
+        assert!(matches!(result, Err(EncodeError::Io(_))));
+        assert!(matches!(job.status, JobStatus::Failed(_)));
+        assert!(!root.join("output.mp4").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_preserves_existing_destination_and_removes_partial_output() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let script = "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\nprintf 'partial' > \"$out\"\nfor i in $(seq 1 100); do echo out_time_us=$i; sleep 0.01; done\n";
+        let (root, executable) = executable_fixture(script, "cancel");
+        std::fs::write(root.join("input.mov"), b"input").unwrap();
+        let output = root.join("cancelled.mp4");
+        std::fs::write(&output, b"prior destination").unwrap();
+        let job = execution_fixture_job(&root, "cancelled.mp4");
+        let backend = EncoderBackend {
+            executable,
+            version: "fixture".into(),
+        };
+        let plan = job
+            .plan(
+                &backend,
+                ExecutionPolicy {
+                    overwrite: true,
+                    ..ExecutionPolicy::default()
+                },
+            )
+            .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = cancel.clone();
+        let job = Arc::new(Mutex::new(job));
+        let worker_job = job.clone();
+        let worker = thread::spawn(move || {
+            let mut job = worker_job.lock().unwrap();
+            execute_job_with_cancel(&mut job, &plan, None, &cancel_for_worker, |_| {})
+        });
+        thread::sleep(Duration::from_millis(80));
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = worker.join().unwrap();
+        assert!(matches!(result, Err(EncodeError::Cancelled)));
+        assert!(matches!(job.lock().unwrap().status, JobStatus::Cancelled));
+        assert_eq!(std::fs::read(&output).unwrap(), b"prior destination");
+        assert!(!std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".loom-encode-")));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

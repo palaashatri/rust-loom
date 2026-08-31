@@ -42,10 +42,22 @@ export component EncodeApp inherits Window {
     in-out property <string> selected-preset: "Web 1080p";
     in-out property <string> selected-source: "";
     in-out property <string> selected-output: "";
+    in property <string> selected-video: "";
+    in property <string> selected-audio: "";
+    in property <string> selected-audio-codec: "aac";
+    in property <string> selected-subtitles: "";
+    in property <int> selected-subtitle-mode: 0;
+    in property <string> selected-metadata: "";
+    in-out property <bool> metadata-copy: true;
+    in property <string> selected-destination: "";
+    in property <int> collision-policy: 0;
+    in property <string> selected-status: "";
+    in property <string> report-summary: "Conformance pending";
     in property <bool> backend-available: false;
     in property <string> backend-version: "FFmpeg not found";
     in property <bool> running: false;
     in property <bool> can-start: false;
+    in property <bool> can-retry: false;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
@@ -64,6 +76,16 @@ export component EncodeApp inherits Window {
     callback preset-changed(string);
     callback source-changed(string);
     callback output-changed(string);
+    callback choose-source;
+    callback choose-output;
+    callback choose-subtitles;
+    callback source-dropped(data-transfer);
+    callback output-dropped(data-transfer);
+    callback audio-codec-changed(string);
+    callback subtitle-mode-changed(int);
+    callback metadata-copy-changed(bool);
+    callback collision-policy-changed(int);
+    callback move-job(int, int);
     callback start-queue;
     callback cancel-queue;
     callback retry-job;
@@ -138,6 +160,7 @@ export component EncodeApp inherits Window {
                 active-job-index: root.active-job-index;
                 batch-progress: root.batch-progress;
                 select-job(index) => { root.select-job(index); }
+                move-job(from, to) => { root.move-job(from, to); }
             }
             Rectangle { width: 1px; background: Theme.palette().border; }
 
@@ -159,15 +182,36 @@ export component EncodeApp inherits Window {
                 max-width: root.compact-layout ? 272px : 360px;
                 compact-layout: root.compact-layout;
                 running: root.running;
+                can-retry: root.can-retry;
                 inspector-tab <=> root.inspector-tab;
                 selected-source <=> root.selected-source;
                 selected-output <=> root.selected-output;
                 selected-preset: root.selected-preset;
+                selected-video: root.selected-video;
+                selected-audio: root.selected-audio;
+                selected-audio-codec: root.selected-audio-codec;
+                selected-subtitles: root.selected-subtitles;
+                selected-subtitle-mode: root.selected-subtitle-mode;
+                selected-metadata: root.selected-metadata;
+                metadata-copy: root.metadata-copy;
+                selected-destination: root.selected-destination;
+                collision-policy: root.collision-policy;
+                selected-status: root.selected-status;
+                report-summary: root.report-summary;
                 selected-job-details: root.selected-job-details;
                 status-left: root.status-left;
                 preset-changed(preset) => { root.preset-changed(preset); }
                 source-changed(path) => { root.source-changed(path); }
                 output-changed(path) => { root.output-changed(path); }
+                choose-source => { root.choose-source(); }
+                choose-output => { root.choose-output(); }
+                choose-subtitles => { root.choose-subtitles(); }
+                source-dropped(path) => { root.source-dropped(path); }
+                output-dropped(path) => { root.output-dropped(path); }
+                audio-codec-changed(codec) => { root.audio-codec-changed(codec); }
+                subtitle-mode-changed(mode) => { root.subtitle-mode-changed(mode); }
+                metadata-copy-changed(copy) => { root.metadata-copy-changed(copy); }
+                collision-policy-changed(policy) => { root.collision-policy-changed(policy); }
                 retry-job => { root.retry-job(); }
             }
         }

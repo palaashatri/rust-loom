@@ -4,17 +4,22 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use loom_desktop::{
     build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
     MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    ScriptedFileDialogs,
 };
 use loom_encode_core::{
     discover_ffmpeg, execute_job_with_cancel, load_encode_queue, probe_duration, save_encode_queue,
-    EncodeJob, EncodePreset, EncodeQueue, EncoderBackend, ExecutionPolicy, JobStatus,
+    AudioSettings, DestinationCollisionPolicy, EncodeJob, EncodePreset, EncodeQueue,
+    EncoderBackend, ExecutionPolicy, JobStatus, MetadataSettings, SubtitleMode, SubtitleSettings,
+    VideoSettings,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
+use slint::private_unstable_api::re_exports::DataTransfer;
 use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
@@ -139,10 +144,81 @@ fn encode_filter() -> FileFilter {
     }
 }
 
+fn source_media_filter() -> FileFilter {
+    FileFilter {
+        name: "Media source (video or audio)".into(),
+        extensions: vec![
+            "mov".into(),
+            "mp4".into(),
+            "mkv".into(),
+            "webm".into(),
+            "avi".into(),
+            "wav".into(),
+            "flac".into(),
+            "mp3".into(),
+        ],
+    }
+}
+
+fn subtitle_filter() -> FileFilter {
+    FileFilter {
+        name: "Subtitles (*.srt, *.vtt)".into(),
+        extensions: vec!["srt".into(), "vtt".into()],
+    }
+}
+
+fn source_file_request(current: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Choose Encode Source".into(),
+        initial_directory: current
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![source_media_filter()],
+    }
+}
+
+fn subtitle_file_request(current: Option<&Path>) -> OpenFileRequest {
+    OpenFileRequest {
+        title: "Choose Subtitle File".into(),
+        initial_directory: current
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf),
+        suggested_name: None,
+        filters: vec![subtitle_filter()],
+    }
+}
+
+fn output_file_request(current: Option<&Path>, preset: Option<&EncodePreset>) -> SaveFileRequest {
+    let extension = preset
+        .map(|preset| preset.container.as_str())
+        .unwrap_or("mp4");
+    SaveFileRequest {
+        title: "Choose Encode Destination".into(),
+        initial_directory: current
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf),
+        suggested_name: current
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+            .or_else(|| Some(format!("encoded.{extension}"))),
+        filters: vec![FileFilter {
+            name: format!("Output (*.{extension})"),
+            extensions: vec![extension.into()],
+        }],
+    }
+}
+
 fn open_queue_request(save_path: Option<&Path>) -> OpenFileRequest {
     OpenFileRequest {
         title: "Open Encode Queue".into(),
-        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        initial_directory: save_path
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf),
         suggested_name: None,
         filters: vec![encode_filter()],
     }
@@ -151,13 +227,156 @@ fn open_queue_request(save_path: Option<&Path>) -> OpenFileRequest {
 fn save_queue_request(save_path: Option<&Path>) -> SaveFileRequest {
     SaveFileRequest {
         title: "Save Encode Queue".into(),
-        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        initial_directory: save_path
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf),
         suggested_name: save_path
             .and_then(Path::file_name)
             .map(|n| n.to_string_lossy().into_owned())
             .or_else(|| Some("Untitled.loomencode".into())),
         filters: vec![encode_filter()],
     }
+}
+
+fn job_progress(status: &JobStatus) -> f32 {
+    match status {
+        JobStatus::Encoding { progress } => progress * 100.0,
+        JobStatus::Complete => 100.0,
+        JobStatus::Queued
+        | JobStatus::Retrying { .. }
+        | JobStatus::Cancelled
+        | JobStatus::Failed(_) => 0.0,
+    }
+}
+
+fn job_status_label(status: &JobStatus) -> String {
+    match status {
+        JobStatus::Queued => "QUEUED".into(),
+        JobStatus::Encoding { progress } => format!("RUNNING {:.0}%", progress * 100.0),
+        JobStatus::Cancelled => "CANCELLED · Retry available".into(),
+        JobStatus::Retrying { attempt } => format!("RETRYING · attempt {attempt}"),
+        JobStatus::Complete => "COMPLETE".into(),
+        JobStatus::Failed(reason) => format!("FAILED · {reason} · Retry available"),
+    }
+}
+
+fn job_status_tone(status: &JobStatus) -> i32 {
+    match status {
+        JobStatus::Complete => 2,
+        JobStatus::Failed(_) | JobStatus::Cancelled => 4,
+        JobStatus::Encoding { .. } | JobStatus::Retrying { .. } => 3,
+        JobStatus::Queued => 0,
+    }
+}
+
+fn selected_video_summary(video: &VideoSettings) -> String {
+    format!("Codec {} · {} kbps", video.codec, video.bitrate_kbps)
+}
+
+fn selected_audio_summary(audio: &AudioSettings) -> String {
+    format!("Codec {} · {} kbps", audio.codec, audio.bitrate_kbps)
+}
+
+fn selected_subtitle_summary(subtitles: &SubtitleSettings) -> String {
+    let mode = match subtitles.mode {
+        SubtitleMode::None => "None",
+        SubtitleMode::BurnIn => "Burn in",
+        SubtitleMode::PassthroughCopy => "Passthrough",
+        SubtitleMode::ConvertSrt => "Convert to embedded SRT",
+    };
+    match subtitles.path.as_deref() {
+        Some(path) => format!("{mode} · {path}"),
+        None => mode.into(),
+    }
+}
+
+fn selected_metadata_summary(metadata: &MetadataSettings) -> &'static str {
+    if metadata.copy {
+        "Copy source metadata"
+    } else {
+        "Do not copy source metadata"
+    }
+}
+
+fn selected_destination_summary(policy: DestinationCollisionPolicy, output: &str) -> String {
+    let policy = match policy {
+        DestinationCollisionPolicy::Fail => "Fail on collision",
+        DestinationCollisionPolicy::Rename => "Rename on collision",
+        DestinationCollisionPolicy::Overwrite => "Overwrite atomically",
+    };
+    format!("{policy} · {output}")
+}
+
+fn subtitle_mode_index(mode: SubtitleMode) -> i32 {
+    match mode {
+        SubtitleMode::None => 0,
+        SubtitleMode::BurnIn => 1,
+        SubtitleMode::PassthroughCopy => 2,
+        SubtitleMode::ConvertSrt => 3,
+    }
+}
+
+fn collision_policy_index(policy: DestinationCollisionPolicy) -> i32 {
+    match policy {
+        DestinationCollisionPolicy::Fail => 0,
+        DestinationCollisionPolicy::Rename => 1,
+        DestinationCollisionPolicy::Overwrite => 2,
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut out = Vec::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let mut clone = bytes.clone();
+            if let (Some(h1), Some(h2)) = (clone.next(), clone.next()) {
+                if let (Some(n1), Some(n2)) = ((h1 as char).to_digit(16), (h2 as char).to_digit(16))
+                {
+                    out.push((n1 * 16 + n2) as u8);
+                    bytes = clone;
+                    continue;
+                }
+            }
+        }
+        out.push(b);
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Converts Slint's platform-neutral drop payload into a filesystem path.
+/// Native file managers expose a `text/uri-list`-compatible plain-text view;
+/// scripted or in-app drops may provide a plain path directly.
+fn dropped_path(data: &DataTransfer) -> Option<String> {
+    let text = data.plain_text().ok()?.to_string();
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            if let Some(path) = line.strip_prefix("file://") {
+                let path = percent_decode(path);
+                #[cfg(windows)]
+                let path = if path.len() > 2 && path.starts_with('/') && path.as_bytes()[2] == b':'
+                {
+                    path[1..].to_string()
+                } else if path.starts_with('/') {
+                    path
+                } else {
+                    format!("/{path}")
+                };
+                #[cfg(not(windows))]
+                let path = if path.starts_with('/') {
+                    path
+                } else {
+                    format!("/{path}")
+                };
+                path
+            } else {
+                line.to_string()
+            }
+        })
+        .next()
 }
 
 fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend>, running: bool) {
@@ -195,46 +414,33 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
         queue
             .jobs
             .iter()
-            .map(|job| {
-                SharedString::from(match &job.status {
-                    JobStatus::Queued => "QUEUED".into(),
-                    JobStatus::Encoding { progress } => {
-                        format!("ENCODING {:.0}%", progress * 100.0)
-                    }
-                    JobStatus::Complete => "COMPLETE".into(),
-                    JobStatus::Failed(reason) => format!("FAILED · {reason}"),
-                })
-            })
+            .map(|job| SharedString::from(job_status_label(&job.status)))
             .collect::<Vec<_>>(),
     )));
     app.set_job_progresses(ModelRc::new(VecModel::from(
         queue
             .jobs
             .iter()
-            .map(|job| match job.status {
-                JobStatus::Queued | JobStatus::Failed(_) => 0.0,
-                JobStatus::Encoding { progress } => progress * 100.0,
-                JobStatus::Complete => 100.0,
-            })
+            .map(|job| job_progress(&job.status))
             .collect::<Vec<_>>(),
     )));
     app.set_job_tones(ModelRc::new(VecModel::from(
         queue
             .jobs
             .iter()
-            .map(|job| match job.status {
-                JobStatus::Complete => 2,
-                JobStatus::Failed(_) => 4,
-                JobStatus::Encoding { .. } => 3,
-                JobStatus::Queued => 0,
-            })
+            .map(|job| job_status_tone(&job.status))
             .collect::<Vec<_>>(),
     )));
     app.set_job_running(ModelRc::new(VecModel::from(
         queue
             .jobs
             .iter()
-            .map(|job| matches!(job.status, JobStatus::Encoding { .. }))
+            .map(|job| {
+                matches!(
+                    job.status,
+                    JobStatus::Encoding { .. } | JobStatus::Retrying { .. }
+                )
+            })
             .collect::<Vec<_>>(),
     )));
     app.set_active_job_index(queue.active_job_index as i32);
@@ -247,6 +453,13 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
             .unwrap_or_else(|| "Install FFmpeg and ensure it is available on PATH".into()),
     );
     app.set_can_start(backend.is_some() && !running && queue.next_queued_index().is_some());
+    app.set_can_retry(
+        !running
+            && queue
+                .jobs
+                .get(queue.active_job_index)
+                .is_some_and(EncodeJob::can_retry),
+    );
     if let Some(job) = queue.jobs.get(queue.active_job_index) {
         app.set_selected_job_text(job.source_file.as_str().into());
         app.set_selected_job_details(SharedString::from(format!(
@@ -258,18 +471,49 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
         app.set_selected_preset(preset_label(&job.preset).into());
         app.set_selected_source(job.source_file.as_str().into());
         app.set_selected_output(job.output_file.as_str().into());
-        app.set_active_job_progress(match job.status {
-            JobStatus::Queued | JobStatus::Failed(_) => 0.0,
-            JobStatus::Encoding { progress } => progress * 100.0,
-            JobStatus::Complete => 100.0,
-        });
+        app.set_active_job_progress(job_progress(&job.status));
+        app.set_selected_video(selected_video_summary(&job.video).into());
+        app.set_selected_audio(selected_audio_summary(&job.audio).into());
+        app.set_selected_subtitles(selected_subtitle_summary(&job.subtitles).into());
+        app.set_selected_audio_codec(job.audio.codec.as_str().into());
+        app.set_selected_subtitle_mode(subtitle_mode_index(job.subtitles.mode));
+        app.set_selected_metadata(selected_metadata_summary(&job.metadata).into());
+        app.set_metadata_copy(job.metadata.copy);
+        app.set_selected_destination(
+            selected_destination_summary(job.destination.collision_policy, &job.output_file).into(),
+        );
+        app.set_collision_policy(collision_policy_index(job.destination.collision_policy));
+        app.set_selected_status(job_status_label(&job.status).into());
     } else {
         app.set_selected_job_text("No job selected".into());
         app.set_selected_job_details("".into());
         app.set_selected_source("".into());
         app.set_selected_output("".into());
         app.set_active_job_progress(0.0);
+        app.set_selected_video("".into());
+        app.set_selected_audio("".into());
+        app.set_selected_subtitles("".into());
+        app.set_selected_audio_codec("aac".into());
+        app.set_selected_subtitle_mode(0);
+        app.set_selected_metadata("".into());
+        app.set_metadata_copy(true);
+        app.set_selected_destination("".into());
+        app.set_collision_policy(0);
+        app.set_selected_status("No job selected".into());
     }
+    let report = queue.conformance_report();
+    let passed = report.jobs.iter().filter(|job| job.passed).count();
+    app.set_report_summary(
+        if report.passed {
+            format!("Conformance passed · {passed}/{} jobs", report.jobs.len())
+        } else {
+            format!(
+                "Conformance pending · {passed}/{} jobs passed",
+                report.jobs.len()
+            )
+        }
+        .into(),
+    );
     app.set_status_right(
         if backend.is_some() {
             "Local FFmpeg"
@@ -281,6 +525,104 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
     if let Ok(bytes) = save_encode_queue(queue) {
         let _ = record_snapshot_recovery("encode queue state", bytes);
     }
+}
+
+fn set_selected_source_path(app: &EncodeApp, state: &Arc<AppState>, path: impl Into<String>) {
+    if state.running.load(Ordering::Relaxed) {
+        app.set_status_left("Queue is running; stop it before changing source paths".into());
+        return;
+    }
+    let path = path.into();
+    if path.trim().is_empty() {
+        app.set_status_left("Source path cannot be empty".into());
+        return;
+    }
+    let mut queue = state
+        .queue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = queue.clone();
+    let index = queue.active_job_index;
+    if let Some(job) = queue.jobs.get_mut(index) {
+        job.set_source_file(path);
+    }
+    if before.queue_digest() != queue.queue_digest() {
+        checkpoint_queue(state, &before);
+    }
+    refresh(
+        app,
+        &queue,
+        state.backend.as_ref(),
+        state.running.load(Ordering::Relaxed),
+    );
+    update_history_controls(app, state);
+    app.set_status_left("Source selected · queue ready".into());
+}
+
+fn set_selected_output_path(app: &EncodeApp, state: &Arc<AppState>, path: impl Into<String>) {
+    if state.running.load(Ordering::Relaxed) {
+        app.set_status_left("Queue is running; stop it before changing destination paths".into());
+        return;
+    }
+    let path = path.into();
+    if path.trim().is_empty() {
+        app.set_status_left("Destination path cannot be empty".into());
+        return;
+    }
+    let mut queue = state
+        .queue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = queue.clone();
+    let index = queue.active_job_index;
+    if let Some(job) = queue.jobs.get_mut(index) {
+        job.set_output_file(path);
+    }
+    if before.queue_digest() != queue.queue_digest() {
+        checkpoint_queue(state, &before);
+    }
+    refresh(
+        app,
+        &queue,
+        state.backend.as_ref(),
+        state.running.load(Ordering::Relaxed),
+    );
+    update_history_controls(app, state);
+    app.set_status_left("Destination selected · collision-safe output".into());
+}
+
+fn set_selected_subtitle_path(app: &EncodeApp, state: &Arc<AppState>, path: impl Into<String>) {
+    if state.running.load(Ordering::Relaxed) {
+        app.set_status_left("Queue is running; stop it before changing subtitles".into());
+        return;
+    }
+    let path = path.into();
+    if path.trim().is_empty() {
+        app.set_status_left("Subtitle path cannot be empty".into());
+        return;
+    }
+    let mut queue = state
+        .queue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = queue.clone();
+    let index = queue.active_job_index;
+    if let Some(job) = queue.jobs.get_mut(index) {
+        job.subtitles.path = Some(path);
+        job.subtitles.mode = loom_encode_core::SubtitleMode::PassthroughCopy;
+        job.status = JobStatus::Queued;
+    }
+    if before.queue_digest() != queue.queue_digest() {
+        checkpoint_queue(state, &before);
+    }
+    refresh(
+        app,
+        &queue,
+        state.backend.as_ref(),
+        state.running.load(Ordering::Relaxed),
+    );
+    update_history_controls(app, state);
+    app.set_status_left("Subtitles selected · passthrough enabled".into());
 }
 
 fn apply_theme(app: &EncodeApp, theme: &str) {
@@ -333,16 +675,249 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
 }
 
-/// Record the keyboard command-palette journey with per-step screenshots.
+fn refresh_journey(app: &EncodeApp, state: &Arc<AppState>) {
+    let queue = snapshot(state);
+    let backend = state.backend.clone();
+    refresh(
+        app,
+        &queue,
+        backend.as_ref(),
+        state.running.load(Ordering::Relaxed),
+    );
+    update_history_controls(app, state);
+}
+
+fn capture_encode_workflow_step(
+    app: &EncodeApp,
+    state: &Arc<AppState>,
+    size: (u32, u32),
+    out_dir: &Path,
+    name: &str,
+    detail: &str,
+    steps: &mut Vec<String>,
+) -> Result<(), String> {
+    let image = snapshot_component(app, size.0 as f32, size.1 as f32, 1.0)
+        .map_err(|error| format!("capture {name}: {error}"))?;
+    let path = out_dir.join(format!("encode-workflow-{name}.png"));
+    loom_test_support::png::save_png(&path, &image)
+        .map_err(|error| format!("save {}: {error}", path.display()))?;
+    let queue = snapshot(state);
+    let statuses = queue
+        .jobs
+        .iter()
+        .map(|job| format!("{}={}", job.id, job_status_label(&job.status)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    steps.push(format!(
+        "{name}: {detail} | statuses=[{statuses}] | artifact={}",
+        path.display()
+    ));
+    Ok(())
+}
+
+fn wait_for_job_status<F>(
+    state: &AppState,
+    index: usize,
+    timeout: Duration,
+    label: &str,
+    predicate: F,
+) -> Result<JobStatus, String>
+where
+    F: Fn(&JobStatus) -> bool,
+{
+    let deadline = Instant::now() + timeout;
+    loop {
+        let status = state
+            .queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .jobs
+            .get(index)
+            .map(|job| job.status.clone());
+        if let Some(status) = status {
+            if predicate(&status) {
+                return Ok(status);
+            }
+            if !state.running.load(Ordering::Acquire) {
+                return Err(format!(
+                    "{label} ended before the expected state (last status: {status:?})"
+                ));
+            }
+        }
+        if Instant::now() >= deadline {
+            let status = state
+                .queue
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .jobs
+                .get(index)
+                .map(|job| format!("{:?}", job.status))
+                .unwrap_or_else(|| "missing job".into());
+            return Err(format!(
+                "timed out waiting for {label} (last status: {status})"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_queue_idle(state: &AppState, timeout: Duration, label: &str) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    while state.running.load(Ordering::Acquire) {
+        if Instant::now() >= deadline {
+            return Err(format!("timed out waiting for {label}"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Ok(())
+}
+
+fn has_encode_temporary_output(out_dir: &Path) -> Result<bool, String> {
+    Ok(std::fs::read_dir(out_dir)
+        .map_err(|error| format!("read {}: {error}", out_dir.display()))?
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".loom-encode-")
+        }))
+}
+
+#[cfg(unix)]
+fn create_journey_encoder(out_dir: &Path) -> Result<EncoderBackend, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let executable = out_dir.join("loom-encode-fixture.sh");
+    let script = r##"#!/bin/sh
+out=""
+source=""
+for arg in "$@"; do
+    out="$arg"
+    case "$arg" in
+        *cancel.mov|*failure.mov|*success.mov) source="$arg" ;;
+    esac
+done
+if [ -z "$out" ]; then
+    exit 2
+fi
+case "$source" in
+    *cancel.mov)
+        printf 'partial' > "$out"
+        i=0
+        while [ "$i" -lt 400 ]; do
+            echo "out_time_us=$((i * 10000))"
+            sleep 0.01
+            i=$((i + 1))
+        done
+        echo progress=end
+        ;;
+    *failure.mov)
+        marker="${source}.loom-fail-once"
+        if [ ! -e "$marker" ]; then
+            : > "$marker"
+            printf 'partial' > "$out"
+            echo out_time_us=100000
+            echo progress=end
+            exit 7
+        fi
+        printf 'retry-encoded' > "$out"
+        echo out_time_us=100000
+        echo progress=end
+        ;;
+    *)
+        printf 'encoded' > "$out"
+        echo out_time_us=100000
+        echo progress=end
+        ;;
+esac
+"##;
+    std::fs::write(&executable, script)
+        .map_err(|error| format!("write fixture encoder: {error}"))?;
+    let mut permissions = std::fs::metadata(&executable)
+        .map_err(|error| format!("stat fixture encoder: {error}"))?
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&executable, permissions)
+        .map_err(|error| format!("make fixture encoder executable: {error}"))?;
+    let probe = out_dir.join("ffprobe");
+    std::fs::write(&probe, "#!/bin/sh\necho 1.0\n")
+        .map_err(|error| format!("write fixture probe: {error}"))?;
+    let mut probe_permissions = std::fs::metadata(&probe)
+        .map_err(|error| format!("stat fixture probe: {error}"))?
+        .permissions();
+    probe_permissions.set_mode(0o755);
+    std::fs::set_permissions(&probe, probe_permissions)
+        .map_err(|error| format!("make fixture probe executable: {error}"))?;
+    Ok(EncoderBackend {
+        executable,
+        version: "Loom Encode deterministic fixture encoder".into(),
+    })
+}
+
+#[cfg(not(unix))]
+fn create_journey_encoder(_out_dir: &Path) -> Result<EncoderBackend, String> {
+    Err("Encode lifecycle journey requires the Unix fixture encoder; native Windows journey remains unverified".into())
+}
+
+/// Execute the controller-backed queue lifecycle and retain a screenshot/report
+/// for each durable state transition, then append the canonical palette probe.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
+    let out_dir = Path::new(out_dir);
+    std::fs::create_dir_all(out_dir)
+        .map_err(|error| format!("create journey output {}: {error}", out_dir.display()))?;
+    let source_cancel = out_dir.join("cancel.mov");
+    let source_failure = out_dir.join("failure.mov");
+    let source_success = out_dir.join("success.mov");
+    let subtitle = out_dir.join("captions.srt");
+    let project_path = out_dir.join("encode-workflow.loomencode");
+    let cancel_output = out_dir.join("cancelled.mp4");
+    let failure_output = out_dir.join("failure.mp4");
+    for (path, bytes) in [
+        (&source_cancel, b"cancel source".as_slice()),
+        (&source_failure, b"failure source".as_slice()),
+        (&source_success, b"success source".as_slice()),
+        (
+            &subtitle,
+            b"1\n00:00:00,000 --> 00:00:01,000\nLoom\n".as_slice(),
+        ),
+    ] {
+        std::fs::write(path, bytes)
+            .map_err(|error| format!("write journey fixture {}: {error}", path.display()))?;
+    }
+    for path in [&project_path, &cancel_output, &failure_output] {
+        let _ = std::fs::remove_file(path);
+    }
+    let backend = create_journey_encoder(out_dir)?;
+    let dialogs = ScriptedFileDialogs::new(
+        [
+            Some(source_cancel.clone()),
+            Some(subtitle.clone()),
+            Some(project_path.clone()),
+        ],
+        [Some(cancel_output.clone()), Some(project_path.clone())],
+    );
     let app = EncodeApp::new().map_err(|error| error.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
-    let (queue, _) = initial_queue(args)?;
-    let backend = discover_ffmpeg(&[]).ok();
-    refresh(&app, &queue, backend.as_ref(), false);
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    let state = Arc::new(AppState {
+        queue: Mutex::new(sample_queue()),
+        history: Mutex::new(QueueHistory::default()),
+        save_path: Mutex::new(None),
+        dialogs: Arc::new(dialogs),
+        backend: Some(backend.clone()),
+        cancel: AtomicBool::new(false),
+        running: AtomicBool::new(false),
+    });
+    wire_application(&app, state.clone());
+    wire_palette(&app);
+    rebuild_palette(&app, "");
+    refresh_journey(&app, &state);
+
     let menu_bar = build_standard_menu_bar(
         "Loom Encode",
         vec![],
@@ -369,20 +944,293 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let menu_service = NativeMenuBar::new();
     let _ = menu_service.install_menu_bar(&menu_bar);
 
-    wire_palette(&app);
-    rebuild_palette(&app, "");
-    app.window()
-        .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    let report = record_keyboard_palette_journey(&app, "encode", Path::new(out_dir), "queue")
-        .map_err(|error| format!("journey failed: {error}"))?;
-    println!(
-        "keyboard journey: {} ({})",
-        if report.passed { "PASS" } else { "FAIL" },
-        out_dir
-    );
-    if !report.passed {
-        return Err("keyboard journey invariants failed".to_string());
+    let mut steps = Vec::new();
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "00-initial",
+        "fresh queue with one queued job",
+        &mut steps,
+    )?;
+
+    app.invoke_choose_source();
+    app.invoke_source_dropped(DataTransfer::from(SharedString::from(
+        source_cancel.to_string_lossy().as_ref(),
+    )));
+    app.invoke_choose_output();
+    app.invoke_choose_subtitles();
+    app.invoke_audio_codec_changed("opus".into());
+    app.invoke_subtitle_mode_changed(3);
+    app.invoke_metadata_copy_changed(false);
+    app.invoke_collision_policy_changed(2);
+    {
+        let queue = snapshot(&state);
+        let job = queue.jobs.first().ok_or("journey queue lost initial job")?;
+        if job.source_file != source_cancel.to_string_lossy()
+            || job.output_file != cancel_output.to_string_lossy()
+            || job.subtitles.path.as_deref() != Some(subtitle.to_string_lossy().as_ref())
+            || job.audio.codec != "opus"
+            || job.subtitles.mode != SubtitleMode::ConvertSrt
+            || job.metadata.copy
+            || job.destination.collision_policy != DestinationCollisionPolicy::Overwrite
+        {
+            return Err("typed chooser/drop configuration did not reach the selected job".into());
+        }
     }
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "01-configured",
+        "source/output chooser, source drop, subtitles, audio, metadata, and collision policy updated typed fields",
+        &mut steps,
+    )?;
+
+    app.invoke_add_job();
+    app.invoke_source_changed(source_failure.to_string_lossy().into_owned().into());
+    app.invoke_output_changed(failure_output.to_string_lossy().into_owned().into());
+    {
+        let queue = snapshot(&state);
+        if queue.jobs.len() != 2 || queue.active_job_index != 1 {
+            return Err("add job did not select the new queue row".into());
+        }
+    }
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "02-added",
+        "added a second job and configured its failure-once fixture source/output",
+        &mut steps,
+    )?;
+
+    app.invoke_move_job(1, 0);
+    if snapshot(&state).jobs.first().map(|job| job.id.as_str()) != Some("job-2") {
+        return Err("queue reorder did not move the selected job".into());
+    }
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "03-reordered",
+        "moved the selected job as a stable queue row",
+        &mut steps,
+    )?;
+    app.invoke_undo();
+    {
+        let queue = snapshot(&state);
+        if queue.jobs.first().map(|job| job.id.as_str()) != Some("job-1")
+            || queue.active_job_index != 1
+        {
+            return Err("undo did not restore queue order and selection".into());
+        }
+    }
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "04-undo",
+        "undo restored order, selection, and the configured typed fields",
+        &mut steps,
+    )?;
+
+    app.invoke_select_job(0);
+    app.invoke_save_as_queue();
+    if !project_path.is_file() {
+        return Err("save-as callback did not write the queue package".into());
+    }
+    app.invoke_open_queue();
+    {
+        let queue = snapshot(&state);
+        let job = queue.jobs.first().ok_or("reopened queue lost first job")?;
+        if queue.jobs.len() != 2
+            || job.source_file != source_cancel.to_string_lossy()
+            || job.audio.codec != "opus"
+            || job.subtitles.mode != SubtitleMode::ConvertSrt
+        {
+            return Err("save/reopen did not preserve typed queue configuration".into());
+        }
+    }
+    refresh_journey(&app, &state);
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "05-save-reopen",
+        "saved and reopened the durable queue package through scripted native dialog services",
+        &mut steps,
+    )?;
+
+    std::fs::write(&cancel_output, b"prior destination")
+        .map_err(|error| format!("seed cancellation destination: {error}"))?;
+    app.invoke_select_job(0);
+    app.invoke_start_queue();
+    wait_for_job_status(
+        &state,
+        0,
+        Duration::from_secs(3),
+        "cancel fixture to enter encoding state",
+        |status| matches!(status, JobStatus::Encoding { .. }),
+    )?;
+    app.invoke_cancel_queue();
+    wait_for_queue_idle(&state, Duration::from_secs(12), "cancelled queue")?;
+    {
+        let queue = snapshot(&state);
+        if !matches!(queue.jobs[0].status, JobStatus::Cancelled)
+            || std::fs::read(&cancel_output).ok().as_deref() != Some(b"prior destination")
+            || has_encode_temporary_output(out_dir)?
+        {
+            return Err(
+                "cancelled encode did not preserve destination and clean temporary output".into(),
+            );
+        }
+    }
+    app.set_status_left("Queue cancelled · destination preserved · retry available".into());
+    refresh_journey(&app, &state);
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "06-cancelled",
+        "cancelled the active encode while preserving its existing destination and removing the temporary output",
+        &mut steps,
+    )?;
+
+    app.invoke_select_job(0);
+    app.invoke_retry_job();
+    if !matches!(snapshot(&state).jobs[0].status, JobStatus::Retrying { .. }) {
+        return Err("cancelled job did not enter retrying state".into());
+    }
+    app.set_status_left("Retrying cancelled job · source can be corrected".into());
+    refresh_journey(&app, &state);
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "07-retry-cancelled",
+        "explicit retry moved the cancelled job into a durable retrying state",
+        &mut steps,
+    )?;
+    app.invoke_source_changed(source_success.to_string_lossy().into_owned().into());
+    app.invoke_start_queue();
+    wait_for_queue_idle(
+        &state,
+        Duration::from_secs(12),
+        "first completion/failure pass",
+    )?;
+    {
+        let queue = snapshot(&state);
+        if !matches!(queue.jobs[0].status, JobStatus::Complete)
+            || !matches!(queue.jobs[1].status, JobStatus::Failed(_))
+            || !cancel_output.is_file()
+            || has_encode_temporary_output(out_dir)?
+        {
+            return Err(
+                "first retry pass did not complete the corrected job and fail the fixture job"
+                    .into(),
+            );
+        }
+    }
+    app.set_status_left("Job 2 failed · retry available · temporary output removed".into());
+    refresh_journey(&app, &state);
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "08-failure",
+        "worker reported a process failure and left no partial destination",
+        &mut steps,
+    )?;
+
+    app.invoke_select_job(1);
+    app.invoke_retry_job();
+    if !matches!(snapshot(&state).jobs[1].status, JobStatus::Retrying { .. }) {
+        return Err("failed job did not enter retrying state".into());
+    }
+    app.set_status_left("Retrying failed job · attempt 1".into());
+    refresh_journey(&app, &state);
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "09-retry-failure",
+        "explicit retry re-queued the failed job for another worker attempt",
+        &mut steps,
+    )?;
+    app.invoke_start_queue();
+    wait_for_queue_idle(&state, Duration::from_secs(12), "successful retry pass")?;
+    let queue = snapshot(&state);
+    let conformance = queue.conformance_report();
+    if !conformance.passed
+        || !queue
+            .jobs
+            .iter()
+            .all(|job| matches!(job.status, JobStatus::Complete))
+        || !failure_output.is_file()
+        || has_encode_temporary_output(out_dir)?
+    {
+        return Err("successful retry did not produce a passing conformance report".into());
+    }
+    app.set_status_left("Queue complete · conformance passed".into());
+    refresh_journey(&app, &state);
+    capture_encode_workflow_step(
+        &app,
+        &state,
+        args.size,
+        out_dir,
+        "10-complete",
+        "successful retry produced complete outputs and a passing durable conformance report",
+        &mut steps,
+    )?;
+
+    let palette = record_keyboard_palette_journey(&app, "encode", out_dir, "queue")
+        .map_err(|error| format!("palette journey failed: {error}"))?;
+    if !palette.passed {
+        return Err("keyboard palette journey invariants failed".into());
+    }
+    let report_path = out_dir.join("encode-workflow.txt");
+    let mut report = format!(
+        "Encode controller lifecycle: PASS\nqueue={}\nproject={}\nfixture_encoder={}\npalette_journey_passed={}\n\n",
+        queue.id,
+        project_path.display(),
+        backend.executable.display(),
+        palette.passed
+    );
+    report.push_str(&steps.join("\n"));
+    report.push_str("\n\nFinal conformance report:\n");
+    report.push_str(&format!(
+        "queue_id={} passed={} jobs={}\n",
+        conformance.queue_id,
+        conformance.passed,
+        conformance.jobs.len()
+    ));
+    for job in &conformance.jobs {
+        report.push_str(&format!(
+            "job_id={} status={} passed={} output={} checks={}\n",
+            job.job_id,
+            job.status,
+            job.passed,
+            job.output_file,
+            job.checks.join(", ")
+        ));
+    }
+    report.push_str(
+        "\nEvidence limits: the lifecycle uses a deterministic local fixture encoder and software-rendered Slint captures; native AppKit menu/file-panel delivery, realtime hardware codecs, and media semantic conformance are not claimed.\n",
+    );
+    std::fs::write(&report_path, report)
+        .map_err(|error| format!("write journey report {}: {error}", report_path.display()))?;
+    println!("encode workflow journey: PASS ({})", report_path.display());
     Ok(())
 }
 
@@ -497,12 +1345,22 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
             let app_ref = app.as_weak();
             app.$method(move || {
                 if let Some(app) = app_ref.upgrade() {
+                    if state.running.load(Ordering::Acquire) {
+                        app.set_status_left(
+                            "Queue is running; stop it before changing jobs".into(),
+                        );
+                        return;
+                    }
                     let mut queue = state
                         .queue
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    checkpoint_queue(&state, &queue);
+                    let before = queue.clone();
                     ($operation)(&mut queue);
+                    let changed = before.queue_digest() != queue.queue_digest();
+                    if changed {
+                        checkpoint_queue(&state, &before);
+                    }
                     refresh(
                         &app,
                         &queue,
@@ -520,6 +1378,12 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
         let app_ref = app.as_weak();
         app.on_new_queue(move || {
             if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Acquire) {
+                    app.set_status_left(
+                        "Queue is running; stop it before creating a new queue".into(),
+                    );
+                    return;
+                }
                 *state
                     .queue
                     .lock()
@@ -544,6 +1408,12 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
         let app_ref = app.as_weak();
         app.on_open_queue(move || {
             if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Acquire) {
+                    app.set_status_left(
+                        "Queue is running; stop it before opening another queue".into(),
+                    );
+                    return;
+                }
                 let current_path = state
                     .save_path
                     .lock()
@@ -724,23 +1594,49 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
             format!("output-{count}.mp4"),
             EncodePreset::h264_1080p(),
         ));
-        queue.active_job_index = queue.jobs.len() - 1;
+        let _ = queue.select_job(queue.jobs.len() - 1);
     });
     queue_callback!(on_remove_job, |queue: &mut EncodeQueue| {
         if !queue.jobs.is_empty() {
-            queue
-                .jobs
-                .remove(queue.active_job_index.min(queue.jobs.len() - 1));
-            queue.active_job_index = queue
-                .active_job_index
-                .min(queue.jobs.len().saturating_sub(1));
+            let index = queue.active_job_index.min(queue.jobs.len() - 1);
+            let _ = queue.remove_job(index);
         }
     });
     queue_callback!(on_retry_job, |queue: &mut EncodeQueue| {
-        if let Some(job) = queue.jobs.get_mut(queue.active_job_index) {
-            job.status = JobStatus::Queued;
-        }
+        let _ = queue.retry_job(queue.active_job_index);
     });
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_move_job(move |from, to| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Acquire) {
+                    app.set_status_left("Queue is running; stop it before reordering jobs".into());
+                    return;
+                }
+                if from < 0 || to < 0 {
+                    return;
+                }
+                let mut queue = state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = queue.clone();
+                let changed = queue.move_job(from as usize, to as usize);
+                if changed {
+                    checkpoint_queue(&state, &before);
+                    refresh(
+                        &app,
+                        &queue,
+                        state.backend.as_ref(),
+                        state.running.load(Ordering::Relaxed),
+                    );
+                    update_history_controls(&app, &state);
+                }
+            }
+        });
+    }
 
     {
         let state = state.clone();
@@ -769,15 +1665,23 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
         match field {
             "source" => app.on_source_changed(move |value| {
                 if let Some(app) = app_ref.upgrade() {
+                    if state.running.load(Ordering::Acquire) {
+                        app.set_status_left(
+                            "Queue is running; stop it before changing source paths".into(),
+                        );
+                        return;
+                    }
                     let mut queue = state
                         .queue
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let index = queue.active_job_index;
-                    checkpoint_queue(&state, &queue);
+                    let before = queue.clone();
                     if let Some(job) = queue.jobs.get_mut(index) {
-                        job.source_file = value.as_str().to_string();
-                        job.status = JobStatus::Queued;
+                        job.set_source_file(value.as_str());
+                    }
+                    if before.queue_digest() != queue.queue_digest() {
+                        checkpoint_queue(&state, &before);
                     }
                     refresh(
                         &app,
@@ -790,15 +1694,23 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
             }),
             "output" => app.on_output_changed(move |value| {
                 if let Some(app) = app_ref.upgrade() {
+                    if state.running.load(Ordering::Acquire) {
+                        app.set_status_left(
+                            "Queue is running; stop it before changing destination paths".into(),
+                        );
+                        return;
+                    }
                     let mut queue = state
                         .queue
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let index = queue.active_job_index;
-                    checkpoint_queue(&state, &queue);
+                    let before = queue.clone();
                     if let Some(job) = queue.jobs.get_mut(index) {
-                        job.output_file = value.as_str().to_string();
-                        job.status = JobStatus::Queued;
+                        job.set_output_file(value.as_str());
+                    }
+                    if before.queue_digest() != queue.queue_digest() {
+                        checkpoint_queue(&state, &before);
                     }
                     refresh(
                         &app,
@@ -811,18 +1723,25 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
             }),
             _ => app.on_preset_changed(move |value| {
                 if let Some(app) = app_ref.upgrade() {
+                    if state.running.load(Ordering::Acquire) {
+                        app.set_status_left(
+                            "Queue is running; stop it before changing presets".into(),
+                        );
+                        return;
+                    }
                     let mut queue = state
                         .queue
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let index = queue.active_job_index;
-                    checkpoint_queue(&state, &queue);
+                    let before = queue.clone();
                     if let Some(job) = queue.jobs.get_mut(index) {
-                        job.preset = match value.as_str() {
+                        let preset = match value.as_str() {
                             "ProRes 422" => EncodePreset::prores_master(),
                             "AV1 High" => av1_preset(),
                             _ => EncodePreset::h264_1080p(),
                         };
+                        job.set_preset(preset);
                         let output = PathBuf::from(&job.output_file);
                         let stem = output
                             .file_stem()
@@ -832,7 +1751,9 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                             .with_file_name(format!("{stem}.{}", job.preset.container))
                             .to_string_lossy()
                             .into_owned();
-                        job.status = JobStatus::Queued;
+                    }
+                    if before.queue_digest() != queue.queue_digest() {
+                        checkpoint_queue(&state, &before);
                     }
                     refresh(
                         &app,
@@ -844,6 +1765,259 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 }
             }),
         }
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_choose_source(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current = snapshot(&state)
+                    .jobs
+                    .get(snapshot(&state).active_job_index)
+                    .map(|job| PathBuf::from(&job.source_file));
+                match state
+                    .dialogs
+                    .open_file(&source_file_request(current.as_deref()))
+                {
+                    Ok(Some(path)) => {
+                        set_selected_source_path(&app, &state, path.to_string_lossy())
+                    }
+                    Ok(None) => app.set_status_left("Source selection cancelled".into()),
+                    Err(error) => {
+                        app.set_status_left(format!("Source dialog failed: {error}").into())
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_choose_output(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let queue = snapshot(&state);
+                let current_job = queue.jobs.get(queue.active_job_index);
+                let current = current_job.map(|job| PathBuf::from(&job.output_file));
+                match state.dialogs.save_file(&output_file_request(
+                    current.as_deref(),
+                    current_job.map(|job| &job.preset),
+                )) {
+                    Ok(Some(path)) => {
+                        set_selected_output_path(&app, &state, path.to_string_lossy())
+                    }
+                    Ok(None) => app.set_status_left("Destination selection cancelled".into()),
+                    Err(error) => {
+                        app.set_status_left(format!("Destination dialog failed: {error}").into())
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_choose_subtitles(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let queue = snapshot(&state);
+                let current = queue
+                    .jobs
+                    .get(queue.active_job_index)
+                    .and_then(|job| job.subtitles.path.as_deref())
+                    .map(PathBuf::from);
+                match state
+                    .dialogs
+                    .open_file(&subtitle_file_request(current.as_deref()))
+                {
+                    Ok(Some(path)) => {
+                        set_selected_subtitle_path(&app, &state, path.to_string_lossy())
+                    }
+                    Ok(None) => app.set_status_left("Subtitle selection cancelled".into()),
+                    Err(error) => {
+                        app.set_status_left(format!("Subtitle dialog failed: {error}").into())
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_source_dropped(move |data| {
+            if let Some(app) = app_ref.upgrade() {
+                match dropped_path(&data) {
+                    Some(path) => set_selected_source_path(&app, &state, path),
+                    None => {
+                        app.set_status_left("Source drop rejected · expected a file path".into())
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_output_dropped(move |data| {
+            if let Some(app) = app_ref.upgrade() {
+                match dropped_path(&data) {
+                    Some(path) => set_selected_output_path(&app, &state, path),
+                    None => app
+                        .set_status_left("Destination drop rejected · expected a file path".into()),
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_audio_codec_changed(move |codec| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Relaxed) {
+                    app.set_status_left(
+                        "Queue is running; stop it before changing audio codec".into(),
+                    );
+                    return;
+                }
+                let mut queue = state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = queue.clone();
+                let index = queue.active_job_index;
+                let result = queue
+                    .jobs
+                    .get_mut(index)
+                    .ok_or_else(|| "no job selected".to_string())
+                    .and_then(|job| job.set_audio_codec(codec.to_string()));
+                if let Err(error) = result {
+                    app.set_status_left(format!("Audio codec rejected: {error}").into());
+                    return;
+                }
+                if before.queue_digest() != queue.queue_digest() {
+                    checkpoint_queue(&state, &before);
+                }
+                refresh(&app, &queue, state.backend.as_ref(), false);
+                update_history_controls(&app, &state);
+                app.set_status_left(format!("Audio codec set to {codec}").into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_subtitle_mode_changed(move |mode| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Relaxed) {
+                    app.set_status_left(
+                        "Queue is running; stop it before changing subtitle mode".into(),
+                    );
+                    return;
+                }
+                let Some(mode) = (match mode {
+                    0 => Some(SubtitleMode::None),
+                    1 => Some(SubtitleMode::BurnIn),
+                    2 => Some(SubtitleMode::PassthroughCopy),
+                    3 => Some(SubtitleMode::ConvertSrt),
+                    _ => None,
+                }) else {
+                    app.set_status_left("Subtitle mode rejected".into());
+                    return;
+                };
+                let mut queue = state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = queue.clone();
+                let index = queue.active_job_index;
+                if let Some(job) = queue.jobs.get_mut(index) {
+                    job.set_subtitle_mode(mode);
+                }
+                if before.queue_digest() != queue.queue_digest() {
+                    checkpoint_queue(&state, &before);
+                }
+                refresh(&app, &queue, state.backend.as_ref(), false);
+                update_history_controls(&app, &state);
+                app.set_status_left("Subtitle mode updated · queue ready".into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_metadata_copy_changed(move |copy| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Relaxed) {
+                    app.set_status_left(
+                        "Queue is running; stop it before changing metadata".into(),
+                    );
+                    return;
+                }
+                let mut queue = state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = queue.clone();
+                let index = queue.active_job_index;
+                if let Some(job) = queue.jobs.get_mut(index) {
+                    job.set_metadata_copy(copy);
+                }
+                if before.queue_digest() != queue.queue_digest() {
+                    checkpoint_queue(&state, &before);
+                }
+                refresh(&app, &queue, state.backend.as_ref(), false);
+                update_history_controls(&app, &state);
+                app.set_status_left(
+                    if copy {
+                        "Source metadata will be copied"
+                    } else {
+                        "Source metadata will be dropped"
+                    }
+                    .into(),
+                );
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_collision_policy_changed(move |policy| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Relaxed) {
+                    app.set_status_left(
+                        "Queue is running; stop it before changing collision policy".into(),
+                    );
+                    return;
+                }
+                let Some(policy) = (match policy {
+                    0 => Some(DestinationCollisionPolicy::Fail),
+                    1 => Some(DestinationCollisionPolicy::Rename),
+                    2 => Some(DestinationCollisionPolicy::Overwrite),
+                    _ => None,
+                }) else {
+                    app.set_status_left("Collision policy rejected".into());
+                    return;
+                };
+                let mut queue = state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = queue.clone();
+                let index = queue.active_job_index;
+                if let Some(job) = queue.jobs.get_mut(index) {
+                    job.set_collision_policy(policy);
+                }
+                if before.queue_digest() != queue.queue_digest() {
+                    checkpoint_queue(&state, &before);
+                }
+                refresh(&app, &queue, state.backend.as_ref(), false);
+                update_history_controls(&app, &state);
+                app.set_status_left("Destination collision policy updated".into());
+            }
+        });
     }
 
     {
@@ -908,6 +2082,23 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
             if state.backend.is_none() || state.running.swap(true, Ordering::SeqCst) {
                 return;
             }
+            {
+                let mut queue = state
+                    .queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let before = queue.clone();
+                if let Err(error) = queue.apply_destination_policies() {
+                    state.running.store(false, Ordering::SeqCst);
+                    let _ = weak.upgrade_in_event_loop(move |app| {
+                        app.set_status_left(format!("Queue blocked: {error}").into());
+                    });
+                    return;
+                }
+                if before.queue_digest() != queue.queue_digest() {
+                    checkpoint_queue(&state, &before);
+                }
+            }
             state.cancel.store(false, Ordering::SeqCst);
             let state = state.clone();
             let weak = weak.clone();
@@ -943,7 +2134,10 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     let plan = match job.plan(
                         &backend,
                         ExecutionPolicy {
-                            overwrite: true,
+                            overwrite: matches!(
+                                job.destination.collision_policy,
+                                DestinationCollisionPolicy::Overwrite
+                            ),
                             create_parent_directories: true,
                         },
                     ) {
@@ -1216,6 +2410,7 @@ fn master_palette(app: &EncodeApp) -> Vec<PaletteCommand> {
     .filter(|c| match c.action {
         PaletteAction::Undo => app.get_can_undo(),
         PaletteAction::Redo => app.get_can_redo(),
+        PaletteAction::RetryJob => app.get_can_retry(),
         _ => true,
     })
     .collect()
@@ -1313,6 +2508,7 @@ fn wire_palette(app: &EncodeApp) {
                     .filter(|c| match c.action {
                         PaletteAction::Undo => app.get_can_undo(),
                         PaletteAction::Redo => app.get_can_redo(),
+                        PaletteAction::RetryJob => app.get_can_retry(),
                         _ => true,
                     })
                     .filter(|c| {
@@ -1457,6 +2653,80 @@ mod tests {
     }
 
     #[test]
+    fn queue_configuration_callbacks_update_typed_fields_and_history() {
+        let dir = std::env::temp_dir().join(format!("loom-encode-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("camera.mov");
+        let subtitle = dir.join("captions.srt");
+        let output = dir.join("camera.mp4");
+        let scripted = ScriptedFileDialogs::new(
+            [Some(source.clone()), Some(subtitle.clone())],
+            [Some(output.clone())],
+        );
+        let (app, state) = test_app_and_state(scripted);
+
+        app.invoke_choose_source();
+        app.invoke_choose_output();
+        app.invoke_choose_subtitles();
+        app.invoke_audio_codec_changed("opus".into());
+        app.invoke_subtitle_mode_changed(3);
+        app.invoke_metadata_copy_changed(false);
+        app.invoke_collision_policy_changed(1);
+
+        let queue = state.queue.lock().unwrap();
+        let job = &queue.jobs[queue.active_job_index];
+        assert_eq!(job.source_file, source.to_string_lossy());
+        assert_eq!(job.output_file, output.to_string_lossy());
+        assert_eq!(
+            job.subtitles.path.as_deref(),
+            Some(subtitle.to_string_lossy().as_ref())
+        );
+        assert_eq!(job.audio.codec, "opus");
+        assert_eq!(job.subtitles.mode, SubtitleMode::ConvertSrt);
+        assert!(!job.metadata.copy);
+        assert_eq!(
+            job.destination.collision_policy,
+            DestinationCollisionPolicy::Rename
+        );
+        assert!(app.get_can_undo());
+        drop(queue);
+
+        // A plain-text DataTransfer is the same payload used by the native
+        // DropArea bridge, so this exercises the real drop callback path.
+        app.invoke_source_dropped(DataTransfer::from(SharedString::from("/tmp/dropped.mov")));
+        assert_eq!(
+            state.queue.lock().unwrap().jobs[0].source_file,
+            "/tmp/dropped.mov"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_move_remove_callbacks_keep_selection_and_undo_coherent() {
+        let scripted = ScriptedFileDialogs::default();
+        let (app, state) = test_app_and_state(scripted);
+        app.invoke_add_job();
+        {
+            let queue = state.queue.lock().unwrap();
+            assert_eq!(queue.active_job_index, 1);
+            assert_eq!(queue.selected_job_indices, vec![1]);
+        }
+        app.invoke_move_job(1, 0);
+        {
+            let queue = state.queue.lock().unwrap();
+            assert_eq!(queue.active_job_index, 0);
+            assert_eq!(queue.selected_job_indices, vec![0]);
+            assert_eq!(queue.jobs[0].id, "job-2");
+        }
+        assert!(app.get_can_undo());
+        app.invoke_remove_job();
+        let queue = state.queue.lock().unwrap();
+        assert_eq!(queue.jobs.len(), 1);
+        assert_eq!(queue.selected_job_indices, vec![0]);
+    }
+
+    #[test]
     fn responsive_layout_switches_at_the_compact_breakpoint() {
         set_platform();
         let app = EncodeApp::new().expect("create EncodeApp");
@@ -1466,5 +2736,32 @@ mod tests {
 
         configure_responsive_layout(&app, (1180, 800));
         assert!(!app.get_compact_layout());
+    }
+
+    #[test]
+    fn dialog_requests_omit_empty_parent_for_bare_filenames() {
+        let source = source_file_request(Some(Path::new("source.mov")));
+        let subtitle = subtitle_file_request(Some(Path::new("captions.srt")));
+        let output = output_file_request(Some(Path::new("output.mp4")), None);
+        let queue_open = open_queue_request(Some(Path::new("queue.loomencode")));
+        let queue_save = save_queue_request(Some(Path::new("queue.loomencode")));
+
+        assert!(source.initial_directory.is_none());
+        assert!(subtitle.initial_directory.is_none());
+        assert!(output.initial_directory.is_none());
+        assert!(queue_open.initial_directory.is_none());
+        assert!(queue_save.initial_directory.is_none());
+    }
+
+    #[test]
+    fn dropped_file_uri_preserves_root_and_decodes_escapes() {
+        let transfer = DataTransfer::from(SharedString::from("file:///tmp/encode%20source.mov"));
+        assert_eq!(
+            dropped_path(&transfer),
+            Some("/tmp/encode source.mov".into())
+        );
+
+        let transfer = DataTransfer::from(SharedString::from("file:////tmp/encode.mov"));
+        assert_eq!(dropped_path(&transfer), Some("//tmp/encode.mov".into()));
     }
 }
