@@ -332,6 +332,7 @@ export component VideoTimeline inherits Rectangle {
     in property <[float]> clip-durations: [];
     in property <[string]> clip-cache-status: [];
     in property <int> active-clip-index: 0;
+    in property <string> active-nle-tool: "Select";
     in-out property <float> playhead-seconds: 0;
     in property <float> frame-step: 1.0 / 30.0;
     callback select-track(int);
@@ -341,6 +342,10 @@ export component VideoTimeline inherits Rectangle {
     callback move-clip(int, float);
     callback trim-clip-in(int, float);
     callback trim-clip-out(int, float);
+    callback begin-clip-gesture(int, string);
+    callback end-clip-gesture;
+    callback cancel-clip-gesture;
+    callback split-clip;
     callback seek(float);
 
     height: 230px;
@@ -352,6 +357,30 @@ export component VideoTimeline inherits Rectangle {
     timeline-focus := FocusScope {
         enabled: root.clip-labels.length > 0;
         key-pressed(event) => {
+            if (event.modifiers.alt && event.text == Key.LeftArrow) {
+                root.trim-clip-in(root.active-clip-index, -root.frame-step);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.RightArrow) {
+                root.trim-clip-in(root.active-clip-index, root.frame-step);
+                return accept;
+            }
+            if (event.modifiers.shift && event.text == Key.LeftArrow) {
+                root.trim-clip-out(root.active-clip-index, -root.frame-step);
+                return accept;
+            }
+            if (event.modifiers.shift && event.text == Key.RightArrow) {
+                root.trim-clip-out(root.active-clip-index, root.frame-step);
+                return accept;
+            }
+            if (!event.modifiers.shift && !event.modifiers.alt && event.text == Key.UpArrow) {
+                root.move-clip(root.active-clip-index, -root.frame-step);
+                return accept;
+            }
+            if (!event.modifiers.shift && !event.modifiers.alt && event.text == Key.DownArrow) {
+                root.move-clip(root.active-clip-index, root.frame-step);
+                return accept;
+            }
             if (event.text == Key.LeftArrow) {
                 root.playhead-seconds = max(0.0, root.playhead-seconds - root.frame-step);
                 root.seek(root.playhead-seconds);
@@ -546,6 +575,13 @@ export component VideoTimeline inherits Rectangle {
                         border-width: clip-index == root.active-clip-index || clip-touch.has-hover ? 2px : 1px;
                         border-color: clip-index == root.active-clip-index ? Theme.palette().focus : clip-touch.has-hover ? Theme.palette().accent : Theme.palette().content-cool;
                         animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
+                        accessible-role: button;
+                        accessible-label: clip + (clip-index == root.active-clip-index ? " (selected)" : "");
+                        accessible-action-default => {
+                            timeline-focus.focus();
+                            root.select-clip(clip-index);
+                            if (root.active-nle-tool == "Blade") { root.split-clip(); }
+                        }
                         VerticalLayout {
                             padding: Theme.tokens.space.sm;
                             spacing: Theme.tokens.space.xs;
@@ -574,19 +610,28 @@ export component VideoTimeline inherits Rectangle {
                                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                     timeline-focus.focus();
                                     root.select-clip(clip-index);
+                                    root.begin-clip-gesture(clip-index, "Move");
                                     self.last-drag-x = self.mouse-x;
-                                } else if (event.kind == PointerEventKind.cancel || event.kind == PointerEventKind.up) {
+                                } else if (event.kind == PointerEventKind.cancel) {
+                                    root.cancel-clip-gesture();
+                                    self.last-drag-x = 0;
+                                } else if (event.kind == PointerEventKind.up) {
+                                    root.end-clip-gesture();
                                     self.last-drag-x = 0;
                                 }
                             }
                             moved => {
-                                if (self.pressed) {
+                                if (self.pressed && root.active-nle-tool != "Blade") {
                                     let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
                                     self.last-drag-x = self.mouse-x;
                                     root.move-clip(clip-index, delta);
                                 }
                             }
-                            clicked => { timeline-focus.focus(); root.select-clip(clip-index); }
+                            clicked => {
+                                timeline-focus.focus();
+                                root.select-clip(clip-index);
+                                if (root.active-nle-tool == "Blade") { root.split-clip(); }
+                            }
                         }
                         Rectangle {
                             x: 0px;
@@ -595,14 +640,26 @@ export component VideoTimeline inherits Rectangle {
                             height: parent.height;
                             background: clip-index == root.active-clip-index ? Theme.palette().focus : transparent;
                             opacity: 0.75;
+                            accessible-role: button;
+                            accessible-label: "Trim in for " + clip;
+                            accessible-action-default => {
+                                timeline-focus.focus();
+                                root.select-clip(clip-index);
+                                root.trim-clip-in(clip-index, root.frame-step);
+                            }
                             trim-in-touch := TouchArea {
                                 property <length> last-drag-x: 0px;
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                         timeline-focus.focus();
                                         root.select-clip(clip-index);
+                                        root.begin-clip-gesture(clip-index, "TrimIn");
                                         self.last-drag-x = self.mouse-x;
-                                    } else if (event.kind == PointerEventKind.cancel || event.kind == PointerEventKind.up) {
+                                    } else if (event.kind == PointerEventKind.cancel) {
+                                        root.cancel-clip-gesture();
+                                        self.last-drag-x = 0;
+                                    } else if (event.kind == PointerEventKind.up) {
+                                        root.end-clip-gesture();
                                         self.last-drag-x = 0;
                                     }
                                 }
@@ -622,14 +679,26 @@ export component VideoTimeline inherits Rectangle {
                             height: parent.height;
                             background: clip-index == root.active-clip-index ? Theme.palette().focus : transparent;
                             opacity: 0.75;
+                            accessible-role: button;
+                            accessible-label: "Trim out for " + clip;
+                            accessible-action-default => {
+                                timeline-focus.focus();
+                                root.select-clip(clip-index);
+                                root.trim-clip-out(clip-index, -root.frame-step);
+                            }
                             trim-out-touch := TouchArea {
                                 property <length> last-drag-x: 0px;
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                         timeline-focus.focus();
                                         root.select-clip(clip-index);
+                                        root.begin-clip-gesture(clip-index, "TrimOut");
                                         self.last-drag-x = self.mouse-x;
-                                    } else if (event.kind == PointerEventKind.cancel || event.kind == PointerEventKind.up) {
+                                    } else if (event.kind == PointerEventKind.cancel) {
+                                        root.cancel-clip-gesture();
+                                        self.last-drag-x = 0;
+                                    } else if (event.kind == PointerEventKind.up) {
+                                        root.end-clip-gesture();
                                         self.last-drag-x = 0;
                                     }
                                 }
@@ -666,7 +735,7 @@ export component VideoInspector inherits InspectorSurface {
     in property <[string]> clip-cache-status: [];
     in property <int> active-clip-index: 0;
     in-out property <int> inspector-tab: 0;
-    in-out property <string> export-path: "loom-video-export.mp4";
+    in-out property <string> export-path: "";
     in property <bool> backend-available: false;
     in property <bool> exporting: false;
     in property <float> export-progress: 0;

@@ -1,5 +1,6 @@
 //! Loom Video desktop application with local FFmpeg media workflows.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -8,16 +9,17 @@ use std::time::{Duration, Instant};
 use std::{process::Command, thread};
 
 use loom_desktop::{
-    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
-    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
-    ScriptedFileDialogs,
+    build_standard_menu_bar, CommandAction, FileDialogService, FileFilter, Menu, MenuActionSink,
+    MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs, NativeMenuBar,
+    OpenFileRequest, SaveFileRequest, ScriptedFileDialogs,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
 use loom_video_core::{
-    build_timeline_export_plan, decode_preview_frame, discover_media_tools,
-    execute_timeline_export_with_cancel, load_video_project, probe_media, save_video_project, Clip,
-    ExportCancellation, MediaTools, TimelineMarker, VideoFrame, VideoProject, VideoSession,
+    build_timeline_export_plan, decode_preview_frame_with_cancel, discover_media_tools,
+    execute_timeline_export_with_cancel, load_video_project, probe_media, save_video_project,
+    snap_timeline_to_edit_points, Clip, ExportCancellation, MediaTools, PreviewCancellation,
+    TimelineMarker, VideoFrame, VideoProject, VideoSession,
 };
 use slint::{
     ComponentHandle, Image, Model, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer,
@@ -152,7 +154,112 @@ struct AppState {
     exporting: AtomicBool,
     export_cancel: ExportCancellation,
     preview_generation: PreviewGeneration,
+    preview_cancel: Mutex<Option<PreviewCancellation>>,
+    preview_in_flight: AtomicBool,
+    preview_cache: Mutex<PreviewCache>,
+    gesture: Mutex<Option<TimelineGesture>>,
     playback_clock: Mutex<Option<PlaybackClock>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheState {
+    Pending,
+    Ready,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+struct PreviewCacheEntry {
+    clip_id: String,
+    thumbnail: CacheState,
+    waveform: CacheState,
+    frame: Option<VideoFrame>,
+}
+
+#[derive(Debug, Default)]
+struct PreviewCache {
+    entries: VecDeque<PreviewCacheEntry>,
+}
+
+impl PreviewCache {
+    const LIMIT: usize = 8;
+
+    fn mark_pending(&mut self, clip_id: &str) {
+        self.entries.retain(|entry| entry.clip_id != clip_id);
+        self.entries.push_front(PreviewCacheEntry {
+            clip_id: clip_id.to_string(),
+            thumbnail: CacheState::Pending,
+            waveform: CacheState::Pending,
+            frame: None,
+        });
+        self.entries.truncate(Self::LIMIT);
+    }
+
+    fn mark_ready(&mut self, clip_id: &str, frame: VideoFrame) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.clip_id == clip_id)
+        {
+            entry.thumbnail = CacheState::Ready;
+            entry.frame = Some(frame);
+            return;
+        }
+        self.entries.push_front(PreviewCacheEntry {
+            clip_id: clip_id.to_string(),
+            thumbnail: CacheState::Ready,
+            waveform: CacheState::Pending,
+            frame: Some(frame),
+        });
+        self.entries.truncate(Self::LIMIT);
+    }
+
+    fn mark_failed(&mut self, clip_id: &str) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.clip_id == clip_id)
+        {
+            entry.thumbnail = CacheState::Failed;
+            entry.frame = None;
+        }
+    }
+
+    fn status_for(&self, clip: &Clip) -> String {
+        let source = clip.source_path.trim();
+        if source.is_empty() {
+            return "Offline sample · synthetic preview".to_string();
+        }
+        if !Path::new(source).is_file() {
+            return "Source missing · relink required".to_string();
+        }
+        match self.entries.iter().find(|entry| entry.clip_id == clip.id) {
+            Some(entry) => match (entry.thumbnail, entry.waveform) {
+                (CacheState::Ready, CacheState::Ready) => "Thumbnail ready · waveform ready".into(),
+                (CacheState::Ready, CacheState::Pending) => {
+                    "Thumbnail ready · waveform pending".into()
+                }
+                (CacheState::Failed, _) => "Thumbnail failed · retry on demand".into(),
+                _ => "Thumbnail pending · waveform pending".into(),
+            },
+            None => "Thumbnail pending · waveform pending".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GestureKind {
+    Move,
+    TrimIn,
+    TrimOut,
+}
+
+#[derive(Debug)]
+struct TimelineGesture {
+    clip_id: String,
+    track_index: usize,
+    kind: GestureKind,
+    baseline: VideoProject,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +323,28 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn invalidate_preview(state: &AppState) {
+    state.preview_generation.next();
+    if let Some(cancel) = lock(&state.preview_cancel).take() {
+        cancel.cancel();
+    }
+}
+
+fn video_track_index(project: &VideoProject) -> Option<usize> {
+    project
+        .tracks
+        .iter()
+        .position(|track| matches!(track.track_type, loom_video_core::TrackType::Video))
+}
+
+fn selected_clip_id(project: &VideoProject, track_index: usize, index: usize) -> Option<String> {
+    project
+        .tracks
+        .get(track_index)
+        .and_then(|track| track.clips.get(index))
+        .map(|clip| clip.id.clone())
+}
+
 fn video_filter() -> FileFilter {
     FileFilter {
         name: "Loom Video Project (*.loomvideo)".into(),
@@ -258,6 +387,21 @@ fn save_video_request(save_path: Option<&Path>) -> SaveFileRequest {
     }
 }
 
+fn save_video_export_request(save_path: Option<&Path>) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Video Timeline".into(),
+        initial_directory: save_path.and_then(Path::parent).map(Path::to_path_buf),
+        suggested_name: save_path
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+            .or_else(|| Some("Untitled-export.mp4".into())),
+        filters: vec![FileFilter {
+            name: "MPEG-4 Video (*.mp4)".into(),
+            extensions: vec!["mp4".into()],
+        }],
+    }
+}
+
 fn open_media_request(save_path: Option<&Path>) -> OpenFileRequest {
     OpenFileRequest {
         title: "Import Media".into(),
@@ -289,17 +433,6 @@ fn clip_display_name(clip: &Clip) -> String {
         format!("{} · offline sample", clip.name)
     } else {
         clip.name.clone()
-    }
-}
-
-fn clip_cache_status(clip: &Clip) -> String {
-    let source = clip.source_path.trim();
-    if source.is_empty() {
-        "Offline sample · synthetic preview".to_string()
-    } else if Path::new(source).is_file() {
-        "Preview on demand · waveform pending".to_string()
-    } else {
-        "Source missing · relink required".to_string()
     }
 }
 
@@ -406,12 +539,14 @@ fn refresh(app: &VideoApp, state: &AppState) {
             .map(|clip| clip.out_point as f32)
             .collect::<Vec<_>>(),
     )));
-    app.set_clip_cache_status(ModelRc::new(VecModel::from(
+    let cache_statuses = {
+        let preview_cache = lock(&state.preview_cache);
         clips
             .iter()
-            .map(|clip| SharedString::from(clip_cache_status(clip)))
-            .collect::<Vec<_>>(),
-    )));
+            .map(|clip| SharedString::from(preview_cache.status_for(clip)))
+            .collect::<Vec<_>>()
+    };
+    app.set_clip_cache_status(ModelRc::new(VecModel::from(cache_statuses)));
     let selected = (*lock(&state.selected_clip)).min(clips.len().saturating_sub(1));
     *lock(&state.selected_clip) = selected;
     app.set_active_clip_index(selected as i32);
@@ -504,6 +639,40 @@ fn refresh(app: &VideoApp, state: &AppState) {
     }
 }
 
+/// Refreshes preview/cache projections without persisting a recovery snapshot.
+/// Playback can request frames several times per second, so it must not route
+/// through the full document refresh path (which checkpoints recovery state).
+fn refresh_preview_surface(app: &VideoApp, state: &AppState) {
+    let session = lock(&state.session);
+    let clips = timeline_clips(&session.project);
+    let cache_statuses = {
+        let preview_cache = lock(&state.preview_cache);
+        clips
+            .iter()
+            .map(|clip| SharedString::from(preview_cache.status_for(clip)))
+            .collect::<Vec<_>>()
+    };
+    app.set_clip_cache_status(ModelRc::new(VecModel::from(cache_statuses)));
+    if let Some(frame) = lock(&state.preview).as_ref() {
+        app.set_preview_image(frame_image(frame));
+        app.set_has_preview(true);
+    }
+    let preview_synthetic = state.preview_synthetic.load(Ordering::Acquire);
+    app.set_preview_synthetic(preview_synthetic);
+    app.set_status_right(
+        if state.tools.is_some() {
+            if preview_synthetic {
+                "Local FFmpeg · synthetic preview"
+            } else {
+                "Local FFmpeg media"
+            }
+        } else {
+            "Media backend unavailable"
+        }
+        .into(),
+    );
+}
+
 fn apply_theme(app: &VideoApp, theme: &str) {
     Theme::get(app).set_active_theme(theme.into());
 }
@@ -526,6 +695,10 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         exporting: AtomicBool::new(false),
         export_cancel: ExportCancellation::default(),
         preview_generation: PreviewGeneration::default(),
+        preview_cancel: Mutex::new(None),
+        preview_in_flight: AtomicBool::new(false),
+        preview_cache: Mutex::new(PreviewCache::default()),
+        gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     };
     refresh(&app, &state);
@@ -673,6 +846,10 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         exporting: AtomicBool::new(false),
         export_cancel: ExportCancellation::default(),
         preview_generation: PreviewGeneration::default(),
+        preview_cancel: Mutex::new(None),
+        preview_in_flight: AtomicBool::new(false),
+        preview_cache: Mutex::new(PreviewCache::default()),
+        gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     });
     wire_application(&app, state.clone());
@@ -699,8 +876,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             ],
         )],
     );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
+    let _menu_service = install_video_menu(&app, menu_bar);
     refresh(&app, &state);
 
     let mut steps = Vec::new();
@@ -845,7 +1021,10 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     app.invoke_export_timeline(export_path.to_string_lossy().into_owned().into());
     wait_for_export(&state, Duration::from_secs(20))?;
     if !export_path.is_file() {
-        return Err("completed export did not produce an output file".into());
+        return Err(format!(
+            "completed export did not produce an output file (status={})",
+            app.get_status_left()
+        ));
     }
     capture_workflow_step(
         &app,
@@ -855,18 +1034,33 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         &mut steps,
     )?;
 
+    let cancellation_destination = b"existing destination before cancellation";
+    std::fs::write(&cancel_path, cancellation_destination)
+        .map_err(|error| format!("seed cancellation destination: {error}"))?;
     app.invoke_export_timeline(cancel_path.to_string_lossy().into_owned().into());
     app.invoke_cancel_export();
     wait_for_export(&state, Duration::from_secs(20))?;
     if !state.export_cancel.is_cancelled() {
         return Err("cancel callback did not signal the export worker".into());
     }
-    let _ = std::fs::remove_file(&cancel_path);
+    let destination_preserved = std::fs::read(&cancel_path)
+        .map(|bytes| bytes == cancellation_destination)
+        .unwrap_or(false);
+    if !destination_preserved {
+        return Err("cancelled export overwrote the existing destination".into());
+    }
+    let temporary_left = std::fs::read_dir(out_dir)
+        .map_err(|error| format!("read cancellation artifacts: {error}"))?
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name().to_string_lossy().contains(".loom-video-"));
+    if temporary_left {
+        return Err("cancelled export left a temporary output behind".into());
+    }
     capture_workflow_step(
         &app,
         out_dir,
         "06-export-cancel",
-        "cancelled the second export and removed any partial output",
+        "cancelled the second export while preserving its prior destination and removing partial output",
         &mut steps,
     )?;
 
@@ -911,7 +1105,29 @@ impl PaletteProbe for VideoApp {
 }
 
 fn request_preview(state: Arc<AppState>, weak: slint::Weak<VideoApp>, timeline_time: f64) {
+    request_preview_internal(state, weak, timeline_time, true);
+}
+
+fn request_playback_preview(state: Arc<AppState>, weak: slint::Weak<VideoApp>, timeline_time: f64) {
+    request_preview_internal(state, weak, timeline_time, false);
+}
+
+fn request_preview_internal(
+    state: Arc<AppState>,
+    weak: slint::Weak<VideoApp>,
+    timeline_time: f64,
+    force: bool,
+) {
+    if !force && state.preview_in_flight.load(Ordering::Acquire) {
+        return;
+    }
     let generation = state.preview_generation.next();
+    if let Some(previous) = lock(&state.preview_cancel).take() {
+        previous.cancel();
+    }
+    let cancellation = PreviewCancellation::default();
+    *lock(&state.preview_cancel) = Some(cancellation.clone());
+    state.preview_in_flight.store(true, Ordering::Release);
     let source = {
         let session = lock(&state.session);
         timeline_clips(&session.project)
@@ -919,54 +1135,82 @@ fn request_preview(state: Arc<AppState>, weak: slint::Weak<VideoApp>, timeline_t
             .find(|clip| timeline_time >= clip.start_time && timeline_time < clip.end_time())
             .map(|clip| {
                 (
+                    clip.id.clone(),
                     PathBuf::from(&clip.source_path),
                     clip.in_point + (timeline_time - clip.start_time) * clip.playback_rate,
                 )
             })
     };
-    let Some((path, source_time)) = source.filter(|(path, _)| path.is_file()) else {
+    let Some((clip_id, path, source_time)) = source.filter(|(_, path, _)| path.is_file()) else {
+        state.preview_in_flight.store(false, Ordering::Release);
+        let _ = lock(&state.preview_cancel).take();
         show_synthetic_preview(&state, &weak);
         return;
     };
     let Some(tools) = state.tools.clone() else {
+        state.preview_in_flight.store(false, Ordering::Release);
+        let _ = lock(&state.preview_cancel).take();
         show_synthetic_preview(&state, &weak);
         return;
     };
+    lock(&state.preview_cache).mark_pending(&clip_id);
+    if let Some(app) = weak.upgrade() {
+        refresh_preview_surface(&app, &state);
+    }
     let callback_state = state.clone();
-    std::thread::spawn(
-        move || match decode_preview_frame(&tools, &path, source_time, 960, 540) {
+    std::thread::spawn(move || {
+        let result =
+            decode_preview_frame_with_cancel(&tools, &path, source_time, 960, 540, &cancellation);
+        match result {
             Ok(frame) => {
                 if !state.preview_generation.is_current(generation) {
                     return;
                 }
                 *lock(&state.preview) = Some(frame.clone());
+                lock(&state.preview_cache).mark_ready(&clip_id, frame.clone());
                 state.preview_synthetic.store(false, Ordering::Relaxed);
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     if !callback_state.preview_generation.is_current(generation) {
                         return;
                     }
+                    refresh_preview_surface(&app, &callback_state);
                     app.set_preview_image(frame_image(&frame));
                     app.set_has_preview(true);
                     app.set_preview_synthetic(false);
                     app.set_status_left(format!("Decoded preview at {timeline_time:.2}s").into());
+                    callback_state
+                        .preview_in_flight
+                        .store(false, Ordering::Release);
                 });
             }
             Err(error) => {
                 if !state.preview_generation.is_current(generation) {
                     return;
                 }
+                lock(&state.preview_cache).mark_failed(&clip_id);
+                let frame = procedural_preview();
+                *lock(&state.preview) = Some(frame);
+                state.preview_synthetic.store(true, Ordering::Release);
+                state.preview_in_flight.store(false, Ordering::Release);
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     if callback_state.preview_generation.is_current(generation) {
+                        refresh_preview_surface(&app, &callback_state);
                         app.set_status_left(format!("Preview decode failed: {error}").into());
                     }
                 });
             }
-        },
-    );
+        }
+        if state.preview_generation.is_current(generation) {
+            *lock(&state.preview_cancel) = None;
+            state.preview_in_flight.store(false, Ordering::Release);
+        }
+    });
 }
 
 fn show_synthetic_preview(state: &AppState, weak: &slint::Weak<VideoApp>) {
     let frame = procedural_preview();
+    let _ = lock(&state.preview_cancel).take();
+    state.preview_in_flight.store(false, Ordering::Release);
     *lock(&state.preview) = Some(frame.clone());
     state.preview_synthetic.store(true, Ordering::Release);
     if let Some(app) = weak.upgrade() {
@@ -993,7 +1237,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
         app.on_new_project(move || {
             if let Some(app) = app_ref.upgrade() {
                 timer.stop();
-                state.preview_generation.next();
+                invalidate_preview(&state);
                 *lock(&state.playback_clock) = None;
                 app.set_is_playing(false);
                 *lock(&state.session) = VideoSession::new(empty_project());
@@ -1021,7 +1265,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     {
                         Ok(project) => {
                             timer.stop();
-                            state.preview_generation.next();
+                            invalidate_preview(&state);
                             *lock(&state.playback_clock) = None;
                             app.set_is_playing(false);
                             *lock(&state.session) = VideoSession::new(project);
@@ -1149,6 +1393,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
         let app_ref = app.as_weak();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
+                invalidate_preview(&state);
                 lock(&state.session).undo();
                 refresh(&app, &state);
             }
@@ -1159,6 +1404,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
         let app_ref = app.as_weak();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
+                invalidate_preview(&state);
                 lock(&state.session).redo();
                 refresh(&app, &state);
             }
@@ -1227,10 +1473,17 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                                     .clips
                                     .len()
                                     .saturating_sub(1);
-                                state.preview_generation.next();
+                                let preview_time = session.project.tracks[track_index]
+                                    .clips
+                                    .last()
+                                    .map(|clip| clip.start_time);
+                                invalidate_preview(&state);
                                 state.preview_synthetic.store(true, Ordering::Relaxed);
                                 drop(session);
                                 refresh(&app, &state);
+                                if let Some(preview_time) = preview_time {
+                                    request_preview(state.clone(), app.as_weak(), preview_time);
+                                }
                                 app.set_status_left(
                                     format!(
                                         "Imported {}",
@@ -1344,6 +1597,93 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        app.on_begin_clip_gesture(move |index, kind| {
+            if let Some(app) = app_ref.upgrade() {
+                if index < 0 {
+                    return;
+                }
+                let kind = match kind.as_str() {
+                    "Move" => GestureKind::Move,
+                    "TrimIn" => GestureKind::TrimIn,
+                    "TrimOut" => GestureKind::TrimOut,
+                    _ => return,
+                };
+                let session = lock(&state.session);
+                let Some(track_index) = video_track_index(&session.project) else {
+                    app.set_status_left("Gesture unavailable: project has no video track".into());
+                    return;
+                };
+                let Some(clip_id) = selected_clip_id(&session.project, track_index, index as usize)
+                else {
+                    app.set_status_left("Gesture unavailable: selected clip is unavailable".into());
+                    return;
+                };
+                let baseline = session.project.clone();
+                *lock(&state.gesture) = Some(TimelineGesture {
+                    clip_id,
+                    track_index,
+                    kind,
+                    baseline,
+                });
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_end_clip_gesture(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let Some(gesture) = lock(&state.gesture).take() else {
+                    return;
+                };
+                let mut session = lock(&state.session);
+                let changed = session.commit_gesture(gesture.baseline);
+                let selected_after = session.project.tracks[gesture.track_index]
+                    .clips
+                    .iter()
+                    .position(|clip| clip.id == gesture.clip_id);
+                if let Some(index) = selected_after {
+                    *lock(&state.selected_clip) = index;
+                }
+                drop(session);
+                if changed {
+                    invalidate_preview(&state);
+                }
+                refresh(&app, &state);
+                app.set_status_left(if changed {
+                    "Committed timeline gesture".into()
+                } else {
+                    "Timeline gesture cancelled (no changes)".into()
+                });
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_cancel_clip_gesture(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let Some(gesture) = lock(&state.gesture).take() else {
+                    return;
+                };
+                let mut session = lock(&state.session);
+                session.rollback_gesture(gesture.baseline);
+                let selected_after = session.project.tracks[gesture.track_index]
+                    .clips
+                    .iter()
+                    .position(|clip| clip.id == gesture.clip_id)
+                    .unwrap_or(0);
+                *lock(&state.selected_clip) = selected_after;
+                drop(session);
+                invalidate_preview(&state);
+                refresh(&app, &state);
+                app.set_status_left("Timeline gesture cancelled".into());
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_move_clip(move |index, delta| {
             if let Some(app) = app_ref.upgrade() {
                 if index < 0 || !delta.is_finite() || delta.abs() < f32::EPSILON {
@@ -1351,32 +1691,59 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 }
                 let selected = index as usize;
                 let mut session = lock(&state.session);
-                let track_index = session.project.tracks.iter().position(|track| {
-                    matches!(track.track_type, loom_video_core::TrackType::Video)
-                });
+                let gesture = lock(&state.gesture);
+                let gesture_target = gesture
+                    .as_ref()
+                    .filter(|gesture| gesture.kind == GestureKind::Move)
+                    .map(|gesture| (gesture.track_index, gesture.clip_id.clone()));
+                drop(gesture);
+                let track_index = gesture_target
+                    .as_ref()
+                    .map(|(track_index, _)| *track_index)
+                    .or_else(|| video_track_index(&session.project));
                 let Some(track_index) = track_index else {
                     app.set_status_left("Move failed: project has no video track".into());
                     return;
                 };
-                let Some(clip_id) = session.project.tracks[track_index]
-                    .clips
-                    .get(selected)
-                    .map(|clip| clip.id.clone())
-                else {
+                let clip_id = gesture_target
+                    .map(|(_, clip_id)| clip_id)
+                    .or_else(|| selected_clip_id(&session.project, track_index, selected));
+                let Some(clip_id) = clip_id else {
                     app.set_status_left("Move failed: selected clip is unavailable".into());
                     return;
                 };
-                let result = session.apply_edit(|project| {
+                let gesture_active = lock(&state.gesture)
+                    .as_ref()
+                    .is_some_and(|gesture| gesture.kind == GestureKind::Move);
+                let snap_enabled = app.get_snap_enabled();
+                let edit = |project: &mut VideoProject| {
                     let clip = project.tracks[track_index]
                         .clips
                         .iter()
                         .find(|clip| clip.id == clip_id)
                         .ok_or(loom_video_core::TimelineError::ClipNotFound)?;
-                    let target = clip.start_time + f64::from(delta);
+                    let mut target = clip.start_time + f64::from(delta);
+                    if snap_enabled {
+                        target = snap_timeline_to_edit_points(
+                            target,
+                            &project.tracks,
+                            &project.markers,
+                            0.1,
+                        );
+                    }
                     project.move_clip(track_index, track_index, &clip_id, target, false)
-                });
+                };
+                let result = if gesture_active {
+                    session.apply_edit_without_history(edit)
+                } else {
+                    session.apply_edit(edit)
+                };
                 if let Err(error) = result {
                     app.set_status_left(format!("Move failed: {error}").into());
+                    if gesture_active {
+                        drop(session);
+                        app.invoke_cancel_clip_gesture();
+                    }
                 } else {
                     let selected_after = session.project.tracks[track_index]
                         .clips
@@ -1385,8 +1752,11 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                         .unwrap_or(selected);
                     *lock(&state.selected_clip) = selected_after;
                     drop(session);
+                    invalidate_preview(&state);
                     refresh(&app, &state);
-                    app.set_status_left("Moved selected clip".into());
+                    if !gesture_active {
+                        app.set_status_left("Moved selected clip".into());
+                    }
                 }
             }
         });
@@ -1414,6 +1784,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                         });
                         if result.is_ok() {
                             *lock(&state.selected_clip) = selected.saturating_sub(1);
+                            invalidate_preview(&state);
                         } else {
                             app.set_status_left(
                                 "Remove failed: selected clip is unavailable".into(),
@@ -1448,6 +1819,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                         });
                         match result {
                             Ok(()) => {
+                                invalidate_preview(&state);
                                 app.set_status_left(
                                     format!("Split clip at {:.2}s", playhead).into(),
                                 );
@@ -1476,40 +1848,102 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 }
                 let selected = *lock(&state.selected_clip);
                 let mut session = lock(&state.session);
-                let track_index = session.project.tracks.iter().position(|track| {
-                    matches!(track.track_type, loom_video_core::TrackType::Video)
-                });
+                let gesture = lock(&state.gesture);
+                let gesture_target = gesture
+                    .as_ref()
+                    .filter(|gesture| {
+                        matches!(gesture.kind, GestureKind::TrimIn | GestureKind::TrimOut)
+                    })
+                    .map(|gesture| (gesture.track_index, gesture.clip_id.clone(), gesture.kind));
+                drop(gesture);
+                let track_index = gesture_target
+                    .as_ref()
+                    .map(|(track_index, _, _)| *track_index)
+                    .or_else(|| video_track_index(&session.project));
                 if let Some(track_index) = track_index {
-                    if let Some(clip_id) = session.project.tracks[track_index]
-                        .clips
-                        .get(selected)
-                        .map(|clip| clip.id.clone())
-                    {
-                        let result: Result<(), loom_video_core::TimelineError> = session
-                            .apply_edit(|project| {
-                                let trim_result = {
+                    let clip_id = gesture_target
+                        .as_ref()
+                        .map(|(_, clip_id, _)| clip_id.clone())
+                        .or_else(|| selected_clip_id(&session.project, track_index, selected));
+                    if let Some(clip_id) = clip_id {
+                        let gesture_active = gesture_target.is_some();
+                        let snap_enabled = app.get_snap_enabled();
+                        let edit = |project: &mut VideoProject| {
+                            let mut snap_start = None;
+                            let mut snap_end = None;
+                            if in_delta != 0.0 {
+                                let clip = project.tracks[track_index]
+                                    .clips
+                                    .iter_mut()
+                                    .find(|clip| clip.id == clip_id)
+                                    .ok_or(loom_video_core::TimelineError::ClipNotFound)?;
+                                clip.trim_in((clip.in_point + f64::from(in_delta)).max(0.0))?;
+                                snap_start = Some(clip.start_time);
+                            } else if out_delta != 0.0 {
+                                let clip = project.tracks[track_index]
+                                    .clips
+                                    .iter_mut()
+                                    .find(|clip| clip.id == clip_id)
+                                    .ok_or(loom_video_core::TimelineError::ClipNotFound)?;
+                                clip.trim_out(
+                                    (clip.out_point + f64::from(out_delta))
+                                        .max(clip.in_point + 0.01),
+                                )?;
+                                snap_end = Some(clip.end_time());
+                            }
+                            if snap_enabled {
+                                if let Some(start) = snap_start {
+                                    let snapped = snap_timeline_to_edit_points(
+                                        start,
+                                        &project.tracks,
+                                        &project.markers,
+                                        0.1,
+                                    );
+                                    let delta = snapped - start;
+                                    if delta.abs() > f64::EPSILON && snapped >= 0.0 {
+                                        let clip = project.tracks[track_index]
+                                            .clips
+                                            .iter_mut()
+                                            .find(|clip| clip.id == clip_id)
+                                            .ok_or(loom_video_core::TimelineError::ClipNotFound)?;
+                                        clip.start_time = snapped;
+                                        clip.in_point += delta * clip.playback_rate;
+                                        clip.sync_duration()?;
+                                    }
+                                }
+                                if let Some(end) = snap_end {
+                                    let snapped = snap_timeline_to_edit_points(
+                                        end,
+                                        &project.tracks,
+                                        &project.markers,
+                                        0.1,
+                                    );
                                     let clip = project.tracks[track_index]
                                         .clips
                                         .iter_mut()
                                         .find(|clip| clip.id == clip_id)
                                         .ok_or(loom_video_core::TimelineError::ClipNotFound)?;
-                                    if in_delta != 0.0 {
-                                        clip.trim_in((clip.in_point + in_delta as f64).max(0.0))
-                                    } else if out_delta != 0.0 {
-                                        clip.trim_out(
-                                            (clip.out_point + out_delta as f64)
-                                                .max(clip.in_point + 0.01),
-                                        )
-                                    } else {
-                                        Ok(())
+                                    if snapped > clip.start_time + 0.01 {
+                                        clip.out_point +=
+                                            (snapped - clip.end_time()) * clip.playback_rate;
+                                        clip.sync_duration()?;
                                     }
-                                };
-                                trim_result?;
-                                project.tracks[track_index].sort_clips();
-                                Ok(())
-                            });
+                                }
+                            }
+                            project.tracks[track_index].sort_clips();
+                            Ok(())
+                        };
+                        let result: Result<(), loom_video_core::TimelineError> = if gesture_active {
+                            session.apply_edit_without_history(edit)
+                        } else {
+                            session.apply_edit(edit)
+                        };
                         if let Err(error) = result {
                             app.set_status_left(format!("Trim failed: {error}").into());
+                            if gesture_active {
+                                drop(session);
+                                app.invoke_cancel_clip_gesture();
+                            }
                         } else {
                             let selected_after = session.project.tracks[track_index]
                                 .clips
@@ -1517,11 +1951,12 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                                 .position(|clip| clip.id == clip_id)
                                 .unwrap_or(selected);
                             *lock(&state.selected_clip) = selected_after;
+                            drop(session);
+                            invalidate_preview(&state);
+                            refresh(&app, &state);
                         }
                     }
                 }
-                drop(session);
-                refresh(&app, &state);
             }
         });
     }
@@ -1608,6 +2043,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     *lock(&state.playback_clock) = None;
                     app.set_playhead_seconds(position as f32);
                     app.set_is_playing(false);
+                    invalidate_preview(&state);
+                    refresh(&app, &state);
                     app.set_status_left("Playback paused".into());
                     return;
                 }
@@ -1698,6 +2135,11 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                                     )
                                     .into(),
                                 );
+                                request_playback_preview(
+                                    timer_state.clone(),
+                                    app.as_weak(),
+                                    position,
+                                );
                             }
                         }
                     },
@@ -1714,6 +2156,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 timer.stop();
                 *lock(&state.playback_clock) = None;
                 app.set_is_playing(false);
+                invalidate_preview(&state);
+                refresh(&app, &state);
                 app.set_status_left("Playback stopped".into());
             }
         });
@@ -1759,6 +2203,32 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
         let state = state.clone();
         let weak = app.as_weak();
         app.on_export_timeline(move |path| {
+            let mut output = if path.trim().is_empty() {
+                let current_path = lock(&state.save_path).clone();
+                match state
+                    .dialogs
+                    .save_file(&save_video_export_request(current_path.as_deref()))
+                {
+                    Ok(Some(path)) => path,
+                    Ok(None) => {
+                        if let Some(app) = weak.upgrade() {
+                            app.set_status_left("Export cancelled".into());
+                        }
+                        return;
+                    }
+                    Err(error) => {
+                        if let Some(app) = weak.upgrade() {
+                            app.set_status_left(format!("Export dialog failed: {error}").into());
+                        }
+                        return;
+                    }
+                }
+            } else {
+                PathBuf::from(path.trim())
+            };
+            if output.extension().is_none() {
+                output.set_extension("mp4");
+            }
             if state.exporting.swap(true, Ordering::SeqCst) {
                 return;
             }
@@ -1770,17 +2240,11 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 }
                 return;
             };
-            let mut output = PathBuf::from(path.trim());
-            if output.as_os_str().is_empty() {
-                output = "loom-video-export.mp4".into();
-            }
-            if output.extension().is_none() {
-                output.set_extension("mp4");
-            }
             let project = lock(&state.session).project.clone();
             let worker_state = state.clone();
             let worker_weak = weak.clone();
             let cancel = state.export_cancel.clone();
+            let display_output = output.clone();
             std::thread::spawn(move || {
                 let plan = build_timeline_export_plan(&project, &tools, &output);
                 let result = match plan {
@@ -1818,11 +2282,69 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 });
             });
             if let Some(app) = weak.upgrade() {
+                app.set_export_path(display_output.to_string_lossy().into_owned().into());
                 app.set_exporting(true);
                 app.set_export_progress(0.0);
             }
         });
     }
+}
+
+fn install_video_menu(app: &VideoApp, mut menu_bar: MenuBar) -> NativeMenuBar {
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "edit.undo",
+        "edit.redo",
+        "app.palette",
+        "file.export_video",
+        "clip.split",
+        "clip.delete",
+        "view.inspector",
+        "view.zoom_in",
+        "view.zoom_out",
+        "view.zoom_actual",
+        "app.quit",
+        "window.minimize",
+        "window.zoom",
+        "window.bring_all_to_front",
+        "help.documentation",
+        "help.shortcuts",
+        "help.feedback",
+    ]);
+    let service = NativeMenuBar::new();
+    let _ = service.install_menu_bar(&menu_bar);
+    let weak = app.as_weak();
+    let sink: MenuActionSink = Arc::new(move |action: CommandAction| {
+        let Some(app) = weak.upgrade() else {
+            return Ok(());
+        };
+        match action.id.as_str() {
+            "file.new" => app.invoke_new_project(),
+            "file.open" => app.invoke_open_project(),
+            "file.save" => app.invoke_save_project(),
+            "file.save_as" => app.invoke_save_as_project(),
+            "edit.undo" => app.invoke_undo(),
+            "edit.redo" => app.invoke_redo(),
+            "app.palette" => app.invoke_open_palette(),
+            "file.export_video" => app.invoke_export_timeline(app.get_export_path()),
+            "clip.split" => app.invoke_split_clip(),
+            "clip.delete" => app.invoke_remove_clip(),
+            "view.inspector" => app.set_show_inspector(!app.get_show_inspector()),
+            "view.zoom_in" => app.set_timeline_zoom((app.get_timeline_zoom() + 0.5).min(4.0)),
+            "view.zoom_out" => app.set_timeline_zoom((app.get_timeline_zoom() - 0.5).max(1.0)),
+            "view.zoom_actual" => app.set_timeline_zoom(1.0),
+            "help.documentation" => app.set_status_left("Loom Video documentation is local".into()),
+            "help.shortcuts" => app.set_status_left("Use Ctrl/Cmd+K for commands".into()),
+            "help.feedback" => app.set_status_left("Feedback is unavailable offline".into()),
+            _ => {}
+        }
+        Ok(())
+    });
+    let _ = service.register_action_sink(sink);
+    service
 }
 
 fn main() -> Result<(), String> {
@@ -1868,6 +2390,10 @@ fn main() -> Result<(), String> {
         exporting: AtomicBool::new(false),
         export_cancel: ExportCancellation::default(),
         preview_generation: PreviewGeneration::default(),
+        preview_cancel: Mutex::new(None),
+        preview_in_flight: AtomicBool::new(false),
+        preview_cache: Mutex::new(PreviewCache::default()),
+        gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     });
 
@@ -1893,8 +2419,7 @@ fn main() -> Result<(), String> {
             ],
         )],
     );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
+    let _menu_service = install_video_menu(&app, menu_bar);
 
     wire_palette(&app);
     refresh(&app, &state);
@@ -2148,15 +2673,49 @@ fn wire_palette(app: &VideoApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loom_desktop::ScriptedFileDialogs;
+    use loom_desktop::{DesktopError, SaveFileRequest, ScriptedFileDialogs};
+
+    #[derive(Default)]
+    struct RecordingDialogs {
+        save_results: Mutex<VecDeque<Option<PathBuf>>>,
+        save_requests: Mutex<Vec<SaveFileRequest>>,
+    }
+
+    impl RecordingDialogs {
+        fn with_save_results(results: impl IntoIterator<Item = Option<PathBuf>>) -> Self {
+            Self {
+                save_results: Mutex::new(results.into_iter().collect()),
+                save_requests: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl FileDialogService for RecordingDialogs {
+        fn open_file(&self, _request: &OpenFileRequest) -> Result<Option<PathBuf>, DesktopError> {
+            Ok(None)
+        }
+
+        fn save_file(&self, request: &SaveFileRequest) -> Result<Option<PathBuf>, DesktopError> {
+            lock(&self.save_requests).push(request.clone());
+            lock(&self.save_results)
+                .pop_front()
+                .ok_or(DesktopError::ScriptExhausted("save_file"))
+        }
+    }
 
     fn test_app_and_state(scripted: ScriptedFileDialogs) -> (VideoApp, Arc<AppState>) {
+        test_app_and_state_with_dialogs(Arc::new(scripted))
+    }
+
+    fn test_app_and_state_with_dialogs(
+        dialogs: Arc<dyn FileDialogService>,
+    ) -> (VideoApp, Arc<AppState>) {
         set_platform();
         let app = VideoApp::new().expect("create VideoApp");
         let state = Arc::new(AppState {
             session: Mutex::new(VideoSession::new(sample_project())),
             save_path: Mutex::new(None),
-            dialogs: Arc::new(scripted),
+            dialogs,
             selected_clip: Mutex::new(0),
             preview: Mutex::new(Some(procedural_preview())),
             preview_synthetic: AtomicBool::new(true),
@@ -2164,6 +2723,10 @@ mod tests {
             exporting: AtomicBool::new(false),
             export_cancel: ExportCancellation::default(),
             preview_generation: PreviewGeneration::default(),
+            preview_cancel: Mutex::new(None),
+            preview_in_flight: AtomicBool::new(false),
+            preview_cache: Mutex::new(PreviewCache::default()),
+            gesture: Mutex::new(None),
             playback_clock: Mutex::new(None),
         });
         wire_application(&app, state.clone());
@@ -2300,6 +2863,31 @@ mod tests {
     }
 
     #[test]
+    fn timeline_gesture_commits_once_and_cancel_restores_baseline() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        app.set_snap_enabled(false);
+        let baseline = lock(&state.session).project.clone();
+
+        app.invoke_begin_clip_gesture(1, "Move".into());
+        app.invoke_move_clip(1, 0.25);
+        app.invoke_move_clip(1, 0.25);
+        assert!(!lock(&state.session).can_undo());
+        assert_ne!(lock(&state.session).project, baseline);
+
+        app.invoke_end_clip_gesture();
+        assert!(lock(&state.session).can_undo());
+        app.invoke_undo();
+        assert_eq!(lock(&state.session).project, baseline);
+        assert!(!lock(&state.session).can_undo());
+
+        app.invoke_begin_clip_gesture(1, "Move".into());
+        app.invoke_move_clip(1, 0.5);
+        app.invoke_cancel_clip_gesture();
+        assert_eq!(lock(&state.session).project, baseline);
+        assert!(!lock(&state.session).can_undo());
+    }
+
+    #[test]
     fn moving_clip_across_neighbor_keeps_clip_selected_after_sort() {
         let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
 
@@ -2337,6 +2925,71 @@ mod tests {
         assert!(!lock(&state.session).can_undo());
         app.invoke_trim_selected(0.0, 0.0);
         assert!(!lock(&state.session).can_undo());
+    }
+
+    #[test]
+    fn preview_cache_reports_thumbnail_progress_and_failure() {
+        let dir =
+            std::env::temp_dir().join(format!("loom-video-preview-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        std::fs::write(&source, b"fixture").unwrap();
+        let mut clip = Clip::new("clip", "Clip", 2.0);
+        clip.source_path = source.to_string_lossy().into_owned();
+        let mut cache = PreviewCache::default();
+        assert_eq!(
+            cache.status_for(&clip),
+            "Thumbnail pending · waveform pending"
+        );
+        cache.mark_pending(&clip.id);
+        assert_eq!(
+            cache.status_for(&clip),
+            "Thumbnail pending · waveform pending"
+        );
+        cache.mark_ready(
+            &clip.id,
+            VideoFrame {
+                width: 2,
+                height: 2,
+                pixels: vec![255; 16],
+            },
+        );
+        assert_eq!(
+            cache.status_for(&clip),
+            "Thumbnail ready · waveform pending"
+        );
+        cache.mark_failed(&clip.id);
+        assert_eq!(
+            cache.status_for(&clip),
+            "Thumbnail failed · retry on demand"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_export_path_uses_mp4_save_dialog() {
+        let dir =
+            std::env::temp_dir().join(format!("loom-video-export-dialog-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("chosen.mp4");
+        let dialogs = Arc::new(RecordingDialogs::with_save_results([Some(output)]));
+        let (app, _state) = test_app_and_state_with_dialogs(dialogs.clone());
+
+        app.invoke_export_timeline("".into());
+
+        let requests = lock(&dialogs.save_requests);
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].title, "Export Video Timeline");
+        assert_eq!(
+            requests[0].suggested_name.as_deref(),
+            Some("Untitled-export.mp4")
+        );
+        assert_eq!(requests[0].filters[0].extensions, ["mp4"]);
+        assert_eq!(
+            app.get_status_left().as_str(),
+            "FFmpeg/FFprobe are unavailable"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
@@ -78,7 +78,7 @@ impl ClipColorTag {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Clip {
     pub id: String,
     pub name: String,
@@ -141,7 +141,7 @@ impl Clip {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Track {
     pub id: String,
     pub name: String,
@@ -224,7 +224,7 @@ pub struct CaptionCue {
     pub language: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VideoProject {
     pub id: String,
     pub name: String,
@@ -1411,6 +1411,37 @@ impl VideoSession {
         self.project = candidate;
         Ok(())
     }
+
+    /// Applies an edit without creating a history entry. Gesture updates use
+    /// this while the pointer is down and commit one checkpoint on release.
+    pub fn apply_edit_without_history<E, F>(&mut self, edit: F) -> Result<(), E>
+    where
+        F: FnOnce(&mut VideoProject) -> Result<(), E>,
+    {
+        let mut candidate = self.project.clone();
+        edit(&mut candidate)?;
+        self.project = candidate;
+        Ok(())
+    }
+
+    /// Commits a gesture baseline as one undo entry when the document changed.
+    pub fn commit_gesture(&mut self, baseline: VideoProject) -> bool {
+        if baseline == self.project {
+            return false;
+        }
+        self.undo.push(baseline);
+        if self.undo.len() > self.history_limit {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+        true
+    }
+
+    /// Rolls the current project back to a gesture baseline without touching
+    /// existing history.
+    pub fn rollback_gesture(&mut self, baseline: VideoProject) {
+        self.project = baseline;
+    }
 }
 
 /// Cooperative cancellation shared by export workers and their UI command.
@@ -1426,6 +1457,22 @@ impl ExportCancellation {
         self.0.store(true, Ordering::Release);
     }
 
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// Cooperative cancellation shared by preview decoder workers.
+#[derive(Debug, Clone, Default)]
+pub struct PreviewCancellation(Arc<AtomicBool>);
+
+impl PreviewCancellation {
+    /// Requests cancellation of the associated preview worker.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    /// Returns whether cancellation was requested.
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Acquire)
     }
@@ -1607,8 +1654,31 @@ pub fn decode_preview_frame(
     max_width: u32,
     max_height: u32,
 ) -> Result<VideoFrame, String> {
+    decode_preview_frame_with_cancel(
+        tools,
+        path,
+        time_secs,
+        max_width,
+        max_height,
+        &PreviewCancellation::default(),
+    )
+}
+
+/// Decodes one scaled RGBA preview frame while allowing the worker to be
+/// cancelled without waiting for FFmpeg to finish.
+pub fn decode_preview_frame_with_cancel(
+    tools: &MediaTools,
+    path: &Path,
+    time_secs: f64,
+    max_width: u32,
+    max_height: u32,
+    cancel: &PreviewCancellation,
+) -> Result<VideoFrame, String> {
     if max_width == 0 || max_height == 0 {
         return Err("preview dimensions must be non-zero".into());
+    }
+    if cancel.is_cancelled() {
+        return Err("preview decode cancelled".into());
     }
     let probe = probe_media(tools, path)?;
     if probe.width == 0 || probe.height == 0 {
@@ -1619,7 +1689,7 @@ pub fn decode_preview_frame(
         .min(1.0);
     let width = ((probe.width as f64 * scale).round() as u32).max(2) & !1;
     let height = ((probe.height as f64 * scale).round() as u32).max(2) & !1;
-    let output = Command::new(&tools.ffmpeg)
+    let mut child = Command::new(&tools.ffmpeg)
         .args([
             "-hide_banner",
             "-loglevel",
@@ -1640,22 +1710,66 @@ pub fn decode_preview_frame(
             "rgba",
             "pipe:1",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("start FFmpeg preview decoder: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "FFmpeg preview stdout was not captured".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "FFmpeg preview stderr was not captured".to_string())?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = std::io::Read::read_to_end(&mut BufReader::new(stdout), &mut bytes);
+        result.map(|_| bytes).map_err(|error| error.to_string())
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let result = std::io::Read::read_to_string(&mut BufReader::new(stderr), &mut text);
+        result.map(|_| text).map_err(|error| error.to_string())
+    });
+    let status = loop {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err("preview decode cancelled".into());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("wait for FFmpeg preview decoder: {error}"))?
+        {
+            break status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let pixels = stdout_reader
+        .join()
+        .map_err(|_| "FFmpeg preview stdout reader panicked".to_string())?
+        .map_err(|error| format!("read FFmpeg preview output: {error}"))?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| "FFmpeg preview stderr reader panicked".to_string())?
+        .map_err(|error| format!("read FFmpeg preview errors: {error}"))?;
+    if !status.success() {
+        return Err(stderr);
     }
     let expected = width as usize * height as usize * 4;
-    if output.stdout.len() != expected {
+    if pixels.len() != expected {
         return Err(format!(
             "decoded frame has {} bytes; expected {expected}",
-            output.stdout.len()
+            pixels.len()
         ));
     }
     Ok(VideoFrame {
         width,
         height,
-        pixels: output.stdout,
+        pixels,
     })
 }
 
@@ -1766,6 +1880,71 @@ where
     execute_timeline_export_with_cancel(plan, progress, &ExportCancellation::default())
 }
 
+static NEXT_EXPORT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+fn export_temp_path(output: &Path) -> PathBuf {
+    let parent = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("loom-video-export.mp4");
+    // FFmpeg selects its muxer from the output suffix. Keep the temporary
+    // marker in the stem while retaining the destination extension so the
+    // worker can encode successfully before the atomic rename.
+    let extension = output
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or("mp4");
+    let nonce = NEXT_EXPORT_TEMP.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(
+        ".{file_name}.loom-video-{}-{nonce}.{extension}",
+        std::process::id(),
+    ))
+}
+
+fn export_arguments_with_output(plan: &TimelineExportPlan, temporary: &Path) -> Vec<String> {
+    let mut arguments = plan.arguments.clone();
+    let final_output = plan.output.to_string_lossy();
+    let temporary = temporary.to_string_lossy().into_owned();
+    if arguments
+        .last()
+        .is_some_and(|argument| argument == final_output.as_ref())
+    {
+        if let Some(argument) = arguments.last_mut() {
+            *argument = temporary;
+        }
+    } else {
+        arguments.push(temporary);
+    }
+    arguments
+}
+
+struct TemporaryExport {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl TemporaryExport {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            committed: false,
+        }
+    }
+}
+
+impl Drop for TemporaryExport {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Executes a timeline export with cooperative cancellation.
 pub fn execute_timeline_export_with_cancel<F>(
     plan: &TimelineExportPlan,
@@ -1783,8 +1962,12 @@ where
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
     }
+    let temporary = export_temp_path(&plan.output);
+    let _ = std::fs::remove_file(&temporary);
+    let mut temporary_output = TemporaryExport::new(temporary.clone());
+    let arguments = export_arguments_with_output(plan, &temporary);
     let mut child = Command::new(&plan.executable)
-        .args(&plan.arguments)
+        .args(arguments)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1803,30 +1986,73 @@ where
         let _ = std::io::Read::read_to_string(&mut reader, &mut text);
         text
     });
+    let (line_sender, line_receiver) = std::sync::mpsc::channel();
+    let stdout_reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if line_sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
     let mut last = 0.0;
-    for line in BufReader::new(stdout).lines() {
+    let status = loop {
         if cancel.is_cancelled() {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = stdout_reader.join();
             let _ = stderr_reader.join();
             return Err("timeline export cancelled".into());
         }
-        let line = line.map_err(|error| error.to_string())?;
-        if let Some(value) = line
-            .strip_prefix("out_time_us=")
-            .and_then(|value| value.parse::<f64>().ok())
-        {
-            last = (value / 1_000_000.0 / plan.duration.max(0.001)).clamp(0.0, 0.999) as f32;
-            progress(last);
-        } else if line == "progress=end" {
-            last = 1.0;
-            progress(1.0);
+        match line_receiver.recv_timeout(std::time::Duration::from_millis(20)) {
+            Ok(line_result) => {
+                let line = match line_result {
+                    Ok(line) => line,
+                    Err(error) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = stdout_reader.join();
+                        let _ = stderr_reader.join();
+                        return Err(error.to_string());
+                    }
+                };
+                if let Some(value) = line
+                    .strip_prefix("out_time_us=")
+                    .and_then(|value| value.parse::<f64>().ok())
+                {
+                    last =
+                        (value / 1_000_000.0 / plan.duration.max(0.001)).clamp(0.0, 0.999) as f32;
+                    progress(last);
+                } else if line == "progress=end" {
+                    last = 1.0;
+                    progress(1.0);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(format!("wait for FFmpeg export: {error}"));
+                }
+            },
         }
-    }
-    if cancel.is_cancelled() {
-        let _ = child.kill();
-    }
-    let status = child.wait().map_err(|error| error.to_string())?;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!("wait for FFmpeg export: {error}"));
+            }
+        }
+    };
+    let _ = stdout_reader.join();
     let stderr = stderr_reader
         .join()
         .unwrap_or_else(|_| "FFmpeg stderr reader panicked".into());
@@ -1836,8 +2062,15 @@ where
         if last < 1.0 {
             progress(1.0);
         }
+        if !temporary.is_file() {
+            return Err("FFmpeg completed without producing an output file".into());
+        }
+        std::fs::rename(&temporary, &plan.output)
+            .map_err(|error| format!("commit timeline export: {error}"))?;
+        temporary_output.committed = true;
         Ok(())
     } else {
+        let _ = std::fs::remove_file(&temporary);
         Err(stderr)
     }
 }
@@ -3675,6 +3908,43 @@ mod tests {
     }
 
     #[test]
+    fn gesture_edits_commit_once_or_restore_without_history() {
+        let mut session = VideoSession::new(VideoProject::new("video", "Gesture"));
+        session.project.tracks[0].add_clip(Clip::new("clip", "Clip", 4.0));
+        let baseline = session.project.clone();
+
+        session
+            .apply_edit_without_history(|project| project.move_clip(0, 0, "clip", 1.0, false))
+            .unwrap();
+        session
+            .apply_edit_without_history(|project| project.move_clip(0, 0, "clip", 2.0, false))
+            .unwrap();
+        assert!(
+            !session.can_undo(),
+            "gesture updates must not create history"
+        );
+        assert!(session.commit_gesture(baseline.clone()));
+        assert!(session.can_undo());
+        assert!(session.undo());
+        assert_eq!(session.project, baseline);
+        assert!(
+            !session.can_undo(),
+            "one gesture should produce one undo entry"
+        );
+
+        let cancel_baseline = session.project.clone();
+        session
+            .apply_edit_without_history(|project| project.move_clip(0, 0, "clip", 3.0, false))
+            .unwrap();
+        session.rollback_gesture(cancel_baseline.clone());
+        assert_eq!(session.project, cancel_baseline);
+        assert!(
+            !session.can_undo(),
+            "cancelled gestures must not create history"
+        );
+    }
+
+    #[test]
     fn timeline_coordinate_conversion_is_zoom_stable() {
         assert_eq!(VideoProject::seconds_to_pixels(2.5, 100.0), 250.0);
         assert_eq!(VideoProject::pixels_to_seconds(250.0, 100.0), 2.5);
@@ -3699,5 +3969,110 @@ mod tests {
             &token,
         )
         .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_export_removes_partial_temp_and_preserves_destination() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "loom-video-export-cancel-{}-{}",
+            std::process::id(),
+            NEXT_EXPORT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).expect("create export test directory");
+        let script = dir.join("fake-ffmpeg.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nmarker=\"$1\"\noutput=\"$2\"\nprintf started > \"$marker\"\nprintf partial > \"$output\"\nwhile :; do sleep 0.01; done\n",
+        )
+        .expect("write fake ffmpeg");
+        let mut permissions = std::fs::metadata(&script)
+            .expect("stat fake ffmpeg")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).expect("make fake ffmpeg executable");
+
+        let destination = dir.join("render.mp4");
+        std::fs::write(&destination, b"existing destination").expect("seed destination");
+        let marker = dir.join("started");
+        let plan = TimelineExportPlan {
+            executable: script,
+            arguments: vec![marker.to_string_lossy().into_owned()],
+            output: destination.clone(),
+            duration: 1.0,
+        };
+        let cancel = ExportCancellation::default();
+        let worker_cancel = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            execute_timeline_export_with_cancel(&plan, |_| {}, &worker_cancel)
+        });
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !marker.is_file() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(marker.is_file(), "fake worker did not start");
+        cancel.cancel();
+        assert!(worker.join().expect("join export worker").is_err());
+        assert_eq!(
+            std::fs::read(&destination).expect("read existing destination"),
+            b"existing destination"
+        );
+        let temporary_left = std::fs::read_dir(&dir)
+            .expect("read export directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().contains(".loom-video-"));
+        assert!(!temporary_left, "temporary export output was not removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_export_removes_partial_temp_and_preserves_destination() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "loom-video-export-failure-{}-{}",
+            std::process::id(),
+            NEXT_EXPORT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).expect("create export test directory");
+        let script = dir.join("fake-ffmpeg.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nmarker=\"$1\"\noutput=\"$2\"\nprintf started > \"$marker\"\nprintf partial > \"$output\"\nprintf failed >&2\nexit 17\n",
+        )
+        .expect("write fake ffmpeg");
+        let mut permissions = std::fs::metadata(&script)
+            .expect("stat fake ffmpeg")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).expect("make fake ffmpeg executable");
+
+        let destination = dir.join("render.mp4");
+        std::fs::write(&destination, b"existing destination").expect("seed destination");
+        let marker = dir.join("started");
+        let plan = TimelineExportPlan {
+            executable: script,
+            arguments: vec![marker.to_string_lossy().into_owned()],
+            output: destination.clone(),
+            duration: 1.0,
+        };
+        let result =
+            execute_timeline_export_with_cancel(&plan, |_| {}, &ExportCancellation::default());
+        assert!(result.is_err(), "fake FFmpeg must fail");
+        assert!(marker.is_file(), "fake worker did not start");
+        assert_eq!(
+            std::fs::read(&destination).expect("read existing destination"),
+            b"existing destination"
+        );
+        let temporary_left = std::fs::read_dir(&dir)
+            .expect("read export directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().contains(".loom-video-"));
+        assert!(!temporary_left, "temporary export output was not removed");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

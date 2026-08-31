@@ -22,7 +22,7 @@ export component VideoApp inherits Window {
     // mute/solo actions and names do not collide with the ruler lane.
     property <length> track-header-width: 180px;
     property <float> frame-step: 1.0 / 30.0;
-    property <bool> show-inspector: true;
+    in-out property <bool> show-inspector: true;
 
     in property <string> project-name: "Untitled Video";
     in property <string> project-format: "1920 × 1080 · 30 fps";
@@ -61,7 +61,7 @@ export component VideoApp inherits Window {
     in-out property <float> playhead-seconds: 0;
     in-out property <string> timecode-display: "00:00:00:00";
     in-out property <string> import-path: "";
-    in-out property <string> export-path: "loom-video-export.mp4";
+    in-out property <string> export-path: "";
     in-out property <int> inspector-tab: 0;
 
     callback new-project;
@@ -81,6 +81,9 @@ export component VideoApp inherits Window {
     callback move-clip(int, float);
     callback trim-clip-in(int, float);
     callback trim-clip-out(int, float);
+    callback begin-clip-gesture(int, string);
+    callback end-clip-gesture;
+    callback cancel-clip-gesture;
     callback select-nle-tool(string);
     callback toggle-snap;
     callback play-pause;
@@ -114,6 +117,21 @@ export component VideoApp inherits Window {
                 root.open-palette();
                 return accept;
             }
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.N || event.text == "n") { root.new-project(); return accept; }
+                if (event.text == Key.O || event.text == "o") { root.open-project(); return accept; }
+                if (event.text == Key.S || event.text == "s") {
+                    if (event.modifiers.shift) { root.save-as-project(); } else { root.save-project(); }
+                    return accept;
+                }
+                if (event.text == Key.Z || event.text == "z") {
+                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                    return accept;
+                }
+                if (event.text == Key.I || event.text == "i") { root.import-media(""); return accept; }
+                if (event.text == Key.E || event.text == "e") { root.export-timeline(root.export-path); return accept; }
+            }
+            if (event.text == Key.Space) { root.play-pause(); return accept; }
             return reject;
         }
 
@@ -227,6 +245,7 @@ export component VideoApp inherits Window {
                     clip-durations: root.clip-durations;
                     clip-cache-status: root.clip-cache-status;
                     active-clip-index: root.active-clip-index;
+                    active-nle-tool: root.active-nle-tool;
                     playhead-seconds <=> root.playhead-seconds;
                     frame-step: root.frame-step;
                     select-track(index) => { root.select-track(index); }
@@ -236,6 +255,10 @@ export component VideoApp inherits Window {
                     move-clip(index, delta) => { root.move-clip(index, delta); }
                     trim-clip-in(index, delta) => { root.trim-clip-in(index, delta); }
                     trim-clip-out(index, delta) => { root.trim-clip-out(index, delta); }
+                    begin-clip-gesture(index, kind) => { root.begin-clip-gesture(index, kind); }
+                    end-clip-gesture => { root.end-clip-gesture(); }
+                    cancel-clip-gesture => { root.cancel-clip-gesture(); }
+                    split-clip => { root.split-clip(); }
                     seek(value) => { root.seek(value); }
                 }
             }
