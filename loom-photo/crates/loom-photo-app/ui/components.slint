@@ -253,6 +253,8 @@ export component PhotoInspector inherits InspectorSurface {
     in property <[string]> layer-labels: [];
     in property <[bool]> layer-visibilities: [];
     in property <int> active-layer-index: 0;
+    in property <bool> can-move-up: false;
+    in property <bool> can-move-down: false;
     in property <string> active-blend-mode: "Normal";
     in property <float> active-layer-opacity: 100.0;
     in property <float> brightness-value: 0.0;
@@ -310,8 +312,8 @@ export component PhotoInspector inherits InspectorSurface {
                 spacing: Theme.tokens.space.sm;
                 ToolbarIconButton { icon: "plus"; label: "Add pixel layer"; clicked => { root.add-layer(); } }
                 ToolbarIconButton { icon: "wand"; label: "Add adjustment"; clicked => { root.add-adjustment(); } }
-                ToolbarIconButton { icon: "chevron-left"; label: "Move layer down"; clicked => { root.move-layer(-1); } }
-                ToolbarIconButton { icon: "chevron-right"; label: "Move layer up"; clicked => { root.move-layer(1); } }
+                ToolbarIconButton { icon: "chevron-left"; label: "Move layer down"; enabled: root.can-move-down; clicked => { root.move-layer(-1); } }
+                ToolbarIconButton { icon: "chevron-right"; label: "Move layer up"; enabled: root.can-move-up; clicked => { root.move-layer(1); } }
                 ToolbarSpacer { }
                 ToolbarIconButton { icon: "trash"; label: "Delete selected layer"; enabled: root.layer-labels.length > 1; clicked => { root.remove-layer(); } }
             }

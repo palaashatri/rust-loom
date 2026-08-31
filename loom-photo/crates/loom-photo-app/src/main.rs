@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
-    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
+    FileDialogService, FileFilter, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut,
+    NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_photo_core::{
     decode_raster, encode_jpeg, encode_png, load_photo, load_photo_canvas, save_photo_canvas,
@@ -207,6 +208,9 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
     app.set_layer_labels(ModelRc::new(VecModel::from(labels)));
     app.set_layer_visibilities(ModelRc::new(VecModel::from(visibilities)));
     app.set_active_layer_index(document.active_layer_index as i32);
+    let last_layer_index = document.layers.len().saturating_sub(1);
+    app.set_can_move_up(document.active_layer_index < last_layer_index);
+    app.set_can_move_down(document.active_layer_index > 0);
     app.set_can_undo(session.can_undo());
     app.set_can_redo(session.can_redo());
     app.set_brightness_value(adjustment_value(document, "brightness") * 100.0);
@@ -287,11 +291,14 @@ fn photo_tool_state(tool: &str) -> (i32, bool) {
     }
 }
 
-fn wire_responsive_layout(app: &PhotoApp) {
+fn wire_responsive_layout(app: &PhotoApp, state: Rc<GuiState>) {
     let app_ref = app.as_weak();
     app.on_window_resized(move |width| {
         if let Some(app) = app_ref.upgrade() {
             configure_responsive_width(&app, width.max(0.0) as u32);
+            if let Some(menu_service) = &state.menu_service {
+                sync_menu_state(menu_service, &app, &state);
+            }
         }
     });
 }
@@ -322,6 +329,21 @@ struct PaletteCommand {
     id: &'static str,
     label: &'static str,
     shortcut: &'static str,
+}
+
+fn palette_action_enabled(app: &PhotoApp, action: &PaletteAction) -> bool {
+    match action {
+        PaletteAction::Undo => app.get_can_undo(),
+        PaletteAction::Redo => app.get_can_redo(),
+        PaletteAction::MoveLayer(direction) => {
+            if *direction > 0 {
+                app.get_can_move_up()
+            } else {
+                app.get_can_move_down()
+            }
+        }
+        _ => true,
+    }
 }
 
 fn master_palette(app: &PhotoApp) -> Vec<PaletteCommand> {
@@ -424,11 +446,7 @@ fn master_palette(app: &PhotoApp) -> Vec<PaletteCommand> {
         },
     ]
     .into_iter()
-    .filter(|c| match c.action {
-        PaletteAction::Undo => app.get_can_undo(),
-        PaletteAction::Redo => app.get_can_redo(),
-        _ => true,
-    })
+    .filter(|command| palette_action_enabled(app, &command.action))
     .collect()
 }
 
@@ -485,6 +503,150 @@ struct GuiState {
     raster_filter: FileFilter,
     png_filter: FileFilter,
     jpeg_filter: FileFilter,
+    menu_service: Option<Rc<NativeMenuBar>>,
+}
+
+fn build_photo_menu_bar(app: &PhotoApp) -> MenuBar {
+    let mut menu_bar = build_standard_menu_bar(
+        "Loom Photo",
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.import_image",
+                "Import Image...",
+                MenuShortcut::primary("I"),
+            ),
+            MenuItem::action_with_shortcut(
+                "file.export_png",
+                "Export as PNG...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_jpeg", "Export as JPEG..."),
+        ],
+        vec![],
+        vec![MenuItem::check(
+            "view.inspector",
+            "Inspector",
+            app.get_show_inspector(),
+        )],
+        vec![Menu::new(
+            "Layer",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "layer.new",
+                    "New Layer",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("layer.adjustment", "New Adjustment Layer"),
+                MenuItem::action("layer.delete", "Delete Layer"),
+                MenuItem::Separator,
+                MenuItem::action("layer.move_up", "Move Layer Up"),
+                MenuItem::action("layer.move_down", "Move Layer Down"),
+            ],
+        )],
+    );
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "file.import_image",
+        "file.export_png",
+        "file.export_jpeg",
+        "edit.undo",
+        "edit.redo",
+        "layer.new",
+        "layer.adjustment",
+        "layer.delete",
+        "layer.move_up",
+        "layer.move_down",
+        "view.inspector",
+        "app.palette",
+    ]);
+    menu_bar
+}
+
+fn menu_projection(
+    menu_service: &NativeMenuBar,
+    app: &PhotoApp,
+    state: &GuiState,
+) -> Result<CommandStateProjection, DesktopError> {
+    let menu_bar = menu_service
+        .installed_menu_bar()
+        .ok_or_else(|| DesktopError::InvalidRequest("Photo menu bar is not installed".into()))?;
+    let mut projection = menu_bar.command_state_projection();
+    let session = state.session.borrow();
+    let layer_count = session.canvas.document.layers.len();
+    let active_layer_index = session.canvas.document.active_layer_index;
+
+    let mut undo = projection
+        .get("edit.undo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Photo menu is missing edit.undo".into()))?;
+    undo.enabled = session.can_undo();
+    projection.insert(undo);
+
+    let mut redo = projection
+        .get("edit.redo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Photo menu is missing edit.redo".into()))?;
+    redo.enabled = session.can_redo();
+    projection.insert(redo);
+
+    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Photo menu is missing view.inspector".into())
+    })?;
+    inspector.enabled = app.get_inspector_available();
+    inspector.checked = Some(app.get_show_inspector());
+    projection.insert(inspector);
+
+    let mut delete = projection
+        .get("layer.delete")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Photo menu is missing layer.delete".into()))?;
+    delete.enabled = layer_count > 1;
+    projection.insert(delete);
+
+    let mut move_up = projection.get("layer.move_up").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Photo menu is missing layer.move_up".into())
+    })?;
+    move_up.enabled = active_layer_index < layer_count.saturating_sub(1);
+    projection.insert(move_up);
+
+    let mut move_down = projection.get("layer.move_down").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Photo menu is missing layer.move_down".into())
+    })?;
+    move_down.enabled = active_layer_index > 0;
+    projection.insert(move_down);
+
+    Ok(projection)
+}
+
+fn sync_menu_state_result(
+    menu_service: &NativeMenuBar,
+    app: &PhotoApp,
+    state: &GuiState,
+) -> Result<(), DesktopError> {
+    rebuild_palette(app, app.get_palette_query().as_str());
+    let projection = menu_projection(menu_service, app, state)?;
+    menu_service.sync_command_states(&projection)
+}
+
+fn sync_menu_state(menu_service: &NativeMenuBar, app: &PhotoApp, state: &GuiState) {
+    if let Err(error) = sync_menu_state_result(menu_service, app, state) {
+        set_status(app, format!("Menu update failed: {error}"));
+    }
+}
+
+fn refresh_photo_with_state(app: &PhotoApp, state: &GuiState) -> Result<(), String> {
+    let refresh_result = {
+        let session = state.session.borrow();
+        refresh_photo(app, &session)
+    };
+    refresh_result?;
+    if let Some(menu_service) = &state.menu_service {
+        sync_menu_state(menu_service, app, state);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -532,6 +694,7 @@ fn new_gui_state(
         png_filter: FileFilter::new("PNG image", ["png"]).map_err(|error| error.to_string())?,
         jpeg_filter: FileFilter::new("JPEG image", ["jpg", "jpeg"])
             .map_err(|error| error.to_string())?,
+        menu_service: None,
     })
 }
 
@@ -661,6 +824,134 @@ fn export_current_image(
     Ok(true)
 }
 
+fn dispatch_command(app: &PhotoApp, id: &str) -> bool {
+    match id {
+        "file.new" => app.invoke_new_project(),
+        "file.open" => app.invoke_open_project(),
+        "file.save" => app.invoke_save_project(),
+        "file.save_as" => app.invoke_save_as_project(),
+        "file.import_image" => app.invoke_import_image(),
+        "file.export_png" => app.invoke_export_png(),
+        "file.export_jpeg" => app.invoke_export_jpeg(),
+        "edit.undo" => app.invoke_undo(),
+        "edit.redo" => app.invoke_redo(),
+        "layer.new" => app.invoke_add_layer(),
+        "layer.adjustment" => app.invoke_add_adjustment(),
+        "layer.delete" => app.invoke_remove_layer(),
+        "layer.move_up" => app.invoke_move_layer(1),
+        "layer.move_down" => app.invoke_move_layer(-1),
+        "view.inspector" => app.invoke_toggle_inspector(),
+        "app.palette" => app.invoke_open_palette(),
+        _ => return false,
+    }
+    true
+}
+
+fn is_photo_menu_command(id: &str) -> bool {
+    matches!(
+        id,
+        "file.new"
+            | "file.open"
+            | "file.save"
+            | "file.save_as"
+            | "file.import_image"
+            | "file.export_png"
+            | "file.export_jpeg"
+            | "edit.undo"
+            | "edit.redo"
+            | "layer.new"
+            | "layer.adjustment"
+            | "layer.delete"
+            | "layer.move_up"
+            | "layer.move_down"
+            | "view.inspector"
+            | "app.palette"
+    )
+}
+
+fn schedule_menu_action(
+    app_ref: &slint::Weak<PhotoApp>,
+    action: CommandAction,
+) -> Result<(), DesktopError> {
+    if !is_photo_menu_command(&action.id) {
+        return Err(DesktopError::InvalidRequest(format!(
+            "unsupported Photo menu command {}",
+            action.id
+        )));
+    }
+    let id = action.id;
+    let error_id = id.clone();
+    app_ref
+        .upgrade_in_event_loop(move |app| {
+            if !dispatch_command(&app, &id) {
+                set_status(&app, format!("Unsupported menu command: {id}"));
+            }
+        })
+        .map_err(|error| {
+            DesktopError::InvalidRequest(format!(
+                "failed to schedule Photo menu command {error_id}: {error}"
+            ))
+        })
+}
+
+fn wire_add_layer_callback(app: &PhotoApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_add_layer(move || {
+        if let Some(app) = app_ref.upgrade() {
+            let mut session = state.session.borrow_mut();
+            let count = session.canvas.document.layers.len() + 1;
+            session.add_pixel_layer(format!("layer-{count}"), format!("Pixel Layer {count}"));
+            if let Ok(image) = RgbaImage::transparent(
+                session.canvas.document.width,
+                session.canvas.document.height,
+            ) {
+                let _ = session
+                    .canvas
+                    .set_layer_image(&format!("layer-{count}"), image);
+            }
+            drop(session);
+            if let Err(error) = refresh_photo_with_state(&app, &state) {
+                set_status(&app, format!("Operation failed: {error}"));
+            }
+        }
+    });
+}
+
+fn wire_move_layer_callback(app: &PhotoApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_move_layer(move |direction| {
+        if let Some(app) = app_ref.upgrade() {
+            let mut session = state.session.borrow_mut();
+            let from = session.canvas.document.active_layer_index;
+            let to = if direction < 0 {
+                from.saturating_sub(1)
+            } else {
+                (from + 1).min(session.canvas.document.layers.len().saturating_sub(1))
+            };
+            session.move_layer(from, to);
+            drop(session);
+            let _ = refresh_photo_with_state(&app, &state);
+        }
+    });
+}
+
+fn wire_inspector_callback(app: &PhotoApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_toggle_inspector(move || {
+        if let Some(app) = app_ref.upgrade() {
+            if app.get_inspector_available() {
+                app.set_show_inspector(!app.get_show_inspector());
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
+            }
+        }
+    });
+}
+
 /// Record the keyboard command-palette journey with per-step screenshots.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
@@ -670,34 +961,6 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     configure_responsive_layout(&app, args.size);
     let session = PhotoSession::new(initial_canvas(args)?);
     refresh_photo(&app, &session)?;
-    let menu_bar = build_standard_menu_bar(
-        "Loom Photo",
-        vec![
-            MenuItem::action_with_shortcut(
-                "file.export_png",
-                "Export as PNG...",
-                MenuShortcut::primary("E"),
-            ),
-            MenuItem::action("file.export_jpeg", "Export as JPEG..."),
-        ],
-        vec![],
-        vec![MenuItem::check("view.inspector", "Inspector", true)],
-        vec![Menu::new(
-            "Layer",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "layer.new",
-                    "New Layer",
-                    MenuShortcut::primary_shift("N"),
-                ),
-                MenuItem::action("layer.duplicate", "Duplicate Layer"),
-                MenuItem::action("layer.delete", "Delete Layer"),
-            ],
-        )],
-    );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
-
     wire_palette(&app);
     rebuild_palette(&app, "");
     app.window()
@@ -766,7 +1029,8 @@ fn update_adjustment(state: &GuiState, app: &PhotoApp, kind: &str, display_name:
             normalized,
         ));
     }
-    if let Err(error) = refresh_photo(app, &session) {
+    drop(session);
+    if let Err(error) = refresh_photo_with_state(app, state) {
         set_status(app, format!("Preview failed: {error}"));
     }
 }
@@ -791,7 +1055,6 @@ fn main() -> Result<(), String> {
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     configure_responsive_layout(&app, args.size);
-    wire_responsive_layout(&app);
     let recovered = initialize_snapshot_recovery()?;
     let initial = if args.open.is_some() {
         initial_canvas(&args)?
@@ -806,11 +1069,14 @@ fn main() -> Result<(), String> {
         .as_ref()
         .map(PathBuf::from)
         .filter(|path| is_native_project(path));
-    let state = Rc::new(new_gui_state(
+    let menu_service = Rc::new(NativeMenuBar::new());
+    let mut gui_state = new_gui_state(
         PhotoSession::new(initial),
         initial_path,
         Rc::new(NativeFileDialogs),
-    )?);
+    )?;
+    gui_state.menu_service = Some(menu_service.clone());
+    let state = Rc::new(gui_state);
 
     macro_rules! mutate_and_refresh {
         ($callback:ident, $body:expr) => {{
@@ -820,7 +1086,8 @@ fn main() -> Result<(), String> {
                 if let Some(app) = app_ref.upgrade() {
                     let mut session = state.session.borrow_mut();
                     ($body)(&mut session);
-                    if let Err(error) = refresh_photo(&app, &session) {
+                    drop(session);
+                    if let Err(error) = refresh_photo_with_state(&app, &state) {
                         set_status(&app, format!("Operation failed: {error}"));
                     }
                 }
@@ -837,7 +1104,7 @@ fn main() -> Result<(), String> {
                     Ok(canvas) => {
                         *state.session.borrow_mut() = PhotoSession::new(canvas);
                         *state.save_path.borrow_mut() = None;
-                        if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
+                        if let Err(error) = refresh_photo_with_state(&app, &state) {
                             set_status(&app, format!("New project failed: {error}"));
                         } else {
                             set_status(&app, "Created unsaved photo project");
@@ -859,7 +1126,7 @@ fn main() -> Result<(), String> {
                         Ok(canvas) => {
                             *state.session.borrow_mut() = PhotoSession::new(canvas);
                             *state.save_path.borrow_mut() = Some(path.clone());
-                            if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
+                            if let Err(error) = refresh_photo_with_state(&app, &state) {
                                 set_status(&app, format!("Open preview failed: {error}"));
                             } else {
                                 set_status(&app, format!("Opened {}", path.display()));
@@ -882,6 +1149,9 @@ fn main() -> Result<(), String> {
                 if let Err(error) = save_current_project(&app, &state, false) {
                     set_status(&app, format!("Save failed: {error}"));
                 }
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
             }
         });
     }
@@ -894,6 +1164,9 @@ fn main() -> Result<(), String> {
                 if let Err(error) = save_current_project(&app, &state, true) {
                     set_status(&app, format!("Save As failed: {error}"));
                 }
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
             }
         });
     }
@@ -903,18 +1176,6 @@ fn main() -> Result<(), String> {
     });
     mutate_and_refresh!(on_redo, |session: &mut PhotoSession| {
         session.redo();
-    });
-    mutate_and_refresh!(on_add_layer, |session: &mut PhotoSession| {
-        let count = session.canvas.document.layers.len() + 1;
-        session.add_pixel_layer(format!("layer-{count}"), format!("Pixel Layer {count}"));
-        if let Ok(image) = RgbaImage::transparent(
-            session.canvas.document.width,
-            session.canvas.document.height,
-        ) {
-            let _ = session
-                .canvas
-                .set_layer_image(&format!("layer-{count}"), image);
-        }
     });
     mutate_and_refresh!(on_add_adjustment, |session: &mut PhotoSession| {
         let count = session.canvas.document.layers.len() + 1;
@@ -933,24 +1194,6 @@ fn main() -> Result<(), String> {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_move_layer(move |direction| {
-            if let Some(app) = app_ref.upgrade() {
-                let mut session = state.session.borrow_mut();
-                let from = session.canvas.document.active_layer_index;
-                let to = if direction < 0 {
-                    from.saturating_sub(1)
-                } else {
-                    (from + 1).min(session.canvas.document.layers.len().saturating_sub(1))
-                };
-                session.move_layer(from, to);
-                let _ = refresh_photo(&app, &session);
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
         app.on_select_layer(move |index| {
             if let Some(app) = app_ref.upgrade() {
                 if index >= 0 {
@@ -960,7 +1203,7 @@ fn main() -> Result<(), String> {
                         .canvas
                         .document
                         .select_layer(index as usize);
-                    let _ = refresh_photo(&app, &state.session.borrow());
+                    let _ = refresh_photo_with_state(&app, &state);
                 }
             }
         });
@@ -978,7 +1221,8 @@ fn main() -> Result<(), String> {
                         session.canvas.document.layers[index as usize].visible =
                             !session.canvas.document.layers[index as usize].visible;
                     }
-                    let _ = refresh_photo(&app, &session);
+                    drop(session);
+                    let _ = refresh_photo_with_state(&app, &state);
                 }
             }
         });
@@ -995,7 +1239,8 @@ fn main() -> Result<(), String> {
                     session.checkpoint();
                     session.canvas.document.layers[index].opacity = (value / 100.0).clamp(0.0, 1.0);
                 }
-                let _ = refresh_photo(&app, &session);
+                drop(session);
+                let _ = refresh_photo_with_state(&app, &state);
             }
         });
     }
@@ -1020,7 +1265,8 @@ fn main() -> Result<(), String> {
                         _ => BlendMode::Normal,
                     };
                 }
-                let _ = refresh_photo(&app, &session);
+                drop(session);
+                let _ = refresh_photo_with_state(&app, &state);
             }
         });
     }
@@ -1073,7 +1319,7 @@ fn main() -> Result<(), String> {
                         Ok(canvas) => {
                             *state.session.borrow_mut() = PhotoSession::new(canvas);
                             *state.save_path.borrow_mut() = None;
-                            if let Err(error) = refresh_photo(&app, &state.session.borrow()) {
+                            if let Err(error) = refresh_photo_with_state(&app, &state) {
                                 set_status(&app, format!("Import preview failed: {error}"));
                             } else {
                                 set_status(
@@ -1102,6 +1348,9 @@ fn main() -> Result<(), String> {
                 if let Err(error) = export_current_image(&app, &state, ExportKind::Png) {
                     set_status(&app, format!("PNG export failed: {error}"));
                 }
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
             }
         });
     }
@@ -1114,41 +1363,30 @@ fn main() -> Result<(), String> {
                 if let Err(error) = export_current_image(&app, &state, ExportKind::Jpeg) {
                     set_status(&app, format!("JPEG export failed: {error}"));
                 }
+                if let Some(menu_service) = &state.menu_service {
+                    sync_menu_state(menu_service, &app, &state);
+                }
             }
         });
     }
 
-    let menu_bar = build_standard_menu_bar(
-        "Loom Photo",
-        vec![
-            MenuItem::action_with_shortcut(
-                "file.export_png",
-                "Export as PNG...",
-                MenuShortcut::primary("E"),
-            ),
-            MenuItem::action("file.export_jpeg", "Export as JPEG..."),
-        ],
-        vec![],
-        vec![MenuItem::check("view.inspector", "Inspector", true)],
-        vec![Menu::new(
-            "Layer",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "layer.new",
-                    "New Layer",
-                    MenuShortcut::primary_shift("N"),
-                ),
-                MenuItem::action("layer.duplicate", "Duplicate Layer"),
-                MenuItem::action("layer.delete", "Delete Layer"),
-            ],
-        )],
-    );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
-
+    wire_responsive_layout(&app, state.clone());
+    wire_add_layer_callback(&app, &state);
+    wire_move_layer_callback(&app, &state);
+    wire_inspector_callback(&app, &state);
+    let menu_bar = build_photo_menu_bar(&app);
+    menu_service
+        .install_menu_bar(&menu_bar)
+        .map_err(|error| error.to_string())?;
+    let app_ref = app.as_weak();
+    menu_service
+        .register_action_sink(std::sync::Arc::new(move |action: CommandAction| {
+            schedule_menu_action(&app_ref, action)
+        }))
+        .map_err(|error| error.to_string())?;
     wire_palette(&app);
 
-    refresh_photo(&app, &state.session.borrow())?;
+    refresh_photo_with_state(&app, &state)?;
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
 }
@@ -1217,20 +1455,16 @@ fn wire_palette(app: &PhotoApp) {
         let app_ref = app.as_weak();
         app.on_palette_invoked(move |index| {
             if let Some(app) = app_ref.upgrade() {
+                let Some(item) = app.get_palette_commands().row_data(index as usize) else {
+                    return;
+                };
+                if !item.enabled {
+                    return;
+                }
                 let command = master_palette(&app)
                     .into_iter()
-                    .filter(|c| match c.action {
-                        PaletteAction::Undo => app.get_can_undo(),
-                        PaletteAction::Redo => app.get_can_redo(),
-                        _ => true,
-                    })
-                    .filter(|c| {
-                        let q = app.get_palette_query().trim().to_lowercase();
-                        q.is_empty()
-                            || c.label.to_lowercase().contains(&q)
-                            || c.id.to_lowercase().contains(&q)
-                    })
-                    .nth(index as usize);
+                    .find(|command| command.id == item.id.as_str())
+                    .filter(|command| palette_action_enabled(&app, &command.action));
                 if let Some(command) = command {
                     app.set_palette_open(false);
                     match command.action {
@@ -1363,5 +1597,342 @@ mod tests {
         assert_eq!(photo_tool_state("brush"), (1, false));
         assert_eq!(photo_tool_state("WAND"), (2, false));
         assert_eq!(photo_tool_state("unknown"), (0, false));
+    }
+
+    #[test]
+    fn photo_menu_uses_canonical_commands_and_disables_unhandled_items() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let menu = build_photo_menu_bar(&app);
+
+        for id in [
+            "file.new",
+            "file.open",
+            "file.save",
+            "file.save_as",
+            "file.import_image",
+            "file.export_png",
+            "file.export_jpeg",
+            "edit.undo",
+            "edit.redo",
+            "layer.new",
+            "layer.adjustment",
+            "layer.delete",
+            "layer.move_up",
+            "layer.move_down",
+            "view.inspector",
+            "app.palette",
+        ] {
+            assert!(
+                menu.find_item(id).is_some(),
+                "missing Photo menu command {id}"
+            );
+        }
+        for id in [
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "edit.select_all",
+            "view.zoom_in",
+            "view.zoom_out",
+            "view.zoom_actual",
+            "layer.duplicate",
+        ] {
+            if let Some(item) = menu.find_item(id) {
+                assert!(
+                    !item.is_enabled(),
+                    "unhandled Photo command {id} must be disabled"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn photo_menu_projection_tracks_history_layer_boundaries_and_inspector() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        configure_responsive_layout(&app, (1280, 800));
+        let state = scripted_state();
+        let menu = NativeMenuBar::new();
+        menu.install_menu_bar(&build_photo_menu_bar(&app))
+            .expect("install menu");
+
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+        assert!(matches!(
+            installed.find_item("edit.undo"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("edit.redo"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("layer.delete"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("layer.move_up"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("layer.move_down"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("view.inspector"),
+            Some(MenuItem::Check {
+                checked,
+                enabled: true,
+                ..
+            }) if *checked == app.get_show_inspector()
+        ));
+
+        state
+            .session
+            .borrow_mut()
+            .add_pixel_layer("layer-2", "Pixel Layer 2");
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+        assert!(matches!(
+            installed.find_item("layer.delete"),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("layer.move_up"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("layer.move_down"),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
+
+        state.session.borrow_mut().canvas.document.select_layer(0);
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+        assert!(matches!(
+            installed.find_item("layer.move_up"),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("layer.move_down"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+
+        app.set_show_inspector(false);
+        sync_menu_state(&menu, &app, &state);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: false,
+                enabled: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn photo_menu_sink_preserves_source_mutates_once_and_guards_boundaries() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let state = Rc::new(scripted_state());
+        let menu = Rc::new(NativeMenuBar::new());
+        menu.install_menu_bar(&build_photo_menu_bar(&app))
+            .expect("install menu");
+
+        wire_add_layer_callback(&app, &state);
+        wire_move_layer_callback(&app, &state);
+        let app_ref = app.as_weak();
+        let observed_source = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let observed_source_ref = observed_source.clone();
+        menu.register_action_sink(std::sync::Arc::new(
+            move |action: loom_desktop::CommandAction| {
+                *observed_source_ref.lock().expect("source lock") = Some(action.source);
+                let app = app_ref.upgrade().ok_or_else(|| {
+                    loom_desktop::DesktopError::InvalidRequest("Photo app was dropped".into())
+                })?;
+                if dispatch_command(&app, &action.id) {
+                    Ok(())
+                } else {
+                    Err(loom_desktop::DesktopError::InvalidRequest(format!(
+                        "unsupported Photo menu command {}",
+                        action.id
+                    )))
+                }
+            },
+        ))
+        .expect("register sink");
+
+        sync_menu_state(&menu, &app, &state);
+        let before = state.session.borrow().canvas.document.layers.len();
+        menu.dispatch_action_from("layer.new", loom_desktop::CommandSource::Menu)
+            .expect("enabled layer.new");
+        assert_eq!(
+            state.session.borrow().canvas.document.layers.len(),
+            before + 1
+        );
+        assert_eq!(
+            *observed_source.lock().expect("source lock"),
+            Some(loom_desktop::CommandSource::Menu)
+        );
+
+        state.session.borrow_mut().canvas.document.select_layer(0);
+        sync_menu_state(&menu, &app, &state);
+        let order_before = state
+            .session
+            .borrow()
+            .canvas
+            .document
+            .layers
+            .iter()
+            .map(|layer| layer.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(order_before, vec!["layer-bg", "layer-2"]);
+        menu.dispatch_action_from("layer.move_up", loom_desktop::CommandSource::Menu)
+            .expect("enabled layer.move_up");
+        let session = state.session.borrow();
+        assert_eq!(session.canvas.document.active_layer_index, 1);
+        assert_eq!(
+            session
+                .canvas
+                .document
+                .layers
+                .iter()
+                .map(|layer| layer.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["layer-2", "layer-bg"]
+        );
+        drop(session);
+
+        *state.session.borrow_mut() = PhotoSession::new(blank_canvas().expect("blank canvas"));
+        sync_menu_state(&menu, &app, &state);
+        let before = state.session.borrow().canvas.document.layers.len();
+        assert!(menu
+            .dispatch_action_from("layer.delete", loom_desktop::CommandSource::Menu)
+            .is_err());
+        assert_eq!(
+            state.session.borrow().canvas.document.layers.len(),
+            before,
+            "one-layer delete stays unchanged"
+        );
+        assert!(menu
+            .dispatch_action_from("layer.move_up", loom_desktop::CommandSource::Menu)
+            .is_err());
+        assert!(menu
+            .dispatch_action_from("layer.move_down", loom_desktop::CommandSource::Menu)
+            .is_err());
+        assert_eq!(
+            state.session.borrow().canvas.document.active_layer_index,
+            0,
+            "one-layer move boundaries stay unchanged"
+        );
+    }
+
+    #[test]
+    fn photo_toolbar_inspector_toggle_reprojects_checked_state() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        configure_responsive_layout(&app, (1280, 800));
+        let menu = Rc::new(NativeMenuBar::new());
+        menu.install_menu_bar(&build_photo_menu_bar(&app))
+            .expect("install menu");
+        let mut gui_state = scripted_state();
+        gui_state.menu_service = Some(menu.clone());
+        let state = Rc::new(gui_state);
+        wire_inspector_callback(&app, &state);
+        sync_menu_state(&menu, &app, &state);
+        assert!(app.get_show_inspector());
+
+        app.invoke_toggle_inspector();
+
+        assert!(!app.get_show_inspector());
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: false,
+                enabled: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn photo_palette_move_commands_follow_layer_boundaries() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let state = scripted_state();
+
+        let has_command = |id: &str| master_palette(&app).iter().any(|command| command.id == id);
+
+        refresh_photo(&app, &state.session.borrow()).expect("refresh first layer");
+        assert!(!app.get_can_move_up());
+        assert!(!app.get_can_move_down());
+        assert!(!has_command("photo.layer.move-up"));
+        assert!(!has_command("photo.layer.move-down"));
+
+        state
+            .session
+            .borrow_mut()
+            .add_pixel_layer("layer-2", "Pixel Layer 2");
+        refresh_photo(&app, &state.session.borrow()).expect("refresh last layer");
+        assert!(!app.get_can_move_up());
+        assert!(app.get_can_move_down());
+        assert!(!has_command("photo.layer.move-up"));
+        assert!(has_command("photo.layer.move-down"));
+
+        state
+            .session
+            .borrow_mut()
+            .add_pixel_layer("layer-3", "Pixel Layer 3");
+        state.session.borrow_mut().canvas.document.select_layer(1);
+        refresh_photo(&app, &state.session.borrow()).expect("refresh middle layer");
+        assert!(app.get_can_move_up());
+        assert!(app.get_can_move_down());
+        assert!(has_command("photo.layer.move-up"));
+        assert!(has_command("photo.layer.move-down"));
+
+        state.session.borrow_mut().canvas.document.select_layer(0);
+        refresh_photo(&app, &state.session.borrow()).expect("refresh first layer");
+        assert!(app.get_can_move_up());
+        assert!(!app.get_can_move_down());
+        assert!(has_command("photo.layer.move-up"));
+        assert!(!has_command("photo.layer.move-down"));
+    }
+
+    #[test]
+    fn photo_palette_invocation_uses_visible_action_after_boundary_change() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let state = Rc::new(scripted_state());
+        wire_move_layer_callback(&app, &state);
+        wire_palette(&app);
+
+        state
+            .session
+            .borrow_mut()
+            .add_pixel_layer("layer-2", "Pixel Layer 2");
+        refresh_photo(&app, &state.session.borrow()).expect("refresh last layer");
+        app.set_palette_query("move layer".into());
+        rebuild_palette(&app, "move layer");
+        assert_eq!(app.get_palette_commands().row_count(), 1);
+        assert_eq!(
+            app.get_palette_commands()
+                .row_data(0)
+                .expect("visible move command")
+                .id,
+            "photo.layer.move-down"
+        );
+
+        state.session.borrow_mut().canvas.document.select_layer(0);
+        refresh_photo(&app, &state.session.borrow()).expect("refresh first layer");
+        assert!(!app.get_can_move_down());
+        app.invoke_palette_invoked(0);
+        assert_eq!(
+            state.session.borrow().canvas.document.active_layer_index,
+            0,
+            "stale visible move-down must not dispatch move-up"
+        );
     }
 }

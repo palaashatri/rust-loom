@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use loom_desktop::{
-    build_standard_menu_bar, FileDialogService, FileFilter, Menu, MenuBarService, MenuItem,
-    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
+    FileDialogService, FileFilter, Menu, MenuBar, MenuBarService, MenuItem, MenuShortcut,
+    NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
     export_pdf, load_presentation_session, save_presentation_session, ElementType,
@@ -191,10 +192,12 @@ fn initial_session(args: &Args) -> Result<PresentationSession, String> {
 struct GuiState {
     session: RefCell<PresentationSession>,
     selected_element: Cell<usize>,
+    inspector_available: Cell<bool>,
     save_path: RefCell<Option<PathBuf>>,
     dialogs: Rc<dyn FileDialogService>,
     deck_filter: FileFilter,
     pdf_filter: FileFilter,
+    menu_service: Option<Rc<NativeMenuBar>>,
 }
 
 fn active_body(session: &PresentationSession) -> String {
@@ -341,6 +344,9 @@ fn refresh(app: &PresentApp, state: &GuiState) {
     if let Ok(bytes) = save_presentation_session(&session) {
         let _ = record_snapshot_recovery("presentation state", bytes);
     }
+    if let Some(menu_service) = &state.menu_service {
+        sync_menu_state(menu_service, app, state);
+    }
 }
 
 fn apply_theme(app: &PresentApp, theme: &str) {
@@ -351,14 +357,15 @@ fn configure_direction(app: &PresentApp, rtl: bool) {
     app.set_rtl(rtl);
 }
 
-fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) {
-    configure_responsive_width(app, size.0);
+fn configure_responsive_layout(app: &PresentApp, size: (u32, u32)) -> bool {
+    configure_responsive_width(app, size.0)
 }
 
-fn configure_responsive_width(app: &PresentApp, width: u32) {
+fn configure_responsive_width(app: &PresentApp, width: u32) -> bool {
     let policy = ResponsivePolicy::get(app);
     let width = width as f32;
-    app.set_show_inspector(width >= policy.get_priority_1_icon_only_below());
+    let inspector_available = width >= policy.get_priority_1_icon_only_below();
+    app.set_show_inspector(inspector_available);
     app.set_labeled_export(width >= policy.get_priority_2_overflow_below());
     let overflow_toolbar = width < policy.get_priority_2_overflow_below();
     if !overflow_toolbar && app.get_toolbar_overflow_open() {
@@ -368,8 +375,10 @@ fn configure_responsive_width(app: &PresentApp, width: u32) {
     if !overflow_toolbar {
         app.set_toolbar_overflow_open(false);
     }
+    inspector_available
 }
 
+#[cfg(test)]
 fn wire_responsive_layout(app: &PresentApp) {
     let app_ref = app.as_weak();
     app.on_window_resized(move |width| {
@@ -379,20 +388,35 @@ fn wire_responsive_layout(app: &PresentApp) {
     });
 }
 
+fn wire_responsive_layout_with_state(app: &PresentApp, state: Rc<GuiState>) {
+    let app_ref = app.as_weak();
+    app.on_window_resized(move |width| {
+        if let Some(app) = app_ref.upgrade() {
+            let inspector_available = configure_responsive_width(&app, width.max(0.0) as u32);
+            state.inspector_available.set(inspector_available);
+            if let Some(menu_service) = &state.menu_service {
+                sync_menu_state(menu_service, &app, &state);
+            }
+        }
+    });
+}
+
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
-    configure_responsive_layout(&app, args.size);
+    let inspector_available = configure_responsive_layout(&app, args.size);
     let state = GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
+        inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
         dialogs: Rc::new(NativeFileDialogs),
         deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
             .map_err(|error| error.to_string())?,
         pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
+        menu_service: None,
     };
     refresh(&app, &state);
     if args.palette {
@@ -507,40 +531,18 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let app = PresentApp::new().map_err(|error| error.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
-    configure_responsive_layout(&app, args.size);
+    let inspector_available = configure_responsive_layout(&app, args.size);
     let state = GuiState {
         session: RefCell::new(initial_session(args)?),
         selected_element: Cell::new(0),
+        inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
         dialogs: Rc::new(NativeFileDialogs),
         deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
             .map_err(|error| error.to_string())?,
         pdf_filter: FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?,
+        menu_service: None,
     };
-    let menu_bar = build_standard_menu_bar(
-        "Loom Present",
-        vec![MenuItem::action_with_shortcut(
-            "file.export_pdf",
-            "Export to PDF...",
-            MenuShortcut::primary("E"),
-        )],
-        vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
-        vec![Menu::new(
-            "Slide",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "slide.new",
-                    "New Slide",
-                    MenuShortcut::primary_shift("N"),
-                ),
-                MenuItem::action("slide.duplicate", "Duplicate Slide"),
-                MenuItem::action("slide.delete", "Delete Slide"),
-            ],
-        )],
-    );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
 
     refresh(&app, &state);
     wire_palette(&app);
@@ -604,8 +606,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    configure_responsive_layout(&app, args.size);
-    wire_responsive_layout(&app);
+    let inspector_available = configure_responsive_layout(&app, args.size);
     let recovered = initialize_snapshot_recovery()?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
     let initial = if let Some(path) = initial_path.as_deref() {
@@ -619,15 +620,227 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let deck_filter =
         FileFilter::new("Loom Present deck", ["loomdeck"]).map_err(|error| error.to_string())?;
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
+    let menu_service = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
         session: RefCell::new(initial),
         selected_element: Cell::new(0),
+        inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(initial_path),
         dialogs,
         deck_filter,
         pdf_filter,
+        menu_service: Some(menu_service.clone()),
     });
 
+    wire_app_callbacks(&app, &state);
+    wire_responsive_layout_with_state(&app, state.clone());
+
+    let menu_bar = build_present_menu_bar();
+    menu_service
+        .install_menu_bar(&menu_bar)
+        .map_err(|error| error.to_string())?;
+
+    let app_ref = app.as_weak();
+    menu_service
+        .register_action_sink(std::sync::Arc::new(move |action: CommandAction| {
+            schedule_menu_action(&app_ref, action)
+        }))
+        .map_err(|error| error.to_string())?;
+
+    wire_palette(&app);
+    refresh(&app, &state);
+    app.show().map_err(|error| error.to_string())?;
+    slint::run_event_loop().map_err(|error| error.to_string())
+}
+
+fn build_present_menu_bar() -> MenuBar {
+    let mut menu_bar = build_standard_menu_bar(
+        "Loom Present",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_pdf",
+            "Export to PDF...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+        vec![Menu::new(
+            "Slide",
+            vec![
+                MenuItem::action_with_shortcut(
+                    "slide.new",
+                    "New Slide",
+                    MenuShortcut::primary_shift("N"),
+                ),
+                MenuItem::action("slide.duplicate", "Duplicate Slide"),
+                MenuItem::action("slide.delete", "Delete Slide"),
+                MenuItem::Separator,
+                MenuItem::action("slide.prev", "Previous Slide"),
+                MenuItem::action("slide.next", "Next Slide"),
+            ],
+        )],
+    );
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "file.export_pdf",
+        "edit.undo",
+        "edit.redo",
+        "slide.new",
+        "slide.duplicate",
+        "slide.delete",
+        "slide.prev",
+        "slide.next",
+        "view.inspector",
+        "app.palette",
+    ]);
+    menu_bar
+}
+
+fn menu_projection(
+    menu_service: &NativeMenuBar,
+    app: &PresentApp,
+    state: &GuiState,
+) -> Result<CommandStateProjection, DesktopError> {
+    let menu_bar = menu_service
+        .installed_menu_bar()
+        .ok_or_else(|| DesktopError::InvalidRequest("Present menu bar is not installed".into()))?;
+    let mut projection = menu_bar.command_state_projection();
+
+    let session = state.session.borrow();
+    let can_undo = session.can_undo();
+    let can_redo = session.can_redo();
+    let deck_len = session.document.len();
+    let active_index = session.document.active_index;
+
+    let mut undo = projection
+        .get("edit.undo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Present menu is missing edit.undo".into()))?;
+    undo.enabled = can_undo;
+    projection.insert(undo);
+
+    let mut redo = projection
+        .get("edit.redo")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Present menu is missing edit.redo".into()))?;
+    redo.enabled = can_redo;
+    projection.insert(redo);
+
+    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Present menu is missing view.inspector".into())
+    })?;
+    inspector.enabled = state.inspector_available.get();
+    inspector.checked = Some(app.get_show_inspector());
+    projection.insert(inspector);
+
+    let mut slide_delete = projection.get("slide.delete").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Present menu is missing slide.delete".into())
+    })?;
+    slide_delete.enabled = deck_len > 1;
+    projection.insert(slide_delete);
+
+    let mut slide_prev = projection
+        .get("slide.prev")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Present menu is missing slide.prev".into()))?;
+    slide_prev.enabled = active_index > 0;
+    projection.insert(slide_prev);
+
+    let mut slide_next = projection
+        .get("slide.next")
+        .cloned()
+        .ok_or_else(|| DesktopError::InvalidRequest("Present menu is missing slide.next".into()))?;
+    slide_next.enabled = active_index < deck_len.saturating_sub(1);
+    projection.insert(slide_next);
+
+    Ok(projection)
+}
+
+fn sync_menu_state_result(
+    menu_service: &NativeMenuBar,
+    app: &PresentApp,
+    state: &GuiState,
+) -> Result<(), DesktopError> {
+    rebuild_palette(app, app.get_palette_query().as_str());
+    let projection = menu_projection(menu_service, app, state)?;
+    menu_service.sync_command_states(&projection)
+}
+
+fn sync_menu_state(menu_service: &NativeMenuBar, app: &PresentApp, state: &GuiState) {
+    if let Err(error) = sync_menu_state_result(menu_service, app, state) {
+        set_status(app, format!("Menu update failed: {error}"));
+    }
+}
+
+fn dispatch_command(app: &PresentApp, id: &str) -> bool {
+    match id {
+        "file.new" => app.invoke_new_deck(),
+        "file.open" => app.invoke_open_deck(),
+        "file.save" => app.invoke_save_deck(),
+        "file.save_as" => app.invoke_save_as_deck(),
+        "file.export_pdf" => app.invoke_export_pdf(),
+        "edit.undo" => app.invoke_undo(),
+        "edit.redo" => app.invoke_redo(),
+        "slide.new" => app.invoke_add_slide(),
+        "slide.duplicate" => app.invoke_duplicate_slide(),
+        "slide.delete" => app.invoke_delete_slide(),
+        "slide.prev" => app.invoke_prev_slide(),
+        "slide.next" => app.invoke_next_slide(),
+        "view.inspector" => app.invoke_toggle_inspector(),
+        "app.palette" => app.invoke_open_palette(),
+        _ => return false,
+    }
+    true
+}
+
+fn is_present_menu_command(id: &str) -> bool {
+    matches!(
+        id,
+        "file.new"
+            | "file.open"
+            | "file.save"
+            | "file.save_as"
+            | "file.export_pdf"
+            | "edit.undo"
+            | "edit.redo"
+            | "slide.new"
+            | "slide.duplicate"
+            | "slide.delete"
+            | "slide.prev"
+            | "slide.next"
+            | "view.inspector"
+            | "app.palette"
+    )
+}
+
+fn schedule_menu_action(
+    app_ref: &slint::Weak<PresentApp>,
+    action: CommandAction,
+) -> Result<(), DesktopError> {
+    if !is_present_menu_command(&action.id) {
+        return Err(DesktopError::InvalidRequest(format!(
+            "unsupported Present menu command {}",
+            action.id
+        )));
+    }
+    let id = action.id;
+    let error_id = id.clone();
+    app_ref
+        .upgrade_in_event_loop(move |app| {
+            if !dispatch_command(&app, &id) {
+                set_status(&app, format!("Unsupported menu command: {id}"));
+            }
+        })
+        .map_err(|error| {
+            DesktopError::InvalidRequest(format!(
+                "failed to schedule Present menu command {error_id}: {error}"
+            ))
+        })
+}
+
+fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -922,12 +1135,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_notes_edited(move |notes| {
-            if let Some(_app) = app_ref.upgrade() {
+            if let Some(app) = app_ref.upgrade() {
                 let mut session = state.session.borrow_mut();
                 session.checkpoint();
                 if let Some(slide) = session.document.active_slide_mut() {
                     slide.speaker_notes = notes.as_str().to_string();
                 }
+                drop(session);
+                refresh(&app, &state);
             }
         });
     }
@@ -1035,10 +1250,16 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
 
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_show_inspector(!app.get_show_inspector());
+                if state.inspector_available.get() {
+                    app.set_show_inspector(!app.get_show_inspector());
+                    if let Some(menu_service) = &state.menu_service {
+                        sync_menu_state(menu_service, &app, &state);
+                    }
+                }
             }
         });
     }
@@ -1071,36 +1292,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-
-    let menu_bar = build_standard_menu_bar(
-        "Loom Present",
-        vec![MenuItem::action_with_shortcut(
-            "file.export_pdf",
-            "Export to PDF...",
-            MenuShortcut::primary("E"),
-        )],
-        vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", true)],
-        vec![Menu::new(
-            "Slide",
-            vec![
-                MenuItem::action_with_shortcut(
-                    "slide.new",
-                    "New Slide",
-                    MenuShortcut::primary_shift("N"),
-                ),
-                MenuItem::action("slide.duplicate", "Duplicate Slide"),
-                MenuItem::action("slide.delete", "Delete Slide"),
-            ],
-        )],
-    );
-    let menu_service = NativeMenuBar::new();
-    let _ = menu_service.install_menu_bar(&menu_bar);
-
-    refresh(&app, &state);
-    wire_palette(&app);
-    app.show().map_err(|error| error.to_string())?;
-    slint::run_event_loop().map_err(|error| error.to_string())
 }
 
 /// Commands exposed through the command palette. Dispatch reuses the same
@@ -1395,16 +1586,18 @@ fn wire_palette(app: &PresentApp) {
 #[cfg(test)]
 mod desktop_tests {
     use super::*;
-    use loom_desktop::ScriptedFileDialogs;
+    use loom_desktop::{CommandSource, ScriptedFileDialogs};
 
     fn test_state() -> GuiState {
         GuiState {
             session: RefCell::new(empty_session()),
             selected_element: Cell::new(0),
+            inspector_available: Cell::new(true),
             save_path: RefCell::new(Some(PathBuf::from("projects/demo.loomdeck"))),
             dialogs: Rc::new(ScriptedFileDialogs::default()),
             deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+            menu_service: None,
         }
     }
 
@@ -1434,10 +1627,12 @@ mod desktop_tests {
         let state = GuiState {
             session: RefCell::new(sample_session()),
             selected_element: Cell::new(0),
+            inspector_available: Cell::new(true),
             save_path: RefCell::new(None),
             dialogs: Rc::new(ScriptedFileDialogs::default()),
             deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+            menu_service: None,
         };
 
         refresh(&app, &state);
@@ -1496,10 +1691,12 @@ mod desktop_tests {
         let state = GuiState {
             session: RefCell::new(sample_session()),
             selected_element: Cell::new(0),
+            inspector_available: Cell::new(true),
             save_path: RefCell::new(None),
             dialogs: Rc::new(ScriptedFileDialogs::default()),
             deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
             pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+            menu_service: None,
         };
         configure_responsive_width(&app, 900);
         refresh(&app, &state);
@@ -1580,5 +1777,287 @@ mod desktop_tests {
 
         assert_eq!(loaded.document.title, session.document.title);
         assert_eq!(loaded.document.len(), session.document.len());
+    }
+
+    #[test]
+    fn present_menu_disables_unhandled_controller_commands() {
+        set_platform();
+        let menu = build_present_menu_bar();
+        for id in [
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "edit.select_all",
+            "view.zoom_in",
+            "view.zoom_out",
+            "view.zoom_actual",
+        ] {
+            assert!(
+                !menu.find_item(id).expect("menu command").is_enabled(),
+                "unhandled Present command {id} must be disabled"
+            );
+        }
+    }
+
+    #[test]
+    fn present_menu_projection_derives_live_session_and_window_state() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let state = GuiState {
+            session: RefCell::new(empty_session()),
+            selected_element: Cell::new(0),
+            inspector_available: Cell::new(true),
+            save_path: RefCell::new(None),
+            dialogs,
+            deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+            menu_service: None,
+        };
+        let menu = NativeMenuBar::new();
+        let bar = build_present_menu_bar();
+        menu.install_menu_bar(&bar).expect("install menu");
+
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+
+        assert!(matches!(
+            installed.find_item("edit.undo"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("edit.redo"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("slide.delete"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("slide.prev"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("slide.next"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("view.inspector"),
+            Some(MenuItem::Check {
+                checked: false,
+                enabled: true,
+                ..
+            })
+        ));
+
+        state
+            .session
+            .borrow_mut()
+            .document
+            .add_slide("Slide 2", "content");
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+
+        assert!(matches!(
+            installed.find_item("slide.delete"),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("slide.prev"),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("slide.next"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+
+        state.session.borrow_mut().document.select_slide(0);
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+
+        assert!(matches!(
+            installed.find_item("slide.prev"),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+        assert!(matches!(
+            installed.find_item("slide.next"),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
+
+        app.set_show_inspector(true);
+        sync_menu_state(&menu, &app, &state);
+        let installed = menu.installed_menu_bar().expect("installed menu");
+
+        assert!(matches!(
+            installed.find_item("view.inspector"),
+            Some(MenuItem::Check {
+                checked: true,
+                enabled: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn present_menu_disables_inspector_when_window_cannot_show_it() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let inspector_available = configure_responsive_width(&app, 900);
+        let state = Rc::new(GuiState {
+            session: RefCell::new(empty_session()),
+            selected_element: Cell::new(0),
+            inspector_available: Cell::new(inspector_available),
+            save_path: RefCell::new(None),
+            dialogs: Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+            deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+            menu_service: None,
+        });
+        wire_app_callbacks(&app, &state);
+        let menu = NativeMenuBar::new();
+        menu.install_menu_bar(&build_present_menu_bar())
+            .expect("install menu");
+
+        sync_menu_state(&menu, &app, &state);
+
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                checked: false,
+                enabled: false,
+                ..
+            })
+        ));
+
+        let before = app.get_show_inspector();
+        let error = menu
+            .dispatch_action_from("view.inspector", CommandSource::Menu)
+            .expect_err("compact inspector action must be disabled");
+        assert!(error
+            .to_string()
+            .contains("menu item view.inspector is disabled"));
+        assert_eq!(app.get_show_inspector(), before);
+    }
+
+    #[test]
+    fn present_menu_action_sink_dispatches_to_controller_and_guards_disabled_boundary() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let menu_service = Rc::new(NativeMenuBar::new());
+        let state = Rc::new(GuiState {
+            session: RefCell::new(empty_session()),
+            selected_element: Cell::new(0),
+            inspector_available: Cell::new(true),
+            save_path: RefCell::new(None),
+            dialogs,
+            deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+            menu_service: Some(menu_service.clone()),
+        });
+        let bar = build_present_menu_bar();
+        menu_service.install_menu_bar(&bar).expect("install menu");
+
+        wire_app_callbacks(&app, &state);
+        let app_ref = app.as_weak();
+        menu_service
+            .register_action_sink(std::sync::Arc::new(move |action: CommandAction| {
+                assert_eq!(action.source, CommandSource::Menu);
+                let app = app_ref.upgrade().ok_or_else(|| {
+                    DesktopError::InvalidRequest("Present app was dropped".into())
+                })?;
+                if dispatch_command(&app, &action.id) {
+                    Ok(())
+                } else {
+                    Err(DesktopError::InvalidRequest(format!(
+                        "unsupported Present menu command {}",
+                        action.id
+                    )))
+                }
+            }))
+            .expect("register sink");
+
+        sync_menu_state(&menu_service, &app, &state);
+        assert_eq!(state.session.borrow().document.len(), 1);
+
+        let before_unsupported = state.session.borrow().document.len();
+        let error = menu_service
+            .dispatch_action_from("edit.cut", CommandSource::Menu)
+            .expect_err("unsupported menu action must be disabled");
+        assert!(error.to_string().contains("menu item edit.cut is disabled"));
+        assert_eq!(state.session.borrow().document.len(), before_unsupported);
+
+        menu_service
+            .dispatch_action_from("slide.new", CommandSource::Menu)
+            .expect("enabled menu action");
+        assert_eq!(state.session.borrow().document.len(), 2);
+
+        state.session.borrow_mut().document.select_slide(0);
+        sync_menu_state(&menu_service, &app, &state);
+        let err = menu_service
+            .dispatch_action_from("slide.prev", CommandSource::Menu)
+            .expect_err("disabled action");
+        assert!(err.to_string().contains("menu item slide.prev is disabled"));
+        assert_eq!(state.session.borrow().document.active_index, 0);
+
+        state.session.borrow_mut().remove_slide(1);
+        sync_menu_state(&menu_service, &app, &state);
+        assert_eq!(state.session.borrow().document.len(), 1);
+        let err = menu_service
+            .dispatch_action_from("slide.delete", CommandSource::Menu)
+            .expect_err("disabled slide.delete");
+        assert!(err
+            .to_string()
+            .contains("menu item slide.delete is disabled"));
+        assert_eq!(state.session.borrow().document.len(), 1);
+    }
+
+    #[test]
+    fn notes_edit_refreshes_undo_menu_state() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let menu_service = Rc::new(NativeMenuBar::new());
+        let state = Rc::new(GuiState {
+            session: RefCell::new(empty_session()),
+            selected_element: Cell::new(0),
+            inspector_available: Cell::new(true),
+            save_path: RefCell::new(None),
+            dialogs: Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+            deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+            menu_service: Some(menu_service.clone()),
+        });
+        menu_service
+            .install_menu_bar(&build_present_menu_bar())
+            .expect("install menu");
+        wire_app_callbacks(&app, &state);
+        sync_menu_state(&menu_service, &app, &state);
+
+        assert!(matches!(
+            menu_service
+                .installed_menu_bar()
+                .and_then(|bar| bar.find_item("edit.undo").cloned()),
+            Some(MenuItem::Action { enabled: false, .. })
+        ));
+
+        app.invoke_notes_edited(SharedString::from("Speaker notes"));
+
+        assert_eq!(
+            state
+                .session
+                .borrow()
+                .document
+                .active_slide()
+                .expect("active slide")
+                .speaker_notes,
+            "Speaker notes"
+        );
+        assert!(matches!(
+            menu_service
+                .installed_menu_bar()
+                .and_then(|bar| bar.find_item("edit.undo").cloned()),
+            Some(MenuItem::Action { enabled: true, .. })
+        ));
     }
 }

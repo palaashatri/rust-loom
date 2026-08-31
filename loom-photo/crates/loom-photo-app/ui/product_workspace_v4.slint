@@ -33,6 +33,8 @@ export component PhotoApp inherits Window {
     in property <[string]> layer-labels: [];
     in property <[bool]> layer-visibilities: [];
     in property <int> active-layer-index: 0;
+    in property <bool> can-move-up: false;
+    in property <bool> can-move-down: false;
     in property <string> active-blend-mode: "Normal";
     in property <float> active-layer-opacity: 100.0;
     in property <image> preview-image;
@@ -55,7 +57,7 @@ export component PhotoApp inherits Window {
     property <length> viewport-pan-x: 0px;
     property <length> viewport-pan-y: 0px;
     property <bool> show-grid: true;
-    property <bool> show-inspector: true;
+    in-out property <bool> show-inspector: true;
 
     callback new-project;
     callback open-project;
@@ -78,6 +80,7 @@ export component PhotoApp inherits Window {
     callback import-image;
     callback export-png;
     callback export-jpeg;
+    callback toggle-inspector;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -129,7 +132,7 @@ export component PhotoApp inherits Window {
                 add-adjustment => { root.add-adjustment(); }
                 import-image => { root.import-image(); }
                 export-png => { root.export-png(); }
-                toggle-inspector => { root.show-inspector = !root.show-inspector; }
+                toggle-inspector => { root.toggle-inspector(); }
             }
 
             DirectionalLayout {
@@ -142,6 +145,8 @@ export component PhotoApp inherits Window {
                     layer-labels: root.layer-labels;
                     layer-visibilities: root.layer-visibilities;
                     active-layer-index: root.active-layer-index;
+                    can-move-up: root.can-move-up;
+                    can-move-down: root.can-move-down;
                     active-blend-mode: root.active-blend-mode;
                     active-layer-opacity: root.active-layer-opacity;
                     brightness-value: root.brightness-value;
@@ -181,6 +186,8 @@ export component PhotoApp inherits Window {
                     layer-labels: root.layer-labels;
                     layer-visibilities: root.layer-visibilities;
                     active-layer-index: root.active-layer-index;
+                    can-move-up: root.can-move-up;
+                    can-move-down: root.can-move-down;
                     active-blend-mode: root.active-blend-mode;
                     active-layer-opacity: root.active-layer-opacity;
                     brightness-value: root.brightness-value;
