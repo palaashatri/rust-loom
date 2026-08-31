@@ -34,6 +34,9 @@ export component VideoApp inherits Window {
     in property <[string]> clip-labels: [];
     in property <[float]> clip-starts: [];
     in property <[float]> clip-durations: [];
+    in property <[float]> clip-in-points: [];
+    in property <[float]> clip-out-points: [];
+    in property <[string]> clip-cache-status: [];
     in property <int> active-clip-index: 0;
     in property <image> preview-image;
     in property <bool> has-preview: false;
@@ -47,6 +50,10 @@ export component VideoApp inherits Window {
     in property <float> export-progress: 0;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
+    in property <string> playback-clock-source: "No clock";
+    in property <string> audio-output-status: "Audio output unavailable";
+    in-out property <float> timeline-zoom: 1;
+    in-out property <float> timeline-scroll: 0;
 
     in-out property <string> active-nle-tool: "Select";
     in-out property <bool> snap-enabled: true;
@@ -71,6 +78,9 @@ export component VideoApp inherits Window {
     callback remove-clip;
     callback split-clip;
     callback trim-selected(float, float);
+    callback move-clip(int, float);
+    callback trim-clip-in(int, float);
+    callback trim-clip-out(int, float);
     callback select-nle-tool(string);
     callback toggle-snap;
     callback play-pause;
@@ -78,6 +88,7 @@ export component VideoApp inherits Window {
     callback seek(float);
     callback add-marker;
     callback export-timeline(string);
+    callback cancel-export;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -155,6 +166,9 @@ export component VideoApp inherits Window {
                 clip-labels: root.clip-labels;
                 clip-starts: root.clip-starts;
                 clip-durations: root.clip-durations;
+                clip-in-points: root.clip-in-points;
+                clip-out-points: root.clip-out-points;
+                clip-cache-status: root.clip-cache-status;
                 active-clip-index: root.active-clip-index;
                 inspector-tab <=> root.inspector-tab;
                 export-path <=> root.export-path;
@@ -165,6 +179,7 @@ export component VideoApp inherits Window {
                 trim-selected(in, out) => { root.trim-selected(in, out); }
                 remove-clip => { root.remove-clip(); }
                 export-timeline(path) => { root.export-timeline(path); }
+                cancel-export => { root.cancel-export(); }
             }
             if root.rtl && root.show-inspector : Rectangle { width: 1px; background: Theme.palette().border; }
 
@@ -183,6 +198,8 @@ export component VideoApp inherits Window {
                     frame-step: root.frame-step;
                     clip-count: root.clip-labels.length;
                     backend-available: root.backend-available;
+                    playback-clock-source: root.playback-clock-source;
+                    audio-output-status: root.audio-output-status;
                     is-playing <=> root.is-playing;
                     playhead-seconds <=> root.playhead-seconds;
                     timeline-duration: root.timeline-duration;
@@ -198,6 +215,8 @@ export component VideoApp inherits Window {
                 VideoTimeline {
                     horizontal-stretch: 1;
                     timeline-duration: root.timeline-duration;
+                    zoom-level <=> root.timeline-zoom;
+                    scroll-offset <=> root.timeline-scroll;
                     track-header-width: root.track-header-width;
                     track-labels: root.track-labels;
                     track-mutes: root.track-mutes;
@@ -206,6 +225,7 @@ export component VideoApp inherits Window {
                     clip-labels: root.clip-labels;
                     clip-starts: root.clip-starts;
                     clip-durations: root.clip-durations;
+                    clip-cache-status: root.clip-cache-status;
                     active-clip-index: root.active-clip-index;
                     playhead-seconds <=> root.playhead-seconds;
                     frame-step: root.frame-step;
@@ -213,6 +233,9 @@ export component VideoApp inherits Window {
                     toggle-track-mute(index) => { root.toggle-track-mute(index); }
                     toggle-track-solo(index) => { root.toggle-track-solo(index); }
                     select-clip(index) => { root.select-clip(index); }
+                    move-clip(index, delta) => { root.move-clip(index, delta); }
+                    trim-clip-in(index, delta) => { root.trim-clip-in(index, delta); }
+                    trim-clip-out(index, delta) => { root.trim-clip-out(index, delta); }
                     seek(value) => { root.seek(value); }
                 }
             }
@@ -234,6 +257,9 @@ export component VideoApp inherits Window {
                 clip-labels: root.clip-labels;
                 clip-starts: root.clip-starts;
                 clip-durations: root.clip-durations;
+                clip-in-points: root.clip-in-points;
+                clip-out-points: root.clip-out-points;
+                clip-cache-status: root.clip-cache-status;
                 active-clip-index: root.active-clip-index;
                 inspector-tab <=> root.inspector-tab;
                 export-path <=> root.export-path;
@@ -244,6 +270,7 @@ export component VideoApp inherits Window {
                 trim-selected(in, out) => { root.trim-selected(in, out); }
                 remove-clip => { root.remove-clip(); }
                 export-timeline(path) => { root.export-timeline(path); }
+                cancel-export => { root.cancel-export(); }
             }
         }
 

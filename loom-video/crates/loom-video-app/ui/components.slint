@@ -226,6 +226,8 @@ export component VideoTransport inherits Rectangle {
     in property <float> frame-step: 1.0 / 30.0;
     in property <int> clip-count: 0;
     in property <bool> backend-available: false;
+    in property <string> playback-clock-source: "No clock";
+    in property <string> audio-output-status: "Audio output unavailable";
     in-out property <bool> is-playing: false;
     in-out property <float> playhead-seconds: 0;
     in property <float> timeline-duration: 1;
@@ -290,6 +292,14 @@ export component VideoTransport inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
         }
+        if !root.compact-layout : Text {
+            text: root.playback-clock-source + " · " + root.audio-output-status;
+            width: 190px;
+            color: Theme.palette().ink-disabled;
+            font-size: Theme.tokens.typography.micro;
+            vertical-alignment: center;
+            overflow: elide;
+        }
         Slider {
             label: "Playhead";
             horizontal-stretch: 1;
@@ -310,6 +320,8 @@ export component VideoTransport inherits Rectangle {
 /// relative to the content lane; only the panel shell is sized by the parent.
 export component VideoTimeline inherits Rectangle {
     in property <float> timeline-duration: 1;
+    in-out property <float> zoom-level: 1;
+    in-out property <float> scroll-offset: 0;
     in property <length> track-header-width: 180px;
     in property <[string]> track-labels: [];
     in property <[bool]> track-mutes: [];
@@ -318,6 +330,7 @@ export component VideoTimeline inherits Rectangle {
     in property <[string]> clip-labels: [];
     in property <[float]> clip-starts: [];
     in property <[float]> clip-durations: [];
+    in property <[string]> clip-cache-status: [];
     in property <int> active-clip-index: 0;
     in-out property <float> playhead-seconds: 0;
     in property <float> frame-step: 1.0 / 30.0;
@@ -325,11 +338,16 @@ export component VideoTimeline inherits Rectangle {
     callback toggle-track-mute(int);
     callback toggle-track-solo(int);
     callback select-clip(int);
+    callback move-clip(int, float);
+    callback trim-clip-in(int, float);
+    callback trim-clip-out(int, float);
     callback seek(float);
 
     height: 230px;
     background: Theme.palette().surface-sunken;
     clip: true;
+
+    property <float> visible-duration: max(0.01, root.timeline-duration / max(1.0, root.zoom-level));
 
     timeline-focus := FocusScope {
         enabled: root.clip-labels.length > 0;
@@ -350,6 +368,47 @@ export component VideoTimeline inherits Rectangle {
 
     VerticalLayout {
         spacing: 0px;
+
+        Rectangle {
+            height: 34px;
+            background: Theme.palette().surface;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                alignment: center;
+                Text {
+                    text: "TIMELINE";
+                    color: Theme.palette().ink-secondary;
+                    font-size: Theme.tokens.typography.micro;
+                    font-weight: 700;
+                }
+                ToolbarButton {
+                    text: "−";
+                    label: "Zoom out timeline";
+                    clicked => { root.zoom-level = max(1.0, root.zoom-level - 0.5); }
+                }
+                Slider {
+                    label: "Timeline zoom";
+                    width: 92px;
+                    minimum: 1;
+                    maximum: 4;
+                    value <=> root.zoom-level;
+                }
+                ToolbarButton {
+                    text: "+";
+                    label: "Zoom in timeline";
+                    clicked => { root.zoom-level = min(4.0, root.zoom-level + 0.5); }
+                }
+                Slider {
+                    label: "Timeline scroll";
+                    horizontal-stretch: 1;
+                    minimum: 0;
+                    maximum: max(0.0, root.timeline-duration - root.visible-duration);
+                    value <=> root.scroll-offset;
+                }
+            }
+        }
 
         Rectangle {
             height: 30px;
@@ -377,28 +436,28 @@ export component VideoTimeline inherits Rectangle {
                         padding-right: 8px;
                         Text { text: "0s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; }
                         Text {
-                            text: Math.round(root.timeline-duration * 0.25 * 10) / 10 + "s";
+                            text: Math.round((root.scroll-offset + root.visible-duration * 0.25) * 10) / 10 + "s";
                             horizontal-stretch: 1;
                             color: Theme.palette().ink-disabled;
                             font-size: Theme.tokens.typography.micro;
                             horizontal-alignment: center;
                         }
                         Text {
-                            text: Math.round(root.timeline-duration * 0.5 * 10) / 10 + "s";
+                            text: Math.round((root.scroll-offset + root.visible-duration * 0.5) * 10) / 10 + "s";
                             horizontal-stretch: 1;
                             color: Theme.palette().ink-disabled;
                             font-size: Theme.tokens.typography.micro;
                             horizontal-alignment: center;
                         }
                         Text {
-                            text: Math.round(root.timeline-duration * 0.75 * 10) / 10 + "s";
+                            text: Math.round((root.scroll-offset + root.visible-duration * 0.75) * 10) / 10 + "s";
                             horizontal-stretch: 1;
                             color: Theme.palette().ink-disabled;
                             font-size: Theme.tokens.typography.micro;
                             horizontal-alignment: center;
                         }
                         Text {
-                            text: Math.round(root.timeline-duration * 10) / 10 + "s";
+                            text: Math.round((root.scroll-offset + root.visible-duration) * 10) / 10 + "s";
                             horizontal-stretch: 1;
                             color: Theme.palette().ink-disabled;
                             font-size: Theme.tokens.typography.micro;
@@ -414,16 +473,16 @@ export component VideoTimeline inherits Rectangle {
                         }
                         moved => {
                             if (self.pressed) {
-                                root.playhead-seconds = clamp(self.mouse-x / self.width * root.timeline-duration, 0.0, root.timeline-duration);
+                                root.playhead-seconds = clamp(root.scroll-offset + self.mouse-x / self.width * root.visible-duration, 0.0, root.timeline-duration);
                             }
                         }
                         clicked => {
-                            root.playhead-seconds = clamp(self.mouse-x / self.width * root.timeline-duration, 0.0, root.timeline-duration);
+                            root.playhead-seconds = clamp(root.scroll-offset + self.mouse-x / self.width * root.visible-duration, 0.0, root.timeline-duration);
                             root.seek(root.playhead-seconds);
                         }
                     }
                     Rectangle {
-                        x: clamp(parent.width * root.playhead-seconds / Math.max(0.01, root.timeline-duration) - 5px, 0px, parent.width - 10px);
+                        x: clamp(parent.width * (root.playhead-seconds - root.scroll-offset) / root.visible-duration - 5px, 0px, parent.width - 10px);
                         y: parent.height - 10px;
                         width: 10px;
                         height: 10px;
@@ -471,13 +530,13 @@ export component VideoTimeline inherits Rectangle {
                     }
                     TouchArea { clicked => { timeline-focus.focus(); root.select-track(index); } }
                 }
-                Rectangle {
+                timeline-lane := Rectangle {
                     horizontal-stretch: 1;
                     background: Theme.palette().media-stage;
                     for clip[clip-index] in root.clip-labels : Rectangle {
                         visible: index == 0;
-                        property <length> clip-start-x: clamp(parent.width * root.clip-starts[clip-index] / Math.max(0.01, root.timeline-duration), 0px, max(0px, parent.width - 56px));
-                        property <length> clip-render-width: max(0px, min(max(56px, parent.width * root.clip-durations[clip-index] / Math.max(0.01, root.timeline-duration) - 3px), max(0px, parent.width - self.clip-start-x - 3px)));
+                        property <length> clip-start-x: clamp(parent.width * (root.clip-starts[clip-index] - root.scroll-offset) / root.visible-duration, 0px, max(0px, parent.width - 12px));
+                        property <length> clip-render-width: max(0px, min(max(56px, parent.width * root.clip-durations[clip-index] / root.visible-duration - 3px), max(0px, parent.width - self.clip-start-x - 3px)));
                         x: self.clip-start-x;
                         width: self.clip-render-width;
                         y: 6px;
@@ -500,14 +559,92 @@ export component VideoTimeline inherits Rectangle {
                                     color: Theme.palette().paper-muted;
                                     vertical-alignment: center;
                                 }
+                                if root.clip-cache-status.length > clip-index : Text {
+                                    text: root.clip-cache-status[clip-index];
+                                    font-size: Theme.tokens.typography.micro;
+                                    color: Theme.palette().paper-muted;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
                             }
                         }
                         clip-touch := TouchArea {
+                            property <length> last-drag-x: 0px;
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                    timeline-focus.focus();
+                                    root.select-clip(clip-index);
+                                    self.last-drag-x = self.mouse-x;
+                                } else if (event.kind == PointerEventKind.cancel || event.kind == PointerEventKind.up) {
+                                    self.last-drag-x = 0;
+                                }
+                            }
+                            moved => {
+                                if (self.pressed) {
+                                    let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
+                                    self.last-drag-x = self.mouse-x;
+                                    root.move-clip(clip-index, delta);
+                                }
+                            }
                             clicked => { timeline-focus.focus(); root.select-clip(clip-index); }
+                        }
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            width: 9px;
+                            height: parent.height;
+                            background: clip-index == root.active-clip-index ? Theme.palette().focus : transparent;
+                            opacity: 0.75;
+                            trim-in-touch := TouchArea {
+                                property <length> last-drag-x: 0px;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                        timeline-focus.focus();
+                                        root.select-clip(clip-index);
+                                        self.last-drag-x = self.mouse-x;
+                                    } else if (event.kind == PointerEventKind.cancel || event.kind == PointerEventKind.up) {
+                                        self.last-drag-x = 0;
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
+                                        self.last-drag-x = self.mouse-x;
+                                        root.trim-clip-in(clip-index, delta);
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            x: parent.width - 9px;
+                            y: 0px;
+                            width: 9px;
+                            height: parent.height;
+                            background: clip-index == root.active-clip-index ? Theme.palette().focus : transparent;
+                            opacity: 0.75;
+                            trim-out-touch := TouchArea {
+                                property <length> last-drag-x: 0px;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                        timeline-focus.focus();
+                                        root.select-clip(clip-index);
+                                        self.last-drag-x = self.mouse-x;
+                                    } else if (event.kind == PointerEventKind.cancel || event.kind == PointerEventKind.up) {
+                                        self.last-drag-x = 0;
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
+                                        self.last-drag-x = self.mouse-x;
+                                        root.trim-clip-out(clip-index, delta);
+                                    }
+                                }
+                            }
                         }
                     }
                     Rectangle {
-                        x: clamp(parent.width * root.playhead-seconds / Math.max(0.01, root.timeline-duration), 0px, parent.width - 2px);
+                        x: clamp(parent.width * (root.playhead-seconds - root.scroll-offset) / root.visible-duration, 0px, parent.width - 2px);
                         width: 2px;
                         height: parent.height;
                         background: Theme.palette().meter-warn;
@@ -524,6 +661,9 @@ export component VideoInspector inherits InspectorSurface {
     in property <[string]> clip-labels: [];
     in property <[float]> clip-starts: [];
     in property <[float]> clip-durations: [];
+    in property <[float]> clip-in-points: [];
+    in property <[float]> clip-out-points: [];
+    in property <[string]> clip-cache-status: [];
     in property <int> active-clip-index: 0;
     in-out property <int> inspector-tab: 0;
     in-out property <string> export-path: "loom-video-export.mp4";
@@ -534,6 +674,7 @@ export component VideoInspector inherits InspectorSurface {
     callback trim-selected(float, float);
     callback remove-clip;
     callback export-timeline(string);
+    callback cancel-export;
 
     width: root.compact-layout ? 240px : 306px;
     min-panel-width: 240px;
@@ -567,6 +708,18 @@ export component VideoInspector inherits InspectorSurface {
                 text: root.clip-labels.length > 0 ? "Start " + Math.round(root.clip-starts[root.active-clip-index] * 100) / 100 + " s · Duration " + Math.round(root.clip-durations[root.active-clip-index] * 100) / 100 + " s" : "";
                 font-size: Theme.tokens.typography.caption;
                 color: Theme.palette().ink-secondary;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.clip-labels.length > 0 && root.clip-in-points.length > root.active-clip-index ? "Source " + Math.round(root.clip-in-points[root.active-clip-index] * 100) / 100 + "–" + Math.round(root.clip-out-points[root.active-clip-index] * 100) / 100 + " s" : "";
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.clip-cache-status.length > root.active-clip-index ? root.clip-cache-status[root.active-clip-index] : "";
+                font-size: Theme.tokens.typography.micro;
+                color: Theme.palette().ink-disabled;
                 wrap: word-wrap;
             }
         }
@@ -620,6 +773,12 @@ export component VideoInspector inherits InspectorSurface {
                 text: root.exporting ? "Exporting " + Math.round(root.export-progress) + "%" : "Export H.264";
                 enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting;
                 clicked => { root.export-timeline(root.export-path); }
+            }
+            ToolbarButton {
+                icon: "stop";
+                text: "Cancel Export";
+                enabled: root.exporting;
+                clicked => { root.cancel-export(); }
             }
             Text {
                 text: "The current renderer concatenates enabled video clips through FFmpeg. Audio mixing remains a separate integration milestone.";

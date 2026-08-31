@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TrackType {
@@ -1394,6 +1398,37 @@ impl VideoSession {
         self.undo.push(std::mem::replace(&mut self.project, next));
         true
     }
+
+    /// Applies an edit to a cloned project and records history only when the
+    /// edit succeeds. This keeps failed/cancelled commands out of undo.
+    pub fn apply_edit<E, F>(&mut self, edit: F) -> Result<(), E>
+    where
+        F: FnOnce(&mut VideoProject) -> Result<(), E>,
+    {
+        let mut candidate = self.project.clone();
+        edit(&mut candidate)?;
+        self.checkpoint();
+        self.project = candidate;
+        Ok(())
+    }
+}
+
+/// Cooperative cancellation shared by export workers and their UI command.
+#[derive(Debug, Clone, Default)]
+pub struct ExportCancellation(Arc<AtomicBool>);
+
+impl ExportCancellation {
+    pub fn reset(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 /// Local FFmpeg/FFprobe/FFplay toolchain.
@@ -1724,10 +1759,25 @@ pub fn build_timeline_export_plan(
 }
 
 /// Executes a timeline export and reports normalized progress.
-pub fn execute_timeline_export<F>(plan: &TimelineExportPlan, mut progress: F) -> Result<(), String>
+pub fn execute_timeline_export<F>(plan: &TimelineExportPlan, progress: F) -> Result<(), String>
 where
     F: FnMut(f32),
 {
+    execute_timeline_export_with_cancel(plan, progress, &ExportCancellation::default())
+}
+
+/// Executes a timeline export with cooperative cancellation.
+pub fn execute_timeline_export_with_cancel<F>(
+    plan: &TimelineExportPlan,
+    mut progress: F,
+    cancel: &ExportCancellation,
+) -> Result<(), String>
+where
+    F: FnMut(f32),
+{
+    if cancel.is_cancelled() {
+        return Err("timeline export cancelled".into());
+    }
     if let Some(parent) = plan.output.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -1755,6 +1805,12 @@ where
     });
     let mut last = 0.0;
     for line in BufReader::new(stdout).lines() {
+        if cancel.is_cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err("timeline export cancelled".into());
+        }
         let line = line.map_err(|error| error.to_string())?;
         if let Some(value) = line
             .strip_prefix("out_time_us=")
@@ -1767,11 +1823,16 @@ where
             progress(1.0);
         }
     }
+    if cancel.is_cancelled() {
+        let _ = child.kill();
+    }
     let status = child.wait().map_err(|error| error.to_string())?;
     let stderr = stderr_reader
         .join()
         .unwrap_or_else(|_| "FFmpeg stderr reader panicked".into());
-    if status.success() {
+    if cancel.is_cancelled() {
+        Err("timeline export cancelled".into())
+    } else if status.success() {
         if last < 1.0 {
             progress(1.0);
         }
@@ -3590,5 +3651,53 @@ mod tests {
         let zero = build_edl_records(&[("z".to_string(), 4.0, 2.0, 0.0)], 25.0).unwrap();
         assert_eq!(zero[0].source_in, "00:00:04:00");
         assert_eq!(zero[0].source_out, "00:00:04:00");
+    }
+
+    #[test]
+    fn apply_edit_checkpoints_only_after_successful_validation() {
+        let mut session = VideoSession::new(VideoProject::new("video", "Edit"));
+        let error = session
+            .apply_edit(|project| project.split_clip(0, "missing", 1.0).map(|_| ()))
+            .unwrap_err();
+        assert!(matches!(error, TimelineError::ClipNotFound));
+        assert!(!session.can_undo());
+
+        let mut clip = Clip::new("clip", "Clip", 4.0);
+        clip.source_path = "clip.mp4".into();
+        session.project.tracks[0].insert_clip(clip).unwrap();
+        session
+            .apply_edit(|project| project.tracks[0].clips[0].trim_out(3.0))
+            .unwrap();
+        assert!(session.can_undo());
+        assert_eq!(session.project.tracks[0].clips[0].duration, 3.0);
+        assert!(session.undo());
+        assert_eq!(session.project.tracks[0].clips[0].duration, 4.0);
+    }
+
+    #[test]
+    fn timeline_coordinate_conversion_is_zoom_stable() {
+        assert_eq!(VideoProject::seconds_to_pixels(2.5, 100.0), 250.0);
+        assert_eq!(VideoProject::pixels_to_seconds(250.0, 100.0), 2.5);
+        assert_eq!(VideoProject::seconds_to_pixels(-1.0, 100.0), 0.0);
+        assert_eq!(VideoProject::pixels_to_seconds(100.0, 0.0), 100.0);
+    }
+
+    #[test]
+    fn export_cancellation_token_is_cooperative() {
+        let token = ExportCancellation::default();
+        assert!(!token.is_cancelled());
+        token.cancel();
+        assert!(token.is_cancelled());
+        assert!(execute_timeline_export_with_cancel(
+            &TimelineExportPlan {
+                executable: "definitely-not-a-real-ffmpeg".into(),
+                arguments: Vec::new(),
+                output: "out.mp4".into(),
+                duration: 1.0,
+            },
+            |_| {},
+            &token,
+        )
+        .is_err());
     }
 }
