@@ -10,9 +10,14 @@ import { Theme } from "theme.slint";
 export component StudioTrackRow inherits WorkspaceRow {
     in property <string> track-label: "Track";
     in property <string> track-kind: "Audio";
+    in property <int> track-index: 0;
     in property <int> region-count: 0;
-    in property <float> region-start-seconds: 0.0;
-    in property <float> region-duration-seconds: 0.0;
+    in property <[string]> region-ids: [];
+    in property <[string]> region-names: [];
+    in property <[int]> region-track-indices: [];
+    in property <[float]> region-start-seconds: [];
+    in property <[float]> region-durations: [];
+    in property <[bool]> region-selected-flags: [];
     in property <float> duration-seconds: 10.0;
     in property <bool> compact-layout: false;
     in property <bool> mute: false;
@@ -20,10 +25,24 @@ export component StudioTrackRow inherits WorkspaceRow {
     in property <bool> record-arm: false;
     in property <bool> input-available: false;
     in property <int> track-height: 64;
+    in property <float> timeline-zoom: 1.0;
+    in property <float> timeline-scroll-seconds: 0.0;
+    in property <float> playhead-seconds: 0.0;
+    in property <bool> looping: false;
 
     callback mute-toggled;
     callback solo-toggled;
     callback record-arm-toggled;
+    callback select-region(string);
+    callback begin-region-gesture(string, string);
+    callback move-region(string, float);
+    callback trim-region-start(string, float);
+    callback trim-region-end(string, float);
+    callback end-region-gesture;
+    callback cancel-region-gesture;
+    callback split-region(string);
+    callback delete-region(string);
+    callback focus-requested;
 
     label: root.track-label;
     min-height: root.track-height * 1px;
@@ -86,23 +105,34 @@ export component StudioTrackRow inherits WorkspaceRow {
             horizontal-stretch: 1;
             background: Theme.palette().media-stage;
             clip: true;
-            property <length> timeline-width: max(0px, stage.width);
-            property <length> lead-width: root.region-count > 0
-                ? clamp(timeline-width * root.region-start-seconds / Math.max(0.01, root.duration-seconds), 0px, max(0px, timeline-width - 54px))
-                : 0px;
-            property <length> region-width: root.region-count > 0
-                ? max(0px, min(max(54px, timeline-width * root.region-duration-seconds / Math.max(0.01, root.duration-seconds)), max(0px, timeline-width - lead-width)))
-                : 0px;
-
-            if root.region-count > 0 : Rectangle {
-                x: stage.lead-width;
-                width: stage.region-width;
+            property <length> timeline-width: max(0px, stage.width * root.timeline-zoom);
+            property <length> timeline-offset: clamp(
+                stage.width * root.timeline-zoom * root.timeline-scroll-seconds / Math.max(0.01, root.duration-seconds),
+                0px,
+                max(0px, stage.timeline-width - stage.width)
+            );
+            for region[region-index] in root.region-ids : Rectangle {
+                visible: root.region-track-indices.length > region-index
+                    && root.region-start-seconds.length > region-index
+                    && root.region-durations.length > region-index
+                    && root.region-names.length > region-index
+                    && root.region-selected-flags.length > region-index
+                    && root.region-track-indices[region-index] == root.track-index;
+                property <length> lead-width: clamp(stage.timeline-width * root.region-start-seconds[region-index] / Math.max(0.01, root.duration-seconds), 0px, max(0px, stage.timeline-width - 54px));
+                property <length> region-width: max(0px, min(max(54px, stage.timeline-width * root.region-durations[region-index] / Math.max(0.01, root.duration-seconds)), max(0px, stage.timeline-width - lead-width)));
+                x: lead-width - stage.timeline-offset;
+                width: region-width;
                 y: Theme.tokens.space.sm;
                 height: max(0px, stage.height - Theme.tokens.space.lg);
                 border-radius: Theme.tokens.metrics.radius-medium;
-                background: root.selected ? Theme.palette().content-accent : Theme.palette().content-cool;
+                background: root.region-selected-flags[region-index] ? Theme.palette().content-accent : Theme.palette().content-cool;
                 border-width: 1px;
-                border-color: root.selected ? Theme.palette().content-accent : Theme.palette().content-cool;
+                border-color: root.region-selected-flags[region-index] ? Theme.palette().focus : Theme.palette().content-cool;
+                accessible-role: button;
+                accessible-label: root.region-names[region-index] + (root.region-selected-flags[region-index] ? " (selected)" : "");
+                accessible-action-default => {
+                    root.select-region(root.region-ids[region-index]);
+                }
                 HorizontalLayout {
                     spacing: Theme.tokens.space.sm;
                     padding-left: Theme.tokens.space.sm;
@@ -114,7 +144,7 @@ export component StudioTrackRow inherits WorkspaceRow {
                         tint: Theme.palette().paper;
                     }
                     Text {
-                        text: root.track-label;
+                        text: root.region-names[region-index];
                         horizontal-stretch: 1;
                         color: Theme.palette().paper;
                         font-size: Theme.tokens.typography.micro;
@@ -122,6 +152,112 @@ export component StudioTrackRow inherits WorkspaceRow {
                         overflow: elide;
                     }
                 }
+                region-touch := TouchArea {
+                    property <length> last-drag-x: 0px;
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                            root.focus-requested();
+                            root.select-region(root.region-ids[region-index]);
+                            root.begin-region-gesture(root.region-ids[region-index], "move");
+                            self.last-drag-x = self.mouse-x;
+                        } else if (event.kind == PointerEventKind.cancel) {
+                            root.cancel-region-gesture();
+                            self.last-drag-x = 0px;
+                        } else if (event.kind == PointerEventKind.up) {
+                            root.end-region-gesture();
+                            self.last-drag-x = 0px;
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
+                            self.last-drag-x = self.mouse-x;
+                            root.move-region(root.region-ids[region-index], delta);
+                        }
+                    }
+                    clicked => { root.select-region(root.region-ids[region-index]); }
+                }
+                trim-in := Rectangle {
+                    x: 0px;
+                    width: 9px;
+                    height: parent.height;
+                    background: root.region-selected-flags[region-index] ? Theme.palette().focus : transparent;
+                    opacity: 0.8;
+                    accessible-role: button;
+                    accessible-label: "Trim start of " + root.region-names[region-index];
+                    accessible-action-default => {
+                        root.select-region(root.region-ids[region-index]);
+                        root.trim-region-start(root.region-ids[region-index], 0.1);
+                    }
+                    TouchArea {
+                        property <length> last-drag-x: 0px;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                root.focus-requested();
+                                root.select-region(root.region-ids[region-index]);
+                                root.begin-region-gesture(root.region-ids[region-index], "trim-start");
+                                self.last-drag-x = self.mouse-x;
+                            } else if (event.kind == PointerEventKind.cancel) {
+                                root.cancel-region-gesture();
+                            } else if (event.kind == PointerEventKind.up) {
+                                root.end-region-gesture();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
+                                self.last-drag-x = self.mouse-x;
+                                root.trim-region-start(root.region-ids[region-index], delta);
+                            }
+                        }
+                    }
+                }
+                trim-out := Rectangle {
+                    x: parent.width - 9px;
+                    width: 9px;
+                    height: parent.height;
+                    background: root.region-selected-flags[region-index] ? Theme.palette().focus : transparent;
+                    opacity: 0.8;
+                    accessible-role: button;
+                    accessible-label: "Trim end of " + root.region-names[region-index];
+                    accessible-action-default => {
+                        root.select-region(root.region-ids[region-index]);
+                        root.trim-region-end(root.region-ids[region-index], 0.1);
+                    }
+                    TouchArea {
+                        property <length> last-drag-x: 0px;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                root.focus-requested();
+                                root.select-region(root.region-ids[region-index]);
+                                root.begin-region-gesture(root.region-ids[region-index], "trim-end");
+                                self.last-drag-x = self.mouse-x;
+                            } else if (event.kind == PointerEventKind.cancel) {
+                                root.cancel-region-gesture();
+                            } else if (event.kind == PointerEventKind.up) {
+                                root.end-region-gesture();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
+                                self.last-drag-x = self.mouse-x;
+                                root.trim-region-end(root.region-ids[region-index], delta);
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                visible: root.duration-seconds > 0 && root.playhead-seconds >= 0;
+                x: stage.timeline-width * root.playhead-seconds / Math.max(0.01, root.duration-seconds) - stage.timeline-offset;
+                width: root.looping ? 3px : 2px;
+                y: 0px;
+                height: stage.height;
+                background: root.looping ? Theme.palette().warning : Theme.palette().accent;
+                opacity: 0.9;
+                accessible-role: image;
+                accessible-label: root.looping ? "Looping playhead" : "Playhead";
             }
         }
     }
@@ -133,8 +269,12 @@ export component StudioArrangement inherits Rectangle {
     in property <[string]> track-labels: [];
     in property <[string]> track-kinds: [];
     in property <[int]> track-region-counts: [];
-    in property <[float]> track-region-starts: [];
-    in property <[float]> track-region-durations: [];
+    in property <[string]> region-ids: [];
+    in property <[string]> region-names: [];
+    in property <[int]> region-track-indices: [];
+    in property <[float]> region-start-seconds: [];
+    in property <[float]> region-durations: [];
+    in property <[bool]> region-selected-flags: [];
     in property <[bool]> track-mutes: [];
     in property <[bool]> track-solos: [];
     in property <[bool]> track-arms: [];
@@ -143,12 +283,59 @@ export component StudioArrangement inherits Rectangle {
     in property <int> workspace-mode-index: 0;
     in property <bool> compact-layout: false;
     in property <bool> input-available: false;
+    in-out property <float> timeline-zoom: 1.0;
+    in-out property <float> timeline-scroll-seconds: 0.0;
+    in property <float> playhead-seconds: 0.0;
+    in property <bool> looping: false;
+    in property <string> selected-region-id: "";
+    in property <int> selected-region-track: -1;
+    in property <string> job-state: "Idle";
+    in property <float> job-progress: 0.0;
+    in property <bool> job-cancellable: false;
+    in property <string> selection-label: "No region selected";
     callback select-track(int);
     callback mute-toggled(int);
     callback solo-toggled(int);
     callback record-arm-toggled(int);
+    callback select-region(int, string);
+    callback begin-region-gesture(int, string, string);
+    callback move-region(int, string, float);
+    callback trim-region-start(int, string, float);
+    callback trim-region-end(int, string, float);
+    callback end-region-gesture;
+    callback cancel-region-gesture;
+    callback split-region(int, string);
+    callback delete-region(int, string);
+    callback cancel-job;
 
     background: Theme.palette().canvas;
+
+    timeline-focus := FocusScope {
+        enabled: root.selected-region-id != "";
+        key-pressed(event) => {
+            if (event.text == Key.Delete) {
+                root.delete-region(root.selected-region-track, root.selected-region-id);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.LeftArrow) {
+                root.trim-region-start(root.selected-region-track, root.selected-region-id, -0.1);
+                return accept;
+            }
+            if (event.modifiers.shift && event.text == Key.RightArrow) {
+                root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.move-region(root.selected-region-track, root.selected-region-id, -0.1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.move-region(root.selected-region-track, root.selected-region-id, 0.1);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     VerticalLayout {
         padding: Theme.tokens.space.md;
@@ -168,14 +355,78 @@ export component StudioArrangement inherits Rectangle {
                 font-size: Theme.tokens.typography.caption;
                 overflow: elide;
             }
+            Text {
+                text: root.selection-label;
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                overflow: elide;
+            }
+            ToolbarButton {
+                text: "−";
+                accessible-label: "Zoom out timeline";
+                enabled: root.timeline-zoom > 0.5;
+                clicked => {
+                    root.timeline-zoom = Math.max(0.5, root.timeline-zoom - 0.25);
+                    root.timeline-scroll-seconds = Math.min(root.timeline-scroll-seconds, Math.max(0, root.duration-seconds * (root.timeline-zoom - 1)));
+                }
+            }
+            Text {
+                text: Math.round(root.timeline-zoom * 100) + "%";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                min-width: 38px;
+                horizontal-alignment: center;
+            }
+            ToolbarButton {
+                text: "+";
+                accessible-label: "Zoom in timeline";
+                enabled: root.timeline-zoom < 4.0;
+                clicked => { root.timeline-zoom = Math.min(4.0, root.timeline-zoom + 0.25); }
+            }
+            ToolbarButton {
+                text: "◀";
+                accessible-label: "Scroll timeline left";
+                enabled: root.timeline-scroll-seconds > 0;
+                clicked => { root.timeline-scroll-seconds = Math.max(0, root.timeline-scroll-seconds - 1); }
+            }
+            ToolbarButton {
+                text: "▶";
+                accessible-label: "Scroll timeline right";
+                enabled: root.timeline-scroll-seconds < Math.max(0, root.duration-seconds * (root.timeline-zoom - 1));
+                clicked => { root.timeline-scroll-seconds = Math.min(Math.max(0, root.duration-seconds * (root.timeline-zoom - 1)), root.timeline-scroll-seconds + 1); }
+            }
+            ToolbarButton {
+                text: "Split";
+                enabled: root.selected-region-id != "";
+                clicked => { root.split-region(root.selected-region-track, root.selected-region-id); }
+            }
+            ToolbarButton {
+                text: "Delete";
+                enabled: root.selected-region-id != "";
+                clicked => { root.delete-region(root.selected-region-track, root.selected-region-id); }
+            }
+            ToolbarButton {
+                text: root.job-state;
+                enabled: root.job-cancellable;
+                clicked => { root.cancel-job(); }
+            }
         }
         for label[index] in root.track-labels : StudioTrackRow {
+            track-index: index;
             track-label: label;
             track-kind: root.track-kinds[index];
             region-count: root.track-region-counts[index];
-            region-start-seconds: root.track-region-starts[index];
-            region-duration-seconds: root.track-region-durations[index];
+            region-ids: root.region-ids;
+            region-names: root.region-names;
+            region-track-indices: root.region-track-indices;
+            region-start-seconds: root.region-start-seconds;
+            region-durations: root.region-durations;
+            region-selected-flags: root.region-selected-flags;
             duration-seconds: root.duration-seconds;
+            timeline-zoom: root.timeline-zoom;
+            timeline-scroll-seconds: root.timeline-scroll-seconds;
+            playhead-seconds: root.playhead-seconds;
+            looping: root.looping;
             compact-layout: root.compact-layout;
             mute: root.track-mutes[index];
             solo: root.track-solos[index];
@@ -187,6 +438,16 @@ export component StudioArrangement inherits Rectangle {
             mute-toggled => { root.mute-toggled(index); }
             solo-toggled => { root.solo-toggled(index); }
             record-arm-toggled => { root.record-arm-toggled(index); }
+            select-region(id) => { root.select-region(index, id); }
+            begin-region-gesture(id, kind) => { root.begin-region-gesture(index, id, kind); }
+            move-region(id, delta) => { root.move-region(index, id, delta); }
+            trim-region-start(id, delta) => { root.trim-region-start(index, id, delta); }
+            trim-region-end(id, delta) => { root.trim-region-end(index, id, delta); }
+            end-region-gesture => { root.end-region-gesture(); }
+            cancel-region-gesture => { root.cancel-region-gesture(); }
+            split-region(id) => { root.split-region(index, id); }
+            delete-region(id) => { root.delete-region(index, id); }
+            focus-requested => { timeline-focus.focus(); }
         }
         Rectangle { vertical-stretch: 1; background: transparent; }
     }

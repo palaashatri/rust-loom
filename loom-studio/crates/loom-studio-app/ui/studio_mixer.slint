@@ -15,6 +15,10 @@ export component StudioMixer inherits InspectorSurface {
     in property <[bool]> track-solos: [];
     in property <[bool]> track-arms: [];
     in property <bool> input-available: false;
+    in property <string> selection-label: "No region selected";
+    in property <string> job-state: "Idle";
+    in property <float> job-progress: 0.0;
+    in property <bool> job-cancellable: false;
     in-out property <string> export-path: "loom-studio-mix.wav";
 
     callback volume-changed(int, float);
@@ -23,6 +27,7 @@ export component StudioMixer inherits InspectorSurface {
     callback solo-toggled(int);
     callback record-arm-toggled(int);
     callback export-mix(string);
+    callback cancel-job;
 
     title: "Mixer";
     detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
@@ -30,6 +35,7 @@ export component StudioMixer inherits InspectorSurface {
     VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: 0px;
+        alignment: start;
 
         Text {
             text: "CHANNEL STRIP";
@@ -37,8 +43,15 @@ export component StudioMixer inherits InspectorSurface {
             font-weight: 700;
             color: Theme.palette().ink-secondary;
         }
+        Text {
+            text: root.selection-label;
+            color: Theme.palette().ink-secondary;
+            font-size: Theme.tokens.typography.micro;
+            overflow: elide;
+        }
         if root.active-track-index < root.track-labels.length : VerticalLayout {
             spacing: Theme.tokens.space.sm;
+            alignment: start;
             Text {
                 text: "Volume  " + Math.round(root.track-volumes[root.active-track-index] * 10) / 10 + " dB";
                 color: Theme.palette().ink;
@@ -96,9 +109,31 @@ export component StudioMixer inherits InspectorSurface {
         }
         Field { label: "WAV destination"; value <=> root.export-path; }
         PrimaryButton {
-            text: "Export WAV";
+            text: root.job-cancellable ? "Cancel " + root.job-state : "Export WAV";
             horizontal-stretch: 1;
-            clicked => { root.export-mix(root.export-path); }
+            clicked => {
+                if (root.job-cancellable) { root.cancel-job(); }
+                else { root.export-mix(root.export-path); }
+            }
+        }
+        if root.job-state != "Idle" : VerticalLayout {
+            spacing: Theme.tokens.space.xs;
+            Text {
+                text: root.job-state + (root.job-progress > 0 ? " " + Math.round(root.job-progress * 100) + "%" : "");
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                overflow: elide;
+            }
+            Rectangle {
+                min-height: 4px;
+                preferred-height: 4px;
+                background: Theme.palette().surface-sunken;
+                Rectangle {
+                    width: clamp(parent.width * root.job-progress, 0px, parent.width);
+                    height: parent.height;
+                    background: Theme.palette().accent;
+                }
+            }
         }
 
         Rectangle { vertical-stretch: 1; background: transparent; }

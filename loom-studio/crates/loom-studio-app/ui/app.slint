@@ -35,8 +35,12 @@ export component StudioApp inherits Window {
     in property <[string]> track-labels: [];
     in property <[string]> track-kinds: [];
     in property <[int]> track-region-counts: [];
-    in property <[float]> track-region-starts: [];
-    in property <[float]> track-region-durations: [];
+    in property <[string]> region-ids: [];
+    in property <[string]> region-names: [];
+    in property <[int]> region-track-indices: [];
+    in property <[float]> region-start-seconds: [];
+    in property <[float]> region-durations: [];
+    in property <[bool]> region-selected-flags: [];
     in property <[bool]> track-mutes: [];
     in property <[bool]> track-solos: [];
     in property <[bool]> track-arms: [];
@@ -45,6 +49,8 @@ export component StudioApp inherits Window {
     in property <int> active-track-index: 0;
     in property <float> duration-seconds: 10.0;
     in-out property <float> playhead-seconds: 0.0;
+    in-out property <float> timeline-zoom: 1.0;
+    in-out property <float> timeline-scroll-seconds: 0.0;
     in property <bool> audio-available: false;
     in property <bool> input-available: false;
     in property <string> output-device: "No output device";
@@ -62,6 +68,11 @@ export component StudioApp inherits Window {
     in-out property <string> export-path: "loom-studio-mix.wav";
     in property <string> status-left: "Ready";
     in property <string> status-right: "Local";
+    in property <string> selection-label: "No region selected";
+    in property <string> selected-region-id: "";
+    in property <string> job-state: "Idle";
+    in property <float> job-progress: 0.0;
+    in property <bool> job-cancellable: false;
 
     callback new-song;
     callback open-song;
@@ -86,7 +97,18 @@ export component StudioApp inherits Window {
     callback pan-changed(int, float);
     callback import-audio(string);
     callback export-mix(string);
+    callback cancel-job;
     callback connect-midi(int);
+
+    callback select-region(int, string);
+    callback begin-region-gesture(int, string, string);
+    callback move-region(int, string, float);
+    callback trim-region-start(int, string, float);
+    callback trim-region-end(int, string, float);
+    callback end-region-gesture;
+    callback cancel-region-gesture;
+    callback split-region(int, string);
+    callback delete-region(int, string);
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -203,8 +225,22 @@ export component StudioApp inherits Window {
                     track-labels: root.track-labels;
                     track-kinds: root.track-kinds;
                     track-region-counts: root.track-region-counts;
-                    track-region-starts: root.track-region-starts;
-                    track-region-durations: root.track-region-durations;
+                    region-ids: root.region-ids;
+                    region-names: root.region-names;
+                    region-track-indices: root.region-track-indices;
+                    region-start-seconds: root.region-start-seconds;
+                    region-durations: root.region-durations;
+                    region-selected-flags: root.region-selected-flags;
+                    selected-region-id: root.selected-region-id;
+                    selected-region-track: root.active-track-index;
+                    playhead-seconds: root.playhead-seconds;
+                    looping: root.is-looping;
+                    timeline-zoom <=> root.timeline-zoom;
+                    timeline-scroll-seconds <=> root.timeline-scroll-seconds;
+                    selection-label: root.selection-label;
+                    job-state: root.job-state;
+                    job-progress: root.job-progress;
+                    job-cancellable: root.job-cancellable;
                     track-mutes: root.track-mutes;
                     track-solos: root.track-solos;
                     track-arms: root.track-arms;
@@ -217,6 +253,15 @@ export component StudioApp inherits Window {
                     mute-toggled(index) => { root.toggle-mute(index); }
                     solo-toggled(index) => { root.toggle-solo(index); }
                     record-arm-toggled(index) => { root.toggle-rec-arm(index); }
+                    select-region(track, id) => { root.select-region(track, id); }
+                    begin-region-gesture(index, id, kind) => { root.begin-region-gesture(index, id, kind); }
+                    move-region(index, id, delta) => { root.move-region(index, id, delta); }
+                    trim-region-start(index, id, delta) => { root.trim-region-start(index, id, delta); }
+                    trim-region-end(index, id, delta) => { root.trim-region-end(index, id, delta); }
+                    end-region-gesture => { root.end-region-gesture(); }
+                    cancel-region-gesture => { root.cancel-region-gesture(); }
+                    split-region(index, id) => { root.split-region(index, id); }
+                    delete-region(index, id) => { root.delete-region(index, id); }
                 }
             }
 
@@ -235,6 +280,10 @@ export component StudioApp inherits Window {
                 track-solos: root.track-solos;
                 track-arms: root.track-arms;
                 input-available: root.input-available;
+                selection-label: root.selection-label;
+                job-state: root.job-state;
+                job-progress: root.job-progress;
+                job-cancellable: root.job-cancellable;
                 export-path <=> root.export-path;
                 volume-changed(index, value) => { root.volume-changed(index, value); }
                 pan-changed(index, value) => { root.pan-changed(index, value); }
@@ -242,6 +291,7 @@ export component StudioApp inherits Window {
                 solo-toggled(index) => { root.toggle-solo(index); }
                 record-arm-toggled(index) => { root.toggle-rec-arm(index); }
                 export-mix(path) => { root.export-mix(path); }
+                cancel-job => { root.cancel-job(); }
             }
         }
 

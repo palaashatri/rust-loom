@@ -6,6 +6,9 @@ use loom_package::manifest::{
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WorkspaceMode {
@@ -13,7 +16,7 @@ pub enum WorkspaceMode {
     Pro,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TrackKind {
     Audio,
     Midi,
@@ -21,7 +24,7 @@ pub enum TrackKind {
     Bus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioRegion {
     pub id: String,
     pub name: String,
@@ -29,7 +32,74 @@ pub struct AudioRegion {
     pub length_samples: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl AudioRegion {
+    /// Exclusive end of the region, saturating on malformed input.
+    pub fn end_sample(&self) -> u64 {
+        self.start_sample.saturating_add(self.length_samples)
+    }
+}
+
+/// Explicit arrangement selection. A track-only selection is useful for
+/// mixer actions; a region selection additionally carries its stable id.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimelineSelection {
+    pub track_index: Option<usize>,
+    pub region_id: Option<String>,
+}
+
+impl TimelineSelection {
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    pub fn track(track_index: usize) -> Self {
+        Self {
+            track_index: Some(track_index),
+            region_id: None,
+        }
+    }
+
+    pub fn region(track_index: usize, region_id: impl Into<String>) -> Self {
+        Self {
+            track_index: Some(track_index),
+            region_id: Some(region_id.into()),
+        }
+    }
+
+    pub fn is_region(&self) -> bool {
+        self.track_index.is_some() && self.region_id.is_some()
+    }
+}
+
+/// Failure returned by validated arrangement and mixer commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StudioEditError {
+    InvalidTrackIndex,
+    RegionNotFound,
+    InvalidRegionIndex,
+    NegativePosition,
+    InvalidTiming(String),
+    NoOp,
+    DuplicateRegionId,
+}
+
+impl std::fmt::Display for StudioEditError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidTrackIndex => formatter.write_str("track index is invalid"),
+            Self::RegionNotFound => formatter.write_str("region was not found"),
+            Self::InvalidRegionIndex => formatter.write_str("region index is invalid"),
+            Self::NegativePosition => formatter.write_str("position must not be negative"),
+            Self::InvalidTiming(message) => formatter.write_str(message),
+            Self::NoOp => formatter.write_str("edit does not change the document"),
+            Self::DuplicateRegionId => formatter.write_str("region id is already in use"),
+        }
+    }
+}
+
+impl std::error::Error for StudioEditError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StudioTrack {
     pub id: String,
     pub name: String,
@@ -38,6 +108,8 @@ pub struct StudioTrack {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    #[serde(default)]
+    pub record_arm: bool,
     pub regions: Vec<AudioRegion>,
 }
 
@@ -51,6 +123,7 @@ impl StudioTrack {
             pan: 0.0,
             mute: false,
             solo: false,
+            record_arm: false,
             regions: Vec::new(),
         }
     }
@@ -150,7 +223,7 @@ impl StudioTrack {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StudioProject {
     pub id: String,
     pub name: String,
@@ -1408,13 +1481,21 @@ pub fn decode_wav(bytes: &[u8]) -> Result<AudioBuffer, String> {
     Ok(buffer)
 }
 
+#[derive(Debug, Clone)]
+struct SessionSnapshot {
+    project: StudioProject,
+    selection: TimelineSelection,
+}
+
 /// Undoable editing session around a Studio project.
 #[derive(Debug, Clone)]
 pub struct StudioSession {
     /// Current project.
     pub project: StudioProject,
-    undo: Vec<StudioProject>,
-    redo: Vec<StudioProject>,
+    /// Current arrangement/mixer selection.
+    pub selection: TimelineSelection,
+    undo: Vec<SessionSnapshot>,
+    redo: Vec<SessionSnapshot>,
     history_limit: usize,
 }
 
@@ -1423,37 +1504,97 @@ impl StudioSession {
     pub fn new(project: StudioProject) -> Self {
         Self {
             project,
+            selection: TimelineSelection::none(),
             undo: Vec::new(),
             redo: Vec::new(),
             history_limit: 64,
         }
     }
 
-    /// Records the current project before a mutation.
-    pub fn checkpoint(&mut self) {
-        self.undo.push(self.project.clone());
+    fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            project: self.project.clone(),
+            selection: self.selection.clone(),
+        }
+    }
+
+    fn push_snapshot(&mut self, snapshot: SessionSnapshot) {
+        self.undo.push(snapshot);
         if self.undo.len() > self.history_limit {
             self.undo.remove(0);
         }
         self.redo.clear();
     }
 
-    /// Restores the previous project state.
+    /// Records the current project before a mutation.
+    pub fn checkpoint(&mut self) {
+        self.push_snapshot(self.snapshot());
+    }
+
+    /// Applies a validated project edit and records history only when it
+    /// changes the document. Failed and no-op commands never enter history.
+    pub fn apply_edit<F>(&mut self, edit: F) -> Result<(), StudioEditError>
+    where
+        F: FnOnce(&mut StudioProject) -> Result<(), StudioEditError>,
+    {
+        let mut candidate = self.project.clone();
+        edit(&mut candidate)?;
+        if candidate == self.project {
+            return Err(StudioEditError::NoOp);
+        }
+        self.checkpoint();
+        self.project = candidate;
+        Ok(())
+    }
+
+    /// Applies a gesture update without adding a history entry.
+    pub fn apply_edit_without_history<F>(&mut self, edit: F) -> Result<(), StudioEditError>
+    where
+        F: FnOnce(&mut StudioProject) -> Result<(), StudioEditError>,
+    {
+        let mut candidate = self.project.clone();
+        edit(&mut candidate)?;
+        self.project = candidate;
+        Ok(())
+    }
+
+    /// Commits a gesture baseline as one undo entry when the project changed.
+    pub fn commit_gesture(&mut self, baseline: StudioProject) -> bool {
+        if baseline == self.project {
+            return false;
+        }
+        self.push_snapshot(SessionSnapshot {
+            project: baseline,
+            selection: self.selection.clone(),
+        });
+        true
+    }
+
+    /// Rolls the current project back to a gesture baseline without touching
+    /// existing history.
+    pub fn rollback_gesture(&mut self, baseline: StudioProject) {
+        self.project = baseline;
+    }
+
+    /// Restores the previous project and selection.
     pub fn undo(&mut self) -> bool {
         let Some(previous) = self.undo.pop() else {
             return false;
         };
-        self.redo
-            .push(std::mem::replace(&mut self.project, previous));
+        self.redo.push(self.snapshot());
+        self.project = previous.project;
+        self.selection = previous.selection;
         true
     }
 
-    /// Reapplies the next project state.
+    /// Reapplies the next project and selection.
     pub fn redo(&mut self) -> bool {
         let Some(next) = self.redo.pop() else {
             return false;
         };
-        self.undo.push(std::mem::replace(&mut self.project, next));
+        self.undo.push(self.snapshot());
+        self.project = next.project;
+        self.selection = next.selection;
         true
     }
 
@@ -1466,6 +1607,309 @@ impl StudioSession {
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
+
+    /// Selects a track for mixer and arrangement commands.
+    pub fn select_track(&mut self, track_index: i32) -> Result<(), StudioEditError> {
+        let index = usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?;
+        if index >= self.project.tracks.len() {
+            return Err(StudioEditError::InvalidTrackIndex);
+        }
+        self.selection = TimelineSelection::track(index);
+        self.project.active_track_index = index;
+        Ok(())
+    }
+
+    /// Selects a stable region id and its owning track.
+    pub fn select_region(
+        &mut self,
+        track_index: i32,
+        region_id: &str,
+    ) -> Result<(), StudioEditError> {
+        let index = usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?;
+        let track = self
+            .project
+            .tracks
+            .get(index)
+            .ok_or(StudioEditError::InvalidTrackIndex)?;
+        if !track.regions.iter().any(|region| region.id == region_id) {
+            return Err(StudioEditError::RegionNotFound);
+        }
+        self.project.active_track_index = index;
+        self.selection = TimelineSelection::region(index, region_id);
+        Ok(())
+    }
+
+    /// Returns the selected region, if selection still points at a live id.
+    pub fn selected_region(&self) -> Option<(usize, &AudioRegion)> {
+        let track_index = self.selection.track_index?;
+        let region_id = self.selection.region_id.as_deref()?;
+        let track = self.project.tracks.get(track_index)?;
+        let region = track.regions.iter().find(|region| region.id == region_id)?;
+        Some((track_index, region))
+    }
+
+    /// Moves a region to an absolute sample position on its current track.
+    pub fn move_region(
+        &mut self,
+        track_index: i32,
+        region_id: &str,
+        start_sample: i64,
+    ) -> Result<(), StudioEditError> {
+        let start_sample = checked_sample(start_sample)?;
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            let region = track
+                .regions
+                .iter_mut()
+                .find(|region| region.id == region_id)
+                .ok_or(StudioEditError::RegionNotFound)?;
+            if region.start_sample == start_sample {
+                return Err(StudioEditError::NoOp);
+            }
+            region.start_sample = start_sample;
+            track.regions.sort_by_key(|region| region.start_sample);
+            Ok(())
+        })
+    }
+
+    /// Trims a region's start while preserving its end.
+    pub fn trim_region_start(
+        &mut self,
+        track_index: i32,
+        region_id: &str,
+        new_start: i64,
+    ) -> Result<(), StudioEditError> {
+        let new_start = checked_sample(new_start)?;
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            let region = track
+                .regions
+                .iter_mut()
+                .find(|region| region.id == region_id)
+                .ok_or(StudioEditError::RegionNotFound)?;
+            let end = region.end_sample();
+            if new_start >= end {
+                return Err(StudioEditError::InvalidTiming(
+                    "trim start must be before region end".into(),
+                ));
+            }
+            if new_start == region.start_sample {
+                return Err(StudioEditError::NoOp);
+            }
+            region.start_sample = new_start;
+            region.length_samples = end - new_start;
+            Ok(())
+        })
+    }
+
+    /// Trims a region's end while preserving its start.
+    pub fn trim_region_end(
+        &mut self,
+        track_index: i32,
+        region_id: &str,
+        new_end: i64,
+    ) -> Result<(), StudioEditError> {
+        let new_end = checked_sample(new_end)?;
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            let region = track
+                .regions
+                .iter_mut()
+                .find(|region| region.id == region_id)
+                .ok_or(StudioEditError::RegionNotFound)?;
+            if new_end <= region.start_sample {
+                return Err(StudioEditError::InvalidTiming(
+                    "trim end must be after region start".into(),
+                ));
+            }
+            if new_end == region.end_sample() {
+                return Err(StudioEditError::NoOp);
+            }
+            region.length_samples = new_end - region.start_sample;
+            Ok(())
+        })
+    }
+
+    /// Splits a region at an absolute sample and selects the right half.
+    pub fn split_region(
+        &mut self,
+        track_index: i32,
+        region_id: &str,
+        split_sample: i64,
+    ) -> Result<(String, String), StudioEditError> {
+        let split_sample = checked_sample(split_sample)?;
+        let mut ids = None;
+        self.apply_edit(|project| {
+            let track_index =
+                usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?;
+            let left_id = format!("{}-a", region_id);
+            let right_id = format!("{}-b", region_id);
+            if project
+                .tracks
+                .iter()
+                .flat_map(|track| track.regions.iter())
+                .any(|item| item.id == left_id || item.id == right_id)
+            {
+                return Err(StudioEditError::DuplicateRegionId);
+            }
+            let track = project
+                .tracks
+                .get_mut(track_index)
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            let position = track
+                .regions
+                .iter()
+                .position(|region| region.id == region_id)
+                .ok_or(StudioEditError::RegionNotFound)?;
+            let region = track.regions[position].clone();
+            if split_sample <= region.start_sample || split_sample >= region.end_sample() {
+                return Err(StudioEditError::InvalidTiming(
+                    "split point must be inside region".into(),
+                ));
+            }
+            let region_end = region.end_sample();
+            let left = AudioRegion {
+                id: left_id.clone(),
+                name: region.name.clone(),
+                start_sample: region.start_sample,
+                length_samples: split_sample - region.start_sample,
+            };
+            let right = AudioRegion {
+                id: right_id.clone(),
+                name: region.name,
+                start_sample: split_sample,
+                length_samples: region_end - split_sample,
+            };
+            track.regions.splice(position..=position, [left, right]);
+            ids = Some((left_id, right_id));
+            Ok(())
+        })?;
+        let result = ids.ok_or(StudioEditError::RegionNotFound)?;
+        self.selection = TimelineSelection::region(
+            usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+            result.1.clone(),
+        );
+        Ok(result)
+    }
+
+    /// Deletes a region and selects the owning track.
+    pub fn delete_region(
+        &mut self,
+        track_index: i32,
+        region_id: &str,
+    ) -> Result<AudioRegion, StudioEditError> {
+        let mut removed = None;
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            let position = track
+                .regions
+                .iter()
+                .position(|region| region.id == region_id)
+                .ok_or(StudioEditError::RegionNotFound)?;
+            removed = Some(track.regions.remove(position));
+            Ok(())
+        })?;
+        self.selection = TimelineSelection::track(
+            usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+        );
+        removed.ok_or(StudioEditError::RegionNotFound)
+    }
+
+    /// Changes one track's mixer volume in dB.
+    pub fn set_volume(&mut self, track_index: i32, volume_db: f32) -> Result<(), StudioEditError> {
+        if !volume_db.is_finite() || !(-90.0..=12.0).contains(&volume_db) {
+            return Err(StudioEditError::InvalidTiming(
+                "volume is out of range".into(),
+            ));
+        }
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            if (track.volume_db - volume_db).abs() <= f32::EPSILON {
+                return Err(StudioEditError::NoOp);
+            }
+            track.volume_db = volume_db;
+            Ok(())
+        })
+    }
+
+    /// Changes one track's pan in the normalized range `[-1, 1]`.
+    pub fn set_pan(&mut self, track_index: i32, pan: f32) -> Result<(), StudioEditError> {
+        if !pan.is_finite() || !(-1.0..=1.0).contains(&pan) {
+            return Err(StudioEditError::InvalidTiming("pan is out of range".into()));
+        }
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            if (track.pan - pan).abs() <= f32::EPSILON {
+                return Err(StudioEditError::NoOp);
+            }
+            track.pan = pan;
+            Ok(())
+        })
+    }
+
+    pub fn toggle_mute(&mut self, track_index: i32) -> Result<(), StudioEditError> {
+        self.toggle_track_bool(track_index, |track| &mut track.mute)
+    }
+
+    pub fn toggle_solo(&mut self, track_index: i32) -> Result<(), StudioEditError> {
+        self.toggle_track_bool(track_index, |track| &mut track.solo)
+    }
+
+    pub fn toggle_record_arm(&mut self, track_index: i32) -> Result<(), StudioEditError> {
+        self.toggle_track_bool(track_index, |track| &mut track.record_arm)
+    }
+
+    fn toggle_track_bool(
+        &mut self,
+        track_index: i32,
+        select: fn(&mut StudioTrack) -> &mut bool,
+    ) -> Result<(), StudioEditError> {
+        self.apply_edit(|project| {
+            let track = project
+                .tracks
+                .get_mut(
+                    usize::try_from(track_index).map_err(|_| StudioEditError::InvalidTrackIndex)?,
+                )
+                .ok_or(StudioEditError::InvalidTrackIndex)?;
+            let value = select(track);
+            *value = !*value;
+            Ok(())
+        })
+    }
+}
+
+fn checked_sample(value: i64) -> Result<u64, StudioEditError> {
+    u64::try_from(value).map_err(|_| StudioEditError::NegativePosition)
 }
 
 /// Simple volume automation point.
@@ -1567,6 +2011,99 @@ pub struct MixResult {
     pub audio: AudioBuffer,
     /// Missing or incompatible assets skipped by the renderer.
     pub warnings: Vec<String>,
+}
+
+/// Cooperative cancellation shared by import and bounce jobs.
+#[derive(Debug, Clone, Default)]
+pub struct StudioCancellation(Arc<AtomicBool>);
+
+impl StudioCancellation {
+    pub fn reset(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// Durable state of one cancellable Studio job.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StudioJobState {
+    Idle,
+    Running { kind: String, progress: f32 },
+    Completed { kind: String },
+    Cancelled { kind: String },
+    Failed { kind: String, message: String },
+}
+
+static BOUNCE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Mixes a project and commits the WAV output transactionally. Cancellation
+/// and every failure remove the temporary output and preserve any destination
+/// that already existed.
+pub fn bounce_mix_with_cancel<F>(
+    project: &StudioProject,
+    assets: &AudioAssetStore,
+    destination: &Path,
+    cancel: &StudioCancellation,
+    mut progress: F,
+) -> Result<MixResult, String>
+where
+    F: FnMut(f32),
+{
+    if destination.as_os_str().is_empty() {
+        return Err("bounce destination is empty".into());
+    }
+    if cancel.is_cancelled() {
+        return Err("bounce cancelled".into());
+    }
+    progress(0.05);
+    let mixed = project.mix(assets)?;
+    if cancel.is_cancelled() {
+        return Err("bounce cancelled".into());
+    }
+    let bytes = mixed.audio.to_wav_pcm16()?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "bounce destination has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| "bounce destination has no file name".to_string())?
+        .to_string_lossy();
+    let unique = BOUNCE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = parent.join(format!(".{file_name}.loom-studio-{unique}.tmp"));
+    let result = (|| {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&temp).map_err(|error| error.to_string())?;
+        let chunk_size = 64 * 1024;
+        for (index, chunk) in bytes.chunks(chunk_size).enumerate() {
+            if cancel.is_cancelled() {
+                return Err("bounce cancelled".to_string());
+            }
+            file.write_all(chunk).map_err(|error| error.to_string())?;
+            progress(
+                0.1 + 0.85 * ((index + 1) * chunk_size).min(bytes.len()) as f32
+                    / bytes.len().max(1) as f32,
+            );
+        }
+        file.sync_all().map_err(|error| error.to_string())?;
+        if cancel.is_cancelled() {
+            return Err("bounce cancelled".to_string());
+        }
+        std::fs::rename(&temp, destination).map_err(|error| error.to_string())?;
+        progress(1.0);
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result.map(|()| mixed)
 }
 
 impl StudioProject {
@@ -2656,22 +3193,25 @@ pub fn fnv1a64(bytes: &[u8]) -> u64 {
 
 impl StudioSession {
     /// Stable integrity digest of the session's musical state: hashes tempo/BPM, track
-    /// layout (names, gain/mute/solo states), and every region's identity/timing in
-    /// order. Two sessions with identical projects produce equal digests regardless of
-    /// undo history. Uses [`fnv1a64`].
+    /// layout (names, gain/pan/mute/solo/arm states), and every region's identity/timing
+    /// in order. Two sessions with identical projects produce equal digests regardless
+    /// of undo history. Uses [`fnv1a64`].
     pub fn session_digest(&self) -> u64 {
         let mut input = format!(
-            "session:bpm:{}\ntracks:{}\n",
+            "session:bpm:{}:active:{}\ntracks:{}\n",
             self.project.bpm.to_bits(),
+            self.project.active_track_index,
             self.project.tracks.len()
         );
         for track in &self.project.tracks {
             input.push_str(&format!(
-                "track:{}:gain:{}:mute:{}:solo:{}:regions:{}\n",
+                "track:{}:gain:{}:pan:{}:mute:{}:solo:{}:arm:{}:regions:{}\n",
                 track.name,
                 track.volume_db.to_bits(),
+                track.pan.to_bits(),
                 u8::from(track.mute),
                 u8::from(track.solo),
+                u8::from(track.record_arm),
                 track.regions.len()
             ));
             for region in &track.regions {
@@ -3109,6 +3649,20 @@ mod tests {
 mod studio_runtime_tests {
     use super::*;
 
+    fn editable_session() -> StudioSession {
+        let mut project = StudioProject::new("studio-edit", "Editable Studio");
+        project.tracks.clear();
+        let mut track = StudioTrack::new("track-1", "Audio", TrackKind::Audio);
+        track.add_region(AudioRegion {
+            id: "region-1".into(),
+            name: "take.wav".into(),
+            start_sample: 4_800,
+            length_samples: 9_600,
+        });
+        project.tracks.push(track);
+        StudioSession::new(project)
+    }
+
     #[test]
     fn wav_round_trip_decodes_pcm16() {
         let source = AudioBuffer::sine(48_000, 2, 440.0, 0.05, 0.25).unwrap();
@@ -3129,6 +3683,130 @@ mod studio_runtime_tests {
         assert_eq!(session.project.tracks[0].volume_db, 0.0);
         assert!(session.redo());
         assert_eq!(session.project.tracks[0].volume_db, -12.0);
+    }
+
+    #[test]
+    fn timeline_selection_and_region_edits_validate_and_undo_as_operations() {
+        let mut session = editable_session();
+        assert!(session.select_region(0, "region-1").is_ok());
+        assert_eq!(session.selection, TimelineSelection::region(0, "region-1"));
+        let history_before = session.can_undo();
+
+        assert_eq!(
+            session.move_region(0, "region-1", -1),
+            Err(StudioEditError::NegativePosition)
+        );
+        assert_eq!(session.can_undo(), history_before);
+        assert_eq!(
+            session.trim_region_end(0, "region-1", 4_800),
+            Err(StudioEditError::InvalidTiming(
+                "trim end must be after region start".into()
+            ))
+        );
+        assert_eq!(session.can_undo(), history_before);
+        assert_eq!(
+            session.move_region(0, "region-1", 4_800),
+            Err(StudioEditError::NoOp)
+        );
+        assert_eq!(session.can_undo(), history_before);
+
+        session.move_region(0, "region-1", 9_600).unwrap();
+        assert_eq!(session.project.tracks[0].regions[0].start_sample, 9_600);
+        assert!(session.undo());
+        assert_eq!(session.project.tracks[0].regions[0].start_sample, 4_800);
+        assert!(session.redo());
+        assert_eq!(session.project.tracks[0].regions[0].start_sample, 9_600);
+
+        let (left, right) = session.split_region(0, "region-1", 14_400).unwrap();
+        assert_eq!(
+            session.selection,
+            TimelineSelection::region(0, right.clone())
+        );
+        assert_eq!(session.project.tracks[0].regions.len(), 2);
+        assert_eq!(session.project.tracks[0].regions[0].id, left);
+        assert_eq!(session.project.tracks[0].regions[1].id, right.clone());
+        session.trim_region_start(0, &right, 16_000).unwrap();
+        session.trim_region_end(0, &right, 18_000).unwrap();
+        session.delete_region(0, &right).unwrap();
+        assert_eq!(session.selection, TimelineSelection::track(0));
+        assert_eq!(session.project.tracks[0].regions.len(), 1);
+    }
+
+    #[test]
+    fn mixer_state_round_trips_and_undoes_without_noop_history() {
+        let mut session = editable_session();
+        assert!(session.set_volume(0, -6.0).is_ok());
+        assert!(session.set_pan(0, 0.25).is_ok());
+        assert!(session.toggle_mute(0).is_ok());
+        assert!(session.toggle_solo(0).is_ok());
+        assert!(session.toggle_record_arm(0).is_ok());
+        assert!(session.project.tracks[0].record_arm);
+        assert_eq!(
+            session.set_pan(0, 2.0),
+            Err(StudioEditError::InvalidTiming("pan is out of range".into()))
+        );
+
+        let project = session.project.clone();
+        let bytes = save_studio_project(&project).unwrap();
+        let loaded = load_studio_project(&bytes).unwrap();
+        assert_eq!(loaded.tracks[0].volume_db, -6.0);
+        assert_eq!(loaded.tracks[0].pan, 0.25);
+        assert!(loaded.tracks[0].mute);
+        assert!(loaded.tracks[0].solo);
+        assert!(loaded.tracks[0].record_arm);
+
+        assert!(session.undo());
+        assert!(!session.project.tracks[0].record_arm);
+        assert!(session.redo());
+        assert!(session.project.tracks[0].record_arm);
+    }
+
+    #[test]
+    fn cancelled_bounce_preserves_existing_destination_and_cleans_temporary_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "loom-studio-bounce-{}-{}",
+            std::process::id(),
+            BOUNCE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let destination = dir.join("mix.wav");
+        std::fs::write(&destination, b"previous mix").unwrap();
+        let mut project = StudioProject::new("bounce", "Bounce");
+        project.tracks[0].regions[0].name = "tone.wav".into();
+        let mut assets = AudioAssetStore::default();
+        assets
+            .insert(
+                "tone.wav",
+                AudioBuffer::sine(48_000, 2, 220.0, 1.0, 0.2).unwrap(),
+            )
+            .unwrap();
+        let cancellation = StudioCancellation::default();
+        let cancel_for_progress = cancellation.clone();
+        let result = bounce_mix_with_cancel(
+            &project,
+            &assets,
+            &destination,
+            &cancellation,
+            move |progress| {
+                if progress >= 0.1 {
+                    cancel_for_progress.cancel();
+                }
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"previous mix");
+        let temporary_files = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".loom-studio-")
+            })
+            .count();
+        assert_eq!(temporary_files, 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

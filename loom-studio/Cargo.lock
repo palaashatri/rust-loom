@@ -2995,6 +2995,7 @@ dependencies = [
  "loom-test-support",
  "loom-ui",
  "midir",
+ "serde_json",
  "slint",
  "slint-build",
 ]
