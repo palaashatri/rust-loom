@@ -1516,6 +1516,8 @@ fn layout_breakpoints(app: &WriterApp, width: u32) -> ResponsiveToolbarState {
 
 fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     let state = layout_breakpoints(app, width);
+    app.set_icon_only_toolbar(state.icon_only);
+    app.set_labeled_toolbar(state.labeled);
     app.set_wide_toolbar(state.labeled);
     app.set_labeled_export(state.labeled);
     if !state.overflow && app.get_toolbar_overflow_open() {
@@ -2780,6 +2782,10 @@ mod tests {
                     labeled,
                 }
             );
+            apply_layout_breakpoints(&app, width);
+            assert_eq!(app.get_icon_only_toolbar(), icon_only);
+            assert_eq!(app.get_overflow_toolbar(), overflow);
+            assert_eq!(app.get_labeled_toolbar(), labeled);
         }
     }
 

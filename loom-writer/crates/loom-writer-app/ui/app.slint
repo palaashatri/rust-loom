@@ -22,13 +22,15 @@ export component WriterApp inherits Window {
     background: Theme.palette().canvas;
 
     in property <bool> wide-toolbar: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
-    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
     in-out property <int> inspector-tab: 0;
     callback window-resized(length);
     changed rtl => {
@@ -223,7 +225,7 @@ export component WriterApp inherits Window {
 
             // Pages-style action toolbar. The host and its groups now choose
             // one slot each; responsive state only selects which host exists.
-            if root.wide-toolbar : LabeledToolbar {
+            if root.labeled-toolbar : LabeledToolbar {
                 WriterToolbarBody {
                     rtl: root.rtl;
                     wide: true;
@@ -243,7 +245,7 @@ export component WriterApp inherits Window {
                     }
                 }
             }
-            if !root.wide-toolbar : ContextToolbar {
+            if !root.labeled-toolbar : ContextToolbar {
                 WriterToolbarBody {
                     rtl: root.rtl;
                     wide: false;

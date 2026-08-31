@@ -1,9 +1,9 @@
 import {
-    DocumentChrome, DirectionalLayout
+    DocumentChrome, DirectionalLayout, ContextToolbar, LabeledToolbar
 } from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
-    MotionToolbar, MotionLayersPanel, MotionStage,
+    MotionToolbarBody, MotionLayersPanel, MotionStage,
     MotionInspector, MotionTimeline, MotionStatusBar
 } from "components.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
@@ -16,6 +16,9 @@ export component MotionApp inherits Window {
     in property <bool> rtl: false;
     changed rtl => { Theme.rtl = root.rtl; }
     in property <bool> compact-layout: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> overflow-toolbar: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
     // Timeline and panel contracts keep the layer header readable even in the
@@ -154,19 +157,45 @@ export component MotionApp inherits Window {
             trailing-text: root.timecode-text;
         }
 
-        MotionToolbar {
-            compact-layout: root.compact-layout;
-            show-guides <=> root.show-guides;
-            show-safe-area <=> root.show-safe-area;
-            is-playing: root.is-playing;
-            is-looping: root.is-looping;
-            zoom-value <=> root.zoom-value;
-            add-layer => { root.add-layer(); }
-            play-pause => { root.play-pause(); }
-            step-back => { root.step-back(); }
-            step-forward => { root.step-forward(); }
-            toggle-loop => { root.toggle-loop(); }
-            export-frame => { root.export-frame(); }
+        if root.labeled-toolbar : LabeledToolbar {
+            MotionToolbarBody {
+                rtl: root.rtl;
+                compact-layout: root.compact-layout;
+                labeled: true;
+                overflow: false;
+                show-guides <=> root.show-guides;
+                show-safe-area <=> root.show-safe-area;
+                is-playing: root.is-playing;
+                is-looping: root.is-looping;
+                zoom-value <=> root.zoom-value;
+                add-layer => { root.add-layer(); }
+                play-pause => { root.play-pause(); }
+                step-back => { root.step-back(); }
+                step-forward => { root.step-forward(); }
+                toggle-loop => { root.toggle-loop(); }
+                export-frame => { root.export-frame(); }
+                overflow-requested => { root.open-palette(); }
+            }
+        }
+        if !root.labeled-toolbar : ContextToolbar {
+            MotionToolbarBody {
+                rtl: root.rtl;
+                compact-layout: root.compact-layout;
+                labeled: false;
+                overflow: root.overflow-toolbar;
+                show-guides <=> root.show-guides;
+                show-safe-area <=> root.show-safe-area;
+                is-playing: root.is-playing;
+                is-looping: root.is-looping;
+                zoom-value <=> root.zoom-value;
+                add-layer => { root.add-layer(); }
+                play-pause => { root.play-pause(); }
+                step-back => { root.step-back(); }
+                step-forward => { root.step-forward(); }
+                toggle-loop => { root.toggle-loop(); }
+                export-frame => { root.export-frame(); }
+                overflow-requested => { root.open-palette(); }
+            }
         }
 
         DirectionalLayout {

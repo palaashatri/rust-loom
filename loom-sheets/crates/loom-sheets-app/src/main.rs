@@ -51,11 +51,20 @@ struct Args {
     journey: Option<String>,
     size: (u32, u32),
     theme: String,
+    rtl: bool,
     open: Option<String>,
     template_chooser: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from<I, S>(raw_args: I) -> Result<Args, String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
     let mut args = Args {
         screenshot: None,
         smoke: false,
@@ -63,10 +72,11 @@ fn parse_args() -> Result<Args, String> {
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
+        rtl: false,
         open: None,
         template_chooser: false,
     };
-    let mut it = std::env::args().skip(1);
+    let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--screenshot" => {
@@ -92,6 +102,7 @@ fn parse_args() -> Result<Args, String> {
                 }
                 args.theme = t;
             }
+            "--rtl" => args.rtl = true,
             "--template-chooser" => args.template_chooser = true,
             "--open" => {
                 args.open = Some(it.next().ok_or("--open needs a path")?);
@@ -814,6 +825,10 @@ fn apply_theme(app: &SheetsApp, theme: &str) {
     Theme::get(app).set_active_theme(SharedString::from(theme));
 }
 
+fn configure_direction(app: &SheetsApp, rtl: bool) {
+    app.set_rtl(rtl);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ResponsiveToolbarState {
     icon_only: bool,
@@ -833,6 +848,8 @@ fn layout_breakpoints(app: &SheetsApp, width: u32) -> ResponsiveToolbarState {
 
 fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     let state = layout_breakpoints(app, width);
+    app.set_icon_only_toolbar(state.icon_only);
+    app.set_labeled_toolbar(state.labeled);
     app.set_show_quick_formulas(state.labeled);
     app.set_wide_toolbar(state.labeled);
     app.set_labeled_export(state.labeled);
@@ -890,6 +907,7 @@ fn wire_responsive_layout(app: &SheetsApp) {
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let (w, h) = args.size;
     app.window().set_size(PhysicalSize::new(w, h));
@@ -1018,6 +1036,7 @@ fn run_gui(args: &Args) -> Result<(), String> {
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -1534,6 +1553,7 @@ fn main() -> Result<(), String> {
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,
@@ -1567,6 +1587,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
 fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(out_dir).map_err(|error| format!("journey output: {error}"))?;
     let app = SheetsApp::new().map_err(|error| error.to_string())?;
+    configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
@@ -1974,6 +1995,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rtl_argument_is_parsed_and_applied_to_the_root() {
+        let args = parse_args_from(["--rtl"] as [&str; 1]).expect("parse --rtl");
+        assert!(args.rtl);
+
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        configure_direction(&app, args.rtl);
+        assert!(app.get_rtl());
+    }
+
+    #[test]
     fn new_workbook_is_blank_and_named_untitled() {
         let sheet = blank_sheet();
         assert!(sheet.cells.is_empty());
@@ -2316,6 +2348,10 @@ mod tests {
                     labeled,
                 }
             );
+            apply_layout_breakpoints(&app, width);
+            assert_eq!(app.get_icon_only_toolbar(), icon_only);
+            assert_eq!(app.get_overflow_toolbar(), overflow);
+            assert_eq!(app.get_labeled_toolbar(), labeled);
         }
     }
 

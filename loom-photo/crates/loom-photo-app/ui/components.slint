@@ -1,8 +1,8 @@
 // Photo-specific workspace objects. Shared chrome and controls stay owned by
 // loom-ui; this module owns Photo's command/state boundaries.
 import {
-    LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarIconButton,
-    AppleToolbarItem, CanvasSurface, InspectorSurface, SectionHeader,
+    DirectionalLayout, ToolbarGroup, ToolbarSpacer, ToolbarIconButton,
+    IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow, CanvasSurface, InspectorSurface, SectionHeader,
     SegmentedControl, RangeSlider, PropertyRow, TabStrip, ToolkitStatusBar,
     ToolbarButton
 } from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
@@ -11,11 +11,12 @@ import { Theme } from "../../../../loom-core/crates/loom-ui/ui/theme.slint";
 
 /// Photo's context toolbar. The app controller owns all mutations; this
 /// object only projects command state and emits the existing callbacks.
-export component PhotoToolbar inherits LabeledToolbar {
+export component PhotoToolbarBody inherits DirectionalLayout {
     in property <int> active-tool: 0;
     in-out property <float> zoom-value: 72.0;
     in property <bool> inspector-visible: true;
-    in property <bool> labeled-export: false;
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
 
     callback select-tool(string);
     callback add-layer;
@@ -23,21 +24,26 @@ export component PhotoToolbar inherits LabeledToolbar {
     callback import-image;
     callback export-png;
     callback toggle-inspector;
+    callback overflow-requested;
 
-    ToolbarGroup { labeled-slot: true;
-        AppleToolbarItem {
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
             icon: "cursor";
             label: "Select";
             checked: root.active-tool == 0;
             clicked => { root.select-tool("select"); }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "brush";
             label: "Brush";
             checked: root.active-tool == 1;
             clicked => { root.select-tool("brush"); }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "wand";
             label: "Wand";
             checked: root.active-tool == 2;
@@ -45,34 +51,79 @@ export component PhotoToolbar inherits LabeledToolbar {
         }
     }
 
-    ToolbarSpacer { }
-
-    ToolbarGroup { labeled-slot: true;
-        AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
-        AppleToolbarItem { icon: "slider"; label: "Adjustment"; clicked => { root.add-adjustment(); } }
-        AppleToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-image(); } }
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "cursor";
+            label: "Select";
+            checked: root.active-tool == 0;
+            clicked => { root.select-tool("select"); }
+        }
+        IconOnlyToolbarItem {
+            icon: "brush";
+            label: "Brush";
+            checked: root.active-tool == 1;
+            clicked => { root.select-tool("brush"); }
+        }
+        IconOnlyToolbarItem {
+            icon: "wand";
+            label: "Wand";
+            checked: root.active-tool == 2;
+            clicked => { root.select-tool("wand"); }
+        }
+        if root.overflow : Overflow {
+            label: "More Photo actions";
+            clicked => { root.overflow-requested(); }
+        }
     }
 
-    ToolbarSpacer { }
+    if root.labeled || !root.overflow : ToolbarSpacer { }
 
-    ToolbarGroup { labeled-slot: true;
-        AppleToolbarItem {
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+        IconOverLabelToolbarItem { icon: "slider"; label: "Adjustment"; clicked => { root.add-adjustment(); } }
+        IconOverLabelToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-image(); } }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+        IconOnlyToolbarItem { icon: "slider"; label: "Adjustment"; clicked => { root.add-adjustment(); } }
+        IconOnlyToolbarItem { icon: "import"; label: "Import"; clicked => { root.import-image(); } }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
             icon: "zoom-in";
             label: Math.round(root.zoom-value) + "%";
             clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "format";
             label: "Inspector";
             checked: root.inspector-visible;
             clicked => { root.toggle-inspector(); }
         }
-        if root.labeled-export : AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "export";
             label: "Export";
             clicked => { root.export-png(); }
         }
-        if !root.labeled-export : ToolbarIconButton {
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        ToolbarIconButton {
+            icon: "zoom-in";
+            label: "Zoom";
+            clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; }
+        }
+        ToolbarIconButton {
+            icon: "format";
+            label: "Inspector";
+            checked: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        ToolbarIconButton {
             icon: "export";
             label: "Export PNG";
             clicked => { root.export-png(); }

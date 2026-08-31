@@ -24,6 +24,8 @@ export component PresentApp inherits Window {
     background: Theme.palette().canvas;
 
     in property <bool> show-inspector: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
@@ -258,7 +260,7 @@ export component PresentApp inherits Window {
 
             // Keynote-style action toolbar. Select a concrete slot owner so a
             // context row never silently stretches icon-over-label controls.
-                if !root.is-preview-mode && root.labeled-export : LabeledToolbar {
+                if !root.is-preview-mode && root.labeled-toolbar : LabeledToolbar {
                     PresentToolbarBody {
                     rtl: root.rtl;
                     labeled: true;
@@ -285,7 +287,7 @@ export component PresentApp inherits Window {
                     }
                 }
             }
-                if !root.is-preview-mode && !root.labeled-export : ContextToolbar {
+                if !root.is-preview-mode && !root.labeled-toolbar : ContextToolbar {
                     PresentToolbarBody {
                     rtl: root.rtl;
                     labeled: false;

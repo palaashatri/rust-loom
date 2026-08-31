@@ -2,8 +2,8 @@
 // loom-ui; these components own the composition's stage, layer, timeline,
 // inspector, and transport state wiring.
 import {
-    LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarIconButton,
-    AppleToolbarItem, DirectionalLayout, InspectorSurface, SidebarSurface,
+    DirectionalLayout, ToolbarGroup, ToolbarSpacer, ToolbarIconButton,
+    IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow, InspectorSurface, SidebarSurface,
     CanvasSurface, ToolkitStatusBar, PanelHeader
 } from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
 import {
@@ -16,8 +16,10 @@ import { Theme } from "../../../../loom-core/crates/loom-ui/ui/theme.slint";
 /// Motion's responsive context toolbar. State changes are emitted through the
 /// existing callbacks, so toolbar controls remain real commands after the
 /// shell is extracted from the Window.
-export component MotionToolbar inherits LabeledToolbar {
+export component MotionToolbarBody inherits DirectionalLayout {
     in property <bool> compact-layout: false;
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
     in-out property <bool> show-guides: true;
     in-out property <bool> show-safe-area: true;
     in property <bool> is-playing: false;
@@ -29,42 +31,58 @@ export component MotionToolbar inherits LabeledToolbar {
     callback step-forward;
     callback toggle-loop;
     callback export-frame;
+    callback overflow-requested;
 
-    ToolbarGroup { labeled-slot: true;
-        if root.compact-layout : ToolbarIconButton { icon: "cursor"; label: "Transform"; checked: true; }
-        if !root.compact-layout : AppleToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
-        if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Add layer"; clicked => { root.add-layer(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
-        if root.compact-layout : ToolbarIconButton { icon: "grid"; label: "Toggle guides"; checked: root.show-guides; clicked => { root.show-guides = !root.show-guides; } }
-        if !root.compact-layout : AppleToolbarItem { icon: "grid"; label: "Guides"; checked: root.show-guides; clicked => { root.show-guides = !root.show-guides; } }
-        if root.compact-layout : ToolbarIconButton { icon: "eye"; label: "Toggle safe area"; checked: root.show-safe-area; clicked => { root.show-safe-area = !root.show-safe-area; } }
-        if !root.compact-layout : AppleToolbarItem { icon: "eye"; label: "Safe Area"; checked: root.show-safe-area; clicked => { root.show-safe-area = !root.show-safe-area; } }
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
+        IconOverLabelToolbarItem { icon: "plus"; label: "Layer"; clicked => { root.add-layer(); } }
+        IconOverLabelToolbarItem { icon: "grid"; label: "Guides"; checked: root.show-guides; clicked => { root.show-guides = !root.show-guides; } }
+        IconOverLabelToolbarItem { icon: "eye"; label: "Safe Area"; checked: root.show-safe-area; clicked => { root.show-safe-area = !root.show-safe-area; } }
     }
 
-    ToolbarSpacer { }
-
-    ToolbarGroup { labeled-slot: true;
-        if root.compact-layout : ToolbarIconButton { icon: "chevron-left"; label: "Step back"; clicked => { root.step-back(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
-        if root.compact-layout : ToolbarIconButton { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.play-pause(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.play-pause(); } }
-        if root.compact-layout : ToolbarIconButton { icon: "chevron-right"; label: "Step forward"; clicked => { root.step-forward(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
-        if root.compact-layout : ToolbarIconButton { icon: "redo"; label: "Toggle loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "redo"; label: "Loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem { icon: "cursor"; label: "Transform"; checked: true; }
+        IconOnlyToolbarItem { icon: "plus"; label: "Add layer"; clicked => { root.add-layer(); } }
+        IconOnlyToolbarItem { icon: "grid"; label: "Toggle guides"; checked: root.show-guides; clicked => { root.show-guides = !root.show-guides; } }
+        IconOnlyToolbarItem { icon: "eye"; label: "Toggle safe area"; checked: root.show-safe-area; clicked => { root.show-safe-area = !root.show-safe-area; } }
+        if root.overflow : Overflow {
+            label: "More Motion actions";
+            clicked => { root.overflow-requested(); }
+        }
     }
 
-    ToolbarSpacer { }
+    if root.labeled || !root.overflow : ToolbarSpacer { }
 
-    ToolbarGroup { labeled-slot: true;
-        if root.compact-layout : ToolbarIconButton { icon: "timeline"; label: "Curves unavailable"; enabled: false; checked: false; }
-        if !root.compact-layout : AppleToolbarItem { icon: "timeline"; label: "Curves unavailable"; enabled: false; checked: false; }
-        if root.compact-layout : ToolbarIconButton { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
-        if root.compact-layout : ToolbarIconButton { icon: "minus"; label: "Zoom out"; clicked => { root.zoom-value = Math.max(10, root.zoom-value - 10); } }
-        if root.compact-layout : Slider { label: "Zoom"; minimum: 10; maximum: 200; value <=> root.zoom-value; width: 120px; }
-        if root.compact-layout : ToolbarIconButton { icon: "plus"; label: "Zoom in"; clicked => { root.zoom-value = Math.min(200, root.zoom-value + 10); } }
-        if !root.compact-layout : AppleToolbarItem { icon: "zoom-in"; label: Math.round(root.zoom-value) + "%"; clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; } }
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "chevron-left"; label: "Step Back"; clicked => { root.step-back(); } }
+        IconOverLabelToolbarItem { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.play-pause(); } }
+        IconOverLabelToolbarItem { icon: "chevron-right"; label: "Step Fwd"; clicked => { root.step-forward(); } }
+        IconOverLabelToolbarItem { icon: "redo"; label: "Loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem { icon: "chevron-left"; label: "Step back"; clicked => { root.step-back(); } }
+        IconOnlyToolbarItem { icon: root.is-playing ? "pause" : "play"; label: root.is-playing ? "Pause" : "Play"; checked: root.is-playing; clicked => { root.play-pause(); } }
+        IconOnlyToolbarItem { icon: "chevron-right"; label: "Step forward"; clicked => { root.step-forward(); } }
+        IconOnlyToolbarItem { icon: "redo"; label: "Toggle loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
+    }
+
+    if !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "timeline"; label: "Curves unavailable"; enabled: false; checked: false; }
+        IconOverLabelToolbarItem { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
+        IconOverLabelToolbarItem { icon: "zoom-in"; label: Math.round(root.zoom-value) + "%"; clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; } }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        ToolbarIconButton { icon: "timeline"; label: "Curves unavailable"; enabled: false; checked: false; }
+        ToolbarIconButton { icon: "export"; label: "Export SVG"; clicked => { root.export-frame(); } }
+        ToolbarIconButton { icon: "zoom-in"; label: Math.round(root.zoom-value) + "%"; clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; } }
     }
 }
 

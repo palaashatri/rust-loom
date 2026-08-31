@@ -6,10 +6,10 @@ import {
     Field, CanvasBackdrop, TransportButton
 } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
-    ToolbarButton, IconOnlyToolbarItem
+    ToolbarButton, IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow
 } from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
 import {
-    LabeledToolbar, ToolbarGroup, ToolbarSpacer, AppleToolbarItem,
+    DirectionalLayout, ToolbarGroup, ToolbarSpacer,
     ToolkitStatusBar
 } from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
 import { Icon } from "../../../../loom-core/crates/loom-ui/ui/icons.slint";
@@ -17,10 +17,12 @@ import { Theme } from "../../../../loom-core/crates/loom-ui/ui/theme.slint";
 
 /// Video's context toolbar. All actions retain the app's existing command
 /// callbacks; this component only owns the responsive presentation.
-export component VideoToolbar inherits LabeledToolbar {
+export component VideoToolbarBody inherits DirectionalLayout {
     in-out property <string> active-nle-tool: "Select";
     in-out property <bool> snap-enabled: true;
     in property <bool> show-inspector: true;
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
     in property <bool> exporting: false;
     in property <bool> backend-available: false;
     in property <int> clip-count: 0;
@@ -31,9 +33,14 @@ export component VideoToolbar inherits LabeledToolbar {
     callback toggle-inspector;
     callback import-media(string);
     callback export-timeline(string);
+    callback overflow-requested;
 
-    ToolbarGroup { labeled-slot: true;
-        AppleToolbarItem {
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
             icon: "cursor";
             label: "Select";
             checked: root.active-nle-tool == "Select";
@@ -42,7 +49,7 @@ export component VideoToolbar inherits LabeledToolbar {
                 root.select-nle-tool("Select");
             }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "scissors";
             label: "Blade";
             checked: root.active-nle-tool == "Blade";
@@ -51,7 +58,7 @@ export component VideoToolbar inherits LabeledToolbar {
                 root.select-nle-tool("Blade");
             }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "link";
             label: "Snap";
             checked: root.snap-enabled;
@@ -62,21 +69,75 @@ export component VideoToolbar inherits LabeledToolbar {
         }
     }
 
-    ToolbarSpacer { }
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "cursor";
+            label: "Select";
+            checked: root.active-nle-tool == "Select";
+            clicked => {
+                root.active-nle-tool = "Select";
+                root.select-nle-tool("Select");
+            }
+        }
+        IconOnlyToolbarItem {
+            icon: "scissors";
+            label: "Blade";
+            checked: root.active-nle-tool == "Blade";
+            clicked => {
+                root.active-nle-tool = "Blade";
+                root.select-nle-tool("Blade");
+            }
+        }
+        IconOnlyToolbarItem {
+            icon: "link";
+            label: "Snap";
+            checked: root.snap-enabled;
+            clicked => {
+                root.snap-enabled = !root.snap-enabled;
+                root.toggle-snap();
+            }
+        }
+        if root.overflow : Overflow {
+            label: "More Video actions";
+            clicked => { root.overflow-requested(); }
+        }
+    }
 
-    ToolbarGroup { labeled-slot: true;
-        AppleToolbarItem {
+    if root.labeled || !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
             icon: "import";
             label: "Import";
             clicked => { root.import-media(root.import-path); }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
             icon: "format";
             label: "Inspector";
             checked: root.show-inspector;
             clicked => { root.toggle-inspector(); }
         }
-        AppleToolbarItem {
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: root.exporting ? "Exporting" : "Export";
+            enabled: root.backend-available && root.clip-count > 0 && !root.exporting;
+            clicked => { root.export-timeline(root.export-path); }
+        }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "import";
+            label: "Import";
+            clicked => { root.import-media(root.import-path); }
+        }
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Inspector";
+            checked: root.show-inspector;
+            clicked => { root.toggle-inspector(); }
+        }
+        IconOnlyToolbarItem {
             icon: "export";
             label: root.exporting ? "Exporting" : "Export";
             enabled: root.backend-available && root.clip-count > 0 && !root.exporting;

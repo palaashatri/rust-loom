@@ -431,8 +431,10 @@ fn responsive_toolbar_state(app: &PhotoApp, width: u32) -> ResponsiveToolbarStat
 
 fn configure_responsive_width(app: &PhotoApp, width: u32) {
     let state = responsive_toolbar_state(app, width);
+    app.set_icon_only_toolbar(state.icon_only);
+    app.set_overflow_toolbar(state.overflow);
+    app.set_labeled_toolbar(state.labeled);
     app.set_inspector_available(!state.icon_only);
-    app.set_labeled_export(state.labeled);
 }
 
 fn configure_direction(app: &PhotoApp, rtl: bool) {
@@ -2310,6 +2312,10 @@ mod tests {
                     labeled,
                 }
             );
+            configure_responsive_width(&app, width);
+            assert_eq!(app.get_icon_only_toolbar(), icon_only);
+            assert_eq!(app.get_overflow_toolbar(), overflow);
+            assert_eq!(app.get_labeled_toolbar(), labeled);
         }
     }
 

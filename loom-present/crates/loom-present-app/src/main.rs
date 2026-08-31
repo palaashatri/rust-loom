@@ -733,6 +733,8 @@ fn responsive_toolbar_state(app: &PresentApp, width: u32) -> ResponsiveToolbarSt
 fn configure_responsive_width(app: &PresentApp, width: u32) -> bool {
     let state = responsive_toolbar_state(app, width);
     let inspector_available = !state.icon_only;
+    app.set_icon_only_toolbar(state.icon_only);
+    app.set_labeled_toolbar(state.labeled);
     app.set_show_inspector(inspector_available);
     app.set_labeled_export(state.labeled);
     if !state.overflow && app.get_toolbar_overflow_open() {
@@ -3054,6 +3056,10 @@ mod desktop_tests {
                     labeled,
                 }
             );
+            configure_responsive_width(&app, width);
+            assert_eq!(app.get_icon_only_toolbar(), icon_only);
+            assert_eq!(app.get_overflow_toolbar(), overflow);
+            assert_eq!(app.get_labeled_toolbar(), labeled);
         }
     }
 

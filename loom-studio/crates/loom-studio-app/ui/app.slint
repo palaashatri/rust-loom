@@ -1,6 +1,6 @@
 import {
-    DocumentChrome, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
-    ToolbarIconButton, AppleToolbarItem, ToolkitStatusBar, CanvasSurface
+    DocumentChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, DirectionalLayout,
+    IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow, ToolkitStatusBar, CanvasSurface
 } from "toolkit.slint";
 import {
     SidebarSurface, InspectorSurface, WorkspaceRow, PrimaryButton, TransportButton, Slider,
@@ -14,6 +14,96 @@ import { ArrangementRegion, StudioArrangement } from "studio_arrangement.slint";
 import { StudioMixer } from "studio_mixer.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 
+component StudioToolbarBody inherits DirectionalLayout {
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+    in property <bool> audio-available: false;
+    in property <bool> input-available: false;
+    in property <bool> is-playing: false;
+    in property <bool> is-recording: false;
+    in-out property <bool> is-looping: false;
+    in-out property <bool> metronome-on: true;
+    in property <[string]> track-labels: [];
+    in property <string> export-path: "loom-studio-mix.wav";
+    callback play-pause;
+    callback stop;
+    callback toggle-record;
+    callback toggle-loop;
+    callback toggle-metronome;
+    callback add-track;
+    callback export-mix(string);
+    callback overflow-requested;
+
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: root.is-playing ? "pause" : "play";
+            label: root.is-playing ? "Pause" : "Play";
+            enabled: root.audio-available;
+            checked: root.is-playing;
+            clicked => { root.play-pause(); }
+        }
+        IconOverLabelToolbarItem { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
+        IconOverLabelToolbarItem {
+            icon: "record";
+            label: root.is-recording ? "Recording" : "Record";
+            enabled: root.input-available;
+            checked: root.is-recording;
+            clicked => { root.toggle-record(); }
+        }
+        IconOverLabelToolbarItem { icon: "link"; label: "Loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+        IconOverLabelToolbarItem { icon: "clock"; label: "Metronome"; checked: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
+    }
+
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: root.is-playing ? "pause" : "play";
+            label: root.is-playing ? "Pause" : "Play";
+            enabled: root.audio-available;
+            checked: root.is-playing;
+            clicked => { root.play-pause(); }
+        }
+        IconOnlyToolbarItem { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
+        IconOnlyToolbarItem {
+            icon: "record";
+            label: root.is-recording ? "Recording" : "Record";
+            enabled: root.input-available;
+            checked: root.is-recording;
+            clicked => { root.toggle-record(); }
+        }
+        if root.overflow : Overflow { label: "More Studio actions"; clicked => { root.overflow-requested(); } }
+    }
+
+    if root.labeled || !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "link"; label: "Loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
+        IconOverLabelToolbarItem { icon: "clock"; label: "Metronome"; checked: root.metronome-on; clicked => { root.toggle-metronome(); } }
+        IconOverLabelToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: "Bounce WAV";
+            enabled: root.track-labels.length > 0;
+            clicked => { root.export-mix(root.export-path); }
+        }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem { icon: "link"; label: "Loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+        IconOnlyToolbarItem { icon: "clock"; label: "Metronome"; checked: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
+        IconOnlyToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
+        IconOnlyToolbarItem {
+            icon: "export";
+            label: "Bounce WAV";
+            enabled: root.track-labels.length > 0;
+            clicked => { root.export-mix(root.export-path); }
+        }
+    }
+}
+
 export component StudioApp inherits Window {
     title: "Loom Studio";
     min-width: 920px;
@@ -24,6 +114,9 @@ export component StudioApp inherits Window {
     // Responsive mode comes from the host so width-dependent panes cannot
     // feed back into the breakpoint predicate and create a binding loop.
     in property <bool> compact-layout: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> overflow-toolbar: false;
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
 
@@ -146,47 +239,50 @@ export component StudioApp inherits Window {
             trailing-text: root.tempo-text + " · " + root.workspace-mode;
         }
 
-        LabeledToolbar {
-            ToolbarGroup { labeled-slot: true;
-                AppleToolbarItem {
-                    icon: root.is-playing ? "pause" : "play";
-                    label: root.is-playing ? "Pause" : "Play";
-                    enabled: root.audio-available;
-                    checked: root.is-playing;
-                    clicked => { root.play-pause(); }
-                }
-                AppleToolbarItem { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
-                AppleToolbarItem {
-                    icon: "record";
-                    label: root.is-recording ? "Recording" : "Record";
-                    enabled: root.input-available;
-                    checked: root.is-recording;
-                    clicked => { root.toggle-record(); }
-                }
-                AppleToolbarItem {
-                    icon: "link";
-                    label: "Loop";
-                    checked: root.is-looping;
-                    clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); }
-                }
-                AppleToolbarItem {
-                    icon: "clock";
-                    label: "Metronome";
-                    checked: root.metronome-on;
-                    clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); }
-                }
+        if root.labeled-toolbar : LabeledToolbar {
+            StudioToolbarBody {
+                rtl: root.rtl;
+                labeled: true;
+                overflow: false;
+                audio-available: root.audio-available;
+                input-available: root.input-available;
+                is-playing: root.is-playing;
+                is-recording: root.is-recording;
+                is-looping <=> root.is-looping;
+                metronome-on <=> root.metronome-on;
+                track-labels: root.track-labels;
+                export-path: root.export-path;
+                play-pause => { root.play-pause(); }
+                stop => { root.stop(); }
+                toggle-record => { root.toggle-record(); }
+                toggle-loop => { root.toggle-loop(); }
+                toggle-metronome => { root.toggle-metronome(); }
+                add-track => { root.add-track(); }
+                export-mix(path) => { root.export-mix(path); }
+                overflow-requested => { root.open-palette(); }
             }
-
-            ToolbarSpacer {}
-
-            ToolbarGroup { labeled-slot: true;
-                AppleToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
-                AppleToolbarItem {
-                    icon: "export";
-                    label: "Bounce WAV";
-                    enabled: root.track-labels.length > 0;
-                    clicked => { root.export-mix(root.export-path); }
-                }
+        }
+        if !root.labeled-toolbar : ContextToolbar {
+            StudioToolbarBody {
+                rtl: root.rtl;
+                labeled: false;
+                overflow: root.overflow-toolbar;
+                audio-available: root.audio-available;
+                input-available: root.input-available;
+                is-playing: root.is-playing;
+                is-recording: root.is-recording;
+                is-looping <=> root.is-looping;
+                metronome-on <=> root.metronome-on;
+                track-labels: root.track-labels;
+                export-path: root.export-path;
+                play-pause => { root.play-pause(); }
+                stop => { root.stop(); }
+                toggle-record => { root.toggle-record(); }
+                toggle-loop => { root.toggle-loop(); }
+                toggle-metronome => { root.toggle-metronome(); }
+                add-track => { root.add-track(); }
+                export-mix(path) => { root.export-mix(path); }
+                overflow-requested => { root.open-palette(); }
             }
         }
 

@@ -659,6 +659,9 @@ fn compact_layout_for_width(app: &MotionApp, width: u32) -> bool {
 fn configure_responsive_layout(app: &MotionApp, width: u32) {
     let state = responsive_toolbar_state(app, width);
     app.set_compact_layout(state.icon_only);
+    app.set_icon_only_toolbar(state.icon_only);
+    app.set_overflow_toolbar(state.overflow);
+    app.set_labeled_toolbar(state.labeled);
 }
 
 fn configure_direction(app: &MotionApp, rtl: bool) {
@@ -1965,6 +1968,10 @@ mod product_tests {
                     labeled,
                 }
             );
+            configure_responsive_layout(&app, width);
+            assert_eq!(app.get_icon_only_toolbar(), icon_only);
+            assert_eq!(app.get_overflow_toolbar(), overflow);
+            assert_eq!(app.get_labeled_toolbar(), labeled);
             assert_eq!(compact_layout_for_width(&app, width), icon_only);
         }
     }

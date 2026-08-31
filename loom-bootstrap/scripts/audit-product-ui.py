@@ -195,7 +195,7 @@ def direct_geometry_properties(block: str) -> dict[str, float]:
         if depth == 0:
             match = re.match(
                 r"\s*(x|y|width|height|min-width|min-height|max-width|max-height|preferred-width|preferred-height)"
-                r"\s*:\s*([0-9]+(?:\.[0-9]+)?)px\s*;",
+                r"\s*:\s*(-?[0-9]+(?:\.[0-9]+)?)px\s*;",
                 line,
             )
             if match:
@@ -818,6 +818,42 @@ def assert_geometry_manifest(manifest: dict, geometry_contract: dict) -> list[st
                     issues.append(f"source geometry node {name}@{line} has {axis} preferred below min")
                 if preferred is not None and maximum is not None and float(preferred) > float(maximum):
                     issues.append(f"source geometry node {name}@{line} has {axis} preferred above max")
+            # Literal coordinates are relative to the node's parent, so a
+            # text-only audit cannot resolve every dynamic expression. When a
+            # source node does provide a complete literal edge, still reject
+            # the same viewport clipping that the shell rectangles reject.
+            x = node.get("x")
+            y = node.get("y")
+            node_width = node.get("width")
+            node_height = node.get("height")
+            try:
+                # Negative local coordinates are valid for centered overlays
+                # (handles, markers, and focus rings); their parent may clip
+                # them intentionally. A text audit cannot resolve that parent
+                # clip, so only literal coordinates beyond the far viewport
+                # edge are treated as source clipping.
+                if x is not None and float(x) > width + max_clipping:
+                    issues.append(f"source geometry node {name}@{line} clips viewport bounds")
+                if y is not None and float(y) > height + max_clipping:
+                    issues.append(f"source geometry node {name}@{line} clips viewport bounds")
+                if node_width is not None and float(node_width) > width + max_clipping:
+                    issues.append(f"source geometry node {name}@{line} clips viewport bounds")
+                if node_height is not None and float(node_height) > height + max_clipping:
+                    issues.append(f"source geometry node {name}@{line} clips viewport bounds")
+                if x is not None and node_width is not None and float(x) + float(node_width) > width + max_clipping:
+                    issues.append(f"source geometry node {name}@{line} clips viewport bounds")
+                if y is not None and node_height is not None and float(y) + float(node_height) > height + max_clipping:
+                    issues.append(f"source geometry node {name}@{line} clips viewport bounds")
+            except (TypeError, ValueError):
+                # Numeric type errors are reported by the per-property checks
+                # above; do not mask those with a secondary comparison error.
+                pass
+            for axis in ("x", "y"):
+                if axis in node:
+                    try:
+                        float(node[axis])
+                    except (TypeError, ValueError):
+                        issues.append(f"source geometry node {name}@{line} has non-numeric {axis}")
     rects = [GeometryRect(**rect) for rect in manifest["rects"]]
     for index, rect in enumerate(rects):
         if rect.x < -max_clipping or rect.y < -max_clipping:
@@ -884,6 +920,28 @@ def geometry_assertion_regressions(manifest: dict, geometry_contract: dict) -> N
         any("clips viewport bounds" in issue for issue in clipping_issues),
         "geometry manifest regression: deliberate clipping was not rejected",
     )
+
+    source_nodes = manifest.get("source-geometry-nodes", [])
+    if source_nodes:
+        source_x_clip = deepcopy(manifest)
+        source_x_clip["source-geometry-nodes"] = [dict(node) for node in source_nodes]
+        source_x_clip["source-geometry-nodes"][0]["x"] = float(manifest["viewport"][0]) + 1.0
+        source_x_clip["source-geometry-nodes"][0]["width"] = 1.0
+        source_x_issues = assert_geometry_manifest(source_x_clip, geometry_contract)
+        require(
+            any("source geometry node" in issue and "clips viewport bounds" in issue for issue in source_x_issues),
+            "geometry manifest regression: deliberate source x/width clipping was not rejected",
+        )
+
+        source_y_clip = deepcopy(manifest)
+        source_y_clip["source-geometry-nodes"] = [dict(node) for node in source_nodes]
+        source_y_clip["source-geometry-nodes"][0]["y"] = float(manifest["viewport"][1]) + 1.0
+        source_y_clip["source-geometry-nodes"][0]["height"] = 1.0
+        source_y_issues = assert_geometry_manifest(source_y_clip, geometry_contract)
+        require(
+            any("source geometry node" in issue and "clips viewport bounds" in issue for issue in source_y_issues),
+            "geometry manifest regression: deliberate source y/height clipping was not rejected",
+        )
 
 
 def require(condition: bool, message: str) -> None:
