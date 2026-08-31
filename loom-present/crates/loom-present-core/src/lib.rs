@@ -1287,7 +1287,7 @@ pub fn load_presentation(bytes: &[u8]) -> Result<PresentationDocument, String> {
 }
 
 pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
-    use loom_pdf::{PdfDocument, TextStyle};
+    use loom_pdf::{PathStyle, PdfDocument, TextStyle};
     let mut pdf = PdfDocument::new();
     let style_title = TextStyle {
         size_pt: 18.0,
@@ -1300,13 +1300,92 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
         ..Default::default()
     };
 
+    // Preserve the 16:9 authoring plane inside a landscape PDF page. PDF's
+    // origin is bottom-left while Present's scene origin is top-left, so each
+    // element receives an explicit transform rather than being laid out in a
+    // synthetic vertical text list.
+    const PAGE_WIDTH: f32 = 842.0;
+    const PAGE_HEIGHT: f32 = 595.0;
+    let scale = (PAGE_WIDTH / SLIDE_WIDTH).min(PAGE_HEIGHT / SLIDE_HEIGHT);
+    let offset_x = (PAGE_WIDTH - SLIDE_WIDTH * scale) / 2.0;
+    let offset_y = (PAGE_HEIGHT - SLIDE_HEIGHT * scale) / 2.0;
+
     for slide in &doc.slides {
-        let page = pdf.add_page(842.0, 595.0); // Landscape presentation page
-        pdf.draw_text(page, 56.0, 520.0, &slide.title, &style_title);
-        let mut y = 480.0;
+        let page = pdf.add_page(PAGE_WIDTH, PAGE_HEIGHT);
+        let has_title = slide
+            .elements
+            .iter()
+            .any(|element| element.element_type == ElementType::Title);
+        if !has_title {
+            // Legacy/document-only slides may not contain a title element;
+            // keep their title visible at the top-left as a deterministic
+            // fallback while still using slide-space coordinates.
+            let title_x = offset_x + 40.0 * scale;
+            let title_y = offset_y + (SLIDE_HEIGHT - 70.0) * scale;
+            pdf.draw_text(page, title_x, title_y, &slide.title, &style_title);
+        }
         for elem in &slide.elements {
-            pdf.draw_text(page, 56.0, y, &elem.content, &style_body);
-            y -= 24.0;
+            let radians = normalize_angle_degrees(elem.rotation_deg).to_radians();
+            let (sin, cos) = radians.sin_cos();
+            // The matrix carries the scene-to-page scale. Keep the emitted
+            // geometry in slide-local units so rectangles and text are not
+            // scaled a second time.
+            let width = elem.width;
+            let height = elem.height;
+            let center_x = offset_x + (elem.x + elem.width / 2.0) * scale;
+            let center_y = offset_y + (SLIDE_HEIGHT - elem.y - elem.height / 2.0) * scale;
+            // Present's scene has a top-left origin and y-down coordinates;
+            // PDF user space has a bottom-left origin and y-up coordinates.
+            // Compose the clockwise scene rotation with that y flip so local
+            // element coordinates stay intuitive for both text and paths.
+            let a = scale * cos;
+            let b = -scale * sin;
+            let c = -scale * sin;
+            let d = -scale * cos;
+            let e = center_x - (a * elem.width / 2.0 + c * elem.height / 2.0);
+            let f = center_y - (b * elem.width / 2.0 + d * elem.height / 2.0);
+            let transform = [a, b, c, d, e, f];
+
+            match elem.element_type {
+                ElementType::ShapeRectangle | ElementType::ShapeCircle | ElementType::StatCard => {
+                    let style = if elem.element_type == ElementType::StatCard {
+                        PathStyle::filled((0.16, 0.36, 0.72))
+                    } else {
+                        PathStyle::filled((0.84, 0.88, 0.96))
+                    };
+                    pdf.draw_rect_with_transform(page, (0.0, 0.0, width, height), style, transform);
+                    if !elem.content.trim().is_empty() {
+                        pdf.draw_text_with_transform(
+                            page,
+                            10.0,
+                            style_body.size_pt + 6.0,
+                            &elem.content,
+                            &style_body,
+                            transform,
+                        );
+                    }
+                }
+                ElementType::Title => {
+                    pdf.draw_text_with_transform(
+                        page,
+                        10.0,
+                        style_title.size_pt + 6.0,
+                        &elem.content,
+                        &style_title,
+                        transform,
+                    );
+                }
+                ElementType::Subtitle | ElementType::BodyText => {
+                    pdf.draw_text_with_transform(
+                        page,
+                        8.0,
+                        style_body.size_pt + 4.0,
+                        &elem.content,
+                        &style_body,
+                        transform,
+                    );
+                }
+            }
         }
     }
     pdf.serialize()
@@ -1751,6 +1830,19 @@ impl PresentationSession {
             self.undo.remove(0);
         }
         self.redo.clear();
+    }
+
+    /// Cancels the most recent checkpoint and restores the document state it
+    /// captured. This is used when a pointer gesture is cancelled or returns
+    /// to its starting geometry; cancelled gestures must not leave an undo
+    /// entry or a partially transformed document.
+    pub fn cancel_checkpoint(&mut self) -> bool {
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.document = previous;
+        self.redo.clear();
+        true
     }
 
     /// Restores the previous document snapshot.
@@ -2618,11 +2710,12 @@ impl PresentationDocument {
                     y,
                     width,
                     height,
+                    rotation_deg,
                     ..
                 } = elem;
                 let marker = element_type_marker(element_type);
                 feed.push_str(&format!(
-                    "el:{id}:{marker}:{content}:{x},{y},{width},{height}\n"
+                    "el:{id}:{marker}:{content}:{x},{y},{width},{height},{rotation_deg}\n"
                 ));
             }
         }
@@ -2685,6 +2778,35 @@ mod tests {
         let doc = PresentationDocument::new("deck-pdf", "PDF Test");
         let pdf_bytes = export_pdf(&doc);
         assert!(!pdf_bytes.is_empty());
+    }
+
+    #[test]
+    fn pdf_export_changes_when_element_geometry_or_rotation_changes() {
+        let mut base = PresentationDocument::new("deck-pdf-geometry", "PDF Geometry");
+        let element = &mut base.slides[0].elements[0];
+        element.content = "Positioned".into();
+        element.x = 321.0;
+        element.y = 123.0;
+        element.width = 240.0;
+        element.height = 80.0;
+
+        let baseline = export_pdf(&base);
+
+        let mut moved = base.clone();
+        moved.slides[0].elements[0].x += 37.0;
+        assert_ne!(
+            export_pdf(&moved),
+            baseline,
+            "PDF export must encode edited element position"
+        );
+
+        let mut rotated = base;
+        rotated.slides[0].elements[0].rotation_deg = 30.0;
+        assert_ne!(
+            export_pdf(&rotated),
+            baseline,
+            "PDF export must encode edited element rotation"
+        );
     }
 
     #[test]
@@ -2901,6 +3023,26 @@ mod tests {
         assert!(!session.can_undo());
         assert!(!session.set_element_rotation(&element.id, 0.0));
         assert!(!session.can_undo());
+    }
+
+    #[test]
+    fn cancelled_checkpoint_restores_document_without_history() {
+        let mut session = PresentationSession::new(PresentationDocument::new(
+            "deck-cancel",
+            "Cancelled gesture",
+        ));
+        let before = session.document.clone();
+        session.checkpoint();
+        assert!(session.transform_element_no_checkpoint("elem-1", 220.0, 240.0, 320.0, 90.0));
+        assert!(session.can_undo());
+
+        assert!(session.cancel_checkpoint());
+        assert_eq!(
+            serde_json::to_vec(&session.document).expect("serialise restored document"),
+            serde_json::to_vec(&before).expect("serialise baseline document")
+        );
+        assert!(!session.can_undo());
+        assert!(!session.cancel_checkpoint());
     }
 
     #[test]
@@ -3911,6 +4053,11 @@ Hiring Plan
         let mut moved = doc.clone();
         moved.slides[1].elements[0].x += 15.0;
         assert_ne!(moved.integrity_digest(), baseline);
+
+        // Rotation is persisted geometry and must participate in the digest.
+        let mut rotated = doc.clone();
+        rotated.slides[1].elements[0].rotation_deg = 30.0;
+        assert_ne!(rotated.integrity_digest(), baseline);
 
         // Adding a slide changes the digest.
         let mut added = doc.clone();

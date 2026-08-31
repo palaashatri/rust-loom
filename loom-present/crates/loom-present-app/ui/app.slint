@@ -57,6 +57,7 @@ export component PresentApp inherits Window {
     in property <[float]> element-rotations: [];
     in property <[int]> element-types: [];
     in property <[bool]> element-selected: [];
+    in property <int> selection-count: 0;
     in property <[float]> snap-guides-x: [];
     in property <[float]> snap-guides-y: [];
     in property <float> marquee-x: 0;
@@ -109,13 +110,16 @@ export component PresentApp inherits Window {
     callback canvas-pressed(float, float, bool);
     callback canvas-moved(float, float);
     callback canvas-released(float, float);
-    callback canvas-key-pressed(string, bool);
+    callback canvas-cancelled;
+    callback canvas-key-pressed(string, bool, bool) -> EventResult;
     callback element-pressed(int, bool);
     callback element-moved(int, float, float);
     callback element-released(int);
+    callback element-cancelled(int);
     callback handle-pressed(int, string, bool);
     callback handle-moved(int, string, float, float);
     callback handle-released(int, string);
+    callback handle-cancelled(int, string);
     callback update-element-content(string);
     callback export-pdf;
     callback notes-edited(string);
@@ -329,6 +333,7 @@ export component PresentApp inherits Window {
                     spacing: 0px;
 
                     PresentSlideCanvas {
+                        editing-enabled: !root.is-preview-mode;
                         aspect-ratio-wide: root.aspect-ratio-wide;
                         element-labels: root.element-labels;
                         element-contents: root.element-contents;
@@ -339,6 +344,7 @@ export component PresentApp inherits Window {
                         element-rotations: root.element-rotations;
                         element-types: root.element-types;
                         element-selected: root.element-selected;
+                        selection-count: root.selection-count;
                         snap-guides-x: root.snap-guides-x;
                         snap-guides-y: root.snap-guides-y;
                         marquee-x: root.marquee-x;
@@ -351,13 +357,16 @@ export component PresentApp inherits Window {
                         canvas-pressed(x, y, shift) => { root.canvas-pressed(x, y, shift); }
                         canvas-moved(x, y) => { root.canvas-moved(x, y); }
                         canvas-released(x, y) => { root.canvas-released(x, y); }
-                        canvas-key-pressed(k, shift) => { root.canvas-key-pressed(k, shift); }
+                        canvas-cancelled => { root.canvas-cancelled(); }
+                        canvas-key-pressed(k, shift, modified) => { return root.canvas-key-pressed(k, shift, modified); }
                         element-pressed(idx, shift) => { root.element-pressed(idx, shift); }
                         element-moved(idx, dx, dy) => { root.element-moved(idx, dx, dy); }
                         element-released(idx) => { root.element-released(idx); }
+                        element-cancelled(idx) => { root.element-cancelled(idx); }
                         handle-pressed(idx, kind, shift) => { root.handle-pressed(idx, kind, shift); }
                         handle-moved(idx, kind, dx, dy) => { root.handle-moved(idx, kind, dx, dy); }
                         handle-released(idx, kind) => { root.handle-released(idx, kind); }
+                        handle-cancelled(idx, kind) => { root.handle-cancelled(idx, kind); }
                     }
 
                     // Speaker Notes Collapsible Drawer
@@ -408,6 +417,7 @@ export component PresentApp inherits Window {
                     active-element-content: root.active-element-content;
                     active-element-index: root.active-element-index;
                     element-count: root.element-labels.length;
+                    selection-count: root.selection-count;
                     element-x-text: root.element-x-text;
                     element-y-text: root.element-y-text;
                     element-width-text: root.element-width-text;

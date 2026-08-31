@@ -10,13 +10,16 @@ use loom_desktop::{
     NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
 use loom_present_core::{
-    calculate_smart_snapping, export_pdf, load_presentation_session, save_presentation_session,
-    ElementType, PresentationDocument, PresentationSession, SlideElement, SnapGuide,
-    TransitionKind,
+    calculate_smart_snapping, export_pdf, load_presentation_session, normalize_angle_degrees,
+    save_presentation_session, ElementType, PresentationDocument, PresentationSession,
+    SlideElement, SnapGuide, TransitionKind,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
-use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{
+    private_unstable_api::re_exports::EventResult, ComponentHandle, Model, ModelRc, PhysicalSize,
+    SharedString, VecModel,
+};
 
 slint::include_modules!();
 
@@ -249,12 +252,54 @@ struct DragState {
     start_mouse_x: f32,
     start_mouse_y: f32,
     elements: Vec<DragElement>,
+    target_id: Option<String>,
     checkpointed: bool,
+    before_digest: Option<u64>,
+    before_selection: Vec<String>,
+    before_selected_element: usize,
+    marquee_additive: bool,
     guides: Vec<SnapGuide>,
     marquee_x: f32,
     marquee_y: f32,
     marquee_width: f32,
     marquee_height: f32,
+}
+
+impl DragState {
+    fn begin(&mut self, session: &PresentationSession, selected_element: usize) {
+        self.target_id = None;
+        self.checkpointed = false;
+        self.before_digest = Some(session.document.integrity_digest());
+        self.before_selection = session.selected_elements.clone();
+        self.before_selected_element = selected_element;
+        self.marquee_additive = false;
+        self.guides.clear();
+        self.elements.clear();
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+fn finish_drag(session: &mut PresentationSession, drag: &mut DragState) {
+    if drag.checkpointed && drag.before_digest == Some(session.document.integrity_digest()) {
+        let _ = session.cancel_checkpoint();
+    }
+    drag.reset();
+}
+
+fn cancel_drag(
+    session: &mut PresentationSession,
+    drag: &mut DragState,
+    selected_element: &Cell<usize>,
+) {
+    if drag.checkpointed {
+        let _ = session.cancel_checkpoint();
+    }
+    session.selected_elements = drag.before_selection.clone();
+    selected_element.set(drag.before_selected_element);
+    drag.reset();
 }
 
 struct GuiState {
@@ -469,6 +514,14 @@ fn nudge_selected(session: &mut PresentationSession, dx: f32, dy: f32) -> bool {
 }
 
 fn refresh(app: &PresentApp, state: &GuiState) {
+    refresh_with_recovery(app, state, true);
+}
+
+fn refresh_without_recovery(app: &PresentApp, state: &GuiState) {
+    refresh_with_recovery(app, state, false);
+}
+
+fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     let session = state.session.borrow();
     let document = &session.document;
     app.set_deck_title(document.title.as_str().into());
@@ -557,13 +610,28 @@ fn refresh(app: &PresentApp, state: &GuiState) {
                 .map(|element| selected_ids.contains(&element.id))
                 .collect::<Vec<_>>(),
         )));
-        let selected = state
-            .selected_element
-            .get()
-            .min(slide.elements.len().saturating_sub(1));
+        let selected_indices = slide
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| {
+                session
+                    .selected_elements
+                    .iter()
+                    .any(|id| id == &element.id)
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let selected_count = selected_indices.len();
+        let selected = selected_indices.first().copied().unwrap_or(0);
         state.selected_element.set(selected);
+        app.set_selection_count(selected_count as i32);
         app.set_active_element_index(selected as i32);
-        if let Some(element) = slide.elements.get(selected) {
+        if selected_count > 0 {
+            let element = slide
+                .elements
+                .get(selected)
+                .expect("selected element index comes from active slide");
             app.set_active_element_label(format!("{:?}", element.element_type).into());
             app.set_active_element_content(element.content.as_str().into());
             app.set_element_x(element.x);
@@ -623,8 +691,10 @@ fn refresh(app: &PresentApp, state: &GuiState) {
     app.set_marquee_width(drag.marquee_width);
     app.set_marquee_height(drag.marquee_height);
     app.set_marquee_visible(drag.mode == Some(HandleKind::Marquee));
-    if let Ok(bytes) = save_presentation_session(&session) {
-        let _ = record_snapshot_recovery("presentation state", bytes);
+    if recover {
+        if let Ok(bytes) = save_presentation_session(&session) {
+            let _ = record_snapshot_recovery("presentation state", bytes);
+        }
     }
     if let Some(menu_service) = &state.menu_service {
         sync_menu_state(menu_service, app, state);
@@ -921,6 +991,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         }
         element.id.clone()
     };
+    let baseline_document = state.session.borrow().document.clone();
     screenshots.push(capture_present_journey_step(
         &app,
         args,
@@ -1070,6 +1141,10 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         .map_err(|error| format!("read journey PDF '{}': {error}", export_path.display()))?;
     if !pdf_bytes.starts_with(b"%PDF") {
         return Err("journey export did not produce a PDF payload".into());
+    }
+    let baseline_pdf = export_pdf(&baseline_document);
+    if pdf_bytes == baseline_pdf {
+        return Err("journey PDF did not encode edited geometry or rotation".into());
     }
     screenshots.push(capture_present_journey_step(
         &app,
@@ -1729,6 +1804,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_element_pressed(move |index, shift| {
             if let Some(app) = app_ref.upgrade() {
+                if app.get_is_preview_mode() || index < 0 {
+                    return;
+                }
                 let mut drag = state.drag_state.borrow_mut();
                 let mut session = state.session.borrow_mut();
                 let Some(id) = session
@@ -1739,12 +1817,16 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 else {
                     return;
                 };
+                drag.begin(&session, state.selected_element.get());
                 session.select_element(&id, shift);
                 state.selected_element.set(index as usize);
-                drag.mode = (!session.selected_elements.is_empty()).then_some(HandleKind::Move);
-                drag.checkpointed = false;
-                drag.guides.clear();
-                drag.elements = drag_snapshots(&session);
+                if session.selected_elements.is_empty() {
+                    drag.reset();
+                } else {
+                    drag.mode = Some(HandleKind::Move);
+                    drag.target_id = Some(id);
+                    drag.elements = drag_snapshots(&session);
+                }
                 drop(session);
                 drop(drag);
                 refresh(&app, &state);
@@ -1756,6 +1838,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_element_moved(move |_, dx, dy| {
             if let Some(app) = app_ref.upgrade() {
+                if app.get_is_preview_mode() {
+                    return;
+                }
                 let mut drag = state.drag_state.borrow_mut();
                 if drag.mode != Some(HandleKind::Move) {
                     return;
@@ -1794,7 +1879,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     drag.guides = guides;
                 }
                 drop(drag);
-                refresh(&app, &state);
+                refresh_without_recovery(&app, &state);
             }
         });
     }
@@ -1803,12 +1888,15 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_element_released(move |_| {
             if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
                 let mut drag = state.drag_state.borrow_mut();
-                drag.mode = None;
-                drag.elements.clear();
-                drag.guides.clear();
-                drag.checkpointed = false;
+                if drag.mode == Some(HandleKind::Move) {
+                    finish_drag(&mut session, &mut drag);
+                } else {
+                    drag.reset();
+                }
                 drop(drag);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -1816,9 +1904,31 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_handle_pressed(move |index, kind, shift| {
+        app.on_element_cancelled(move |_| {
             if let Some(app) = app_ref.upgrade() {
                 let mut session = state.session.borrow_mut();
+                let mut drag = state.drag_state.borrow_mut();
+                if drag.mode == Some(HandleKind::Move) {
+                    cancel_drag(&mut session, &mut drag, &state.selected_element);
+                } else {
+                    drag.reset();
+                }
+                drop(drag);
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_handle_pressed(move |index, kind, _shift| {
+            if let Some(app) = app_ref.upgrade() {
+                if app.get_is_preview_mode() || index < 0 {
+                    return;
+                }
+                let mut drag = state.drag_state.borrow_mut();
+                let session = state.session.borrow();
                 let Some(id) = session
                     .document
                     .active_slide()
@@ -1827,16 +1937,22 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 else {
                     return;
                 };
-                if !session.selected_elements.contains(&id) {
-                    session.select_element(&id, shift);
+                drag.begin(&session, state.selected_element.get());
+                // Resize/rotate handles are only meaningful for one selected
+                // element. Ignore stale or accessibility-triggered handle
+                // events rather than applying them to an arbitrary first
+                // element in a multi-selection.
+                if session.selected_elements.len() != 1
+                    || !session.selected_elements.iter().any(|item| item == &id)
+                {
+                    drag.reset();
+                    drop(session);
+                    drop(drag);
+                    return;
                 }
                 state.selected_element.set(index as usize);
-                let mut drag = state.drag_state.borrow_mut();
                 drag.mode = Some(handle_kind(kind.as_str()));
-                drag.start_mouse_x = 0.0;
-                drag.start_mouse_y = 0.0;
-                drag.checkpointed = false;
-                drag.guides.clear();
+                drag.target_id = Some(id);
                 drag.elements = drag_snapshots(&session);
                 drop(drag);
                 drop(session);
@@ -1849,44 +1965,84 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_handle_moved(move |_, kind, dx, dy| {
             if let Some(app) = app_ref.upgrade() {
+                if app.get_is_preview_mode() {
+                    return;
+                }
                 let mut drag = state.drag_state.borrow_mut();
                 let mode = handle_kind(kind.as_str());
                 if drag.mode != Some(mode) {
                     return;
                 }
-                let Some(element) = drag.elements.first().cloned() else {
+                let Some(target_id) = drag.target_id.as_deref() else {
+                    return;
+                };
+                let Some(element) = drag
+                    .elements
+                    .iter()
+                    .find(|element| element.id == target_id)
+                    .cloned()
+                else {
                     return;
                 };
                 let mut session = state.session.borrow_mut();
-                let (x, y, width, height) = if mode == HandleKind::Rotate {
-                    let rotation = element.rotation_deg + dx * 0.5;
-                    if !drag.checkpointed {
+                let (x, y, width, height, changed) = if mode == HandleKind::Rotate {
+                    let rotation = normalize_angle_degrees(element.rotation_deg + dx * 0.5);
+                    let changed = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.iter().find(|item| item.id == element.id))
+                        .map(|item| (item.rotation_deg - rotation).abs() > f32::EPSILON)
+                        .unwrap_or(false);
+                    if changed && !drag.checkpointed {
                         session.checkpoint();
                         drag.checkpointed = true;
                     }
-                    session.set_element_rotation_no_checkpoint(&element.id, rotation);
-                    (element.x, element.y, element.width, element.height)
+                    let changed = session.set_element_rotation_no_checkpoint(&element.id, rotation);
+                    (element.x, element.y, element.width, element.height, changed)
                 } else {
                     let ((x, y, width, height), guides) =
                         resize_targets(&session, &element, mode, dx, dy);
-                    if !drag.checkpointed {
-                        let changed = (element.x - x).abs() > f32::EPSILON
-                            || (element.y - y).abs() > f32::EPSILON
-                            || (element.width - width).abs() > f32::EPSILON
-                            || (element.height - height).abs() > f32::EPSILON;
-                        if changed {
-                            session.checkpoint();
-                            drag.checkpointed = true;
-                        }
+                    let changed = session
+                        .document
+                        .active_slide()
+                        .and_then(|slide| slide.elements.iter().find(|item| item.id == element.id))
+                        .map(|item| {
+                            (item.x - x).abs() > f32::EPSILON
+                                || (item.y - y).abs() > f32::EPSILON
+                                || (item.width - width).abs() > f32::EPSILON
+                                || (item.height - height).abs() > f32::EPSILON
+                        })
+                        .unwrap_or(false);
+                    if changed && !drag.checkpointed {
+                        session.checkpoint();
+                        drag.checkpointed = true;
                     }
                     drag.guides = guides;
-                    (x, y, width, height)
+                    (x, y, width, height, changed)
                 };
-                if mode != HandleKind::Rotate && drag.checkpointed {
+                if mode != HandleKind::Rotate && changed {
                     session.transform_element_no_checkpoint(&element.id, x, y, width, height);
                 }
                 drop(session);
                 drop(drag);
+                refresh_without_recovery(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_handle_released(move |_, kind| {
+            if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
+                let mut drag = state.drag_state.borrow_mut();
+                if drag.mode == Some(handle_kind(kind.as_str())) {
+                    finish_drag(&mut session, &mut drag);
+                } else {
+                    drag.reset();
+                }
+                drop(drag);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -1894,14 +2050,17 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_handle_released(move |_, _| {
+        app.on_handle_cancelled(move |_, kind| {
             if let Some(app) = app_ref.upgrade() {
+                let mut session = state.session.borrow_mut();
                 let mut drag = state.drag_state.borrow_mut();
-                drag.mode = None;
-                drag.elements.clear();
-                drag.guides.clear();
-                drag.checkpointed = false;
+                if drag.mode == Some(handle_kind(kind.as_str())) {
+                    cancel_drag(&mut session, &mut drag, &state.selected_element);
+                } else {
+                    drag.reset();
+                }
                 drop(drag);
+                drop(session);
                 refresh(&app, &state);
             }
         });
@@ -1911,11 +2070,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_canvas_pressed(move |x, y, shift| {
             if let Some(app) = app_ref.upgrade() {
-                let mut session = state.session.borrow_mut();
-                if !shift {
-                    session.clear_selection();
+                if app.get_is_preview_mode() {
+                    return;
                 }
                 let mut drag = state.drag_state.borrow_mut();
+                let mut session = state.session.borrow_mut();
+                drag.begin(&session, state.selected_element.get());
                 drag.mode = Some(HandleKind::Marquee);
                 drag.start_mouse_x = x;
                 drag.start_mouse_y = y;
@@ -1923,7 +2083,10 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 drag.marquee_y = y;
                 drag.marquee_width = 0.0;
                 drag.marquee_height = 0.0;
-                drag.guides.clear();
+                drag.marquee_additive = shift;
+                if !shift {
+                    session.clear_selection();
+                }
                 drop(drag);
                 drop(session);
                 refresh(&app, &state);
@@ -1935,6 +2098,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_canvas_moved(move |x, y| {
             if let Some(app) = app_ref.upgrade() {
+                if app.get_is_preview_mode() {
+                    return;
+                }
                 let mut drag = state.drag_state.borrow_mut();
                 if drag.mode == Some(HandleKind::Marquee) {
                     drag.marquee_x = drag.start_mouse_x.min(x);
@@ -1942,7 +2108,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     drag.marquee_width = (x - drag.start_mouse_x).abs();
                     drag.marquee_height = (y - drag.start_mouse_y).abs();
                     drop(drag);
-                    refresh(&app, &state);
+                    refresh_without_recovery(&app, &state);
                 }
             }
         });
@@ -1958,8 +2124,9 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                     let y0 = drag.start_mouse_y;
                     let width = x - x0;
                     let height = y - y0;
+                    let additive = drag.marquee_additive;
                     let mut session = state.session.borrow_mut();
-                    session.marquee_select(x0, y0, width, height, false);
+                    session.marquee_select(x0, y0, width, height, additive);
                     if let Some(id) = session.selected_elements.first().cloned() {
                         if let Some(index) = session.document.active_slide().and_then(|slide| {
                             slide.elements.iter().position(|element| element.id == id)
@@ -1967,11 +2134,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                             state.selected_element.set(index);
                         }
                     }
+                    finish_drag(&mut session, &mut drag);
+                    drop(drag);
+                    drop(session);
+                    refresh(&app, &state);
+                    return;
                 }
-                drag.mode = None;
-                drag.marquee_width = 0.0;
-                drag.marquee_height = 0.0;
-                drag.guides.clear();
                 drop(drag);
                 refresh(&app, &state);
             }
@@ -1980,22 +2148,54 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_canvas_key_pressed(move |key, _shift| {
+        app.on_canvas_cancelled(move || {
             if let Some(app) = app_ref.upgrade() {
-                let (dx, dy) = match key.as_str() {
-                    "Left" => (-10.0, 0.0),
-                    "Right" => (10.0, 0.0),
-                    "Up" => (0.0, -10.0),
-                    "Down" => (0.0, 10.0),
-                    _ => (0.0, 0.0),
+                let mut session = state.session.borrow_mut();
+                let mut drag = state.drag_state.borrow_mut();
+                if drag.mode == Some(HandleKind::Marquee) {
+                    cancel_drag(&mut session, &mut drag, &state.selected_element);
+                } else {
+                    drag.reset();
+                }
+                drop(drag);
+                drop(session);
+                refresh(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let left_arrow: SharedString = slint::platform::Key::LeftArrow.into();
+        let right_arrow: SharedString = slint::platform::Key::RightArrow.into();
+        let up_arrow: SharedString = slint::platform::Key::UpArrow.into();
+        let down_arrow: SharedString = slint::platform::Key::DownArrow.into();
+        app.on_canvas_key_pressed(move |key, _shift, modified| {
+            if let Some(app) = app_ref.upgrade() {
+                if app.get_is_preview_mode() || modified {
+                    return EventResult::Reject;
+                }
+                let (dx, dy) = if key == left_arrow {
+                    (-10.0, 0.0)
+                } else if key == right_arrow {
+                    (10.0, 0.0)
+                } else if key == up_arrow {
+                    (0.0, -10.0)
+                } else if key == down_arrow {
+                    (0.0, 10.0)
+                } else {
+                    (0.0, 0.0)
                 };
                 if (dx, dy) != (0.0, 0.0) {
                     let mut session = state.session.borrow_mut();
-                    nudge_selected(&mut session, dx, dy);
-                    drop(session);
-                    refresh(&app, &state);
+                    if nudge_selected(&mut session, dx, dy) {
+                        drop(session);
+                        refresh(&app, &state);
+                        return EventResult::Accept;
+                    }
                 }
             }
+            EventResult::Reject
         });
     }
     {
@@ -2504,6 +2704,10 @@ mod desktop_tests {
             drag_state: RefCell::new(DragState::default()),
         };
 
+        state
+            .session
+            .borrow_mut()
+            .select_element("cover-title", false);
         refresh(&app, &state);
         assert_eq!(app.get_active_element_label().as_str(), "Title");
         assert_eq!(
@@ -2515,15 +2719,240 @@ mod desktop_tests {
         assert_eq!(app.get_element_contents().row_count(), 2);
         assert_eq!(app.get_element_types().row_count(), 2);
 
-        state.selected_element.set(1);
+        state
+            .session
+            .borrow_mut()
+            .select_element("cover-body", false);
         refresh(&app, &state);
         assert_eq!(app.get_active_element_label().as_str(), "BodyText");
+        assert_eq!(app.get_selection_count(), 1);
         assert_eq!(
             app.get_active_element_content().as_str(),
             "A private, native creative studio designed for Linux."
         );
         assert_eq!(app.get_element_y_text().as_str(), "230 pt");
         assert_eq!(app.get_element_height_text().as_str(), "120 pt");
+    }
+
+    #[test]
+    fn refresh_clears_inspector_when_domain_selection_is_empty() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = GuiState {
+            session: RefCell::new(sample_session()),
+            selected_element: Cell::new(1),
+            inspector_available: Cell::new(true),
+            save_path: RefCell::new(None),
+            dialogs: Rc::new(ScriptedFileDialogs::default()),
+            deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"]).expect("filter"),
+            pdf_filter: FileFilter::new("PDF document", ["pdf"]).expect("filter"),
+            menu_service: None,
+            drag_state: RefCell::new(DragState::default()),
+        };
+
+        state
+            .session
+            .borrow_mut()
+            .select_element("cover-body", false);
+        refresh(&app, &state);
+        assert_eq!(app.get_active_element_label().as_str(), "BodyText");
+
+        state.session.borrow_mut().clear_selection();
+        refresh(&app, &state);
+        assert_eq!(
+            app.get_active_element_label().as_str(),
+            "No element selected"
+        );
+        assert_eq!(app.get_selection_count(), 0);
+        assert_eq!(app.get_active_element_content().as_str(), "");
+        assert_eq!(app.get_element_x_text().as_str(), "—");
+    }
+
+    #[test]
+    fn focused_canvas_arrow_key_nudges_selected_element() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = Rc::new(test_state());
+        state.session.borrow_mut().select_element("elem-1", false);
+        wire_app_callbacks(&app, &state);
+
+        let before = state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .expect("slide")
+            .elements[0]
+            .x;
+        app.invoke_canvas_key_pressed(slint::platform::Key::RightArrow.into(), false, false);
+        let after = state
+            .session
+            .borrow()
+            .document
+            .active_slide()
+            .expect("slide")
+            .elements[0]
+            .x;
+        assert!((after - before - 10.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn shift_marquee_adds_to_existing_domain_selection() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = Rc::new(test_state());
+        {
+            let mut session = state.session.borrow_mut();
+            session
+                .document
+                .active_slide_mut()
+                .expect("slide")
+                .elements
+                .push(SlideElement {
+                    id: "elem-2".into(),
+                    element_type: ElementType::ShapeRectangle,
+                    content: "Second".into(),
+                    x: 300.0,
+                    y: 300.0,
+                    width: 50.0,
+                    height: 50.0,
+                    rotation_deg: 0.0,
+                    action: None,
+                });
+            session.select_element("elem-1", false);
+        }
+        wire_app_callbacks(&app, &state);
+
+        app.invoke_canvas_pressed(280.0, 280.0, true);
+        app.invoke_canvas_moved(380.0, 380.0);
+        app.invoke_canvas_released(380.0, 380.0);
+
+        assert_eq!(
+            state.session.borrow().selected_elements,
+            vec!["elem-1".to_string(), "elem-2".to_string()]
+        );
+        assert_eq!(app.get_selection_count(), 2);
+    }
+
+    #[test]
+    fn cancelled_pointer_gestures_restore_geometry_selection_and_history() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = Rc::new(test_state());
+        state.session.borrow_mut().select_element("elem-1", false);
+        state.selected_element.set(0);
+        wire_app_callbacks(&app, &state);
+
+        let before = state.session.borrow().document.clone();
+        app.invoke_element_pressed(0, false);
+        app.invoke_element_moved(0, 20.0, 30.0);
+        assert_ne!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        assert!(state.session.borrow().can_undo());
+        app.invoke_element_cancelled(0);
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        assert_eq!(state.session.borrow().selected_elements, ["elem-1"]);
+        assert!(!state.session.borrow().can_undo());
+
+        app.invoke_canvas_pressed(0.0, 0.0, false);
+        app.invoke_canvas_moved(80.0, 80.0);
+        assert!(state.session.borrow().selected_elements.is_empty());
+        app.invoke_canvas_cancelled();
+        assert_eq!(state.session.borrow().selected_elements, ["elem-1"]);
+        assert!(!state.session.borrow().can_undo());
+
+        let before = state.session.borrow().document.clone();
+        app.invoke_handle_pressed(0, "se".into(), false);
+        app.invoke_handle_moved(0, "se".into(), 20.0, 15.0);
+        assert_ne!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        app.invoke_handle_cancelled(0, "se".into());
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        assert!(!state.session.borrow().can_undo());
+
+        let before = state.session.borrow().document.clone();
+        app.invoke_handle_pressed(0, "rotate".into(), false);
+        app.invoke_handle_moved(0, "rotate".into(), 30.0, 0.0);
+        assert_ne!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        app.invoke_handle_cancelled(0, "rotate".into());
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        assert!(!state.session.borrow().can_undo());
+    }
+
+    #[test]
+    fn no_op_rotation_gesture_does_not_leave_history() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = Rc::new(test_state());
+        state.session.borrow_mut().select_element("elem-1", false);
+        wire_app_callbacks(&app, &state);
+
+        let before = state.session.borrow().document.clone();
+        app.invoke_handle_pressed(0, "rotate".into(), false);
+        app.invoke_handle_moved(0, "rotate".into(), 0.0, 0.0);
+        app.invoke_handle_released(0, "rotate".into());
+
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        assert!(!state.session.borrow().can_undo());
+    }
+
+    #[test]
+    fn preview_mode_rejects_pointer_edits_and_modified_canvas_arrows() {
+        set_platform();
+        let app = PresentApp::new().expect("create PresentApp");
+        let state = Rc::new(test_state());
+        state.session.borrow_mut().select_element("elem-1", false);
+        wire_app_callbacks(&app, &state);
+
+        let before = state.session.borrow().document.clone();
+        let result =
+            app.invoke_canvas_key_pressed(slint::platform::Key::RightArrow.into(), false, true);
+        assert!(matches!(result, EventResult::Reject));
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+
+        app.set_is_preview_mode(true);
+        app.invoke_element_pressed(0, false);
+        app.invoke_element_moved(0, 20.0, 30.0);
+        app.invoke_handle_pressed(0, "se".into(), false);
+        app.invoke_handle_moved(0, "se".into(), 20.0, 15.0);
+        app.invoke_canvas_pressed(0.0, 0.0, false);
+        app.invoke_canvas_moved(100.0, 100.0);
+        app.invoke_canvas_released(100.0, 100.0);
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
+        assert!(!state.session.borrow().can_undo());
+
+        let result =
+            app.invoke_canvas_key_pressed(slint::platform::Key::RightArrow.into(), false, false);
+        assert!(matches!(result, EventResult::Reject));
+        assert_eq!(
+            state.session.borrow().document.integrity_digest(),
+            before.integrity_digest()
+        );
     }
 
     #[test]

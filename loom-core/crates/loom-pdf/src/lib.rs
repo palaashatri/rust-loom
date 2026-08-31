@@ -147,6 +147,52 @@ impl PdfDocument {
         ));
     }
 
+    /// Draw text in a caller-supplied PDF transformation matrix. The matrix
+    /// is `[a, b, c, d, e, f]` as defined by the PDF `cm` operator and is
+    /// applied to the text's local coordinates. Keeping the operation here
+    /// lets scene exporters preserve position, scale, and rotation without
+    /// reaching into the PDF page stream.
+    pub fn draw_text_with_transform(
+        &mut self,
+        page: PageIndex,
+        x: f32,
+        y: f32,
+        text: &str,
+        style: &TextStyle,
+        transform: [f32; 6],
+    ) {
+        let font = match (style.bold, style.italic) {
+            (true, true) => "Helvetica-BoldOblique",
+            (true, false) => "Helvetica-Bold",
+            (false, true) => "Helvetica-Oblique",
+            (false, false) => "Helvetica",
+        };
+        let (r, g, b) = (
+            clip01(style.fill_rgb.0),
+            clip01(style.fill_rgb.1),
+            clip01(style.fill_rgb.2),
+        );
+        let [a, b_matrix, c, d, e, f] = transform;
+        let p = self.page_mut(page);
+        p.font = font.to_string();
+        p.ops.push(format!(
+            "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg /F1 {:.2} Tf BT 1 0 0 1 {:.2} {:.2} Tm ({}) Tj ET Q",
+            a,
+            b_matrix,
+            c,
+            d,
+            e,
+            f,
+            fmt3(r),
+            fmt3(g),
+            fmt3(b),
+            style.size_pt,
+            x,
+            y,
+            escape_pdf_string(text)
+        ));
+    }
+
     /// Draw a filled or stroked rectangle at `(x, y)` (bottom-left) of the
     /// given size, using [`PathStyle`].
     pub fn draw_rect(&mut self, page: PageIndex, x: f32, y: f32, w: f32, h: f32, style: PathStyle) {
@@ -159,6 +205,43 @@ impl PdfDocument {
         let p = self.page_mut(page);
         p.ops.push(format!(
             "{} {} {} rg {:.2} {:.2} {:.2} {:.2} re {op}",
+            fmt3(r),
+            fmt3(g),
+            fmt3(b),
+            x,
+            y,
+            w,
+            h
+        ));
+    }
+
+    /// Draw a rectangle in a caller-supplied PDF transformation matrix. The
+    /// rectangle is emitted in local coordinates and the matrix carries the
+    /// scene position, scale, and rotation.
+    pub fn draw_rect_with_transform(
+        &mut self,
+        page: PageIndex,
+        rect: (f32, f32, f32, f32),
+        style: PathStyle,
+        transform: [f32; 6],
+    ) {
+        let (x, y, w, h) = rect;
+        let (r, g, b) = (
+            clip01(style.rgb.0),
+            clip01(style.rgb.1),
+            clip01(style.rgb.2),
+        );
+        let op = if style.filled { "f" } else { "S" };
+        let [a, b_matrix, c, d, e, f] = transform;
+        let p = self.page_mut(page);
+        p.ops.push(format!(
+            "q {:.5} {:.5} {:.5} {:.5} {:.5} {:.5} cm {} {} {} rg {:.2} {:.2} {:.2} {:.2} re {op} Q",
+            a,
+            b_matrix,
+            c,
+            d,
+            e,
+            f,
             fmt3(r),
             fmt3(g),
             fmt3(b),

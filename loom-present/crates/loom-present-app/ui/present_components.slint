@@ -155,6 +155,8 @@ export component PresentSlideCanvas inherits CanvasSurface {
     in property <[float]> element-rotations: [];
     in property <[int]> element-types: [];
     in property <[bool]> element-selected: [];
+    in property <int> selection-count: 0;
+    in property <bool> editing-enabled: true;
     in property <[float]> snap-guides-x: [];
     in property <[float]> snap-guides-y: [];
     in property <float> marquee-x: 0;
@@ -167,16 +169,20 @@ export component PresentSlideCanvas inherits CanvasSurface {
     callback canvas-pressed(float, float, bool);
     callback canvas-moved(float, float);
     callback canvas-released(float, float);
-    callback canvas-key-pressed(string, bool);
+    callback canvas-cancelled;
+    callback canvas-key-pressed(string, bool, bool) -> EventResult;
     callback element-pressed(int, bool);
     callback element-moved(int, float, float);
     callback element-released(int);
+    callback element-cancelled(int);
     callback handle-pressed(int, string, bool);
     callback handle-moved(int, string, float, float);
     callback handle-released(int, string);
+    callback handle-cancelled(int, string);
 
     slide-focus := FocusScope {
-        key-pressed(event) => { root.canvas-key-pressed(event.text, event.modifiers.shift); return accept; }
+        enabled: root.editing-enabled;
+        key-pressed(event) => { return root.canvas-key-pressed(event.text, event.modifiers.shift, event.modifiers.control || event.modifiers.meta); }
 
         slide := Rectangle {
             property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
@@ -197,6 +203,7 @@ export component PresentSlideCanvas inherits CanvasSurface {
             // and handle targets below take precedence and keep pointer
             // capture inside the active manipulation.
             canvas-touch := TouchArea {
+                enabled: root.editing-enabled;
                 width: 100%;
                 height: 100%;
                 pointer-event(event) => {
@@ -205,7 +212,9 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                         slide-focus.focus();
                         root.canvas-pressed(domain_x, domain_y, event.modifiers.shift);
-                    } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    } else if (event.kind == PointerEventKind.cancel) {
+                        root.canvas-cancelled();
+                    } else if (event.kind == PointerEventKind.up) {
                         root.canvas-released(domain_x, domain_y);
                     }
                 }
@@ -224,7 +233,7 @@ export component PresentSlideCanvas inherits CanvasSurface {
                 width: 1px;
                 height: parent.height;
                 background: Theme.palette().focus;
-                opacity: 0.7;
+                opacity: root.editing-enabled ? 0.7 : 0;
             }
             for guide_y in root.snap-guides-y : Rectangle {
                 x: 0px;
@@ -232,9 +241,9 @@ export component PresentSlideCanvas inherits CanvasSurface {
                 width: parent.width;
                 height: 1px;
                 background: Theme.palette().focus;
-                opacity: 0.7;
+                opacity: root.editing-enabled ? 0.7 : 0;
             }
-            if root.marquee-visible : Rectangle {
+            if root.marquee-visible && root.editing-enabled : Rectangle {
                 x: root.marquee-x * parent.width / 1000.0;
                 y: root.marquee-y * parent.height / 562.5;
                 width: root.marquee-width * parent.width / 1000.0;
@@ -255,7 +264,7 @@ export component PresentSlideCanvas inherits CanvasSurface {
                 width: self.render-width;
                 height: self.render-height;
                 border-radius: root.element-types[idx] == 4 ? self.width / 2 : Theme.tokens.metrics.radius-small;
-                border-width: root.element-selected.length > idx && root.element-selected[idx] ? 2px : 0px;
+                border-width: root.editing-enabled && root.element-selected.length > idx && root.element-selected[idx] ? 2px : 0px;
                 border-color: Theme.palette().accent;
                 background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
                     : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
@@ -264,6 +273,7 @@ export component PresentSlideCanvas inherits CanvasSurface {
                 transform-origin: { x: self.width / 2, y: self.height / 2 };
                 transform-rotation: root.element-rotations.length > idx ? root.element-rotations[idx] * 1deg : 0deg;
                 accessible-role: button;
+                accessible-enabled: root.editing-enabled;
                 accessible-label: root.element-selected.length > idx && root.element-selected[idx] ? "Selected " + root.element-labels[idx] : root.element-labels[idx];
                 accessible-action-default => { root.select-element(idx); root.element-pressed(idx, false); slide-focus.focus(); }
                 Text {
@@ -285,13 +295,16 @@ export component PresentSlideCanvas inherits CanvasSurface {
                 }
 
                 element-touch := TouchArea {
+                    enabled: root.editing-enabled;
                     width: 100%;
                     height: 100%;
                     mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
                     pointer-event(event) => {
                         if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                             root.element-pressed(idx, event.modifiers.shift);
-                        } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                        } else if (event.kind == PointerEventKind.cancel) {
+                            root.element-cancelled(idx);
+                        } else if (event.kind == PointerEventKind.up) {
                             root.element-released(idx);
                         }
                     }
@@ -302,7 +315,7 @@ export component PresentSlideCanvas inherits CanvasSurface {
                     }
                 }
 
-                if root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
                     x: -5px;
                     y: -5px;
                     width: 10px;
@@ -319,12 +332,13 @@ export component PresentSlideCanvas inherits CanvasSurface {
                         height: 100%;
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "nw", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { root.handle-released(idx, "nw"); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "nw"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "nw"); }
                         }
                         moved => { if self.pressed { root.handle-moved(idx, "nw", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
                     }
                 }
-                if root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
                     x: parent.width - 5px;
                     y: -5px;
                     width: 10px;
@@ -341,12 +355,13 @@ export component PresentSlideCanvas inherits CanvasSurface {
                         height: 100%;
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "ne", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { root.handle-released(idx, "ne"); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "ne"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "ne"); }
                         }
                         moved => { if self.pressed { root.handle-moved(idx, "ne", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
                     }
                 }
-                if root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
                     x: -5px;
                     y: parent.height - 5px;
                     width: 10px;
@@ -363,12 +378,13 @@ export component PresentSlideCanvas inherits CanvasSurface {
                         height: 100%;
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "sw", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { root.handle-released(idx, "sw"); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "sw"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "sw"); }
                         }
                         moved => { if self.pressed { root.handle-moved(idx, "sw", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
                     }
                 }
-                if root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
                     x: parent.width - 5px;
                     y: parent.height - 5px;
                     width: 10px;
@@ -385,12 +401,13 @@ export component PresentSlideCanvas inherits CanvasSurface {
                         height: 100%;
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "se", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { root.handle-released(idx, "se"); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "se"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "se"); }
                         }
                         moved => { if self.pressed { root.handle-moved(idx, "se", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
                     }
                 }
-                if root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
                     x: parent.width / 2 - 5px;
                     y: -30px;
                     width: 10px;
@@ -405,7 +422,8 @@ export component PresentSlideCanvas inherits CanvasSurface {
                         height: 100%;
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.handle-pressed(idx, "rotate", event.modifiers.shift); }
-                            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { root.handle-released(idx, "rotate"); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "rotate"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "rotate"); }
                         }
                         moved => { if self.pressed { root.handle-moved(idx, "rotate", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
                     }
@@ -492,6 +510,7 @@ export component PresentInspector inherits InspectorSurface {
     in property <string> active-element-content: "";
     in property <int> active-element-index: 0;
     in property <int> element-count: 0;
+    in property <int> selection-count: 0;
     in property <string> element-x-text: "100";
     in property <string> element-y-text: "100";
     in property <string> element-width-text: "400";
@@ -517,7 +536,7 @@ export component PresentInspector inherits InspectorSurface {
             SectionHeader { title: "Selected Element"; }
             Rectangle {
                 min-height: 40px; border-radius: Theme.tokens.metrics.radius-small; border-width: 1px; border-color: Theme.palette().border; background: Theme.palette().selection-soft;
-                VerticalLayout { padding: Theme.tokens.space.sm; spacing: Theme.tokens.space.xs; Text { text: root.active-element-label; font-size: Theme.tokens.typography.body; font-weight: 600; color: Theme.palette().ink; overflow: elide; } Text { text: root.element-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected"; font-size: Theme.tokens.typography.micro; color: Theme.palette().ink-secondary; overflow: elide; } }
+                VerticalLayout { padding: Theme.tokens.space.sm; spacing: Theme.tokens.space.xs; Text { text: root.active-element-label; font-size: Theme.tokens.typography.body; font-weight: 600; color: Theme.palette().ink; overflow: elide; } Text { text: root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected"; font-size: Theme.tokens.typography.micro; color: Theme.palette().ink-secondary; overflow: elide; } }
             }
             Field { label: "Element text"; value: root.active-element-content; enabled: root.active-element-label != "No element selected"; edited(t) => { root.update-element-content(t); } }
             SectionHeader { title: "Geometry"; }
