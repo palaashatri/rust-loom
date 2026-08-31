@@ -2317,15 +2317,39 @@ where
         cancelled = true;
         let _ = child.kill();
     }
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(error) => {
-            let _ = stderr_thread.join();
-            let error = EncodeError::Io(error);
-            job.status = JobStatus::Failed(error.to_string());
-            return Err(error);
+    // A reader can finish before the process does (for example, an encoder
+    // may close stdout while continuing work). Poll the child instead of
+    // entering an uninterruptible `wait`: cancellation must still kill the
+    // process and release the temporary output promptly.
+    let status = loop {
+        if cancel.load(Ordering::Relaxed) && !cancelled {
+            cancelled = true;
+            let _ = child.kill();
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let error = EncodeError::Io(error);
+                job.status = JobStatus::Failed(error.to_string());
+                return Err(error);
+            }
         }
     };
+    // On cancellation, a descendant may still own one of the inherited pipe
+    // descriptors. Detach the reader threads rather than blocking cleanup on
+    // their EOF; the temporary-output guard still removes the partial file.
+    if cancel.load(Ordering::Relaxed) {
+        cancelled = true;
+    }
+    if cancelled {
+        drop(stdout_thread);
+        drop(stderr_thread);
+        job.status = JobStatus::Cancelled;
+        return Err(EncodeError::Cancelled);
+    }
     let stdout_join = stdout_thread.join();
     let stderr = match stderr_thread.join() {
         Ok(Ok(stderr)) => stderr,
@@ -2349,10 +2373,6 @@ where
         let error = EncodeError::InvalidJob("encoder stdout reader panicked".into());
         job.status = JobStatus::Failed(error.to_string());
         return Err(error);
-    }
-    if cancelled {
-        job.status = JobStatus::Cancelled;
-        return Err(EncodeError::Cancelled);
     }
     if status.success() {
         if !temporary.is_file() {
@@ -3826,6 +3846,65 @@ mod tests {
         let result = done_rx
             .recv_timeout(Duration::from_secs(2))
             .expect("silent encoder must not block cancellation");
+        assert!(matches!(result, Err(EncodeError::Cancelled)));
+        assert!(matches!(job.lock().unwrap().status, JobStatus::Cancelled));
+        assert_eq!(std::fs::read(&output).unwrap(), b"prior destination");
+        assert!(!std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".loom-encode-")
+            }));
+        worker.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closed_stdout_live_child_cancellation_is_observed_without_blocking_wait() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        let script = "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\nprintf 'partial' > \"$out\"\nexec 1>&-\nexec sleep 30\n";
+        let (root, executable) = executable_fixture(script, "closed-stdout");
+        std::fs::write(root.join("input.mov"), b"input").unwrap();
+        let output = root.join("closed-stdout.mp4");
+        std::fs::write(&output, b"prior destination").unwrap();
+        let job = execution_fixture_job(&root, "closed-stdout.mp4");
+        let backend = EncoderBackend {
+            executable,
+            version: "fixture".into(),
+        };
+        let plan = job
+            .plan(
+                &backend,
+                ExecutionPolicy {
+                    overwrite: true,
+                    ..ExecutionPolicy::default()
+                },
+            )
+            .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = cancel.clone();
+        let job = Arc::new(Mutex::new(job));
+        let worker_job = job.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let mut job = worker_job.lock().unwrap();
+            let result = execute_job_with_cancel(&mut job, &plan, None, &cancel_for_worker, |_| {});
+            done_tx.send(result).unwrap();
+        });
+        thread::sleep(Duration::from_millis(80));
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("closed stdout must not block cancellation in child wait");
         assert!(matches!(result, Err(EncodeError::Cancelled)));
         assert!(matches!(job.lock().unwrap().status, JobStatus::Cancelled));
         assert_eq!(std::fs::read(&output).unwrap(), b"prior destination");
