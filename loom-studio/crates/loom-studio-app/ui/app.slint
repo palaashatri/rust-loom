@@ -10,7 +10,7 @@ import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import { StudioTransport } from "studio_transport.slint";
 import { StudioLibrary } from "studio_library.slint";
-import { StudioArrangement } from "studio_arrangement.slint";
+import { ArrangementRegion, StudioArrangement } from "studio_arrangement.slint";
 import { StudioMixer } from "studio_mixer.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 
@@ -35,12 +35,7 @@ export component StudioApp inherits Window {
     in property <[string]> track-labels: [];
     in property <[string]> track-kinds: [];
     in property <[int]> track-region-counts: [];
-    in property <[string]> region-ids: [];
-    in property <[string]> region-names: [];
-    in property <[int]> region-track-indices: [];
-    in property <[float]> region-start-seconds: [];
-    in property <[float]> region-durations: [];
-    in property <[bool]> region-selected-flags: [];
+    in property <[ArrangementRegion]> regions: [];
     in property <[bool]> track-mutes: [];
     in property <[bool]> track-solos: [];
     in property <[bool]> track-arms: [];
@@ -70,6 +65,7 @@ export component StudioApp inherits Window {
     in property <string> status-right: "Local";
     in property <string> selection-label: "No region selected";
     in property <string> selected-region-id: "";
+    in-out property <bool> context-menu-open: false;
     in property <string> job-state: "Idle";
     in property <float> job-progress: 0.0;
     in property <bool> job-cancellable: false;
@@ -230,13 +226,9 @@ export component StudioApp inherits Window {
                     track-labels: root.track-labels;
                     track-kinds: root.track-kinds;
                     track-region-counts: root.track-region-counts;
-                    region-ids: root.region-ids;
-                    region-names: root.region-names;
-                    region-track-indices: root.region-track-indices;
-                    region-start-seconds: root.region-start-seconds;
-                    region-durations: root.region-durations;
-                    region-selected-flags: root.region-selected-flags;
+                    regions: root.regions;
                     selected-region-id: root.selected-region-id;
+                    context-menu-open <=> root.context-menu-open;
                     selected-region-track: root.active-track-index;
                     playhead-seconds: root.playhead-seconds;
                     looping: root.is-looping;

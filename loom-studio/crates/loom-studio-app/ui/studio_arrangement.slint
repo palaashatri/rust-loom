@@ -1,23 +1,39 @@
-import { DirectionalLayout, ToolbarButton } from "toolkit.slint";
-import { WorkspaceRow } from "components.slint";
+import { ToolbarButton } from "toolkit.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+
+/// Arrangement data is carried as one model row so repeater children retain
+/// their identity while a gesture updates timing.  The id is the only
+/// identity used by pointer and keyboard callbacks; position is presentation
+/// data and may change without retargeting a live gesture.
+export struct ArrangementRegion {
+    id: string,
+    name: string,
+    track-index: int,
+    start-seconds: float,
+    duration-seconds: float,
+    selected: bool,
+}
 
 /// A single timeline row.  The header has bounded intrinsic sizing; the
 /// timeline itself is a three-cell flow (lead-in, region, remainder) rather
 /// than an unbounded stack of absolute children.  Region widths remain tied to
 /// the media duration, while the surrounding layout can safely resize.
-export component StudioTrackRow inherits WorkspaceRow {
+export component StudioTrackRow inherits Rectangle {
+    // Keep the small shared WorkspaceRow interaction contract locally while
+    // giving the timeline stage its own hit-testing surface.  The shared row
+    // component's full-row TouchArea would otherwise sit above the stage and
+    // swallow every region gesture.
+    in property <string> label: "Workspace item";
+    in property <bool> selected: false;
+    in property <bool> emphasized: false;
+    in property <bool> enabled: true;
+    callback clicked;
     in property <string> track-label: "Track";
     in property <string> track-kind: "Audio";
     in property <int> track-index: 0;
     in property <int> region-count: 0;
-    in property <[string]> region-ids: [];
-    in property <[string]> region-names: [];
-    in property <[int]> region-track-indices: [];
-    in property <[float]> region-start-seconds: [];
-    in property <[float]> region-durations: [];
-    in property <[bool]> region-selected-flags: [];
+    in property <[ArrangementRegion]> regions: [];
     in property <float> duration-seconds: 10.0;
     in property <bool> compact-layout: false;
     in property <bool> mute: false;
@@ -42,12 +58,38 @@ export component StudioTrackRow inherits WorkspaceRow {
     callback cancel-region-gesture;
     callback split-region(string);
     callback delete-region(string);
+    callback context-menu-requested(string);
     callback focus-requested;
 
-    label: root.track-label;
     min-height: root.track-height * 1px;
     preferred-height: root.track-height * 1px;
     max-height: root.track-height * 1px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus
+        : root.selected ? Theme.palette().accent
+        : root.emphasized ? Theme.palette().border-strong
+        : transparent;
+    background: root.selected ? Theme.palette().selection-soft
+        : header-touch.has-hover && root.enabled ? Theme.palette().surface-raised
+        : transparent;
+    animate background, border-color {
+        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+        easing: cubic-bezier(0.2, 0.9, 0.2, 1.0);
+    }
+    accessible-role: button;
+    accessible-label: root.track-label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     HorizontalLayout {
         spacing: 0px;
@@ -57,6 +99,18 @@ export component StudioTrackRow inherits WorkspaceRow {
             preferred-width: root.compact-layout ? 176px : 220px;
             max-width: root.compact-layout ? 204px : 260px;
             background: Theme.palette().surface;
+            // Place the header target beneath its controls so M/S/R buttons
+            // retain their own callbacks while empty header space selects the
+            // track.
+            header-touch := TouchArea {
+                enabled: root.enabled;
+                width: 100%;
+                height: 100%;
+                clicked => {
+                    focus-scope.focus();
+                    root.clicked();
+                }
+            }
             HorizontalLayout {
                 spacing: Theme.tokens.space.xs;
                 padding-left: Theme.tokens.space.sm;
@@ -99,6 +153,14 @@ export component StudioTrackRow inherits WorkspaceRow {
                     }
                 }
             }
+            if root.selected : Rectangle {
+                x: 0px;
+                y: 8px;
+                width: 3px;
+                height: parent.height - 16px;
+                border-radius: 2px;
+                background: Theme.palette().accent;
+            }
         }
 
         stage := Rectangle {
@@ -111,27 +173,22 @@ export component StudioTrackRow inherits WorkspaceRow {
                 0px,
                 max(0px, stage.timeline-width - stage.width)
             );
-            for region[region-index] in root.region-ids : Rectangle {
-                visible: root.region-track-indices.length > region-index
-                    && root.region-start-seconds.length > region-index
-                    && root.region-durations.length > region-index
-                    && root.region-names.length > region-index
-                    && root.region-selected-flags.length > region-index
-                    && root.region-track-indices[region-index] == root.track-index;
-                property <length> lead-width: clamp(stage.timeline-width * root.region-start-seconds[region-index] / Math.max(0.01, root.duration-seconds), 0px, max(0px, stage.timeline-width - 54px));
-                property <length> region-width: max(0px, min(max(54px, stage.timeline-width * root.region-durations[region-index] / Math.max(0.01, root.duration-seconds)), max(0px, stage.timeline-width - lead-width)));
+            for region in root.regions : Rectangle {
+                visible: region.track-index == root.track-index;
+                property <length> lead-width: clamp(stage.timeline-width * region.start-seconds / Math.max(0.01, root.duration-seconds), 0px, max(0px, stage.timeline-width - 54px));
+                property <length> region-width: max(0px, min(max(54px, stage.timeline-width * region.duration-seconds / Math.max(0.01, root.duration-seconds)), max(0px, stage.timeline-width - lead-width)));
                 x: lead-width - stage.timeline-offset;
                 width: region-width;
                 y: Theme.tokens.space.sm;
                 height: max(0px, stage.height - Theme.tokens.space.lg);
                 border-radius: Theme.tokens.metrics.radius-medium;
-                background: root.region-selected-flags[region-index] ? Theme.palette().content-accent : Theme.palette().content-cool;
+                background: region.selected ? Theme.palette().content-accent : Theme.palette().content-cool;
                 border-width: 1px;
-                border-color: root.region-selected-flags[region-index] ? Theme.palette().focus : Theme.palette().content-cool;
+                border-color: region.selected ? Theme.palette().focus : Theme.palette().content-cool;
                 accessible-role: button;
-                accessible-label: root.region-names[region-index] + (root.region-selected-flags[region-index] ? " (selected)" : "");
+                accessible-label: region.name + (region.selected ? " (selected)" : "");
                 accessible-action-default => {
-                    root.select-region(root.region-ids[region-index]);
+                    root.select-region(region.id);
                 }
                 HorizontalLayout {
                     spacing: Theme.tokens.space.sm;
@@ -144,7 +201,7 @@ export component StudioTrackRow inherits WorkspaceRow {
                         tint: Theme.palette().paper;
                     }
                     Text {
-                        text: root.region-names[region-index];
+                        text: region.name;
                         horizontal-stretch: 1;
                         color: Theme.palette().paper;
                         font-size: Theme.tokens.typography.micro;
@@ -153,12 +210,18 @@ export component StudioTrackRow inherits WorkspaceRow {
                     }
                 }
                 region-touch := TouchArea {
+                    width: 100%;
+                    height: 100%;
                     property <length> last-drag-x: 0px;
                     property <string> gesture-region-id: "";
                     pointer-event(event) => {
-                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
                             root.focus-requested();
-                            self.gesture-region-id = root.region-ids[region-index];
+                            root.select-region(region.id);
+                            root.context-menu-requested(region.id);
+                        } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                            root.focus-requested();
+                            self.gesture-region-id = region.id;
                             root.select-region(self.gesture-region-id);
                             root.begin-region-gesture(self.gesture-region-id, "move");
                             self.last-drag-x = self.mouse-x;
@@ -179,27 +242,29 @@ export component StudioTrackRow inherits WorkspaceRow {
                             root.move-region(self.gesture-region-id, delta);
                         }
                     }
-                    clicked => { root.select-region(root.region-ids[region-index]); }
+                    clicked => { root.select-region(region.id); }
                 }
                 trim-in := Rectangle {
                     x: 0px;
                     width: 9px;
                     height: parent.height;
-                    background: root.region-selected-flags[region-index] ? Theme.palette().focus : transparent;
+                    background: region.selected ? Theme.palette().focus : transparent;
                     opacity: 0.8;
                     accessible-role: button;
-                    accessible-label: "Trim start of " + root.region-names[region-index];
+                    accessible-label: "Trim start of " + region.name;
                     accessible-action-default => {
-                        root.select-region(root.region-ids[region-index]);
-                        root.trim-region-start(root.region-ids[region-index], 0.1);
+                        root.select-region(region.id);
+                        root.trim-region-start(region.id, 0.1);
                     }
                     TouchArea {
+                        width: 100%;
+                        height: 100%;
                         property <length> last-drag-x: 0px;
                         property <string> gesture-region-id: "";
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                 root.focus-requested();
-                                self.gesture-region-id = root.region-ids[region-index];
+                                self.gesture-region-id = region.id;
                                 root.select-region(self.gesture-region-id);
                                 root.begin-region-gesture(self.gesture-region-id, "trim-start");
                                 self.last-drag-x = self.mouse-x;
@@ -224,21 +289,23 @@ export component StudioTrackRow inherits WorkspaceRow {
                     x: parent.width - 9px;
                     width: 9px;
                     height: parent.height;
-                    background: root.region-selected-flags[region-index] ? Theme.palette().focus : transparent;
+                    background: region.selected ? Theme.palette().focus : transparent;
                     opacity: 0.8;
                     accessible-role: button;
-                    accessible-label: "Trim end of " + root.region-names[region-index];
+                    accessible-label: "Trim end of " + region.name;
                     accessible-action-default => {
-                        root.select-region(root.region-ids[region-index]);
-                        root.trim-region-end(root.region-ids[region-index], 0.1);
+                        root.select-region(region.id);
+                        root.trim-region-end(region.id, 0.1);
                     }
                     TouchArea {
+                        width: 100%;
+                        height: 100%;
                         property <length> last-drag-x: 0px;
                         property <string> gesture-region-id: "";
                         pointer-event(event) => {
                             if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                 root.focus-requested();
-                                self.gesture-region-id = root.region-ids[region-index];
+                                self.gesture-region-id = region.id;
                                 root.select-region(self.gesture-region-id);
                                 root.begin-region-gesture(self.gesture-region-id, "trim-end");
                                 self.last-drag-x = self.mouse-x;
@@ -281,12 +348,7 @@ export component StudioArrangement inherits Rectangle {
     in property <[string]> track-labels: [];
     in property <[string]> track-kinds: [];
     in property <[int]> track-region-counts: [];
-    in property <[string]> region-ids: [];
-    in property <[string]> region-names: [];
-    in property <[int]> region-track-indices: [];
-    in property <[float]> region-start-seconds: [];
-    in property <[float]> region-durations: [];
-    in property <[bool]> region-selected-flags: [];
+    in property <[ArrangementRegion]> regions: [];
     in property <[bool]> track-mutes: [];
     in property <[bool]> track-solos: [];
     in property <[bool]> track-arms: [];
@@ -305,6 +367,16 @@ export component StudioArrangement inherits Rectangle {
     in property <float> job-progress: 0.0;
     in property <bool> job-cancellable: false;
     in property <string> selection-label: "No region selected";
+    in-out property <bool> context-menu-open: false;
+    in-out property <int> context-region-track: -1;
+    in-out property <string> context-region-id: "";
+    changed selected-region-id => {
+        if (root.selected-region-id == "") {
+            root.context-menu-open = false;
+            root.context-region-track = -1;
+            root.context-region-id = "";
+        }
+    }
     callback select-track(int);
     callback mute-toggled(int);
     callback solo-toggled(int);
@@ -323,7 +395,9 @@ export component StudioArrangement inherits Rectangle {
     background: Theme.palette().canvas;
 
     timeline-focus := FocusScope {
-        enabled: root.selected-region-id != "";
+        // Keep the scope available before selection so the first pointer down
+        // can focus it before the controller reports the selected region.
+        enabled: true;
         key-pressed(event) => {
             if (event.text == Key.Delete) {
                 root.delete-region(root.selected-region-track, root.selected-region-id);
@@ -365,6 +439,17 @@ export component StudioArrangement inherits Rectangle {
     /// focus to the selected region without mutating document state.
     public function focus-timeline() {
         timeline-focus.focus();
+    }
+
+    /// Opens the secondary action surface for the currently selected region.
+    /// The row callback is the normal entry point; this helper keeps headless
+    /// journeys deterministic without bypassing the typed action callbacks.
+    public function open-context-menu() {
+        if (root.selected-region-id != "") {
+            root.context-region-track = root.selected-region-track;
+            root.context-region-id = root.selected-region-id;
+            root.context-menu-open = true;
+        }
     }
 
     VerticalLayout {
@@ -475,12 +560,7 @@ export component StudioArrangement inherits Rectangle {
             track-label: label;
             track-kind: root.track-kinds[index];
             region-count: root.track-region-counts[index];
-            region-ids: root.region-ids;
-            region-names: root.region-names;
-            region-track-indices: root.region-track-indices;
-            region-start-seconds: root.region-start-seconds;
-            region-durations: root.region-durations;
-            region-selected-flags: root.region-selected-flags;
+            regions: root.regions;
             duration-seconds: root.duration-seconds;
             timeline-zoom: root.timeline-zoom;
             timeline-scroll-seconds: root.timeline-scroll-seconds;
@@ -506,8 +586,85 @@ export component StudioArrangement inherits Rectangle {
             cancel-region-gesture => { root.cancel-region-gesture(); }
             split-region(id) => { root.split-region(index, id); }
             delete-region(id) => { root.delete-region(index, id); }
+            context-menu-requested(id) => {
+                root.context-region-track = index;
+                root.context-region-id = id;
+                root.context-menu-open = true;
+                root.select-region(index, id);
+            }
             focus-requested => { timeline-focus.focus(); }
         }
         Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+
+    if root.context-menu-open : Rectangle {
+        x: Theme.tokens.space.md;
+        y: Theme.tokens.space.xl;
+        width: 220px;
+        min-height: 48px;
+        background: Theme.palette().surface-raised;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        accessible-role: button;
+        accessible-label: "Region context actions";
+        VerticalLayout {
+            padding: Theme.tokens.space.sm;
+            spacing: Theme.tokens.space.xs;
+            Text {
+                text: "REGION ACTIONS";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                font-weight: 700;
+            }
+            ToolbarButton {
+                text: "Move earlier";
+                accessible-label: "Move selected region earlier";
+                clicked => {
+                    root.move-region(root.context-region-track, root.context-region-id, -0.1);
+                    root.context-menu-open = false;
+                }
+            }
+            ToolbarButton {
+                text: "Move later";
+                accessible-label: "Move selected region later";
+                clicked => {
+                    root.move-region(root.context-region-track, root.context-region-id, 0.1);
+                    root.context-menu-open = false;
+                }
+            }
+            ToolbarButton {
+                text: "Trim start";
+                accessible-label: "Trim selected region start earlier";
+                clicked => {
+                    root.trim-region-start(root.context-region-track, root.context-region-id, -0.1);
+                    root.context-menu-open = false;
+                }
+            }
+            ToolbarButton {
+                text: "Trim end";
+                accessible-label: "Trim selected region end later";
+                clicked => {
+                    root.trim-region-end(root.context-region-track, root.context-region-id, 0.1);
+                    root.context-menu-open = false;
+                }
+            }
+            ToolbarButton {
+                text: "Split";
+                accessible-label: "Split selected region";
+                clicked => {
+                    root.split-region(root.context-region-track, root.context-region-id);
+                    root.context-menu-open = false;
+                }
+            }
+            ToolbarButton {
+                text: "Delete";
+                accessible-label: "Delete selected region";
+                clicked => {
+                    root.delete-region(root.context-region-track, root.context-region-id);
+                    root.context-menu-open = false;
+                }
+            }
+        }
     }
 }

@@ -2142,7 +2142,7 @@ where
         .to_string_lossy();
     let unique = BOUNCE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp = parent.join(format!(".{file_name}.loom-studio-{unique}.tmp"));
-    let result = (|| {
+    let result: Result<Option<String>, String> = (|| {
         use std::io::Write;
         let mut file = std::fs::File::create(&temp).map_err(|error| error.to_string())?;
         let chunk_size = 64 * 1024;
@@ -2167,26 +2167,53 @@ where
         }
         if cancel.is_cancelled() {
             if had_destination {
-                let _ = std::fs::rename(&backup, destination);
+                if let Err(error) = std::fs::rename(&backup, destination) {
+                    return Err(format!(
+                        "bounce cancelled; failed to restore existing destination: {error}"
+                    ));
+                }
             }
             return Err("bounce cancelled".into());
         }
         if let Err(error) = std::fs::rename(&temp, destination) {
-            if had_destination {
-                let _ = std::fs::rename(&backup, destination);
-            }
-            return Err(error.to_string());
+            let restore_error = had_destination
+                .then(|| std::fs::rename(&backup, destination).err())
+                .flatten();
+            return Err(match restore_error {
+                Some(restore_error) => format!(
+                    "failed to commit bounce output: {error}; failed to restore existing destination: {restore_error}"
+                ),
+                None => format!("failed to commit bounce output: {error}"),
+            });
         }
-        if had_destination {
-            let _ = std::fs::remove_file(&backup);
-        }
+        let cleanup_warning = had_destination
+            .then(|| {
+                std::fs::remove_file(&backup)
+                    .err()
+                    .map(|error| format!("failed to remove the previous bounce backup: {error}"))
+            })
+            .flatten();
         progress(1.0);
-        Ok(())
+        Ok(cleanup_warning)
     })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
+    let cleanup_warning = match result {
+        Ok(warning) => warning,
+        Err(error) => {
+            if let Err(cleanup_error) = std::fs::remove_file(&temp) {
+                if temp.exists() {
+                    return Err(format!(
+                        "{error}; failed to remove temporary bounce output: {cleanup_error}"
+                    ));
+                }
+            }
+            return Err(error);
+        }
+    };
+    let mut mixed = mixed;
+    if let Some(warning) = cleanup_warning {
+        mixed.warnings.push(warning);
     }
-    result.map(|()| mixed)
+    Ok(mixed)
 }
 
 impl StudioProject {

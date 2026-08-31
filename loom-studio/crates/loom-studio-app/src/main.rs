@@ -3,6 +3,7 @@
 mod audio_io;
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
@@ -230,6 +231,98 @@ struct GuiState {
     audio_error: RefCell<Option<String>>,
     gesture: RefCell<Option<RegionGesture>>,
     job: RefCell<JobUiState>,
+    models: StableModels,
+}
+
+/// Models are installed once and then updated row-by-row.  Replacing a
+/// `ModelRc` on every refresh resets repeaters and can destroy a pressed
+/// region child; stable model rows keep pointer capture and child-local state
+/// alive while Rust projects through the latest timing values.
+struct StableModels {
+    track_labels: Rc<VecModel<SharedString>>,
+    track_kinds: Rc<VecModel<SharedString>>,
+    track_region_counts: Rc<VecModel<i32>>,
+    regions: Rc<VecModel<ArrangementRegion>>,
+    track_mutes: Rc<VecModel<bool>>,
+    track_solos: Rc<VecModel<bool>>,
+    track_arms: Rc<VecModel<bool>>,
+    track_volumes: Rc<VecModel<f32>>,
+    track_pans: Rc<VecModel<f32>>,
+    bound: Cell<bool>,
+}
+
+impl StableModels {
+    fn new() -> Self {
+        Self {
+            track_labels: Rc::new(VecModel::default()),
+            track_kinds: Rc::new(VecModel::default()),
+            track_region_counts: Rc::new(VecModel::default()),
+            regions: Rc::new(VecModel::default()),
+            track_mutes: Rc::new(VecModel::default()),
+            track_solos: Rc::new(VecModel::default()),
+            track_arms: Rc::new(VecModel::default()),
+            track_volumes: Rc::new(VecModel::default()),
+            track_pans: Rc::new(VecModel::default()),
+            bound: Cell::new(false),
+        }
+    }
+}
+
+fn sync_vec_model<T: Clone + 'static>(model: &VecModel<T>, values: Vec<T>) {
+    let common = model.row_count().min(values.len());
+    for (index, value) in values.iter().take(common).enumerate() {
+        model.set_row_data(index, value.clone());
+    }
+    while model.row_count() > values.len() {
+        model.remove(model.row_count() - 1);
+    }
+    for value in values.into_iter().skip(common) {
+        model.push(value);
+    }
+}
+
+fn sync_region_model(model: &VecModel<ArrangementRegion>, values: Vec<ArrangementRegion>) {
+    let wanted = values
+        .iter()
+        .map(|region| region.id.to_string())
+        .collect::<HashSet<_>>();
+    for index in (0..model.row_count()).rev() {
+        let keep = model
+            .row_data(index)
+            .map(|region| wanted.contains(region.id.as_str()))
+            .unwrap_or(false);
+        if !keep {
+            model.remove(index);
+        }
+    }
+    for region in values {
+        let existing = (0..model.row_count()).find(|&index| {
+            model
+                .row_data(index)
+                .map(|item| item.id == region.id)
+                .unwrap_or(false)
+        });
+        if let Some(index) = existing {
+            model.set_row_data(index, region);
+        } else {
+            model.push(region);
+        }
+    }
+}
+
+fn bind_stable_models(app: &StudioApp, models: &StableModels) {
+    if models.bound.replace(true) {
+        return;
+    }
+    app.set_track_labels(models.track_labels.clone().into());
+    app.set_track_kinds(models.track_kinds.clone().into());
+    app.set_track_region_counts(models.track_region_counts.clone().into());
+    app.set_regions(models.regions.clone().into());
+    app.set_track_mutes(models.track_mutes.clone().into());
+    app.set_track_solos(models.track_solos.clone().into());
+    app.set_track_arms(models.track_arms.clone().into());
+    app.set_track_volumes(models.track_volumes.clone().into());
+    app.set_track_pans(models.track_pans.clone().into());
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -364,14 +457,17 @@ fn refresh(app: &StudioApp, state: &GuiState) {
     };
     app.set_workspace_mode(mode.into());
     app.set_workspace_mode_index(mode_index);
-    app.set_track_labels(ModelRc::new(VecModel::from(
+    let models = &state.models;
+    sync_vec_model(
+        &models.track_labels,
         project
             .tracks
             .iter()
             .map(|track| SharedString::from(track.name.as_str()))
-            .collect::<Vec<_>>(),
-    )));
-    app.set_track_kinds(ModelRc::new(VecModel::from(
+            .collect(),
+    );
+    sync_vec_model(
+        &models.track_kinds,
         project
             .tracks
             .iter()
@@ -381,75 +477,56 @@ fn refresh(app: &StudioApp, state: &GuiState) {
                 TrackKind::Drummer => SharedString::from("Drummer"),
                 TrackKind::Bus => SharedString::from("Bus"),
             })
-            .collect::<Vec<_>>(),
-    )));
-    app.set_track_region_counts(ModelRc::new(VecModel::from(
+            .collect(),
+    );
+    sync_vec_model(
+        &models.track_region_counts,
         project
             .tracks
             .iter()
             .map(|track| track.regions.len() as i32)
-            .collect::<Vec<_>>(),
-    )));
-    let mut region_ids = Vec::new();
-    let mut region_names = Vec::new();
-    let mut region_track_indices = Vec::new();
-    let mut region_starts = Vec::new();
-    let mut region_durations = Vec::new();
-    let mut region_selected = Vec::new();
+            .collect(),
+    );
+    let mut regions = Vec::new();
     for (track_index, track) in project.tracks.iter().enumerate() {
         for region in &track.regions {
-            region_ids.push(SharedString::from(region.id.as_str()));
-            region_names.push(SharedString::from(region.name.as_str()));
-            region_track_indices.push(track_index as i32);
-            region_starts.push(region.start_sample as f32 / project.sample_rate.max(1) as f32);
-            region_durations.push(region.length_samples as f32 / project.sample_rate.max(1) as f32);
-            region_selected.push(
-                session.selection.track_index == Some(track_index)
+            regions.push(ArrangementRegion {
+                id: SharedString::from(region.id.as_str()),
+                name: SharedString::from(region.name.as_str()),
+                track_index: track_index as i32,
+                start_seconds: region.start_sample as f32 / project.sample_rate.max(1) as f32,
+                duration_seconds: region.length_samples as f32 / project.sample_rate.max(1) as f32,
+                selected: session.selection.track_index == Some(track_index)
                     && session.selection.region_id.as_deref() == Some(region.id.as_str()),
-            );
+            });
         }
     }
-    app.set_region_ids(ModelRc::new(VecModel::from(region_ids)));
-    app.set_region_names(ModelRc::new(VecModel::from(region_names)));
-    app.set_region_track_indices(ModelRc::new(VecModel::from(region_track_indices)));
-    app.set_region_start_seconds(ModelRc::new(VecModel::from(region_starts)));
-    app.set_region_durations(ModelRc::new(VecModel::from(region_durations)));
-    app.set_region_selected_flags(ModelRc::new(VecModel::from(region_selected)));
-    app.set_track_mutes(ModelRc::new(VecModel::from(
-        project
-            .tracks
-            .iter()
-            .map(|track| track.mute)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_track_solos(ModelRc::new(VecModel::from(
-        project
-            .tracks
-            .iter()
-            .map(|track| track.solo)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_track_arms(ModelRc::new(VecModel::from(
+    sync_region_model(&models.regions, regions);
+    sync_vec_model(
+        &models.track_mutes,
+        project.tracks.iter().map(|track| track.mute).collect(),
+    );
+    sync_vec_model(
+        &models.track_solos,
+        project.tracks.iter().map(|track| track.solo).collect(),
+    );
+    sync_vec_model(
+        &models.track_arms,
         project
             .tracks
             .iter()
             .map(|track| track.record_arm)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_track_volumes(ModelRc::new(VecModel::from(
-        project
-            .tracks
-            .iter()
-            .map(|track| track.volume_db)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_track_pans(ModelRc::new(VecModel::from(
-        project
-            .tracks
-            .iter()
-            .map(|track| track.pan)
-            .collect::<Vec<_>>(),
-    )));
+            .collect(),
+    );
+    sync_vec_model(
+        &models.track_volumes,
+        project.tracks.iter().map(|track| track.volume_db).collect(),
+    );
+    sync_vec_model(
+        &models.track_pans,
+        project.tracks.iter().map(|track| track.pan).collect(),
+    );
+    bind_stable_models(app, models);
     // TimelineSelection is runtime UI state.  The project field remains a
     // backwards-compatible fallback for an unselected session, but selecting
     // a track or region must not dirty the persisted package.
@@ -589,6 +666,17 @@ fn clear_transient_state(state: &GuiState) {
     job.generation = job.generation.wrapping_add(1);
     job.warnings.clear();
     job.state = StudioJobState::Idle;
+}
+
+/// Stop old playback before a document replacement and reset transport state
+/// so the newly opened project cannot inherit an obsolete audio cursor.
+fn reset_transport(app: &StudioApp, state: &GuiState) {
+    if let Some(audio) = state.audio.borrow().as_ref() {
+        audio.stop();
+    }
+    app.set_playhead_seconds(0.0);
+    app.set_is_playing(false);
+    app.set_is_recording(false);
 }
 
 fn format_edit_error(operation: &str, error: &StudioEditError) -> String {
@@ -1048,6 +1136,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         audio_error: RefCell::new(Some("headless harness".into())),
         gesture: RefCell::new(None),
         job: RefCell::new(JobUiState::default()),
+        models: StableModels::new(),
     };
     refresh(&app, &state);
     if args.palette {
@@ -1148,6 +1237,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         audio_error: RefCell::new(Some("headless harness".into())),
         gesture: RefCell::new(None),
         job: RefCell::new(JobUiState::default()),
+        models: StableModels::new(),
     });
     wire_application(&app, state.clone());
     wire_palette(&app);
@@ -1167,22 +1257,78 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     }
     capture_studio_journey_step(&app, &state, &out_dir, "imported", &mut steps)?;
 
-    // Select, coalesce a pointer gesture, and prove undo/redo restore the
-    // exact arrangement state before the subsequent trims/split/delete.
-    app.invoke_select_region(0, "region-vocal".into());
-    let before_move = state.session.borrow().session_digest();
-    app.invoke_begin_region_gesture(0, "region-vocal".into(), "move".into());
-    app.invoke_move_region(0, "region-vocal".into(), 0.10);
-    app.invoke_move_region(0, "region-vocal".into(), 0.10);
-    app.invoke_end_region_gesture();
+    // Drive a real Slint pointer press/move/release through the arrangement
+    // row.  The model is refreshed between move frames, so this also proves
+    // child identity and pointer capture survive in-place row updates.
+    let pointer_x = args.size.0 as f32 * 0.5;
+    // Import exposes the region-action row, so the first track starts around
+    // y=212px at both reference and compact capture sizes.  Keep the probe in
+    // the body of the first region rather than on that row's boundary.
+    let pointer_y = 240.0_f32;
+    let pointer = |event| app.window().dispatch_event(event);
+    let pointer_position = |x| slint::LogicalPosition { x, y: pointer_y };
+    let left = slint::platform::PointerEventButton::Left;
+    let pre_gesture_digest = state.session.borrow().session_digest();
+    // Establish the hover target before pressing.  Slint's testing/native
+    // event path performs hit testing from the last pointer position; without
+    // this move a press can be dispatched against the stale cursor location.
+    pointer(slint::platform::WindowEvent::PointerMoved {
+        position: pointer_position(pointer_x),
+    });
+    pointer(slint::platform::WindowEvent::PointerPressed {
+        position: pointer_position(pointer_x),
+        button: left,
+    });
+    pointer(slint::platform::WindowEvent::PointerMoved {
+        position: pointer_position(pointer_x + 24.0),
+    });
+    pointer(slint::platform::WindowEvent::PointerMoved {
+        position: pointer_position(pointer_x + 48.0),
+    });
+    pointer(slint::platform::WindowEvent::PointerReleased {
+        position: pointer_position(pointer_x + 48.0),
+        button: left,
+    });
+    // The import fixture is the topmost, visible first-row region at every
+    // supported journey width (the original vocal region remains underneath
+    // it at the same start).  Assert the stable imported id rather than
+    // relying on a hidden overlapped row.
+    if state.session.borrow().selection.region_id.as_deref() != Some("import-1") {
+        return Err(format!(
+            "physical arrangement click did not select the imported region (session={:?}, ui={})",
+            state.session.borrow().selection,
+            app.get_selected_region_id()
+        ));
+    }
+    let moved_digest = state.session.borrow().session_digest();
     if !state.session.borrow().can_undo() {
         return Err("move gesture did not create an undo entry".into());
     }
     app.invoke_undo();
-    if state.session.borrow().session_digest() != before_move {
+    if state.session.borrow().session_digest() != pre_gesture_digest {
         return Err("undo did not restore the pre-gesture arrangement".into());
     }
     app.invoke_redo();
+    if state.session.borrow().session_digest() != moved_digest {
+        return Err("redo did not restore the moved arrangement".into());
+    }
+
+    // A secondary pointer action opens the same context surface that exposes
+    // move/trim/split/delete callbacks.  The action itself is dispatched via
+    // the typed move callback below, matching the context button's route.
+    pointer(slint::platform::WindowEvent::PointerMoved {
+        position: pointer_position(pointer_x + 48.0),
+    });
+    pointer(slint::platform::WindowEvent::PointerPressed {
+        position: pointer_position(pointer_x + 48.0),
+        button: slint::platform::PointerEventButton::Right,
+    });
+    if !app.get_context_menu_open() {
+        return Err("region context action surface did not open on secondary click".into());
+    }
+    capture_studio_journey_step(&app, &state, &out_dir, "context-menu", &mut steps)?;
+    app.invoke_move_region(0, "import-1".into(), 0.1);
+    app.set_context_menu_open(false);
 
     // Exercise the arrangement FocusScope through the same public window
     // event path used by a physical keyboard.  This deliberately selects a
@@ -1420,14 +1566,15 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_new_song(move || {
             if let Some(app) = weak.upgrade() {
+                reset_transport(&app, &state);
                 clear_transient_state(&state);
                 let (session, assets) = empty_session();
                 *state.session.borrow_mut() = session;
                 *state.assets.borrow_mut() = assets;
                 *state.save_path.borrow_mut() = None;
-                if let Some(audio) = state.audio.borrow().as_ref() {
-                    audio.stop();
-                }
+                // A replacement is a durable recovery boundary: a crash
+                // after New must never resurrect the previous document.
+                record_recovery_snapshot(&state);
                 refresh(&app, &state);
                 app.set_status_left("Created a new untitled Studio project".into());
             }
@@ -1446,11 +1593,15 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
                         .and_then(|bytes| load_studio_bundle(&bytes))
                     {
                         Ok((project, assets)) => {
+                            reset_transport(&app, &state);
                             clear_transient_state(&state);
                             *state.session.borrow_mut() =
                                 StudioSession::with_assets(project, assets.clone());
                             *state.assets.borrow_mut() = assets;
                             *state.save_path.borrow_mut() = Some(path.clone());
+                            // Record the loaded bundle immediately so a crash
+                            // after Open can only recover this document.
+                            record_recovery_snapshot(&state);
                             refresh(&app, &state);
                             app.set_status_left(
                                 format!("Opened {}", path.file_name().unwrap().to_string_lossy())
@@ -2532,6 +2683,7 @@ fn main() -> Result<(), String> {
         audio_error: RefCell::new(audio_error),
         gesture: RefCell::new(None),
         job: RefCell::new(JobUiState::default()),
+        models: StableModels::new(),
     });
 
     wire_application(&app, state.clone());
@@ -2920,6 +3072,7 @@ mod tests {
             audio_error: RefCell::new(Some("test harness".into())),
             gesture: RefCell::new(None),
             job: RefCell::new(JobUiState::default()),
+            models: StableModels::new(),
         });
         wire_application(&app, state.clone());
         refresh(&app, &state);
@@ -2969,11 +3122,19 @@ mod tests {
         let scripted = ScriptedFileDialogs::new(vec![Some(file.clone())], vec![]);
 
         let (app, state) = test_app_and_state(scripted);
+        // Opening a replacement while transport is active must stop the old
+        // cursor/recording state before the new project is projected.
+        app.set_playhead_seconds(7.25);
+        app.set_is_playing(true);
+        app.set_is_recording(true);
         app.invoke_open_song();
 
         assert_eq!(*state.save_path.borrow(), Some(file));
         assert_eq!(state.session.borrow().project.name, "Loaded Studio Project");
         assert_eq!(app.get_song_title().as_str(), "Loaded Studio Project");
+        assert_eq!(app.get_playhead_seconds(), 0.0);
+        assert!(!app.get_is_playing());
+        assert!(!app.get_is_recording());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3190,6 +3351,146 @@ mod tests {
             state.session.borrow().selection,
             loom_studio_core::TimelineSelection::track(0)
         );
+    }
+
+    #[test]
+    fn physical_arrangement_pointer_selects_and_focuses_region_commands() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        // Materialize the deterministic scene before dispatching a native-style
+        // pointer event; this is the same software window used by screenshots.
+        snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render arrangement");
+        let position = slint::LogicalPosition { x: 640.0, y: 210.0 };
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+                position,
+                button: slint::platform::PointerEventButton::Left,
+            });
+        assert_eq!(
+            state.session.borrow().selection.region_id.as_deref(),
+            Some("region-vocal")
+        );
+        assert_eq!(app.get_selected_region_id().as_str(), "region-vocal");
+
+        let original_start = state.session.borrow().project.tracks[0].regions[0].start_sample;
+        app.invoke_focus_arrangement();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::RightArrow.into(),
+            });
+        assert_eq!(
+            state.session.borrow().project.tracks[0].regions[0].start_sample,
+            original_start + 4_800
+        );
+
+        app.invoke_focus_arrangement();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Delete.into(),
+            });
+        assert!(state.session.borrow().project.tracks[0].regions.is_empty());
+        assert_eq!(
+            state.session.borrow().selection,
+            loom_studio_core::TimelineSelection::track(0)
+        );
+    }
+
+    #[test]
+    fn secondary_pointer_opens_context_actions_and_routes_typed_move() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render arrangement");
+        let position = slint::LogicalPosition { x: 640.0, y: 210.0 };
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                position,
+                button: slint::platform::PointerEventButton::Right,
+            });
+        assert!(app.get_context_menu_open());
+        assert_eq!(
+            state.session.borrow().selection.region_id.as_deref(),
+            Some("region-vocal")
+        );
+
+        let original_start = state.session.borrow().project.tracks[0].regions[0].start_sample;
+        app.invoke_move_region(0, "region-vocal".into(), 0.1);
+        assert_eq!(
+            state.session.borrow().project.tracks[0].regions[0].start_sample,
+            original_start + 4_800
+        );
+        assert!(state.session.borrow().can_undo());
+        app.set_context_menu_open(false);
+    }
+
+    #[test]
+    fn refresh_updates_bound_region_model_without_replacing_it() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        let regions_before = app.get_regions();
+        let labels_before = app.get_track_labels();
+        {
+            let mut session = state.session.borrow_mut();
+            session.project.tracks[0].regions[0].start_sample = 9_600;
+        }
+        refresh(&app, &state);
+        assert_eq!(regions_before, app.get_regions());
+        assert_eq!(labels_before, app.get_track_labels());
+        let region = app.get_regions().row_data(0).expect("region row");
+        assert_eq!(region.id.as_str(), "region-vocal");
+        assert_eq!(region.start_seconds, 0.2);
+    }
+
+    #[test]
+    fn new_and_open_record_replacement_recovery_boundaries() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "loom-studio-recovery-{}-{unique}",
+            std::process::id()
+        ));
+        let recovery_dir = root.join("recovery");
+        let project_path = root.join("loaded.loomstudio");
+        std::fs::create_dir_all(&root).expect("create recovery fixture");
+        let mut loaded = StudioProject::new("loaded-project", "Loaded Replacement");
+        loaded.tracks.clear();
+        let loaded_bytes = save_studio_bundle(&loaded, &AudioAssetStore::default()).unwrap();
+        std::fs::write(&project_path, loaded_bytes).expect("write loaded project");
+
+        let recovery = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
+            .expect("open test recovery journal");
+        STUDIO_RECOVERY.with(|slot| *slot.borrow_mut() = Some(recovery));
+        let scripted = ScriptedFileDialogs::new(vec![Some(project_path.clone())], vec![]);
+        let (app, state) = test_app_and_state(scripted);
+
+        app.invoke_new_song();
+        let mut journal = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
+            .expect("read New recovery snapshot");
+        let new_payload = journal
+            .take_restored_payload()
+            .expect("New snapshot payload");
+        let (new_project, _) = load_studio_bundle(&new_payload).expect("decode New snapshot");
+        assert_eq!(new_project.name, "Untitled Session");
+
+        app.invoke_open_song();
+        let mut journal = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
+            .expect("read Open recovery snapshot");
+        let open_payload = journal
+            .take_restored_payload()
+            .expect("Open snapshot payload");
+        let (open_project, _) = load_studio_bundle(&open_payload).expect("decode Open snapshot");
+        assert_eq!(open_project.name, "Loaded Replacement");
+        assert_eq!(state.session.borrow().project.name, "Loaded Replacement");
+
+        STUDIO_RECOVERY.with(|slot| *slot.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
