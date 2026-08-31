@@ -370,8 +370,28 @@ export component StudioArrangement inherits Rectangle {
     in-out property <bool> context-menu-open: false;
     in-out property <int> context-region-track: -1;
     in-out property <string> context-region-id: "";
+    changed selected-region-track => {
+        if (root.context-menu-open
+                && (root.selected-region-id != root.context-region-id
+                    || root.selected-region-track != root.context-region-track)) {
+            root.context-menu-open = false;
+            root.context-region-track = -1;
+            root.context-region-id = "";
+            timeline-focus.focus();
+        }
+    }
     changed selected-region-id => {
-        if (root.selected-region-id == "") {
+        // A context action is bound to the region that opened it.  Close the
+        // surface as soon as selection moves elsewhere so callbacks can never
+        // mutate a stale region behind the visible selection.
+        if (root.context-menu-open
+                && (root.selected-region-id != root.context-region-id
+                    || root.selected-region-track != root.context-region-track)) {
+            root.context-menu-open = false;
+            root.context-region-track = -1;
+            root.context-region-id = "";
+            timeline-focus.focus();
+        } else if (root.selected-region-id == "") {
             root.context-menu-open = false;
             root.context-region-track = -1;
             root.context-region-id = "";
@@ -449,6 +469,7 @@ export component StudioArrangement inherits Rectangle {
             root.context-region-track = root.selected-region-track;
             root.context-region-id = root.selected-region-id;
             root.context-menu-open = true;
+            context-menu-focus.focus();
         }
     }
 
@@ -591,6 +612,7 @@ export component StudioArrangement inherits Rectangle {
                 root.context-region-id = id;
                 root.context-menu-open = true;
                 root.select-region(index, id);
+                context-menu-focus.focus();
             }
             focus-requested => { timeline-focus.focus(); }
         }
@@ -601,70 +623,104 @@ export component StudioArrangement inherits Rectangle {
         x: Theme.tokens.space.md;
         y: Theme.tokens.space.xl;
         width: 220px;
-        min-height: 48px;
+        // Keep the six actions inside a bounded surface.  At the supported
+        // 1024x720 and 1440x900 heights this resolves to the intrinsic menu
+        // height; on a shorter or larger-text surface it remains within the
+        // available viewport instead of painting over the status bar.
+        height: min(320px, max(1px, parent.height - self.y - Theme.tokens.space.md));
+        max-height: max(1px, parent.height - self.y - Theme.tokens.space.md);
         background: Theme.palette().surface-raised;
         border-width: 1px;
         border-color: Theme.palette().border-strong;
         border-radius: Theme.tokens.metrics.radius-medium;
+        clip: true;
         accessible-role: button;
         accessible-label: "Region context actions";
-        VerticalLayout {
-            padding: Theme.tokens.space.sm;
-            spacing: Theme.tokens.space.xs;
-            Text {
-                text: "REGION ACTIONS";
-                color: Theme.palette().ink-secondary;
-                font-size: Theme.tokens.typography.micro;
-                font-weight: 700;
-            }
-            ToolbarButton {
-                text: "Move earlier";
-                accessible-label: "Move selected region earlier";
-                clicked => {
-                    root.move-region(root.context-region-track, root.context-region-id, -0.1);
-                    root.context-menu-open = false;
+        context-menu-scroll := Flickable {
+            width: parent.width;
+            height: parent.height;
+            viewport-width: parent.width;
+            // Keep the action list intrinsic and let Flickable expose the
+            // complete list when large text or a short viewport needs it.
+            viewport-height: max(parent.height, context-menu-content.preferred-height);
+            context-menu-content := VerticalLayout {
+                y: 0px;
+                width: parent.width;
+                height: self.preferred-height;
+                padding: Theme.tokens.space.sm;
+                spacing: Theme.tokens.space.xs;
+                alignment: start;
+                Text {
+                    text: "REGION ACTIONS";
+                    color: Theme.palette().ink-secondary;
+                    font-size: Theme.tokens.typography.micro;
+                    font-weight: 700;
+                }
+                ToolbarButton {
+                    text: "Move earlier";
+                    accessible-label: "Move selected region earlier";
+                    clicked => {
+                        root.move-region(root.context-region-track, root.context-region-id, -0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Move later";
+                    accessible-label: "Move selected region later";
+                    clicked => {
+                        root.move-region(root.context-region-track, root.context-region-id, 0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Trim start";
+                    accessible-label: "Trim selected region start earlier";
+                    clicked => {
+                        root.trim-region-start(root.context-region-track, root.context-region-id, -0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Trim end";
+                    accessible-label: "Trim selected region end later";
+                    clicked => {
+                        root.trim-region-end(root.context-region-track, root.context-region-id, 0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Split";
+                    accessible-label: "Split selected region";
+                    clicked => {
+                        root.split-region(root.context-region-track, root.context-region-id);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Delete";
+                    accessible-label: "Delete selected region";
+                    clicked => {
+                        root.delete-region(root.context-region-track, root.context-region-id);
+                        root.context-menu-open = false;
+                    }
                 }
             }
-            ToolbarButton {
-                text: "Move later";
-                accessible-label: "Move selected region later";
-                clicked => {
-                    root.move-region(root.context-region-track, root.context-region-id, 0.1);
-                    root.context-menu-open = false;
-                }
+        }
+    }
+
+    // Keep Escape dismissal available even when the menu was opened by a
+    // secondary pointer action.  Closing returns focus to the timeline scope.
+    context-menu-focus := FocusScope {
+        enabled: root.context-menu-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.context-menu-open = false;
+                root.context-region-track = -1;
+                root.context-region-id = "";
+                timeline-focus.focus();
+                return accept;
             }
-            ToolbarButton {
-                text: "Trim start";
-                accessible-label: "Trim selected region start earlier";
-                clicked => {
-                    root.trim-region-start(root.context-region-track, root.context-region-id, -0.1);
-                    root.context-menu-open = false;
-                }
-            }
-            ToolbarButton {
-                text: "Trim end";
-                accessible-label: "Trim selected region end later";
-                clicked => {
-                    root.trim-region-end(root.context-region-track, root.context-region-id, 0.1);
-                    root.context-menu-open = false;
-                }
-            }
-            ToolbarButton {
-                text: "Split";
-                accessible-label: "Split selected region";
-                clicked => {
-                    root.split-region(root.context-region-track, root.context-region-id);
-                    root.context-menu-open = false;
-                }
-            }
-            ToolbarButton {
-                text: "Delete";
-                accessible-label: "Delete selected region";
-                clicked => {
-                    root.delete-region(root.context-region-track, root.context-region-id);
-                    root.context-menu-open = false;
-                }
-            }
+            return reject;
         }
     }
 }

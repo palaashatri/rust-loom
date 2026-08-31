@@ -1534,6 +1534,24 @@ fn schedule_studio_menu_action(
 }
 
 fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
+    // Context-menu callbacks carry the region captured when the surface was
+    // opened.  Slint property change handlers run on the event-loop turn, so
+    // a selection callback can briefly leave the menu visible with an old
+    // target.  Reject that stale target at the controller boundary as well as
+    // closing the surface, before any edit reaches the session.
+    fn reject_stale_context_action(app: &StudioApp, track_index: i32, region_id: &str) -> bool {
+        if !app.get_context_menu_open() {
+            return false;
+        }
+        if app.get_active_track_index() != track_index
+            || app.get_selected_region_id().as_str() != region_id
+        {
+            app.set_context_menu_open(false);
+            return true;
+        }
+        false
+    }
+
     macro_rules! edit_project {
         ($callback:ident, $body:expr) => {{
             let state = state.clone();
@@ -1865,6 +1883,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_move_region(move |track_index, region_id, delta_seconds| {
             if let Some(app) = weak.upgrade() {
+                if reject_stale_context_action(&app, track_index, region_id.as_str()) {
+                    return;
+                }
                 let track = usize::try_from(track_index).unwrap_or(usize::MAX);
                 let active = state.gesture.borrow().as_ref().map(|gesture| {
                     gesture.track_index == track
@@ -1916,6 +1937,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_trim_region_start(move |track_index, region_id, delta_seconds| {
             if let Some(app) = weak.upgrade() {
+                if reject_stale_context_action(&app, track_index, region_id.as_str()) {
+                    return;
+                }
                 let track = usize::try_from(track_index).unwrap_or(usize::MAX);
                 let active = state.gesture.borrow().as_ref().map(|gesture| {
                     gesture.track_index == track
@@ -1962,6 +1986,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_trim_region_end(move |track_index, region_id, delta_seconds| {
             if let Some(app) = weak.upgrade() {
+                if reject_stale_context_action(&app, track_index, region_id.as_str()) {
+                    return;
+                }
                 let track = usize::try_from(track_index).unwrap_or(usize::MAX);
                 let active = state.gesture.borrow().as_ref().map(|gesture| {
                     gesture.track_index == track
@@ -2043,6 +2070,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_split_region(move |track_index, region_id| {
             if let Some(app) = weak.upgrade() {
+                if reject_stale_context_action(&app, track_index, region_id.as_str()) {
+                    return;
+                }
                 let split = {
                     let session = state.session.borrow();
                     session
@@ -2089,6 +2119,9 @@ fn wire_application(app: &StudioApp, state: Rc<GuiState>) {
         let weak = app.as_weak();
         app.on_delete_region(move |track_index, region_id| {
             if let Some(app) = weak.upgrade() {
+                if reject_stale_context_action(&app, track_index, region_id.as_str()) {
+                    return;
+                }
                 let result = state
                     .session
                     .borrow_mut()
@@ -3427,6 +3460,43 @@ mod tests {
         );
         assert!(state.session.borrow().can_undo());
         app.set_context_menu_open(false);
+    }
+
+    #[test]
+    fn context_menu_dismisses_when_selection_changes() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render arrangement");
+        let position = slint::LogicalPosition { x: 640.0, y: 210.0 };
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+                position,
+                button: slint::platform::PointerEventButton::Right,
+            });
+        assert!(app.get_context_menu_open());
+        assert_eq!(
+            state.session.borrow().selection.region_id.as_deref(),
+            Some("region-vocal")
+        );
+
+        // Selecting another region while the menu is still visible must close
+        // it before any stale A-targeted action can be invoked.  Invoke the
+        // old callback in the same turn to cover the controller-side guard,
+        // before queued Slint property handlers have a chance to run.
+        let original_start = state.session.borrow().project.tracks[0].regions[0].start_sample;
+        app.invoke_select_region(1, "region-guitar".into());
+        app.invoke_move_region(0, "region-vocal".into(), 0.1);
+        assert_eq!(
+            state.session.borrow().project.tracks[0].regions[0].start_sample,
+            original_start
+        );
+        slint::platform::update_timers_and_animations();
+        assert_eq!(
+            state.session.borrow().selection.region_id.as_deref(),
+            Some("region-guitar")
+        );
+        assert!(!app.get_context_menu_open());
     }
 
     #[test]
