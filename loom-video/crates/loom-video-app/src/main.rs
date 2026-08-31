@@ -15,11 +15,14 @@ use loom_desktop::{
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
+#[cfg(test)]
+use loom_video_core::decode_preview_frame;
 use loom_video_core::{
-    build_timeline_export_plan, decode_preview_frame_with_cancel, discover_media_tools,
-    execute_timeline_export_with_cancel, load_video_project, probe_media, save_video_project,
-    snap_timeline_to_edit_points, Clip, ExportCancellation, MediaTools, PreviewCancellation,
-    TimelineMarker, VideoFrame, VideoProject, VideoSession,
+    build_timeline_export_plan, decode_audio_waveform_with_cancel,
+    decode_preview_frame_with_cancel, discover_media_tools, execute_timeline_export_with_cancel,
+    load_video_project, probe_media, save_video_project, snap_timeline_to_edit_points, Clip,
+    ExportCancellation, MediaTools, PreviewCancellation, TimelineMarker, VideoFrame, VideoProject,
+    VideoSession,
 };
 use slint::{
     ComponentHandle, Image, Model, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer,
@@ -157,6 +160,7 @@ struct AppState {
     preview_cancel: Mutex<Option<PreviewCancellation>>,
     preview_in_flight: AtomicBool,
     preview_cache: Mutex<PreviewCache>,
+    preview_cache_hits: AtomicU64,
     gesture: Mutex<Option<TimelineGesture>>,
     playback_clock: Mutex<Option<PlaybackClock>>,
 }
@@ -171,9 +175,11 @@ enum CacheState {
 #[derive(Debug, Clone)]
 struct PreviewCacheEntry {
     clip_id: String,
+    frame_time: f64,
     thumbnail: CacheState,
     waveform: CacheState,
     frame: Option<VideoFrame>,
+    waveform_peaks: Option<Vec<(f32, f32)>>,
 }
 
 #[derive(Debug, Default)]
@@ -184,37 +190,56 @@ struct PreviewCache {
 impl PreviewCache {
     const LIMIT: usize = 8;
 
+    #[cfg(test)]
     fn mark_pending(&mut self, clip_id: &str) {
+        self.mark_pending_at(clip_id, 0.0);
+    }
+
+    fn mark_pending_at(&mut self, clip_id: &str, frame_time: f64) {
         self.entries.retain(|entry| entry.clip_id != clip_id);
         self.entries.push_front(PreviewCacheEntry {
             clip_id: clip_id.to_string(),
+            frame_time,
             thumbnail: CacheState::Pending,
             waveform: CacheState::Pending,
             frame: None,
+            waveform_peaks: None,
         });
         self.entries.truncate(Self::LIMIT);
     }
 
+    #[cfg(test)]
     fn mark_ready(&mut self, clip_id: &str, frame: VideoFrame) {
+        self.mark_thumbnail_ready_at(clip_id, 0.0, frame);
+    }
+
+    fn mark_thumbnail_ready_at(&mut self, clip_id: &str, frame_time: f64, frame: VideoFrame) {
         if let Some(entry) = self
             .entries
             .iter_mut()
             .find(|entry| entry.clip_id == clip_id)
         {
+            entry.frame_time = frame_time;
             entry.thumbnail = CacheState::Ready;
             entry.frame = Some(frame);
             return;
         }
         self.entries.push_front(PreviewCacheEntry {
             clip_id: clip_id.to_string(),
+            frame_time,
             thumbnail: CacheState::Ready,
             waveform: CacheState::Pending,
             frame: Some(frame),
+            waveform_peaks: None,
         });
         self.entries.truncate(Self::LIMIT);
     }
 
     fn mark_failed(&mut self, clip_id: &str) {
+        self.mark_thumbnail_failed(clip_id);
+    }
+
+    fn mark_thumbnail_failed(&mut self, clip_id: &str) {
         if let Some(entry) = self
             .entries
             .iter_mut()
@@ -223,6 +248,44 @@ impl PreviewCache {
             entry.thumbnail = CacheState::Failed;
             entry.frame = None;
         }
+    }
+
+    fn mark_waveform_ready(&mut self, clip_id: &str, peaks: Vec<(f32, f32)>) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.clip_id == clip_id)
+        {
+            entry.waveform = CacheState::Ready;
+            entry.waveform_peaks = Some(peaks);
+        }
+    }
+
+    fn mark_waveform_failed(&mut self, clip_id: &str) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.clip_id == clip_id)
+        {
+            entry.waveform = CacheState::Failed;
+            entry.waveform_peaks = None;
+        }
+    }
+
+    fn cached_frame(&mut self, clip_id: &str, frame_time: f64) -> Option<VideoFrame> {
+        let index = self.entries.iter().position(|entry| {
+            entry.clip_id == clip_id
+                && entry.thumbnail == CacheState::Ready
+                && entry
+                    .frame
+                    .as_ref()
+                    .is_some_and(|_| (entry.frame_time - frame_time).abs() <= 1e-3)
+        })?;
+        let entry = self.entries.remove(index)?;
+        let frame = entry.frame.clone();
+        self.entries.push_front(entry);
+        self.entries.truncate(Self::LIMIT);
+        frame
     }
 
     fn status_for(&self, clip: &Clip) -> String {
@@ -239,8 +302,27 @@ impl PreviewCache {
                 (CacheState::Ready, CacheState::Pending) => {
                     "Thumbnail ready · waveform pending".into()
                 }
-                (CacheState::Failed, _) => "Thumbnail failed · retry on demand".into(),
-                _ => "Thumbnail pending · waveform pending".into(),
+                (CacheState::Ready, CacheState::Failed) => {
+                    "Thumbnail ready · waveform failed · retry on demand".into()
+                }
+                (CacheState::Pending, CacheState::Ready) => {
+                    "Thumbnail pending · waveform ready".into()
+                }
+                (CacheState::Pending, CacheState::Failed) => {
+                    "Thumbnail pending · waveform failed".into()
+                }
+                (CacheState::Failed, CacheState::Ready) => {
+                    "Thumbnail failed · waveform ready · retry on demand".into()
+                }
+                (CacheState::Failed, CacheState::Failed) => {
+                    "Thumbnail failed · waveform failed · retry on demand".into()
+                }
+                (CacheState::Failed, CacheState::Pending) => {
+                    "Thumbnail failed · waveform pending · retry on demand".into()
+                }
+                (CacheState::Pending, CacheState::Pending) => {
+                    "Thumbnail pending · waveform pending".into()
+                }
             },
             None => "Thumbnail pending · waveform pending".into(),
         }
@@ -269,18 +351,73 @@ enum ClockSource {
 }
 
 #[derive(Debug)]
+struct AudioSampleSource {
+    sample_rate: u32,
+    sample_cursor: u64,
+    fractional_samples: f64,
+}
+
+impl AudioSampleSource {
+    fn new(position: f64, sample_rate: u32) -> Self {
+        let sample_rate = sample_rate.max(1);
+        Self {
+            sample_rate,
+            sample_cursor: (position.max(0.0) * f64::from(sample_rate)).round() as u64,
+            fractional_samples: 0.0,
+        }
+    }
+
+    fn position(&self) -> f64 {
+        (self.sample_cursor as f64 + self.fractional_samples) / f64::from(self.sample_rate)
+    }
+
+    fn advance_samples(&mut self, samples: u64) {
+        self.sample_cursor = self.sample_cursor.saturating_add(samples);
+    }
+
+    fn advance_elapsed(&mut self, elapsed: Duration) -> u64 {
+        let exact_samples =
+            elapsed.as_secs_f64() * f64::from(self.sample_rate) + self.fractional_samples;
+        let whole_samples = exact_samples.floor().max(0.0);
+        self.fractional_samples = exact_samples - whole_samples;
+        whole_samples as u64
+    }
+
+    fn seek(&mut self, position: f64) {
+        self.sample_cursor = (position.max(0.0) * f64::from(self.sample_rate)).round() as u64;
+        self.fractional_samples = 0.0;
+    }
+}
+
+#[derive(Debug)]
 struct PlaybackClock {
     source: ClockSource,
     anchor: Instant,
     anchor_position: f64,
+    audio: Option<AudioSampleSource>,
+    last_tick: Instant,
 }
 
 impl PlaybackClock {
     fn start(source: ClockSource, position: f64) -> Self {
+        let now = Instant::now();
         Self {
             source,
-            anchor: Instant::now(),
+            anchor: now,
             anchor_position: position.max(0.0),
+            audio: None,
+            last_tick: now,
+        }
+    }
+
+    fn start_audio(position: f64, sample_rate: u32) -> Self {
+        let now = Instant::now();
+        Self {
+            source: ClockSource::AudioMaster,
+            anchor: now,
+            anchor_position: position.max(0.0),
+            audio: Some(AudioSampleSource::new(position, sample_rate)),
+            last_tick: now,
         }
     }
 
@@ -289,12 +426,41 @@ impl PlaybackClock {
     }
 
     fn position(&self) -> f64 {
-        self.anchor_position + self.anchor.elapsed().as_secs_f64()
+        self.audio
+            .as_ref()
+            .map(AudioSampleSource::position)
+            .unwrap_or_else(|| self.anchor_position + self.anchor.elapsed().as_secs_f64())
+    }
+
+    fn tick(&mut self) -> f64 {
+        let samples = if let Some(audio) = self.audio.as_mut() {
+            let elapsed = self.last_tick.elapsed();
+            self.last_tick = Instant::now();
+            Some(audio.advance_elapsed(elapsed))
+        } else {
+            None
+        };
+        if let Some(samples) = samples {
+            self.advance_audio_samples(samples);
+        }
+        self.position()
+    }
+
+    fn advance_audio_samples(&mut self, samples: u64) {
+        if let Some(audio) = self.audio.as_mut() {
+            audio.advance_samples(samples);
+        }
     }
 
     fn seek(&mut self, position: f64) {
-        self.anchor = Instant::now();
-        self.anchor_position = position.max(0.0);
+        let now = Instant::now();
+        self.last_tick = now;
+        if let Some(audio) = self.audio.as_mut() {
+            audio.seek(position);
+        } else {
+            self.anchor = now;
+            self.anchor_position = position.max(0.0);
+        }
     }
 }
 
@@ -698,6 +864,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         preview_cancel: Mutex::new(None),
         preview_in_flight: AtomicBool::new(false),
         preview_cache: Mutex::new(PreviewCache::default()),
+        preview_cache_hits: AtomicU64::new(0),
         gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     };
@@ -849,6 +1016,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         preview_cancel: Mutex::new(None),
         preview_in_flight: AtomicBool::new(false),
         preview_cache: Mutex::new(PreviewCache::default()),
+        preview_cache_hits: AtomicU64::new(0),
         gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     });
@@ -1147,13 +1315,32 @@ fn request_preview_internal(
         show_synthetic_preview(&state, &weak);
         return;
     };
+    let cached_frame = {
+        let mut preview_cache = lock(&state.preview_cache);
+        preview_cache.cached_frame(&clip_id, source_time)
+    };
+    if let Some(frame) = cached_frame {
+        let _ = lock(&state.preview_cancel).take();
+        state.preview_in_flight.store(false, Ordering::Release);
+        state.preview_cache_hits.fetch_add(1, Ordering::AcqRel);
+        *lock(&state.preview) = Some(frame.clone());
+        state.preview_synthetic.store(false, Ordering::Release);
+        if let Some(app) = weak.upgrade() {
+            refresh_preview_surface(&app, &state);
+            app.set_preview_image(frame_image(&frame));
+            app.set_has_preview(true);
+            app.set_preview_synthetic(false);
+            app.set_status_left(format!("Preview cache hit at {timeline_time:.2}s").into());
+        }
+        return;
+    }
     let Some(tools) = state.tools.clone() else {
         state.preview_in_flight.store(false, Ordering::Release);
         let _ = lock(&state.preview_cancel).take();
         show_synthetic_preview(&state, &weak);
         return;
     };
-    lock(&state.preview_cache).mark_pending(&clip_id);
+    lock(&state.preview_cache).mark_pending_at(&clip_id, source_time);
     if let Some(app) = weak.upgrade() {
         refresh_preview_surface(&app, &state);
     }
@@ -1167,8 +1354,22 @@ fn request_preview_internal(
                     return;
                 }
                 *lock(&state.preview) = Some(frame.clone());
-                lock(&state.preview_cache).mark_ready(&clip_id, frame.clone());
+                lock(&state.preview_cache).mark_thumbnail_ready_at(
+                    &clip_id,
+                    source_time,
+                    frame.clone(),
+                );
                 state.preview_synthetic.store(false, Ordering::Relaxed);
+                let waveform_result =
+                    decode_audio_waveform_with_cancel(&tools, &path, 256, &cancellation);
+                if !state.preview_generation.is_current(generation) {
+                    return;
+                }
+                if let Ok(peaks) = waveform_result {
+                    lock(&state.preview_cache).mark_waveform_ready(&clip_id, peaks);
+                } else {
+                    lock(&state.preview_cache).mark_waveform_failed(&clip_id);
+                }
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     if !callback_state.preview_generation.is_current(generation) {
                         return;
@@ -2037,8 +2238,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 if app.get_is_playing() {
                     timer.stop();
                     let position = lock(&state.playback_clock)
-                        .as_ref()
-                        .map(PlaybackClock::position)
+                        .as_mut()
+                        .map(PlaybackClock::tick)
                         .unwrap_or_else(|| f64::from(app.get_playhead_seconds()));
                     *lock(&state.playback_clock) = None;
                     app.set_playhead_seconds(position as f32);
@@ -2049,13 +2250,13 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     return;
                 }
                 let playhead = f64::from(app.get_playhead_seconds());
-                let (source_path, has_audio) = {
+                let (source_path, audio_sample_rate) = {
                     let session = lock(&state.session);
                     let source_path = timeline_clips(&session.project)
                         .into_iter()
                         .find(|clip| playhead >= clip.start_time && playhead < clip.end_time())
                         .map(|clip| clip.source_path.clone());
-                    let has_audio = source_path
+                    let audio_sample_rate = source_path
                         .as_deref()
                         .zip(state.tools.as_ref())
                         .and_then(|(path, tools)| {
@@ -2063,16 +2264,21 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                             path.is_file().then(|| probe_media(tools, path).ok())
                         })
                         .flatten()
-                        .map(|probe| probe.has_audio)
-                        .unwrap_or(false);
-                    (source_path, has_audio)
+                        .filter(|probe| probe.has_audio)
+                        .and_then(|probe| probe.audio_sample_rate);
+                    (source_path, audio_sample_rate)
                 };
+                let has_audio = audio_sample_rate.is_some();
                 let source = if has_audio {
                     ClockSource::AudioMaster
                 } else {
                     ClockSource::MonotonicFallback
                 };
-                *lock(&state.playback_clock) = Some(PlaybackClock::start(source, playhead));
+                *lock(&state.playback_clock) = Some(if let Some(sample_rate) = audio_sample_rate {
+                    PlaybackClock::start_audio(playhead, sample_rate)
+                } else {
+                    PlaybackClock::start(source, playhead)
+                });
                 app.set_playback_clock_source(
                     if has_audio {
                         "Audio master"
@@ -2110,8 +2316,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     move || {
                         if let Some(app) = weak.upgrade() {
                             let position = lock(&timer_state.playback_clock)
-                                .as_ref()
-                                .map(PlaybackClock::position);
+                                .as_mut()
+                                .map(PlaybackClock::tick);
                             let Some(position) = position else {
                                 return;
                             };
@@ -2393,6 +2599,7 @@ fn main() -> Result<(), String> {
         preview_cancel: Mutex::new(None),
         preview_in_flight: AtomicBool::new(false),
         preview_cache: Mutex::new(PreviewCache::default()),
+        preview_cache_hits: AtomicU64::new(0),
         gesture: Mutex::new(None),
         playback_clock: Mutex::new(None),
     });
@@ -2726,6 +2933,7 @@ mod tests {
             preview_cancel: Mutex::new(None),
             preview_in_flight: AtomicBool::new(false),
             preview_cache: Mutex::new(PreviewCache::default()),
+            preview_cache_hits: AtomicU64::new(0),
             gesture: Mutex::new(None),
             playback_clock: Mutex::new(None),
         });
@@ -2961,7 +3169,7 @@ mod tests {
         cache.mark_failed(&clip.id);
         assert_eq!(
             cache.status_for(&clip),
-            "Thumbnail failed · retry on demand"
+            "Thumbnail failed · waveform pending · retry on demand"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3049,5 +3257,103 @@ mod tests {
         let second = generation.next();
         assert!(generation.is_current(second));
         assert!(!generation.is_current(first));
+    }
+
+    #[test]
+    fn audio_master_clock_advances_decoded_preview_frames_from_samples() {
+        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let dir =
+            std::env::temp_dir().join(format!("loom-video-audio-clock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = create_workflow_media(&tools, &dir).expect("create audio/video fixture");
+        let probe = probe_media(&tools, &source).expect("probe audio/video fixture");
+        assert!(probe.has_audio);
+        let sample_rate = probe
+            .audio_sample_rate
+            .expect("audio fixture must expose a sample rate");
+
+        let mut clock = PlaybackClock::start_audio(0.0, sample_rate);
+        assert_eq!(clock.source(), ClockSource::AudioMaster);
+        let first_frame = decode_preview_frame(&tools, &source, clock.position(), 320, 180)
+            .expect("decode first preview frame");
+        clock.advance_audio_samples(u64::from(sample_rate) / 2);
+        assert!((clock.position() - 0.5).abs() < 1e-6);
+        let second_frame = decode_preview_frame(&tools, &source, clock.position(), 320, 180)
+            .expect("decode advanced preview frame");
+        assert_ne!(first_frame.pixels, second_frame.pixels);
+
+        let fallback = PlaybackClock::start(ClockSource::MonotonicFallback, 0.0);
+        assert_eq!(fallback.source(), ClockSource::MonotonicFallback);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preview_request_generates_waveform_and_serves_cached_frame() {
+        set_platform();
+        let tools = discover_media_tools().expect("FFmpeg is required for preview cache test");
+        let dir = std::env::temp_dir().join(format!(
+            "loom-video-preview-cache-hit-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = create_workflow_media(&tools, &dir).expect("create preview fixture");
+        let app = VideoApp::new().expect("create VideoApp");
+        let mut project = sample_project();
+        project.tracks[0].clips[0].source_path = source.to_string_lossy().into_owned();
+        project.tracks[0].clips[0].duration = 4.0;
+        project.tracks[0].clips[0].out_point = 4.0;
+        let state = Arc::new(AppState {
+            session: Mutex::new(VideoSession::new(project)),
+            save_path: Mutex::new(None),
+            dialogs: Arc::new(ScriptedFileDialogs::default()),
+            selected_clip: Mutex::new(0),
+            preview: Mutex::new(Some(procedural_preview())),
+            preview_synthetic: AtomicBool::new(true),
+            tools: Some(tools),
+            exporting: AtomicBool::new(false),
+            export_cancel: ExportCancellation::default(),
+            preview_generation: PreviewGeneration::default(),
+            preview_cancel: Mutex::new(None),
+            preview_in_flight: AtomicBool::new(false),
+            preview_cache: Mutex::new(PreviewCache::default()),
+            preview_cache_hits: AtomicU64::new(0),
+            gesture: Mutex::new(None),
+            playback_clock: Mutex::new(None),
+        });
+        let clip = lock(&state.session).project.tracks[0].clips[0].clone();
+
+        request_preview(state.clone(), app.as_weak(), 0.0);
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let ready = lock(&state.preview_cache)
+                .entries
+                .iter()
+                .find(|entry| entry.clip_id == clip.id)
+                .map(|entry| {
+                    entry.thumbnail == CacheState::Ready
+                        && entry.waveform == CacheState::Ready
+                        && entry
+                            .waveform_peaks
+                            .as_ref()
+                            .is_some_and(|peaks| !peaks.is_empty())
+                })
+                .unwrap_or(false);
+            if ready || Instant::now() >= deadline {
+                assert!(ready, "preview cache did not become ready");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let cached = lock(&state.preview_cache)
+            .cached_frame(&clip.id, 0.0)
+            .expect("generated preview frame should be cached");
+        assert!(!cached.pixels.is_empty());
+
+        request_preview_internal(state.clone(), app.as_weak(), 0.0, true);
+        assert_eq!(state.preview_cache_hits.load(Ordering::Acquire), 1);
+        assert!(!state.preview_in_flight.load(Ordering::Acquire));
+        assert_eq!(lock(&state.preview).as_ref(), Some(&cached));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
