@@ -46,6 +46,7 @@ export component PhotoApp inherits Window {
     in property <string> active-layer-id: "";
     in property <string> active-layer-kind: "Pixel";
     in property <bool> active-layer-transform-enabled: true;
+    in property <bool> active-layer-crop-enabled: true;
     in property <string> active-layer-bounds: "—";
     in property <float> active-layer-x: 0.0;
     in property <float> active-layer-y: 0.0;
@@ -56,10 +57,13 @@ export component PhotoApp inherits Window {
     in property <float> selected-layer-bounds-y: 0.0;
     in property <float> selected-layer-bounds-width: 1.0;
     in property <float> selected-layer-bounds-height: 1.0;
+    in property <bool> has-selected-layer-bounds: false;
     in property <string> selection-geometry: "None";
     in property <string> crop-geometry: "None";
+    in property <string> active-layer-crop-geometry: "None";
     in property <bool> has-selection: false;
     in property <bool> has-crop: false;
+    in property <bool> has-active-layer-crop: false;
 
     in-out property <int> active-tool: 0;
     // Pan is a viewport mode, not a paint/select tool. Keep it separate from
@@ -71,10 +75,13 @@ export component PhotoApp inherits Window {
     in-out property <float> brightness-value: 0.0;
     in-out property <float> contrast-value: 0.0;
     in-out property <float> saturation-value: 0.0;
+    in property <bool> brightness-enabled: false;
+    in property <bool> contrast-enabled: false;
+    in property <bool> saturation-enabled: false;
     in-out property <float> zoom-value: 72.0;
 
-    property <length> viewport-pan-x: 0px;
-    property <length> viewport-pan-y: 0px;
+    in-out property <length> viewport-pan-x: 0px;
+    in-out property <length> viewport-pan-y: 0px;
     property <bool> show-grid: true;
     in-out property <bool> show-inspector: true;
 
@@ -99,8 +106,10 @@ export component PhotoApp inherits Window {
     callback layer-transform-changed(float, float, float, float, float);
     callback select-layer-bounds;
     callback crop-to-selection;
+    callback crop-active-layer-to-selection;
     callback clear-selection;
     callback clear-crop;
+    callback clear-active-layer-crop;
     callback import-image;
     callback export-png;
     callback export-jpeg;
@@ -176,9 +185,13 @@ export component PhotoApp inherits Window {
                     brightness-value: root.brightness-value;
                     contrast-value: root.contrast-value;
                     saturation-value: root.saturation-value;
+                    brightness-enabled: root.brightness-enabled;
+                    contrast-enabled: root.contrast-enabled;
+                    saturation-enabled: root.saturation-enabled;
                     active-layer-id: root.active-layer-id;
                     active-layer-kind: root.active-layer-kind;
                     active-layer-transform-enabled: root.active-layer-transform-enabled;
+                    active-layer-crop-enabled: root.active-layer-crop-enabled;
                     active-layer-bounds: root.active-layer-bounds;
                     active-layer-x: root.active-layer-x;
                     active-layer-y: root.active-layer-y;
@@ -187,8 +200,10 @@ export component PhotoApp inherits Window {
                     active-layer-rotation: root.active-layer-rotation;
                     selection-geometry: root.selection-geometry;
                     crop-geometry: root.crop-geometry;
+                    active-layer-crop-geometry: root.active-layer-crop-geometry;
                     has-selection: root.has-selection;
                     has-crop: root.has-crop;
+                    has-active-layer-crop: root.has-active-layer-crop;
                     has-preview: root.has-preview;
                     select-layer(index) => { root.select-layer(index); }
                     toggle-layer-visibility(index) => { root.toggle-layer-visibility(index); }
@@ -204,8 +219,10 @@ export component PhotoApp inherits Window {
                     layer-transform-changed(x, y, scale-x, scale-y, rotation) => { root.layer-transform-changed(x, y, scale-x, scale-y, rotation); }
                     select-layer-bounds => { root.select-layer-bounds(); }
                     crop-to-selection => { root.crop-to-selection(); }
+                    crop-active-layer-to-selection => { root.crop-active-layer-to-selection(); }
                     clear-selection => { root.clear-selection(); }
                     clear-crop => { root.clear-crop(); }
+                    clear-active-layer-crop => { root.clear-active-layer-crop(); }
                     import-image => { root.import-image(); }
                     export-png => { root.export-png(); }
                     export-jpeg => { root.export-jpeg(); }
@@ -220,6 +237,7 @@ export component PhotoApp inherits Window {
                     selected-layer-bounds-y: root.selected-layer-bounds-y;
                     selected-layer-bounds-width: root.selected-layer-bounds-width;
                     selected-layer-bounds-height: root.selected-layer-bounds-height;
+                    has-selected-layer-bounds: root.has-selected-layer-bounds;
                     show-grid: root.show-grid;
                     active-tool: root.active-tool;
                     pan-mode <=> root.pan-mode;
@@ -241,9 +259,13 @@ export component PhotoApp inherits Window {
                     brightness-value: root.brightness-value;
                     contrast-value: root.contrast-value;
                     saturation-value: root.saturation-value;
+                    brightness-enabled: root.brightness-enabled;
+                    contrast-enabled: root.contrast-enabled;
+                    saturation-enabled: root.saturation-enabled;
                     active-layer-id: root.active-layer-id;
                     active-layer-kind: root.active-layer-kind;
                     active-layer-transform-enabled: root.active-layer-transform-enabled;
+                    active-layer-crop-enabled: root.active-layer-crop-enabled;
                     active-layer-bounds: root.active-layer-bounds;
                     active-layer-x: root.active-layer-x;
                     active-layer-y: root.active-layer-y;
@@ -252,8 +274,10 @@ export component PhotoApp inherits Window {
                     active-layer-rotation: root.active-layer-rotation;
                     selection-geometry: root.selection-geometry;
                     crop-geometry: root.crop-geometry;
+                    active-layer-crop-geometry: root.active-layer-crop-geometry;
                     has-selection: root.has-selection;
                     has-crop: root.has-crop;
+                    has-active-layer-crop: root.has-active-layer-crop;
                     has-preview: root.has-preview;
                     select-layer(index) => { root.select-layer(index); }
                     toggle-layer-visibility(index) => { root.toggle-layer-visibility(index); }
@@ -269,8 +293,10 @@ export component PhotoApp inherits Window {
                     layer-transform-changed(x, y, scale-x, scale-y, rotation) => { root.layer-transform-changed(x, y, scale-x, scale-y, rotation); }
                     select-layer-bounds => { root.select-layer-bounds(); }
                     crop-to-selection => { root.crop-to-selection(); }
+                    crop-active-layer-to-selection => { root.crop-active-layer-to-selection(); }
                     clear-selection => { root.clear-selection(); }
                     clear-crop => { root.clear-crop(); }
+                    clear-active-layer-crop => { root.clear-active-layer-crop(); }
                     import-image => { root.import-image(); }
                     export-png => { root.export-png(); }
                     export-jpeg => { root.export-jpeg(); }

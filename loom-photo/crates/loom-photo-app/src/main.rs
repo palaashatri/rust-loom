@@ -194,11 +194,20 @@ fn initial_canvas(args: &Args) -> Result<PhotoCanvas, String> {
 
 fn adjustment_value(document: &PhotoDocument, kind: &str) -> f32 {
     document
-        .layers
-        .iter()
-        .find(|layer| layer.adjustment_type.as_deref() == Some(kind))
+        .active_layer()
+        .filter(|layer| {
+            layer.kind == loom_photo_core::LayerKind::Adjustment
+                && layer.adjustment_type.as_deref() == Some(kind)
+        })
         .map(|layer| layer.adjustment_value)
         .unwrap_or(0.0)
+}
+
+fn adjustment_enabled(document: &PhotoDocument, kind: &str) -> bool {
+    document.active_layer().is_some_and(|layer| {
+        layer.kind == loom_photo_core::LayerKind::Adjustment
+            && layer.adjustment_type.as_deref() == Some(kind)
+    })
 }
 
 fn transform_components(transform: AffineTransform2D) -> (f32, f32, f32, f32, f32) {
@@ -292,6 +301,9 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
     app.set_brightness_value(adjustment_value(document, "brightness") * 100.0);
     app.set_contrast_value(adjustment_value(document, "contrast") * 100.0);
     app.set_saturation_value(adjustment_value(document, "saturation") * 100.0);
+    app.set_brightness_enabled(adjustment_enabled(document, "brightness"));
+    app.set_contrast_enabled(adjustment_enabled(document, "contrast"));
+    app.set_saturation_enabled(adjustment_enabled(document, "saturation"));
 
     app.set_selection_geometry(SharedString::from(format_rect(document.selection)));
     app.set_crop_geometry(SharedString::from(format_rect(document.crop)));
@@ -306,6 +318,7 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
             active.kind,
             loom_photo_core::LayerKind::Pixel
         ));
+        app.set_active_layer_crop_enabled(matches!(active.kind, loom_photo_core::LayerKind::Pixel));
         app.set_active_layer_x(x);
         app.set_active_layer_y(y);
         app.set_active_layer_scale_x(scale_x);
@@ -313,6 +326,7 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
         app.set_active_layer_rotation(rotation);
         let bounds = session.canvas.active_layer_bounds();
         app.set_active_layer_bounds(SharedString::from(format_rect(bounds)));
+        app.set_has_selected_layer_bounds(bounds.is_some());
         if let Some(bounds) = bounds {
             let width = document.width.max(1) as f32;
             let height = document.height.max(1) as f32;
@@ -326,6 +340,8 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
             app.set_selected_layer_bounds_width(1.0);
             app.set_selected_layer_bounds_height(1.0);
         }
+        app.set_active_layer_crop_geometry(SharedString::from(format_rect(active.crop)));
+        app.set_has_active_layer_crop(active.crop.is_some());
         app.set_active_blend_mode(
             match active.blend_mode {
                 BlendMode::Normal => "Normal",
@@ -344,7 +360,22 @@ fn refresh_photo(app: &PhotoApp, session: &PhotoSession) -> Result<(), String> {
         app.set_active_layer_id("".into());
         app.set_active_layer_kind("None".into());
         app.set_active_layer_transform_enabled(false);
+        app.set_active_layer_crop_enabled(false);
         app.set_active_layer_bounds("—".into());
+        app.set_active_layer_crop_geometry("None".into());
+        app.set_has_active_layer_crop(false);
+        app.set_has_selected_layer_bounds(false);
+        app.set_selected_layer_bounds_x(0.0);
+        app.set_selected_layer_bounds_y(0.0);
+        app.set_selected_layer_bounds_width(0.0);
+        app.set_selected_layer_bounds_height(0.0);
+        app.set_active_layer_x(0.0);
+        app.set_active_layer_y(0.0);
+        app.set_active_layer_scale_x(100.0);
+        app.set_active_layer_scale_y(100.0);
+        app.set_active_layer_rotation(0.0);
+        app.set_active_blend_mode("Normal".into());
+        app.set_active_layer_opacity(100.0);
     }
 
     let composite = session.canvas.composite()?;
@@ -1031,6 +1062,34 @@ fn wire_add_layer_callback(app: &PhotoApp, state: &Rc<GuiState>) {
     });
 }
 
+fn add_adjustment_layer(state: &GuiState, app: &PhotoApp) -> Result<(), String> {
+    {
+        let mut session = state.session.borrow_mut();
+        let count = session.canvas.document.layers.len() + 1;
+        session.add_adjustment(
+            format!("adjustment-{count}"),
+            format!("Brightness {count}"),
+            "brightness",
+            0.0,
+        );
+    }
+    refresh_photo_with_state(app, state)
+}
+
+/// Wire the adjustment-layer command once so toolbar, inspector, palette, and
+/// deterministic journeys all exercise the same controller-backed operation.
+fn wire_add_adjustment_callback(app: &PhotoApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_add_adjustment(move || {
+        if let Some(app) = app_ref.upgrade() {
+            if let Err(error) = add_adjustment_layer(&state, &app) {
+                set_status(&app, format!("Add adjustment failed: {error}"));
+            }
+        }
+    });
+}
+
 fn wire_move_layer_callback(app: &PhotoApp, state: &Rc<GuiState>) {
     let state = state.clone();
     let app_ref = app.as_weak();
@@ -1092,6 +1151,15 @@ fn capture_photo_journey_step(
     ))
 }
 
+fn payload_digests(canvas: &PhotoCanvas) -> Vec<Option<u64>> {
+    canvas
+        .document
+        .layers
+        .iter()
+        .map(|layer| canvas.layer_image(&layer.id).map(RgbaImage::pixel_digest))
+        .collect()
+}
+
 /// Record the controller-backed Photo editing journey with per-step screenshots. The existing
 /// keyboard palette recorder remains a separate regression at the end of this journey.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
@@ -1135,7 +1203,9 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     )?);
     wire_transform_callback(&app, &state);
     wire_selection_callbacks(&app, &state);
+    wire_add_adjustment_callback(&app, &state);
     wire_adjustment_callbacks(&app, &state);
+    wire_tool_callback(&app);
     wire_import_callback(&app, &state);
     wire_export_callbacks(&app, &state);
     refresh_photo_with_state(&app, &state)?;
@@ -1173,6 +1243,13 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     )?);
 
     app.invoke_layer_transform_changed(36.0, 20.0, 118.0, 96.0, 8.0);
+    {
+        let session = state.session.borrow();
+        let transformed = &session.canvas.document.layers[0].transform;
+        if transformed.tx.abs() < f32::EPSILON || transformed.ty.abs() < f32::EPSILON {
+            return Err("journey transform did not mutate the imported layer".into());
+        }
+    }
     set_status(&app, "Transformed selected layer");
     steps.push(capture_photo_journey_step(
         &app,
@@ -1182,43 +1259,99 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         3,
         "transformed",
     )?);
-    if state.session.borrow().canvas.document.layers[0]
-        .transform
-        .tx
-        .abs()
-        < f32::EPSILON
+    app.invoke_select_tool("pan".into());
+    app.set_zoom_value(125.0);
+    app.set_viewport_pan_x(36.0);
+    app.set_viewport_pan_y(-18.0);
+    if !app.get_pan_mode()
+        || (app.get_zoom_value() - 125.0).abs() > 0.001
+        || (app.get_viewport_pan_x() - 36.0).abs() > 0.001
+        || (app.get_viewport_pan_y() + 18.0).abs() > 0.001
     {
-        return Err("journey transform did not mutate the imported layer".into());
+        return Err("journey pan/zoom did not persist non-default viewport state".into());
     }
+    set_status(&app, "Panned viewport at 125% zoom");
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 4, "pan-zoom",
+    )?);
 
     app.invoke_select_layer_bounds();
+    if !app.get_has_selected_layer_bounds() {
+        return Err("journey layer bounds selection did not expose bounds".into());
+    }
     set_status(&app, "Selected transformed layer bounds");
     steps.push(capture_photo_journey_step(
         &app,
         &state,
         args,
         out_dir,
-        4,
+        5,
         "selection",
     )?);
     app.invoke_crop_to_selection();
+    if state.session.borrow().canvas.document.crop.is_none() {
+        return Err("journey canvas crop callback did not mutate document state".into());
+    }
     set_status(&app, "Cropped preview to selection");
     steps.push(capture_photo_journey_step(
-        &app, &state, args, out_dir, 5, "cropped",
+        &app, &state, args, out_dir, 6, "cropped",
     )?);
-    app.invoke_brightness_changed(35.0);
-    set_status(&app, "Adjusted brightness");
+
+    app.invoke_crop_active_layer_to_selection();
+    {
+        let session = state.session.borrow();
+        if session.canvas.document.layers[0].crop.is_none() || !app.get_has_active_layer_crop() {
+            return Err("journey active-layer crop callback did not mutate document state".into());
+        }
+    }
+    set_status(&app, "Cropped active layer to selection");
     steps.push(capture_photo_journey_step(
-        &app, &state, args, out_dir, 6, "adjusted",
+        &app,
+        &state,
+        args,
+        out_dir,
+        7,
+        "layer-cropped",
     )?);
+
+    app.invoke_add_adjustment();
+    {
+        let session = state.session.borrow();
+        let Some(active) = session.canvas.document.active_layer() else {
+            return Err("journey adjustment layer was not created".into());
+        };
+        if active.kind != loom_photo_core::LayerKind::Adjustment
+            || active.adjustment_type.as_deref() != Some("brightness")
+        {
+            return Err("journey adjustment did not create an active brightness layer".into());
+        }
+    }
+    set_status(&app, "Added active brightness adjustment");
+    steps.push(capture_photo_journey_step(
+        &app,
+        &state,
+        args,
+        out_dir,
+        8,
+        "adjustment-layer",
+    )?);
+
+    app.invoke_brightness_changed(35.0);
     if (adjustment_value(&state.session.borrow().canvas.document, "brightness") - 0.35).abs()
         > 0.001
     {
-        return Err("journey adjustment did not mutate document state".into());
+        return Err("journey adjustment did not mutate active layer state".into());
     }
+    set_status(&app, "Adjusted brightness");
+    steps.push(capture_photo_journey_step(
+        &app, &state, args, out_dir, 9, "adjusted",
+    )?);
 
     if !state.session.borrow_mut().undo() {
         return Err("journey adjustment undo was unavailable".into());
+    }
+    if adjustment_value(&state.session.borrow().canvas.document, "brightness").abs() > 0.001 {
+        return Err("journey undo did not restore brightness".into());
     }
     set_status(&app, "Undid brightness adjustment");
     refresh_photo_with_state(&app, &state)?;
@@ -1227,45 +1360,51 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         &state,
         args,
         out_dir,
-        7,
+        10,
         "undo-adjustment",
     )?);
-    if adjustment_value(&state.session.borrow().canvas.document, "brightness").abs() > 0.001 {
-        return Err("journey undo did not restore brightness".into());
-    }
-
+    let (pre_save_metadata, pre_save_payloads, pre_save_composite_digest) = {
+        let session = state.session.borrow();
+        let composite = session.canvas.composite()?;
+        (
+            session.canvas.document.metadata_digest(),
+            payload_digests(&session.canvas),
+            composite.pixel_digest(),
+        )
+    };
     save_current_project(&app, &state, false)?;
     steps.push(capture_photo_journey_step(
-        &app, &state, args, out_dir, 8, "saved",
+        &app, &state, args, out_dir, 11, "saved",
     )?);
     let saved_bytes =
         std::fs::read(&save_path).map_err(|error| format!("read saved project: {error}"))?;
     let saved_canvas = load_photo_canvas(&saved_bytes)?;
-    let saved_digest = saved_canvas.document.metadata_digest();
+    let reopened_metadata = saved_canvas.document.metadata_digest();
+    let reopened_payloads = payload_digests(&saved_canvas);
+    let reopened_composite_digest = saved_canvas.composite()?.pixel_digest();
+    if reopened_metadata != pre_save_metadata
+        || reopened_payloads != pre_save_payloads
+        || reopened_composite_digest != pre_save_composite_digest
+    {
+        return Err("journey save/reopen changed metadata, payload, or composite state".into());
+    }
     *state.session.borrow_mut() = PhotoSession::new(saved_canvas);
     *state.save_path.borrow_mut() = Some(save_path.clone());
     refresh_photo_with_state(&app, &state)?;
     steps.push(capture_photo_journey_step(
-        &app, &state, args, out_dir, 9, "reopened",
+        &app, &state, args, out_dir, 12, "reopened",
     )?);
-    if state.session.borrow().canvas.document.metadata_digest() != saved_digest {
-        return Err("journey save/reopen changed persisted metadata".into());
-    }
 
     app.invoke_export_png();
     let exported =
         std::fs::read(&export_path).map_err(|error| format!("read exported PNG: {error}"))?;
     let decoded_export = decode_raster(&exported)?;
-    if (decoded_export.width, decoded_export.height)
-        != (
-            state.session.borrow().canvas.document.width,
-            state.session.borrow().canvas.document.height,
-        )
-    {
-        return Err("journey PNG export dimensions did not match the document".into());
+    let expected_export = state.session.borrow().canvas.composite()?;
+    if decoded_export != expected_export {
+        return Err("journey PNG export pixels did not match the compositor".into());
     }
     steps.push(capture_photo_journey_step(
-        &app, &state, args, out_dir, 10, "exported",
+        &app, &state, args, out_dir, 13, "exported",
     )?);
 
     app.invoke_import_image();
@@ -1277,7 +1416,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         &state,
         args,
         out_dir,
-        11,
+        14,
         "import-failure",
     )?);
 
@@ -1290,7 +1429,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         &state,
         args,
         out_dir,
-        12,
+        15,
         "export-failure",
     )?);
 
@@ -1303,7 +1442,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         &state,
         args,
         out_dir,
-        13,
+        16,
         "import-cancel",
     )?);
 
@@ -1355,35 +1494,40 @@ fn set_status(app: &PhotoApp, message: impl Into<SharedString>) {
     app.set_status_left(message.into());
 }
 
-fn update_adjustment(state: &GuiState, app: &PhotoApp, kind: &str, display_name: &str, value: f32) {
-    let mut session = state.session.borrow_mut();
-    let current = adjustment_value(&session.canvas.document, kind);
-    let normalized = (value / 100.0).clamp(-1.0, 1.0);
-    if (current - normalized).abs() < 0.0001 {
-        return;
+fn update_adjustment(
+    state: &GuiState,
+    app: &PhotoApp,
+    kind: &str,
+    _display_name: &str,
+    value: f32,
+) -> Result<bool, String> {
+    let changed = {
+        let mut session = state.session.borrow_mut();
+        let Some(active) = session.canvas.document.active_layer() else {
+            return Err("select a matching adjustment layer first".into());
+        };
+        if active.kind != loom_photo_core::LayerKind::Adjustment
+            || active.adjustment_type.as_deref() != Some(kind)
+        {
+            return Err(format!("select the {kind} adjustment layer first"));
+        }
+        let normalized = (value / 100.0).clamp(-1.0, 1.0);
+        if (active.adjustment_value - normalized).abs() < 0.0001 {
+            false
+        } else {
+            session.checkpoint();
+            // The active-layer check above makes this index stable across the
+            // mutable borrow and prevents a similarly named hidden layer from
+            // receiving the edit.
+            let index = session.canvas.document.active_layer_index;
+            session.canvas.document.layers[index].adjustment_value = normalized;
+            true
+        }
+    };
+    if changed {
+        refresh_photo_with_state(app, state)?;
     }
-    session.checkpoint();
-    if let Some(layer) = session
-        .canvas
-        .document
-        .layers
-        .iter_mut()
-        .find(|layer| layer.adjustment_type.as_deref() == Some(kind))
-    {
-        layer.adjustment_value = normalized;
-    } else {
-        let id = format!("adjust-{kind}");
-        session.canvas.document.add_layer(Layer::new_adjustment(
-            id,
-            display_name,
-            kind,
-            normalized,
-        ));
-    }
-    drop(session);
-    if let Err(error) = refresh_photo_with_state(app, state) {
-        set_status(app, format!("Preview failed: {error}"));
-    }
+    Ok(changed)
 }
 
 fn apply_layer_transform(
@@ -1443,6 +1587,33 @@ fn crop_to_selection(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
         return Err("select a layer region before cropping".into());
     };
     let changed = state.session.borrow_mut().set_crop(Some(selection))?;
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn crop_active_layer_to_selection(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
+    let (index, selection) = {
+        let session = state.session.borrow();
+        let Some(selection) = session.canvas.document.selection else {
+            return Err("select a layer region before cropping the active layer".into());
+        };
+        (session.canvas.document.active_layer_index, selection)
+    };
+    let changed = state
+        .session
+        .borrow_mut()
+        .set_layer_crop(index, Some(selection))?;
+    if changed {
+        refresh_photo_with_state(app, state)?;
+    }
+    Ok(changed)
+}
+
+fn clear_active_layer_crop(state: &GuiState, app: &PhotoApp) -> Result<bool, String> {
+    let index = state.session.borrow().canvas.document.active_layer_index;
+    let changed = state.session.borrow_mut().set_layer_crop(index, None)?;
     if changed {
         refresh_photo_with_state(app, state)?;
     }
@@ -1524,6 +1695,28 @@ fn wire_selection_callbacks(app: &PhotoApp, state: &Rc<GuiState>) {
             }
         });
     }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_crop_active_layer_to_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = crop_active_layer_to_selection(&state, &app) {
+                    set_status(&app, format!("Layer crop failed: {error}"));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_clear_active_layer_crop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if let Err(error) = clear_active_layer_crop(&state, &app) {
+                    set_status(&app, format!("Clear layer crop failed: {error}"));
+                }
+            }
+        });
+    }
 }
 
 fn wire_adjustment_callbacks(app: &PhotoApp, state: &Rc<GuiState>) {
@@ -1537,21 +1730,39 @@ fn wire_adjustment_callbacks(app: &PhotoApp, state: &Rc<GuiState>) {
         match kind {
             "brightness" => app.on_brightness_changed(move |value| {
                 if let Some(app) = app_ref.upgrade() {
-                    update_adjustment(&state, &app, kind, display, value);
+                    if let Err(error) = update_adjustment(&state, &app, kind, display, value) {
+                        set_status(&app, format!("Brightness adjustment failed: {error}"));
+                    }
                 }
             }),
             "contrast" => app.on_contrast_changed(move |value| {
                 if let Some(app) = app_ref.upgrade() {
-                    update_adjustment(&state, &app, kind, display, value);
+                    if let Err(error) = update_adjustment(&state, &app, kind, display, value) {
+                        set_status(&app, format!("Contrast adjustment failed: {error}"));
+                    }
                 }
             }),
             _ => app.on_saturation_changed(move |value| {
                 if let Some(app) = app_ref.upgrade() {
-                    update_adjustment(&state, &app, kind, display, value);
+                    if let Err(error) = update_adjustment(&state, &app, kind, display, value) {
+                        set_status(&app, format!("Saturation adjustment failed: {error}"));
+                    }
                 }
             }),
         }
     }
+}
+
+fn wire_tool_callback(app: &PhotoApp) {
+    let app_ref = app.as_weak();
+    app.on_select_tool(move |tool| {
+        if let Some(app) = app_ref.upgrade() {
+            let (active_tool, pan_mode) = photo_tool_state(tool.as_str());
+            app.set_active_tool(active_tool);
+            app.set_pan_mode(pan_mode);
+            set_status(&app, format!("{} tool selected", tool.as_str()));
+        }
+    });
 }
 
 fn wire_import_callback(app: &PhotoApp, state: &Rc<GuiState>) {
@@ -1762,15 +1973,6 @@ fn main() -> Result<(), String> {
     mutate_and_refresh!(on_redo, |session: &mut PhotoSession| {
         session.redo();
     });
-    mutate_and_refresh!(on_add_adjustment, |session: &mut PhotoSession| {
-        let count = session.canvas.document.layers.len() + 1;
-        session.add_adjustment(
-            format!("adjustment-{count}"),
-            format!("Brightness {count}"),
-            "brightness",
-            0.0,
-        );
-    });
     mutate_and_refresh!(on_remove_layer, |session: &mut PhotoSession| {
         let index = session.canvas.document.active_layer_index;
         session.remove_layer(index);
@@ -1856,21 +2058,11 @@ fn main() -> Result<(), String> {
         });
     }
 
-    {
-        let app_ref = app.as_weak();
-        app.on_select_tool(move |tool| {
-            if let Some(app) = app_ref.upgrade() {
-                let (active_tool, pan_mode) = photo_tool_state(tool.as_str());
-                app.set_active_tool(active_tool);
-                app.set_pan_mode(pan_mode);
-                set_status(&app, format!("{} tool selected", tool.as_str()));
-            }
-        });
-    }
-
     wire_transform_callback(&app, &state);
     wire_selection_callbacks(&app, &state);
+    wire_add_adjustment_callback(&app, &state);
     wire_adjustment_callbacks(&app, &state);
+    wire_tool_callback(&app);
     wire_import_callback(&app, &state);
     wire_export_callbacks(&app, &state);
 
@@ -2140,6 +2332,7 @@ mod tests {
         let state = Rc::new(scripted_state());
         wire_transform_callback(&app, &state);
         wire_selection_callbacks(&app, &state);
+        wire_add_adjustment_callback(&app, &state);
         wire_adjustment_callbacks(&app, &state);
         refresh_photo_with_state(&app, &state).expect("initial refresh");
 
@@ -2153,6 +2346,17 @@ mod tests {
         assert!(state.session.borrow().canvas.document.selection.is_some());
         app.invoke_crop_to_selection();
         assert!(state.session.borrow().canvas.document.crop.is_some());
+        app.invoke_add_adjustment();
+        assert_eq!(
+            state
+                .session
+                .borrow()
+                .canvas
+                .document
+                .active_layer()
+                .and_then(|layer| layer.adjustment_type.as_deref()),
+            Some("brightness")
+        );
         app.invoke_brightness_changed(25.0);
         assert!(
             (adjustment_value(&state.session.borrow().canvas.document, "brightness") - 0.25).abs()
@@ -2176,6 +2380,40 @@ mod tests {
         assert_eq!(
             reopened.document.crop,
             state.session.borrow().canvas.document.crop
+        );
+    }
+
+    #[test]
+    fn adjustment_callbacks_are_scoped_to_the_active_adjustment_layer() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        let state = Rc::new(scripted_state());
+        {
+            let mut session = state.session.borrow_mut();
+            session.add_adjustment("brightness", "Brightness", "brightness", 0.0);
+            session.add_adjustment("contrast", "Contrast", "contrast", 0.0);
+            assert!(session.canvas.document.select_layer(1));
+        }
+        wire_adjustment_callbacks(&app, &state);
+        refresh_photo_with_state(&app, &state).expect("initial refresh");
+        assert!(app.get_brightness_enabled());
+        assert!(!app.get_contrast_enabled());
+        app.invoke_brightness_changed(40.0);
+        assert!(
+            (state.session.borrow().canvas.document.layers[1].adjustment_value - 0.4).abs() < 0.001
+        );
+
+        state.session.borrow_mut().canvas.document.select_layer(2);
+        refresh_photo_with_state(&app, &state).expect("contrast refresh");
+        assert!(!app.get_brightness_enabled());
+        assert!(app.get_contrast_enabled());
+        app.invoke_brightness_changed(90.0);
+        assert!(
+            (state.session.borrow().canvas.document.layers[1].adjustment_value - 0.4).abs() < 0.001
+        );
+        app.invoke_contrast_changed(-30.0);
+        assert!(
+            (state.session.borrow().canvas.document.layers[2].adjustment_value + 0.3).abs() < 0.001
         );
     }
 

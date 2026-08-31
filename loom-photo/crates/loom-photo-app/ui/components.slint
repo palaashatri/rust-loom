@@ -91,6 +91,7 @@ export component PhotoCanvas inherits CanvasSurface {
     in property <float> selected-layer-bounds-y: 0.0;
     in property <float> selected-layer-bounds-width: 1.0;
     in property <float> selected-layer-bounds-height: 1.0;
+    in property <bool> has-selected-layer-bounds: false;
     in property <bool> show-grid: true;
     in property <int> active-tool: 0;
     in-out property <bool> pan-mode: false;
@@ -124,6 +125,11 @@ export component PhotoCanvas inherits CanvasSurface {
             if root.has-preview : viewport := Rectangle {
                 property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
                 property <length> scaled-height: max(90px, stage.height * root.zoom-value / 100.0);
+                property <float> document-aspect: root.document-height > 0 ? root.document-width / root.document-height : 1.0;
+                property <length> image-content-width: min(parent.width, parent.height * document-aspect);
+                property <length> image-content-height: min(parent.height, parent.width / document-aspect);
+                property <length> image-content-x: (parent.width - image-content-width) / 2;
+                property <length> image-content-y: (parent.height - image-content-height) / 2;
                 x: (stage.width - self.scaled-width) / 2 + root.viewport-pan-x;
                 y: (stage.height - self.scaled-height) / 2 + root.viewport-pan-y;
                 width: self.scaled-width;
@@ -134,29 +140,35 @@ export component PhotoCanvas inherits CanvasSurface {
                 clip: true;
                 Image {
                     source: root.preview-image;
-                    width: parent.width;
-                    height: parent.height;
-                    image-fit: contain;
+                    x: viewport.image-content-x;
+                    y: viewport.image-content-y;
+                    width: viewport.image-content-width;
+                    height: viewport.image-content-height;
+                    image-fit: fill;
                 }
-                Rectangle {
-                    x: parent.width * root.selected-layer-bounds-x;
-                    y: parent.height * root.selected-layer-bounds-y;
-                    width: max(2px, parent.width * root.selected-layer-bounds-width);
-                    height: max(2px, parent.height * root.selected-layer-bounds-height);
+                if root.has-selected-layer-bounds : Rectangle {
+                    property <length> bounds-x: viewport.image-content-x + viewport.image-content-width * root.selected-layer-bounds-x;
+                    property <length> bounds-y: viewport.image-content-y + viewport.image-content-height * root.selected-layer-bounds-y;
+                    property <length> bounds-width: viewport.image-content-width * root.selected-layer-bounds-width;
+                    property <length> bounds-height: viewport.image-content-height * root.selected-layer-bounds-height;
+                    x: bounds-x;
+                    y: bounds-y;
+                    width: max(2px, bounds-width);
+                    height: max(2px, bounds-height);
                     border-width: 2px;
                     border-color: Theme.palette().selection;
                     background: transparent;
                     accessible-role: AccessibleRole.none;
-                }
-                for corner in [0, 1, 2, 3] : Rectangle {
-                    x: corner == 1 || corner == 3 ? parent.width - 4px : -4px;
-                    y: corner >= 2 ? parent.height - 4px : -4px;
-                    width: 8px;
-                    height: 8px;
-                    border-radius: Theme.tokens.metrics.radius-small;
-                    background: Theme.palette().paper;
-                    border-width: 1px;
-                    border-color: Theme.palette().accent;
+                    for corner in [0, 1, 2, 3] : Rectangle {
+                        x: corner == 1 || corner == 3 ? bounds-width - 4px : -4px;
+                        y: corner >= 2 ? bounds-height - 4px : -4px;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: Theme.tokens.metrics.radius-small;
+                        background: Theme.palette().paper;
+                        border-width: 1px;
+                        border-color: Theme.palette().accent;
+                    }
                 }
             }
 
@@ -206,7 +218,7 @@ export component PhotoCanvas inherits CanvasSurface {
                     }
                 }
                 moved => {
-                    if (self.pressed && root.active-tool == 1) {
+                    if (self.pressed && root.pan-mode) {
                         root.viewport-pan-x = clamp(self.start-pan-x + self.mouse-x - self.pressed-x, -stage.width, stage.width);
                         root.viewport-pan-y = clamp(self.start-pan-y + self.mouse-y - self.pressed-y, -stage.height, stage.height);
                     }
@@ -219,16 +231,17 @@ export component PhotoCanvas inherits CanvasSurface {
 component PhotoAdjustmentRow inherits Rectangle {
     in property <string> label: "Adjustment";
     in-out property <float> value: 0.0;
+    in property <bool> enabled: true;
     callback changed(float);
     height: 56px;
     VerticalLayout {
         spacing: Theme.tokens.space.sm;
         HorizontalLayout {
             height: 20px;
-            Text { text: root.label; font-size: Theme.tokens.typography.body; color: Theme.palette().ink; vertical-alignment: center; horizontal-stretch: 1; }
-            Text { text: Math.round(root.value); font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+            Text { text: root.label; font-size: Theme.tokens.typography.body; color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: Math.round(root.value); font-size: Theme.tokens.typography.caption; color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled; vertical-alignment: center; }
         }
-        RangeSlider { label: root.label; minimum: -100; maximum: 100; value <=> root.value; changed(value) => { root.changed(value); } }
+        RangeSlider { label: root.label; minimum: -100; maximum: 100; enabled: root.enabled; value <=> root.value; changed(value) => { root.changed(value); } }
     }
 }
 
@@ -276,10 +289,14 @@ export component PhotoInspector inherits InspectorSurface {
     in property <float> brightness-value: 0.0;
     in property <float> contrast-value: 0.0;
     in property <float> saturation-value: 0.0;
+    in property <bool> brightness-enabled: false;
+    in property <bool> contrast-enabled: false;
+    in property <bool> saturation-enabled: false;
     in property <bool> has-preview: false;
     in property <string> active-layer-id: "";
     in property <string> active-layer-kind: "Pixel";
     in property <bool> active-layer-transform-enabled: true;
+    in property <bool> active-layer-crop-enabled: true;
     in property <string> active-layer-bounds: "—";
     in-out property <float> active-layer-x: 0.0;
     in-out property <float> active-layer-y: 0.0;
@@ -288,8 +305,10 @@ export component PhotoInspector inherits InspectorSurface {
     in-out property <float> active-layer-rotation: 0.0;
     in property <string> selection-geometry: "None";
     in property <string> crop-geometry: "None";
+    in property <string> active-layer-crop-geometry: "None";
     in property <bool> has-selection: false;
     in property <bool> has-crop: false;
+    in property <bool> has-active-layer-crop: false;
 
     callback select-layer(int);
     callback toggle-layer-visibility(int);
@@ -305,8 +324,10 @@ export component PhotoInspector inherits InspectorSurface {
     callback layer-transform-changed(float, float, float, float, float);
     callback select-layer-bounds;
     callback crop-to-selection;
+    callback crop-active-layer-to-selection;
     callback clear-selection;
     callback clear-crop;
+    callback clear-active-layer-crop;
     callback import-image;
     callback export-png;
     callback export-jpeg;
@@ -322,6 +343,18 @@ export component PhotoInspector inherits InspectorSurface {
             tabs: ["Adjust", "Layers", "Export"];
             current <=> root.inspector-tab;
         }
+
+        Flickable {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: parent.width;
+            // Keep the inspector bounded to the window while allowing the
+            // full control stack (and long layer lists) to scroll.
+            viewport-height: max(parent.height, 720px);
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: Theme.tokens.space.lg;
 
         if root.inspector-tab == 0 : VerticalLayout {
             spacing: Theme.tokens.space.lg;
@@ -361,7 +394,8 @@ export component PhotoInspector inherits InspectorSurface {
             PropertyRow { label: "Layer bounds"; Text { text: root.active-layer-bounds; color: Theme.palette().ink-secondary; overflow: elide; } }
             SectionHeader { title: "Selection and crop"; }
             PropertyRow { label: "Selection"; Text { text: root.selection-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
-            PropertyRow { label: "Crop"; Text { text: root.crop-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
+            PropertyRow { label: "Canvas crop"; Text { text: root.crop-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
+            PropertyRow { label: "Layer crop"; Text { text: root.active-layer-crop-geometry; color: Theme.palette().ink-secondary; overflow: elide; } }
             HorizontalLayout {
                 spacing: Theme.tokens.space.sm;
                 ToolbarButton { label: "Select layer bounds"; enabled: root.has-preview; clicked => { root.select-layer-bounds(); } }
@@ -372,10 +406,22 @@ export component PhotoInspector inherits InspectorSurface {
                 ToolbarButton { label: "Crop to selection"; primary: true; enabled: root.has-selection; clicked => { root.crop-to-selection(); } }
                 ToolbarButton { label: "Clear crop"; enabled: root.has-crop; clicked => { root.clear-crop(); } }
             }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                ToolbarButton { label: "Crop active layer"; enabled: root.has-selection && root.active-layer-crop-enabled; clicked => { root.crop-active-layer-to-selection(); } }
+                ToolbarButton { label: "Clear layer crop"; enabled: root.has-active-layer-crop; clicked => { root.clear-active-layer-crop(); } }
+            }
             SectionHeader { title: "Color adjustments"; }
-            PhotoAdjustmentRow { label: "Brightness"; value: root.brightness-value; changed(value) => { root.brightness-changed(value); } }
-            PhotoAdjustmentRow { label: "Contrast"; value: root.contrast-value; changed(value) => { root.contrast-changed(value); } }
-            PhotoAdjustmentRow { label: "Saturation"; value: root.saturation-value; changed(value) => { root.saturation-changed(value); } }
+            Text {
+                text: "Select a matching adjustment layer to edit its value.";
+                visible: !root.brightness-enabled && !root.contrast-enabled && !root.saturation-enabled;
+                font-size: Theme.tokens.typography.micro;
+                color: Theme.palette().ink-disabled;
+                wrap: word-wrap;
+            }
+            PhotoAdjustmentRow { label: "Brightness"; enabled: root.brightness-enabled; value: root.brightness-value; changed(value) => { root.brightness-changed(value); } }
+            PhotoAdjustmentRow { label: "Contrast"; enabled: root.contrast-enabled; value: root.contrast-value; changed(value) => { root.contrast-changed(value); } }
+            PhotoAdjustmentRow { label: "Saturation"; enabled: root.saturation-enabled; value: root.saturation-value; changed(value) => { root.saturation-changed(value); } }
         }
 
         if root.inspector-tab == 1 : VerticalLayout {
@@ -426,7 +472,9 @@ export component PhotoInspector inherits InspectorSurface {
             ToolbarButton { icon: "export"; label: "Export JPEG"; enabled: root.has-preview; clicked => { root.export-jpeg(); } }
         }
 
-        Rectangle { vertical-stretch: 1; background: transparent; }
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+        }
     }
 }
 

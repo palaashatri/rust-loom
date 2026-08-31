@@ -59,6 +59,12 @@ impl Rect {
         if self.width <= 0.0 || self.height <= 0.0 {
             return Err("rectangle dimensions must be positive".into());
         }
+        // Check the derived edges as well as the stored fields. A finite
+        // origin plus a finite extent can still overflow to infinity, which
+        // would make containment and clipping silently accept invalid state.
+        if !self.right().is_finite() || !self.bottom().is_finite() {
+            return Err("rectangle right and bottom edges must be finite".into());
+        }
         Ok(self)
     }
 
@@ -217,6 +223,77 @@ impl PhotoDocument {
         self.layers.is_empty()
     }
 
+    /// Validates all persisted document and layer state before it is used by
+    /// the compositor or written to a package. Deserialization bypasses the
+    /// constructors, so this is the single boundary that keeps malformed
+    /// project files from becoming live editing state.
+    pub fn validate(&self) -> Result<(), String> {
+        image_byte_len(self.width, self.height)?;
+        if self.dpi == 0 {
+            return Err("document DPI must be non-zero".into());
+        }
+        if self.layers.is_empty() {
+            return Err("photo document must contain at least one layer".into());
+        }
+        if self.active_layer_index >= self.layers.len() {
+            return Err(format!(
+                "active layer index {} is outside {} layers",
+                self.active_layer_index,
+                self.layers.len()
+            ));
+        }
+        self.canvas_transform.validate()?;
+        self.selection
+            .map(|rect| rect.within(self.width, self.height))
+            .transpose()?;
+        self.crop
+            .map(|rect| rect.within(self.width, self.height))
+            .transpose()?;
+
+        let mut layer_ids = std::collections::HashSet::with_capacity(self.layers.len());
+        for layer in &self.layers {
+            if layer.id.trim().is_empty() {
+                return Err("layer ids must not be empty".into());
+            }
+            if !layer_ids.insert(layer.id.as_str()) {
+                return Err(format!("duplicate layer id '{}'", layer.id));
+            }
+            if layer.name.trim().is_empty() {
+                return Err(format!("layer '{}' has an empty name", layer.id));
+            }
+            if !layer.opacity.is_finite() || !(0.0..=1.0).contains(&layer.opacity) {
+                return Err(format!(
+                    "layer '{}' opacity must be finite and in [0,1]",
+                    layer.id
+                ));
+            }
+            if !layer.adjustment_value.is_finite() {
+                return Err(format!(
+                    "layer '{}' adjustment value must be finite",
+                    layer.id
+                ));
+            }
+            if layer.kind == LayerKind::Adjustment
+                && layer
+                    .adjustment_type
+                    .as_deref()
+                    .map_or(true, |value| value.trim().is_empty())
+            {
+                return Err(format!(
+                    "adjustment layer '{}' must declare an adjustment type",
+                    layer.id
+                ));
+            }
+            layer.transform.validate()?;
+            self.canvas_transform.compose(layer.transform).validate()?;
+            layer
+                .crop
+                .map(|rect| rect.within(self.width, self.height))
+                .transpose()?;
+        }
+        Ok(())
+    }
+
     pub fn select_layer(&mut self, index: usize) -> bool {
         if index >= self.layers.len() {
             return false;
@@ -238,27 +315,15 @@ impl PhotoDocument {
         layer_id: &str,
         transform: AffineTransform2D,
     ) -> Result<bool, String> {
-        if [
-            transform.a,
-            transform.b,
-            transform.c,
-            transform.d,
-            transform.tx,
-            transform.ty,
-        ]
-        .iter()
-        .any(|value| !value.is_finite())
-        {
-            return Err("layer transform values must be finite".into());
-        }
-        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
-            return Err("layer transform must be invertible".into());
-        }
         let layer = self
             .layers
             .iter_mut()
             .find(|layer| layer.id == layer_id)
             .ok_or_else(|| format!("unknown layer {layer_id}"))?;
+        if layer.kind != LayerKind::Pixel {
+            return Err(format!("layer {layer_id} does not support transforms"));
+        }
+        transform.validate()?;
         if layer.transform == transform {
             return Ok(false);
         }
@@ -275,6 +340,9 @@ impl PhotoDocument {
             .iter_mut()
             .find(|layer| layer.id == layer_id)
             .ok_or_else(|| format!("unknown layer {layer_id}"))?;
+        if layer.kind != LayerKind::Pixel {
+            return Err(format!("layer {layer_id} does not support crops"));
+        }
         if layer.crop == crop {
             return Ok(false);
         }
@@ -305,22 +373,7 @@ impl PhotoDocument {
     }
 
     pub fn set_canvas_transform(&mut self, transform: AffineTransform2D) -> Result<bool, String> {
-        if [
-            transform.a,
-            transform.b,
-            transform.c,
-            transform.d,
-            transform.tx,
-            transform.ty,
-        ]
-        .iter()
-        .any(|value| !value.is_finite())
-        {
-            return Err("canvas transform values must be finite".into());
-        }
-        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
-            return Err("canvas transform must be invertible".into());
-        }
+        transform.validate()?;
         if self.canvas_transform == transform {
             return Ok(false);
         }
@@ -330,6 +383,7 @@ impl PhotoDocument {
 }
 
 pub fn save_photo(doc: &PhotoDocument) -> Result<Vec<u8>, String> {
+    doc.validate()?;
     let json = serde_json::to_vec_pretty(doc).map_err(|e| e.to_string())?;
     let mut arch = PackageArchive::new();
     arch.add("content/photo.json", json.clone())
@@ -370,7 +424,10 @@ pub fn load_photo(bytes: &[u8]) -> Result<PhotoDocument, String> {
     let content = arch
         .get("content/photo.json")
         .ok_or_else(|| "missing photo.json".to_string())?;
-    serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))
+    let document: PhotoDocument =
+        serde_json::from_slice(content).map_err(|e| format!("parse payload: {e}"))?;
+    document.validate()?;
+    Ok(document)
 }
 
 /// Maximum raster size accepted by the in-memory reference compositor.
@@ -1420,17 +1477,25 @@ impl AffineTransform2D {
         )
     }
 
-    pub fn is_identity(&self) -> bool {
-        *self == Self::identity()
-    }
-
-    /// Returns the inverse transform, or `None` for a singular/non-finite matrix.
-    pub fn inverse(&self) -> Option<Self> {
+    /// Validates the matrix and proves that its inverse can be represented by
+    /// finite `f32` values. Persisted transforms must pass this check before
+    /// entering the compositor; checking only the six source fields misses
+    /// determinant overflow and inverse-translation overflow.
+    pub fn validate(&self) -> Result<(), String> {
+        if [self.a, self.b, self.c, self.d, self.tx, self.ty]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err("affine transform values must be finite".into());
+        }
         let determinant = self.a * self.d - self.b * self.c;
         if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
-            return None;
+            return Err("affine transform determinant must be finite and non-zero".into());
         }
         let inverse_det = 1.0 / determinant;
+        if !inverse_det.is_finite() {
+            return Err("affine transform inverse is not finite".into());
+        }
         let inverse = Self {
             a: self.d * inverse_det,
             b: -self.b * inverse_det,
@@ -1443,12 +1508,43 @@ impl AffineTransform2D {
             inverse.a, inverse.b, inverse.c, inverse.d, inverse.tx, inverse.ty,
         ]
         .iter()
-        .all(|value| value.is_finite())
+        .any(|value| !value.is_finite())
         {
-            Some(inverse)
-        } else {
-            None
+            return Err("affine transform inverse is not finite".into());
         }
+        Ok(())
+    }
+
+    /// Composes `self` after `inner`, returning `self ∘ inner`.
+    pub fn compose(self, inner: Self) -> Self {
+        Self {
+            a: self.a * inner.a + self.c * inner.b,
+            b: self.b * inner.a + self.d * inner.b,
+            c: self.a * inner.c + self.c * inner.d,
+            d: self.b * inner.c + self.d * inner.d,
+            tx: self.a * inner.tx + self.c * inner.ty + self.tx,
+            ty: self.b * inner.tx + self.d * inner.ty + self.ty,
+        }
+    }
+
+    pub fn is_identity(&self) -> bool {
+        *self == Self::identity()
+    }
+
+    /// Returns the inverse transform, or `None` for a singular/non-finite matrix.
+    pub fn inverse(&self) -> Option<Self> {
+        self.validate().ok()?;
+        let determinant = self.a * self.d - self.b * self.c;
+        let inverse_det = 1.0 / determinant;
+        let inverse = Self {
+            a: self.d * inverse_det,
+            b: -self.b * inverse_det,
+            c: -self.c * inverse_det,
+            d: self.a * inverse_det,
+            tx: (self.c * self.ty - self.d * self.tx) * inverse_det,
+            ty: (self.b * self.tx - self.a * self.ty) * inverse_det,
+        };
+        Some(inverse)
     }
 }
 
@@ -1578,7 +1674,7 @@ pub struct PhotoCanvas {
 impl PhotoCanvas {
     /// Creates an empty canvas for an existing document.
     pub fn new(document: PhotoDocument) -> Result<Self, String> {
-        image_byte_len(document.width, document.height)?;
+        document.validate()?;
         Ok(Self {
             document,
             layer_images: BTreeMap::new(),
@@ -1678,15 +1774,17 @@ impl PhotoCanvas {
             .layers
             .iter()
             .find(|layer| layer.id == layer_id)?;
-        let source = layer.crop.unwrap_or(Rect::new(
-            0.0,
-            0.0,
-            self.document.width as f32,
-            self.document.height as f32,
-        ));
-        source
-            .transformed_bounds(layer.transform)
-            .and_then(|bounds| bounds.transformed_bounds(self.document.canvas_transform))
+        if layer.kind != LayerKind::Pixel || !self.layer_images.contains_key(layer_id) {
+            return None;
+        }
+        let image = self.layer_images.get(layer_id)?;
+        let source =
+            layer
+                .crop
+                .unwrap_or(Rect::new(0.0, 0.0, image.width as f32, image.height as f32));
+        let transform = self.document.canvas_transform.compose(layer.transform);
+        transform.validate().ok()?;
+        source.transformed_bounds(transform)
     }
 
     /// Returns the transformed bounds of the active layer in document coordinates.
@@ -1698,6 +1796,7 @@ impl PhotoCanvas {
 
     /// Composites all visible layers bottom-to-top.
     pub fn composite(&self) -> Result<RgbaImage, String> {
+        self.document.validate()?;
         let mut output = RgbaImage::transparent(self.document.width, self.document.height)?;
         for layer in &self.document.layers {
             if !layer.visible || layer.opacity <= 0.0 {
@@ -1715,7 +1814,7 @@ impl PhotoCanvas {
                         mask,
                         layer,
                         &self.document.canvas_transform,
-                    );
+                    )?;
                 }
                 LayerKind::Adjustment => apply_adjustment(
                     &mut output,
@@ -1858,34 +1957,22 @@ impl PhotoSession {
         index: usize,
         transform: AffineTransform2D,
     ) -> Result<bool, String> {
-        let Some((layer_id, current_transform)) = self
+        let Some((layer_id, current_transform, kind)) = self
             .canvas
             .document
             .layers
             .get(index)
-            .map(|layer| (layer.id.clone(), layer.transform))
+            .map(|layer| (layer.id.clone(), layer.transform, layer.kind.clone()))
         else {
             return Err(format!("unknown layer index {index}"));
         };
+        if kind != LayerKind::Pixel {
+            return Err(format!("layer {index} does not support transforms"));
+        }
         if current_transform == transform {
             return Ok(false);
         }
-        if [
-            transform.a,
-            transform.b,
-            transform.c,
-            transform.d,
-            transform.tx,
-            transform.ty,
-        ]
-        .iter()
-        .any(|value| !value.is_finite())
-        {
-            return Err("layer transform values must be finite".into());
-        }
-        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
-            return Err("layer transform must be invertible".into());
-        }
+        transform.validate()?;
         self.checkpoint();
         self.canvas
             .document
@@ -1893,15 +1980,18 @@ impl PhotoSession {
     }
 
     pub fn set_layer_crop(&mut self, index: usize, crop: Option<Rect>) -> Result<bool, String> {
-        let Some((layer_id, current_crop)) = self
+        let Some((layer_id, current_crop, kind)) = self
             .canvas
             .document
             .layers
             .get(index)
-            .map(|layer| (layer.id.clone(), layer.crop))
+            .map(|layer| (layer.id.clone(), layer.crop, layer.kind.clone()))
         else {
             return Err(format!("unknown layer index {index}"));
         };
+        if kind != LayerKind::Pixel {
+            return Err(format!("layer {index} does not support crops"));
+        }
         if current_crop == crop {
             return Ok(false);
         }
@@ -1938,22 +2028,7 @@ impl PhotoSession {
         if self.canvas.document.canvas_transform == transform {
             return Ok(false);
         }
-        if [
-            transform.a,
-            transform.b,
-            transform.c,
-            transform.d,
-            transform.tx,
-            transform.ty,
-        ]
-        .iter()
-        .any(|value| !value.is_finite())
-        {
-            return Err("canvas transform values must be finite".into());
-        }
-        if (transform.a * transform.d - transform.b * transform.c).abs() <= f32::EPSILON {
-            return Err("canvas transform must be invertible".into());
-        }
+        transform.validate()?;
         self.checkpoint();
         self.canvas.document.set_canvas_transform(transform)
     }
@@ -2140,13 +2215,11 @@ fn blend_transformed_image(
     mask: Option<&Vec<u8>>,
     layer: &Layer,
     canvas_transform: &AffineTransform2D,
-) {
-    let Some(layer_inverse) = layer.transform.inverse() else {
-        return;
-    };
-    let Some(canvas_inverse) = canvas_transform.inverse() else {
-        return;
-    };
+) -> Result<(), String> {
+    let transform = canvas_transform.compose(layer.transform);
+    let inverse = transform
+        .inverse()
+        .ok_or_else(|| format!("layer '{}' transform has no finite inverse", layer.id))?;
     let source_crop = layer.crop.unwrap_or(Rect::new(
         0.0,
         0.0,
@@ -2155,8 +2228,7 @@ fn blend_transformed_image(
     ));
     for y in 0..destination.height {
         for x in 0..destination.width {
-            let canvas_point = canvas_inverse.transform_point(x as f32 + 0.5, y as f32 + 0.5);
-            let source_point = layer_inverse.transform_point(canvas_point.0, canvas_point.1);
+            let source_point = inverse.transform_point(x as f32 + 0.5, y as f32 + 0.5);
             if !source_crop.contains(source_point.0, source_point.1)
                 || source_point.0 < 0.0
                 || source_point.1 < 0.0
@@ -2186,6 +2258,7 @@ fn blend_transformed_image(
             );
         }
     }
+    Ok(())
 }
 
 fn blend_pixel(
@@ -4411,5 +4484,106 @@ mod tests {
             .set_canvas_transform(AffineTransform2D::scale(f32::INFINITY, 1.0))
             .is_err());
         assert!(!session.can_undo());
+    }
+
+    #[test]
+    fn geometry_validation_rejects_overflow_and_unsafe_affines() {
+        assert!(Rect::new(f32::MAX, 0.0, f32::MAX, 1.0).validate().is_err());
+        assert!(Rect::new(0.0, f32::MAX, 1.0, f32::MAX).validate().is_err());
+
+        let determinant_overflow = AffineTransform2D {
+            a: f32::MAX,
+            b: 0.0,
+            c: 0.0,
+            d: 2.0,
+            tx: 0.0,
+            ty: 0.0,
+        };
+        assert!(determinant_overflow.validate().is_err());
+
+        let inverse_overflow = AffineTransform2D {
+            a: 1.0,
+            b: 0.0,
+            c: 1.0e38,
+            d: 1.0,
+            tx: 1.0,
+            ty: 1.0e38,
+        };
+        assert!(inverse_overflow.validate().is_err());
+        assert!(inverse_overflow.inverse().is_none());
+    }
+
+    #[test]
+    fn document_validation_rejects_malformed_persisted_state() {
+        let mut document = PhotoDocument::new("invalid", "Invalid", 4, 2);
+        document.active_layer_index = 4;
+        assert!(document.validate().is_err());
+        assert!(save_photo(&document).is_err());
+
+        let mut document = PhotoDocument::new("invalid", "Invalid", 4, 2);
+        document.layers[0].opacity = f32::NAN;
+        assert!(document.validate().is_err());
+
+        let mut document = PhotoDocument::new("invalid", "Invalid", 4, 2);
+        document.layers[0].crop = Some(Rect::new(0.0, 0.0, 9.0, 1.0));
+        assert!(document.validate().is_err());
+    }
+
+    #[test]
+    fn non_pixel_layers_cannot_receive_pixel_geometry_or_bounds() {
+        let mut document = PhotoDocument::new("non-pixel", "Non-pixel", 2, 1);
+        document.add_layer(Layer::new_adjustment(
+            "adjust",
+            "Brightness",
+            "brightness",
+            0.0,
+        ));
+        assert!(document
+            .set_layer_transform("adjust", AffineTransform2D::identity())
+            .is_err());
+        assert!(document.set_layer_crop("adjust", None).is_err());
+
+        let canvas = PhotoCanvas::new(document).unwrap();
+        assert!(canvas.layer_bounds("adjust").is_none());
+        assert!(canvas.layer_bounds("layer-bg").is_none());
+    }
+
+    #[test]
+    fn layer_bounds_compose_canvas_and_layer_transforms_from_source_corners() {
+        let mut document = PhotoDocument::new("bounds", "Bounds", 2, 1);
+        document.canvas_transform = AffineTransform2D::rotation(-std::f32::consts::FRAC_PI_4);
+        document.layers[0].transform = AffineTransform2D::rotation(std::f32::consts::FRAC_PI_4);
+        let mut canvas = PhotoCanvas::new(document).unwrap();
+        canvas
+            .set_layer_image(
+                "layer-bg",
+                RgbaImage::solid(2, 1, [255, 0, 0, 255]).unwrap(),
+            )
+            .unwrap();
+        let bounds = canvas.layer_bounds("layer-bg").expect("pixel bounds");
+        assert!((bounds.x - 0.0).abs() < 1.0e-5);
+        assert!((bounds.y - 0.0).abs() < 1.0e-5);
+        assert!((bounds.width - 2.0).abs() < 1.0e-5);
+        assert!((bounds.height - 1.0).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn layer_crop_changes_composited_pixels_without_changing_canvas_size() {
+        let document = PhotoDocument::new("layer-crop", "Layer Crop", 3, 1);
+        let mut canvas = PhotoCanvas::new(document).unwrap();
+        let mut source = RgbaImage::transparent(3, 1).unwrap();
+        source.set_pixel(0, 0, [10, 20, 30, 255]);
+        source.set_pixel(1, 0, [40, 50, 60, 255]);
+        source.set_pixel(2, 0, [70, 80, 90, 255]);
+        canvas.set_layer_image("layer-bg", source).unwrap();
+        canvas
+            .document
+            .set_layer_crop("layer-bg", Some(Rect::new(1.0, 0.0, 1.0, 1.0)))
+            .unwrap();
+        let result = canvas.composite().unwrap();
+        assert_eq!(result.width, 3);
+        assert_eq!(result.pixel(0, 0).unwrap()[3], 0);
+        assert_eq!(result.pixel(1, 0), Some([40, 50, 60, 255]));
+        assert_eq!(result.pixel(2, 0).unwrap()[3], 0);
     }
 }

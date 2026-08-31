@@ -64,48 +64,82 @@ exports. App tests cover imported payload identity, callback-backed editing and
 reopen, dialog routing, command projection, palette/menu behavior, and the
 existing Photo interaction contracts.
 
-## Fresh verification (2026-08-31)
+## Round-1 review fixes (2026-08-31)
 
-Commands were run after the final source edit from `loom-photo/` unless noted.
+The review follow-up closes the nine reported correctness and interaction
+findings. Geometry validation now rejects overflowing rectangle edges,
+non-finite or non-invertible affine matrices, malformed persisted documents,
+and invalid composed canvas/layer transforms. Compositing and bounds use the
+single composed transform, bounds are payload-aware, and non-pixel layers do
+not expose pixel geometry. The app now scopes adjustment controls to the
+active adjustment layer, disables mismatched sliders, keeps the inspector
+bounded, maps overlays to the document aspect ratio, separates pan mode from
+painting, and exposes active-layer crop operations through the controller.
+
+### Focused regression checks
+
+Commands were run from `loom-photo/` after the review edits. Each listed
+focused test reported `1 passed; 0 failed`:
+
+```text
+cargo test -p loom-photo-core --locked geometry_validation_rejects_overflow_and_unsafe_affines
+cargo test -p loom-photo-core --locked document_validation_rejects_malformed_persisted_state
+cargo test -p loom-photo-core --locked non_pixel_layers_cannot_receive_pixel_geometry_or_bounds
+cargo test -p loom-photo-core --locked layer_bounds_compose_canvas_and_layer_transforms_from_source_corners
+cargo test -p loom-photo-core --locked layer_crop_changes_composited_pixels_without_changing_canvas_size
+cargo test -p loom-photo-core --locked transformed_layer_bounds_and_pixels_follow_persisted_geometry
+cargo test -p loom-photo-core --locked canvas_transform_is_applied_to_every_layer_and_round_trips
+cargo test -p loom-photo-core --locked rejected_geometry_edits_do_not_create_history_entries
+cargo test -p loom-photo-core --locked selection_crop_and_adjustment_edits_are_validated_and_undoable
+cargo test -p loom-photo-app --locked adjustment_callbacks_are_scoped_to_the_active_adjustment_layer
+cargo test -p loom-photo-app --locked photo_edit_callbacks_mutate_selection_transform_crop_and_adjustment
+cargo test -p loom-photo-app --locked pan_tool_is_a_viewport_mode_separate_from_brush
+cargo test -p loom-photo-app --locked imported_raster_canvas_preserves_payload_identity_through_reopen
+```
+
+The focused core run covered nine tests and the focused app run covered four
+tests; all reported zero failures. `cargo fmt --all -- --check` and
+`git diff --check` also exited 0.
+
+### Full and release verification
 
 | Check | Actual result |
 | --- | --- |
-| `cargo fmt --all -- --check` | PASS (exit 0) |
-| `cargo test --workspace --all-targets --locked` | PASS (exit 0): 42 `loom-photo-core` tests + 12 `loom-photo-app` tests; CLI target ran 0 tests; 0 failures |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0); existing generated Slint component warnings only |
-| `cargo build --workspace --release --locked` | PASS (exit 0) |
-| `./target/release/loom-photo --smoke --size 1280x800 --theme dark` | PASS (exit 0) |
-| `./loom-photo/target/release/loom-photo --screenshot .work/evidence/ui/photo-task-6-final-20260831/release-smoke.png --size 1280x800 --theme dark` | PASS (exit 0) |
-| `file .work/evidence/ui/photo-task-6-final-20260831/release-smoke.png` | PNG image data, 1280 x 800, 8-bit/color RGBA, non-interlaced |
-| `./loom-photo/target/release/loom-photo --journey .work/evidence/ui/photo-task-6-final-20260831 --size 1280x800 --theme dark` | PASS; printed `keyboard journey: PASS` and `photo journey: PASS` |
-| `jq` palette transcript assertions | PASS: `passed=true`, `app=photo`, expected 10-step journey and final dismiss step |
-| Vertical journey capture assertions | PASS: 14 `photo-vertical-*.png` files; all are 1280 x 800 8-bit RGBA PNGs |
+| `cargo test --workspace --all-targets --locked` | PASS (exit 0): 13 `loom-photo-app` tests + 47 `loom-photo-core` tests; CLI target ran 0 tests; 0 failures |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0); generated Slint export/deprecation warnings only |
+| `cargo build --workspace --release --locked` | PASS (exit 0): `Finished release profile [optimized]` |
+| `./loom-photo/target/release/loom-photo --journey .work/evidence/ui/photo-task-6-release-review1-20260831 --size 1280x800 --theme dark` | PASS; printed `keyboard journey: PASS` and `photo journey: PASS` |
+| `./loom-photo/target/release/loom-photo --smoke --size 1280x800 --theme dark` | PASS (exit 0) |
+| `./loom-photo/target/release/loom-photo --screenshot .work/evidence/ui/photo-task-6-release-review1-20260831/release-smoke.png --size 1280x800 --theme dark` | PASS (exit 0) |
+| `file .../release-smoke.png` | PNG image data, 1280 x 800, 8-bit/color RGBA, non-interlaced |
+| `jq` palette transcript assertions | PASS: `passed=true`, `app=photo`, 10 steps, final `5-dismiss` step |
+| Vertical journey capture assertions | PASS: 17 `photo-vertical-*.png` files; all are 1280 x 800 8-bit RGBA PNGs |
 | Export/package assertions | PASS: exported `photo-vertical.png` is a 480 x 300 RGBA PNG; `unzip -t photo-vertical.loomphoto` reports no errors |
 | Failure/cancellation transcript assertions | PASS: invalid import, directory-target PNG export failure, and import cancellation messages are present in `photo-vertical.log` |
 | `git diff --check` | PASS (exit 0) |
 
-The first fresh Clippy run found two `manual_range_contains` diagnostics in
-the deterministic sample generator. The expression was corrected to use
-`Range::contains`; formatter, tests, Clippy, release build, and all journey
-checks above were rerun on the corrected tree.
+The release journey is the exact optimized binary built by the release check;
+the screenshots and transcripts are retained as inspectable evidence below.
 
 ## Journey artifacts
 
-The final release journey is retained under:
+The review-fix release journey is retained under:
 
 ```text
-.work/evidence/ui/photo-task-6-final-20260831/
+.work/evidence/ui/photo-task-6-release-review1-20260831/
 ```
 
-It contains the 14 vertical captures (`initial`, `imported`, `selected`,
-`transformed`, `selection`, `cropped`, `adjusted`, `undo-adjustment`, `saved`,
-`reopened`, `exported`, `import-failure`, `export-failure`, and `import-cancel`),
-the separate ten-step keyboard-palette captures and `photo.json`, the source
-and invalid import fixtures, `photo-vertical.loomphoto`, `photo-vertical.png`,
-`photo-vertical.log`, and the release smoke screenshot. The transformed and
-adjusted captures were visually inspected after generation: the transformed
-image is visibly rotated/scaled with updated inspector geometry, and the
-adjusted image shows the brightness change and selection/crop state.
+It contains 17 vertical captures (`initial`, `imported`, `selected`,
+`transformed`, `pan-zoom`, `selection`, `cropped`, `layer-cropped`,
+`adjustment-layer`, `adjusted`, `undo-adjustment`, `saved`, `reopened`,
+`exported`, `import-failure`, `export-failure`, and `import-cancel`), the
+separate ten-step keyboard-palette captures and `photo.json`, the source and
+invalid import fixtures, `photo-vertical.loomphoto`, `photo-vertical.png`,
+`photo-vertical.log`, and the optimized release smoke screenshot. The
+transformed, pan/zoom, crop, adjusted, and failure captures were visually
+inspected after generation; the transformed image shows rotated/scaled
+geometry, pan/zoom changes the viewport, crop state is visible in the
+inspector, brightness changes the pixels, and the failure state is actionable.
 
 ## Evidence boundaries and known limitations
 
