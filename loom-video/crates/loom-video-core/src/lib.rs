@@ -1801,6 +1801,22 @@ pub fn decode_preview_frame_with_cancel(
 const WAVEFORM_READ_BUFFER_BYTES: usize = 64 * 1024;
 const WAVEFORM_STDERR_LIMIT_BYTES: u64 = 64 * 1024;
 
+fn drain_reader_with_prefix<R: Read>(mut reader: R, limit: usize) -> std::io::Result<String> {
+    let mut retained = Vec::with_capacity(limit.min(WAVEFORM_READ_BUFFER_BYTES));
+    let mut bytes = [0_u8; WAVEFORM_READ_BUFFER_BYTES];
+    loop {
+        let read = reader.read(&mut bytes)?;
+        if read == 0 {
+            break;
+        }
+        if retained.len() < limit {
+            let keep = (limit - retained.len()).min(read);
+            retained.extend_from_slice(&bytes[..keep]);
+        }
+    }
+    Ok(String::from_utf8_lossy(&retained).into_owned())
+}
+
 pub fn decode_audio_waveform_with_cancel(
     tools: &MediaTools,
     path: &Path,
@@ -1932,10 +1948,8 @@ pub fn decode_audio_waveform_with_cancel(
         }
     });
     let stderr_reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        let mut reader = BufReader::new(stderr).take(WAVEFORM_STDERR_LIMIT_BYTES);
-        let result = reader.read_to_string(&mut text);
-        result.map(|_| text).map_err(|error| error.to_string())
+        drain_reader_with_prefix(stderr, WAVEFORM_STDERR_LIMIT_BYTES as usize)
+            .map_err(|error| error.to_string())
     });
     let status = loop {
         if cancel.is_cancelled() {
@@ -2980,6 +2994,7 @@ impl VideoProject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn video_timeline_digest_stability() {
@@ -3025,6 +3040,20 @@ mod tests {
         // An empty project digests differently from a populated one.
         let empty = VideoProject::new("proj-empty", "Empty");
         assert_ne!(empty.timeline_digest(), baseline);
+    }
+
+    #[test]
+    fn stderr_prefix_reader_drains_beyond_retained_limit() {
+        let limit = WAVEFORM_STDERR_LIMIT_BYTES as usize;
+        let mut input = vec![b'x'; limit + WAVEFORM_READ_BUFFER_BYTES + 17];
+        input.extend_from_slice(b"tail");
+        let mut reader = Cursor::new(input.clone());
+
+        let retained = drain_reader_with_prefix(&mut reader, limit).unwrap();
+
+        assert_eq!(reader.position() as usize, input.len());
+        assert_eq!(retained.len(), limit);
+        assert!(retained.bytes().all(|byte| byte == b'x'));
     }
 
     #[test]

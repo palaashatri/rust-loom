@@ -442,6 +442,7 @@ struct DecodedAudioSampleConsumer {
     cancellation: PreviewCancellation,
     process: Arc<Mutex<Child>>,
     worker: Option<thread::JoinHandle<()>>,
+    terminal: bool,
 }
 
 impl DecodedAudioSampleConsumer {
@@ -581,6 +582,7 @@ impl DecodedAudioSampleConsumer {
             cancellation,
             process,
             worker: Some(worker),
+            terminal: false,
         })
     }
 
@@ -590,6 +592,10 @@ impl DecodedAudioSampleConsumer {
 
     fn start_time(&self) -> f64 {
         self.start_time
+    }
+
+    fn is_terminal(&self) -> bool {
+        self.terminal
     }
 
     fn consume_samples(&mut self, budget: u64) -> u64 {
@@ -604,9 +610,16 @@ impl DecodedAudioSampleConsumer {
                 // The decoder runs asynchronously. If no chunk is ready for
                 // this timer tick, leave the audio-master clock parked until
                 // a later tick observes decoded samples. A disconnected
-                // worker likewise means there can be no more samples; do not
-                // spin forever waiting for a budget that can never be met.
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                // worker is terminal unless cancellation is replacing it
+                // (for example during a seek), in which case the replacement
+                // consumer owns the next samples.
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    if !self.cancellation.is_cancelled() {
+                        self.terminal = true;
+                    }
+                    break;
+                }
             }
         }
         let consumed = self.pending_samples.min(budget);
@@ -636,6 +649,7 @@ impl DecodedAudioSampleConsumer {
             }
             Err(_) => {
                 self.pending_samples = 0;
+                self.terminal = false;
                 false
             }
         }
@@ -707,16 +721,35 @@ struct PlaybackClock {
     anchor_position: f64,
     audio: Option<AudioSampleSource>,
     audio_clip_id: Option<String>,
+    active_clip_id: Option<String>,
+    audio_ended: bool,
+    audio_status: &'static str,
 }
 
 impl PlaybackClock {
+    #[cfg(test)]
     fn start(position: f64) -> Self {
+        Self::start_for_clip_with_status(
+            position,
+            None,
+            "No audio stream · monotonic fallback clock",
+        )
+    }
+
+    fn start_for_clip_with_status(
+        position: f64,
+        clip_id: Option<String>,
+        audio_status: &'static str,
+    ) -> Self {
         Self {
             source: ClockSource::MonotonicFallback,
             anchor: Instant::now(),
             anchor_position: position.max(0.0),
             audio: None,
             audio_clip_id: None,
+            active_clip_id: clip_id,
+            audio_ended: false,
+            audio_status,
         }
     }
 
@@ -736,7 +769,11 @@ impl PlaybackClock {
             anchor: Instant::now(),
             anchor_position: position.max(0.0),
             audio: Some(AudioSampleSource::new(position, consumer, playback_rate)),
-            audio_clip_id: clip_id,
+            audio_clip_id: clip_id.clone(),
+            active_clip_id: clip_id,
+            audio_ended: false,
+            audio_status:
+                "Audio stream detected · output device unavailable; clock is audio-master",
         }
     }
 
@@ -744,8 +781,21 @@ impl PlaybackClock {
         self.source
     }
 
+    #[cfg(test)]
     fn audio_clip_id(&self) -> Option<&str> {
         self.audio_clip_id.as_deref()
+    }
+
+    fn active_clip_id(&self) -> Option<&str> {
+        self.active_clip_id.as_deref()
+    }
+
+    fn audio_ended(&self) -> bool {
+        self.audio_ended
+    }
+
+    fn audio_status(&self) -> &'static str {
+        self.audio_status
     }
 
     fn position(&self) -> f64 {
@@ -758,6 +808,9 @@ impl PlaybackClock {
     fn tick(&mut self) -> f64 {
         if let Some(audio) = self.audio.as_mut() {
             audio.consume_for_tick();
+            if audio.consumer.is_terminal() {
+                self.audio_ended = true;
+            }
         }
         self.position()
     }
@@ -775,10 +828,17 @@ impl PlaybackClock {
             self.anchor_position = timeline_position.max(0.0);
             true
         };
+        if audio_seeked {
+            self.audio_ended = false;
+        }
         if !audio_seeked {
+            let active_clip_id = self.active_clip_id.clone();
             self.audio = None;
             self.source = ClockSource::MonotonicFallback;
             self.audio_clip_id = None;
+            self.active_clip_id = active_clip_id;
+            self.audio_ended = false;
+            self.audio_status = "Audio seek unavailable · monotonic fallback clock";
             self.anchor = Instant::now();
             self.anchor_position = timeline_position.max(0.0);
         }
@@ -1084,10 +1144,17 @@ fn refresh(app: &VideoApp, state: &AppState) {
         }
         .into(),
     );
-    match lock(&state.playback_clock)
-        .as_ref()
-        .map(PlaybackClock::source)
-    {
+    let (clock_source, clock_status) = {
+        let clock = lock(&state.playback_clock);
+        (
+            clock.as_ref().map(PlaybackClock::source),
+            clock
+                .as_ref()
+                .map(PlaybackClock::audio_status)
+                .unwrap_or("No audio stream · monotonic fallback clock"),
+        )
+    };
+    match clock_source {
         Some(ClockSource::AudioMaster) => {
             app.set_playback_clock_source("Audio master".into());
             app.set_audio_output_status(
@@ -1096,7 +1163,7 @@ fn refresh(app: &VideoApp, state: &AppState) {
         }
         Some(ClockSource::MonotonicFallback) => {
             app.set_playback_clock_source("Monotonic fallback".into());
-            app.set_audio_output_status("No audio stream · monotonic fallback clock".into());
+            app.set_audio_output_status(clock_status.into());
         }
         None => {
             app.set_playback_clock_source("No clock".into());
@@ -1814,6 +1881,152 @@ fn show_synthetic_preview(state: &AppState, weak: &slint::Weak<VideoApp>) {
             }
             .into(),
         );
+    }
+}
+
+#[derive(Debug)]
+struct PlaybackClockSetup {
+    clock: PlaybackClock,
+    source_label: &'static str,
+    audio_status: &'static str,
+}
+
+fn build_playback_clock(state: &AppState, playhead: f64) -> PlaybackClockSetup {
+    let playhead = if playhead.is_finite() {
+        playhead.max(0.0)
+    } else {
+        0.0
+    };
+    let source = {
+        let session = lock(&state.session);
+        timeline_clips(&session.project)
+            .into_iter()
+            .find(|clip| playhead >= clip.start_time && playhead < clip.end_time())
+            .map(|clip| {
+                (
+                    clip.id.clone(),
+                    clip.source_path.clone(),
+                    clip.in_point + (playhead - clip.start_time) * clip.playback_rate,
+                    clip.playback_rate,
+                )
+            })
+    };
+    let source_clip_id = source.as_ref().map(|source| source.0.clone());
+    let audio_probe = source.as_ref().and_then(|(_, path, _, _)| {
+        state.tools.as_ref().and_then(|tools| {
+            let path = Path::new(path);
+            path.is_file()
+                .then(|| probe_media(tools, path).ok())
+                .flatten()
+        })
+    });
+    let has_audio = audio_probe.as_ref().is_some_and(|probe| probe.has_audio);
+    let audio_sample_rate = audio_probe
+        .as_ref()
+        .filter(|probe| probe.has_audio)
+        .and_then(|probe| probe.audio_sample_rate);
+    let fallback = |audio_status| PlaybackClockSetup {
+        clock: PlaybackClock::start_for_clip_with_status(
+            playhead,
+            source_clip_id.clone(),
+            audio_status,
+        ),
+        source_label: "Monotonic fallback",
+        audio_status,
+    };
+
+    match (
+        audio_sample_rate,
+        source.as_ref(),
+        state.tools.as_ref(),
+    ) {
+        (Some(sample_rate), Some((clip_id, path, source_time, playback_rate)), Some(tools)) => {
+            match spawn_decoded_audio_consumer(tools, Path::new(path), *source_time, sample_rate) {
+                Ok(consumer) => PlaybackClockSetup {
+                    clock: PlaybackClock::start_audio_for_clip(
+                        playhead,
+                        consumer,
+                        Some(clip_id.clone()),
+                        *playback_rate,
+                    ),
+                    source_label: "Audio master",
+                    audio_status:
+                        "Audio stream detected · output device unavailable; clock is audio-master",
+                },
+                Err(_) => fallback(
+                    "Audio stream detected · decoded consumer unavailable; monotonic fallback clock",
+                ),
+            }
+        }
+        _ if has_audio => fallback(
+            "Audio stream detected · sample rate unavailable; monotonic fallback clock",
+        ),
+        _ => fallback("No audio stream · monotonic fallback clock"),
+    }
+}
+
+fn apply_playback_clock_setup(app: &VideoApp, setup: &PlaybackClockSetup) {
+    app.set_playback_clock_source(setup.source_label.into());
+    app.set_audio_output_status(setup.audio_status.into());
+}
+
+fn clip_id_at(project: &VideoProject, position: f64) -> Option<String> {
+    timeline_clips(project)
+        .into_iter()
+        .find(|clip| position >= clip.start_time && position < clip.end_time())
+        .map(|clip| clip.id.clone())
+}
+
+fn advance_playback_tick(app: &VideoApp, state: &Arc<AppState>) -> bool {
+    let (position, audio_ended) = {
+        let mut clock = lock(&state.playback_clock);
+        let Some(clock) = clock.as_mut() else {
+            return false;
+        };
+        let position = clock.tick();
+        (position, clock.audio_ended())
+    };
+    if audio_ended {
+        let active_clip_id = lock(&state.playback_clock)
+            .as_ref()
+            .and_then(|clock| clock.active_clip_id().map(str::to_owned));
+        *lock(&state.playback_clock) = Some(PlaybackClock::start_for_clip_with_status(
+            position,
+            active_clip_id,
+            "Audio stream ended · monotonic fallback clock",
+        ));
+        app.set_playback_clock_source("Monotonic fallback".into());
+        app.set_audio_output_status("Audio stream ended · monotonic fallback clock".into());
+    }
+
+    let current_clip_id = {
+        let session = lock(&state.session);
+        clip_id_at(&session.project, position)
+    };
+    let clip_changed = lock(&state.playback_clock)
+        .as_ref()
+        .is_some_and(|clock| clock.active_clip_id() != current_clip_id.as_deref());
+    if clip_changed {
+        let setup = build_playback_clock(state, position);
+        apply_playback_clock_setup(app, &setup);
+        *lock(&state.playback_clock) = Some(setup.clock);
+    }
+
+    let duration = timeline_duration(&lock(&state.session).project);
+    if position >= duration {
+        app.set_playhead_seconds(duration as f32);
+        app.set_timecode_display(
+            timecode(duration, lock(&state.session).project.frame_rate).into(),
+        );
+        app.invoke_stop_playback();
+        false
+    } else {
+        app.set_playhead_seconds(position as f32);
+        app.set_timecode_display(
+            timecode(position, lock(&state.session).project.frame_rate).into(),
+        );
+        request_playback_preview(state.clone(), app.as_weak(), position);
+        true
     }
 }
 
@@ -2624,9 +2837,19 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 };
                 if let Some(clock) = lock(&state.playback_clock).as_mut() {
                     let was_audio_master = clock.source() == ClockSource::AudioMaster;
-                    let clip_matches = !was_audio_master
-                        || clock.audio_clip_id()
-                            == sought_source.as_ref().map(|(clip_id, _)| clip_id.as_str());
+                    let clip_matches = match (
+                        clock.active_clip_id(),
+                        sought_source.as_ref().map(|(clip_id, _)| clip_id.as_str()),
+                    ) {
+                        (Some(active_clip_id), Some(sought_clip_id)) => {
+                            active_clip_id == sought_clip_id
+                        }
+                        (Some(_), None) => false,
+                        // A clock without a clip identity is only used by
+                        // focused unit tests; let it seek in place rather
+                        // than inventing a source mismatch.
+                        (None, _) => true,
+                    };
                     if clip_matches {
                         clock.seek_with_source(
                             seconds,
@@ -2642,7 +2865,15 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                             );
                         }
                     } else {
-                        *clock = PlaybackClock::start(seconds);
+                        // Keep the target unresolved so the next playback
+                        // tick probes its own media and can attach the right
+                        // audio consumer. Persist the diagnostic in the
+                        // clock so refreshes before that tick stay honest.
+                        *clock = PlaybackClock::start_for_clip_with_status(
+                            seconds,
+                            None,
+                            "Audio source changed · monotonic fallback clock",
+                        );
                         app.set_playback_clock_source("Monotonic fallback".into());
                         app.set_audio_output_status(
                             "Audio source changed · monotonic fallback clock".into(),
@@ -2674,94 +2905,13 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     return;
                 }
                 let playhead = f64::from(app.get_playhead_seconds());
-                let (source_clip_id, source_path, source_time, playback_rate, audio_sample_rate) = {
-                    let session = lock(&state.session);
-                    let source = timeline_clips(&session.project)
-                        .into_iter()
-                        .find(|clip| playhead >= clip.start_time && playhead < clip.end_time())
-                        .map(|clip| {
-                            (
-                                clip.id.clone(),
-                                clip.source_path.clone(),
-                                clip.in_point
-                                    + (playhead - clip.start_time) * clip.playback_rate,
-                                clip.playback_rate,
-                            )
-                    });
-                    let audio_sample_rate = source
-                        .as_ref()
-                        .zip(state.tools.as_ref())
-                        .and_then(|((_, path, _, _), tools)| {
-                            let path = Path::new(path);
-                            path.is_file().then(|| probe_media(tools, path).ok())
-                        })
-                        .flatten()
-                        .filter(|probe| probe.has_audio)
-                        .and_then(|probe| probe.audio_sample_rate);
-                    (
-                        source.as_ref().map(|(clip_id, _, _, _)| clip_id.clone()),
-                        source.as_ref().map(|(_, path, _, _)| path.clone()),
-                        source.as_ref().map(|(_, _, time, _)| *time),
-                        source.as_ref().map(|(_, _, _, rate)| *rate).unwrap_or(1.0),
-                        audio_sample_rate,
-                    )
-                };
-                let mut has_audio = false;
-                let playback_clock = match (
-                    audio_sample_rate,
-                    source_path.as_deref(),
-                    source_time,
-                    source_clip_id.as_deref(),
-                    playback_rate,
-                    state.tools.as_ref(),
-                ) {
-                    (
-                        Some(sample_rate),
-                        Some(path),
-                        Some(source_time),
-                        Some(clip_id),
-                        playback_rate,
-                        Some(tools),
-                    ) => {
-                        match spawn_decoded_audio_consumer(
-                            tools,
-                            Path::new(path),
-                            source_time,
-                            sample_rate,
-                        ) {
-                            Ok(consumer) => {
-                                has_audio = true;
-                                PlaybackClock::start_audio_for_clip(
-                                    playhead,
-                                    consumer,
-                                    Some(clip_id.to_string()),
-                                    playback_rate,
-                                )
-                            }
-                            Err(_) => PlaybackClock::start(playhead),
-                        }
-                    }
-                    _ => PlaybackClock::start(playhead),
-                };
-                *lock(&state.playback_clock) = Some(playback_clock);
-                app.set_playback_clock_source(
-                    if has_audio {
-                        "Audio master"
-                    } else {
-                        "Monotonic fallback"
-                    }
-                    .into(),
-                );
-                app.set_audio_output_status(
-                    if has_audio {
-                        "Audio stream detected · output device unavailable; clock is audio-master"
-                    } else if audio_sample_rate.is_some() {
-                        "Audio stream detected · decoded consumer unavailable; monotonic fallback clock"
-                    } else {
-                        "No audio stream · monotonic fallback clock"
-                    }
-                    .into(),
-                );
+                let setup = build_playback_clock(&state, playhead);
+                apply_playback_clock_setup(&app, &setup);
+                *lock(&state.playback_clock) = Some(setup.clock);
+                let source_path = timeline_clips(&lock(&state.session).project)
+                    .into_iter()
+                    .find(|clip| playhead >= clip.start_time && playhead < clip.end_time())
+                    .map(|clip| clip.source_path.clone());
                 app.set_is_playing(true);
                 app.set_status_left(
                     if source_path
@@ -2782,66 +2932,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                     std::time::Duration::from_millis(33),
                     move || {
                         if let Some(app) = weak.upgrade() {
-                            let position = lock(&timer_state.playback_clock)
-                                .as_mut()
-                                .map(PlaybackClock::tick);
-                            let Some(position) = position else {
-                                return;
-                            };
-                            let current_clip_id = {
-                                let session = lock(&timer_state.session);
-                                timeline_clips(&session.project)
-                                    .into_iter()
-                                    .find(|clip| {
-                                        position >= clip.start_time && position < clip.end_time()
-                                    })
-                                    .map(|clip| clip.id.clone())
-                            };
-                            let audio_source_changed = {
-                                let clock = lock(&timer_state.playback_clock);
-                                clock.as_ref().is_some_and(|clock| {
-                                    clock.source() == ClockSource::AudioMaster
-                                        && clock.audio_clip_id() != current_clip_id.as_deref()
-                                })
-                            };
-                            if audio_source_changed {
-                                // The sample consumer is tied to the clip it
-                                // decoded. At a clip boundary, stop claiming
-                                // audio-master timing until a source-aware
-                                // consumer can be attached to the next clip.
-                                *lock(&timer_state.playback_clock) =
-                                    Some(PlaybackClock::start(position));
-                                app.set_playback_clock_source("Monotonic fallback".into());
-                                app.set_audio_output_status(
-                                    "Audio source changed · monotonic fallback clock".into(),
-                                );
-                            }
-                            let duration = timeline_duration(&lock(&timer_state.session).project);
-                            if position >= duration {
-                                app.set_playhead_seconds(duration as f32);
-                                app.set_timecode_display(
-                                    timecode(
-                                        duration,
-                                        lock(&timer_state.session).project.frame_rate,
-                                    )
-                                    .into(),
-                                );
-                                app.invoke_stop_playback();
-                            } else {
-                                app.set_playhead_seconds(position as f32);
-                                app.set_timecode_display(
-                                    timecode(
-                                        position,
-                                        lock(&timer_state.session).project.frame_rate,
-                                    )
-                                    .into(),
-                                );
-                                request_playback_preview(
-                                    timer_state.clone(),
-                                    app.as_weak(),
-                                    position,
-                                );
-                            }
+                            let _ = advance_playback_tick(&app, &timer_state);
                         }
                     },
                 );
@@ -3439,6 +3530,36 @@ mod tests {
         (app, state)
     }
 
+    fn test_app_and_state_with_project(
+        project: VideoProject,
+        tools: MediaTools,
+    ) -> (VideoApp, Arc<AppState>) {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+        let state = Arc::new(AppState {
+            session: Mutex::new(VideoSession::new(project)),
+            save_path: Mutex::new(None),
+            dialogs: Arc::new(ScriptedFileDialogs::default()),
+            selected_clip: Mutex::new(0),
+            preview: Mutex::new(Some(procedural_preview())),
+            preview_synthetic: AtomicBool::new(true),
+            tools: Some(tools),
+            exporting: AtomicBool::new(false),
+            export_cancel: ExportCancellation::default(),
+            preview_generation: PreviewGeneration::default(),
+            preview_cancel: Mutex::new(None),
+            preview_in_flight: AtomicBool::new(false),
+            preview_cache: Mutex::new(PreviewCache::default()),
+            preview_cache_hits: AtomicU64::new(0),
+            waveform_cache_hits: AtomicU64::new(0),
+            gesture: Mutex::new(None),
+            playback_clock: Mutex::new(None),
+        });
+        wire_application(&app, state.clone());
+        refresh(&app, &state);
+        (app, state)
+    }
+
     #[test]
     fn new_project_creates_untitled_clean_state() {
         let scripted = ScriptedFileDialogs::default();
@@ -3751,6 +3872,40 @@ mod tests {
     }
 
     #[test]
+    fn cross_clip_seek_keeps_source_change_status_through_refresh() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::default());
+        *lock(&state.playback_clock) = Some(PlaybackClock::start_for_clip_with_status(
+            0.0,
+            Some("clip-1".into()),
+            "Audio seek unavailable · monotonic fallback clock",
+        ));
+
+        app.invoke_seek(6.0);
+
+        {
+            let clock = lock(&state.playback_clock);
+            let clock = clock.as_ref().expect("seek should retain a playback clock");
+            assert_eq!(clock.source(), ClockSource::MonotonicFallback);
+            assert_eq!(clock.active_clip_id(), None);
+            assert_eq!(
+                clock.audio_status(),
+                "Audio source changed · monotonic fallback clock"
+            );
+        }
+        assert_eq!(
+            app.get_audio_output_status().as_str(),
+            "Audio source changed · monotonic fallback clock"
+        );
+
+        refresh(&app, &state);
+        assert_eq!(
+            app.get_audio_output_status().as_str(),
+            "Audio source changed · monotonic fallback clock"
+        );
+        app.invoke_stop_playback();
+    }
+
+    #[test]
     fn preview_generation_rejects_stale_results() {
         let generation = PreviewGeneration::default();
         let first = generation.next();
@@ -3832,6 +3987,131 @@ mod tests {
         );
         drop(clock);
         drop(stalled_clock);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn terminal_audio_eof_switches_playing_controller_to_monotonic_fallback() {
+        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let dir = std::env::temp_dir().join(format!(
+            "loom-video-audio-eof-controller-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = create_workflow_media(&tools, &dir).expect("create audio/video fixture");
+        let sample_rate = probe_media(&tools, &source)
+            .expect("probe audio/video fixture")
+            .audio_sample_rate
+            .expect("audio fixture must expose a sample rate");
+
+        let mut project = sample_project();
+        project.tracks[0].clips[0].source_path = source.to_string_lossy().into_owned();
+        project.tracks[0].clips[0].duration = 6.0;
+        project.tracks[0].clips[0].out_point = 6.0;
+        let (app, state) = test_app_and_state_with_project(project, tools);
+        let consumer = spawn_decoded_audio_consumer(
+            state.tools.as_ref().unwrap(),
+            &source,
+            999.0,
+            sample_rate,
+        )
+        .expect("spawn bounded local audio consumer");
+        *lock(&state.playback_clock) = Some(PlaybackClock::start_audio_for_clip(
+            0.0,
+            consumer,
+            Some("clip-1".into()),
+            1.0,
+        ));
+        app.set_is_playing(true);
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while Instant::now() < deadline
+            && lock(&state.playback_clock)
+                .as_ref()
+                .is_some_and(|clock| clock.source() == ClockSource::AudioMaster)
+        {
+            assert!(advance_playback_tick(&app, &state));
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(app.get_is_playing());
+        assert_eq!(
+            lock(&state.playback_clock)
+                .as_ref()
+                .map(PlaybackClock::source),
+            Some(ClockSource::MonotonicFallback)
+        );
+        assert_eq!(
+            app.get_playback_clock_source().as_str(),
+            "Monotonic fallback"
+        );
+        assert!(app
+            .get_audio_output_status()
+            .to_string()
+            .contains("Audio stream ended"));
+        app.invoke_stop_playback();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn audio_master_boundary_rebuilds_consumer_for_next_clip() {
+        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let dir = std::env::temp_dir().join(format!(
+            "loom-video-audio-boundary-controller-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = create_workflow_media(&tools, &dir).expect("create audio/video fixture");
+
+        let mut project = sample_project();
+        let source_path = source.to_string_lossy().into_owned();
+        let first = &mut project.tracks[0].clips[0];
+        first.source_path = source_path.clone();
+        first.duration = 0.1;
+        first.in_point = 0.0;
+        first.out_point = 0.1;
+        let second = &mut project.tracks[0].clips[1];
+        second.source_path = source_path;
+        second.start_time = 0.1;
+        second.duration = 0.2;
+        second.in_point = 1.25;
+        second.out_point = 1.65;
+        second.playback_rate = 2.0;
+        let (app, state) = test_app_and_state_with_project(project, tools);
+        let setup = build_playback_clock(&state, 0.0);
+        assert_eq!(setup.clock.source(), ClockSource::AudioMaster);
+        *lock(&state.playback_clock) = Some(setup.clock);
+        app.set_is_playing(true);
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < deadline
+            && lock(&state.playback_clock)
+                .as_ref()
+                .and_then(PlaybackClock::audio_clip_id)
+                != Some("clip-2")
+        {
+            assert!(advance_playback_tick(&app, &state));
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        {
+            let clock = lock(&state.playback_clock);
+            let clock = clock
+                .as_ref()
+                .expect("boundary should retain playback clock");
+            assert_eq!(clock.source(), ClockSource::AudioMaster);
+            assert_eq!(clock.audio_clip_id(), Some("clip-2"));
+            let position = clock.position();
+            let expected_source_time = 1.25 + (position - 0.1) * 2.0;
+            let actual_source_time = clock
+                .audio
+                .as_ref()
+                .expect("next clip should have decoded audio")
+                .consumer
+                .start_time();
+            assert!((actual_source_time - expected_source_time).abs() < 0.08);
+        }
+        app.invoke_stop_playback();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
