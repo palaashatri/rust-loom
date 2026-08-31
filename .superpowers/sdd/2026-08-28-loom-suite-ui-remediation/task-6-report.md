@@ -243,3 +243,66 @@ The evidence remains bounded to deterministic Slint/software-renderer and
 scripted-dialog behavior. Native AppKit/Linux portal delivery, screen-reader
 runtime output, GPU rendering, and production operation-level recovery remain
 unverified roadmap work.
+
+## Round-3 review fixes (2026-08-31)
+
+The follow-up Important regression was that a negative `inspector-scroll-y`
+from the long Adjust panel could remain active after switching to the shorter
+Layers or Export panels. The reset now lives on the `PhotoApp` owner, next to
+the two app-level properties, so the shared scroll state is reset whenever the
+tab changes. The ineffective child-level reset was removed. The app regression
+`inspector_tab_change_clamps_scroll_for_shorter_content` renders each tab
+transition before asserting that the app-owned offset is `0` (Slint's change
+tracking is deferred until the render/update pass in this headless harness).
+
+The vertical journey now exercises the same transition after setting Adjust to
+`-460`, switches through Layers and Export, and records `tab`/`scroll` values
+in `photo-vertical.log`. The 17-capture set is retained; the combined
+`photo-vertical-09-adjusted-tab-reset.png` capture shows the Export panel back
+at its top controls.
+
+### Round-3 verification
+
+Commands were rerun from `loom-photo/` after the final source edit:
+
+```text
+cargo test --manifest-path loom-photo/Cargo.toml -p loom-photo-app --locked inspector_tab_change_clamps_scroll_for_shorter_content -- --nocapture
+1 passed; 0 failed
+
+cargo test --workspace --all-targets --locked
+PASS (exit 0): 17 `loom-photo-app` tests + 49 `loom-photo-core` tests; CLI
+target ran 0 tests; 0 failures
+
+cargo fmt --all -- --check
+PASS (exit 0)
+
+cargo clippy --workspace --all-targets --locked -- -D warnings
+PASS (exit 0); generated Slint export/deprecation warnings only
+
+cargo build --workspace --release --locked
+PASS (exit 0): Finished release profile [optimized]
+
+./target/release/loom-photo --journey ../.work/evidence/ui/photo-task-6-release-review3-20260831 --size 1280x800 --theme dark
+PASS (exit 0): printed `keyboard journey: PASS` and `photo journey: PASS`
+```
+
+Fresh evidence under
+`.work/evidence/ui/photo-task-6-release-review3-20260831/` was checked as
+follows:
+
+- 17 `photo-vertical-*.png` captures are 1280×800 8-bit RGBA PNGs.
+- `photo-vertical-08-adjustment-layer.png` records `tab=0 scroll=-460`;
+  `photo-vertical-09-adjusted-tab-reset.png` records `tab=2 scroll=0` and was
+  visually inspected with the Export controls visible at the top.
+- `photo-vertical.png` is a 480×300 8-bit RGBA PNG.
+- `photo.json` satisfies `passed=true`, `app=photo`, ten palette steps, and
+  final `5-dismiss`.
+- `unzip -t photo-vertical.loomphoto` reports all three entries `OK` and no
+  errors.
+- `photo-vertical.log` contains the invalid-import, directory-target PNG
+  export, and cancelled-import messages.
+- `git diff --check` exits 0.
+
+This remains deterministic Slint/software-renderer and scripted-dialog
+evidence; native AppKit/Linux portal delivery, screen-reader runtime output,
+GPU rendering, and production operation-level recovery remain unverified.

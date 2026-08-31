@@ -1140,8 +1140,10 @@ fn capture_photo_journey_step(
     let session = state.session.borrow();
     let active = session.canvas.document.active_layer();
     Ok(format!(
-        "{index:02} {name} status={:?} active={} transform={:?} selection={} crop={} undo={} pixels={}",
+        "{index:02} {name} status={:?} tab={} scroll={} active={} transform={:?} selection={} crop={} undo={} pixels={}",
         app.get_status_left().as_str(),
+        app.get_inspector_tab(),
+        app.get_inspector_scroll_y(),
         active.map(|layer| layer.id.as_str()).unwrap_or("none"),
         active.map(|layer| layer.transform),
         format_rect(session.canvas.document.selection),
@@ -1347,8 +1349,30 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         return Err("journey adjustment did not mutate active layer state".into());
     }
     set_status(&app, "Adjusted brightness");
+
+    // A long Adjust panel can legitimately scroll below the fold, but that
+    // offset must not carry into the shorter Layers or Export panels. Render
+    // after each transition so the deferred Slint change handler is evaluated,
+    // then assert the app-owned scroll state before recording the evidence.
+    app.set_inspector_tab(1);
+    snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| format!("render Layers tab: {error}"))?;
+    if app.get_inspector_scroll_y() != 0.0 {
+        return Err("journey Layers tab retained the Adjust scroll offset".into());
+    }
+    app.set_inspector_tab(2);
+    snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| format!("render Export tab: {error}"))?;
+    if app.get_inspector_scroll_y() != 0.0 {
+        return Err("journey Export tab retained the Adjust scroll offset".into());
+    }
     steps.push(capture_photo_journey_step(
-        &app, &state, args, out_dir, 9, "adjusted",
+        &app,
+        &state,
+        args,
+        out_dir,
+        9,
+        "adjusted-tab-reset",
     )?);
 
     if !state.session.borrow_mut().undo() {
@@ -1358,6 +1382,9 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         return Err("journey undo did not restore brightness".into());
     }
     set_status(&app, "Undid brightness adjustment");
+    app.set_inspector_tab(0);
+    snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| format!("render Adjust tab after undo: {error}"))?;
     refresh_photo_with_state(&app, &state)?;
     steps.push(capture_photo_journey_step(
         &app,
@@ -1463,7 +1490,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         return Err("keyboard journey invariants failed".to_string());
     }
     let log = format!(
-        "Photo vertical journey: PASS\njourney=import-select-transform-selection-crop-adjust-undo-save-reopen-export-failures\n{}\n",
+        "Photo vertical journey: PASS\njourney=import-select-transform-selection-crop-adjust-tab-reset-undo-save-reopen-export-failures\n{}\n",
         steps.join("\n")
     );
     std::fs::write(out_dir.join("photo-vertical.log"), log)
@@ -2459,6 +2486,29 @@ mod tests {
         app.set_inspector_scroll_y(-460.0);
         assert_eq!(app.get_inspector_scroll_y(), -460.0);
         app.set_inspector_scroll_y(0.0);
+        assert_eq!(app.get_inspector_scroll_y(), 0.0);
+    }
+
+    #[test]
+    fn inspector_tab_change_clamps_scroll_for_shorter_content() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        configure_responsive_layout(&app, (1280, 800));
+        let state = Rc::new(scripted_state());
+        refresh_photo_with_state(&app, &state).expect("initial refresh");
+
+        app.set_inspector_tab(0);
+        app.set_inspector_scroll_y(-460.0);
+        assert_eq!(app.get_inspector_scroll_y(), -460.0);
+
+        // Layers and Export have shorter content than Adjust. Switching to
+        // either tab must bring its top controls back into the viewport rather
+        // than reusing Adjust's stale negative offset.
+        app.set_inspector_tab(1);
+        snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render Layers tab");
+        assert_eq!(app.get_inspector_scroll_y(), 0.0);
+        app.set_inspector_tab(2);
+        snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render Export tab");
         assert_eq!(app.get_inspector_scroll_y(), 0.0);
     }
 

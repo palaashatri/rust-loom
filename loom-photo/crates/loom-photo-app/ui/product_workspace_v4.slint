@@ -73,6 +73,10 @@ export component PhotoApp inherits Window {
     in-out property <bool> pan-mode: false;
     in-out property <int> inspector-tab: 0;
     in-out property <length> inspector-scroll-y: 0px;
+    // Each tab owns a different content extent. Reset the app-owned scroll
+    // state when switching tabs so shorter panels never inherit a stale
+    // negative offset from Adjust.
+    changed inspector-tab => { root.inspector-scroll-y = 0px; }
     in-out property <float> brightness-value: 0.0;
     in-out property <float> contrast-value: 0.0;
     in-out property <float> saturation-value: 0.0;
