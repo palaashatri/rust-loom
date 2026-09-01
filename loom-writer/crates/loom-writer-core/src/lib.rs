@@ -3732,25 +3732,32 @@ impl WriterDocument {
         }
         let usable_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
         let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
-        let average_glyph_width = style.body_font_size_pt * 0.52;
-        let columns = (usable_width / average_glyph_width).floor().max(1.0) as usize;
-        let line_height = style.body_font_size_pt * style.line_height;
-        let lines_per_page = (usable_height / line_height).floor().max(1.0) as usize;
         let mut pages = vec![DocumentPage {
             index: 0,
             fragments: Vec::new(),
         }];
-        let mut lines_used = 0usize;
-        for block in &self.blocks {
+        let mut height_used = 0.0_f32;
+        for (block_index, block) in self.blocks.iter().enumerate() {
             let text = block.text.as_str();
+            // Pagination must use the same block metrics as `layout`: a
+            // heading has wider glyphs and a taller line box than body text.
+            // Keeping this calculation here (rather than applying body
+            // columns to every block) prevents long headings from producing
+            // fragments that the renderer cannot fit on the page.
+            let font_size = style.font_size_for_kind(block.kind.as_str());
+            let average_glyph_width = font_size * 0.52;
+            let columns = (usable_width / average_glyph_width).floor().max(1.0) as usize;
+            let line_height = font_size * style.line_height;
             let ranges = wrap_utf8_ranges(text, columns);
             for (start, end) in ranges {
-                if lines_used == lines_per_page {
+                if !pages.last().is_some_and(|page| page.fragments.is_empty())
+                    && height_used + line_height > usable_height + f32::EPSILON
+                {
                     pages.push(DocumentPage {
                         index: pages.len(),
                         fragments: Vec::new(),
                     });
-                    lines_used = 0;
+                    height_used = 0.0;
                 }
                 pages
                     .last_mut()
@@ -3762,11 +3769,17 @@ impl WriterDocument {
                         end,
                         text: text[start..end].to_string(),
                     });
-                lines_used += 1;
+                height_used += line_height;
             }
-            // Paragraph spacing consumes one reference line unless already at a page break.
-            if lines_used > 0 && lines_used < lines_per_page {
-                lines_used += 1;
+            // Paragraph spacing consumes one body line unless the next block
+            // starts on a fresh page. This mirrors `layout`, which adds the
+            // same gap only between fragments that share a page.
+            if block_index + 1 < self.blocks.len()
+                && height_used > 0.0
+                && height_used + style.body_font_size_pt * style.line_height
+                    <= usable_height + f32::EPSILON
+            {
+                height_used += style.body_font_size_pt * style.line_height;
             }
         }
         Ok(pages)
@@ -5112,6 +5125,34 @@ mod tests {
             (selection.rect.x - expected_center_x).abs() < 0.001,
             "selection projection retains centered-line geometry"
         );
+    }
+
+    #[test]
+    fn pagination_uses_heading_width_and_height_for_long_blocks() {
+        let mut document = WriterDocument::new("heading-flow", "Heading flow");
+        document.push(RichBlock::new(1, "heading1", &"Long heading ".repeat(80)));
+        document.push(RichBlock::new(2, "paragraph", "Body follows"));
+
+        let style = PageStyle::default();
+        let layout = document
+            .layout(&style, PageViewport::default())
+            .expect("heading flow layout");
+        let content_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        assert!(
+            layout
+                .fragments
+                .iter()
+                .all(|fragment| { fragment.bounds.width <= content_width + 0.001 }),
+            "wrapped fragments must fit the content width using their block metrics"
+        );
+        for pair in layout.fragments.windows(2) {
+            if pair[0].block_id != pair[1].block_id {
+                assert!(
+                    pair[1].bounds.y >= pair[0].bounds.y + pair[0].bounds.height,
+                    "paragraph spacing must not overlap a long heading"
+                );
+            }
+        }
     }
 
     #[test]

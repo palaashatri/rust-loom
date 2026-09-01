@@ -25,12 +25,20 @@ export struct WriterRenderBlock {
     font-size: length,
     height: length,
     alignment: int,
+    /// True when the source paragraph uses a style the reference renderer
+    /// cannot reproduce faithfully (for example persisted Justify).
+    unsupported: bool,
+    unsupported-label: string,
 }
 
 /// A selection highlight or collapsed caret rectangle projected from the
 /// authoritative Writer page layout.  `caret` distinguishes a one-pixel
 /// insertion marker from a non-collapsed text highlight.
 export struct WriterSelectionRect {
+    /// Zero-based source page for this geometry. The current canvas renders
+    /// pages in a single scrollable projection, so this remains inspectable
+    /// even when a selection spans page boundaries.
+    page-index: int,
     x: length,
     y: length,
     width: length,
@@ -304,6 +312,10 @@ component WriterDocumentEditor inherits Rectangle {
     in property <string> selection-announcement: "No text selected";
     callback edited(string, int, int);
     callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
     callback key-pressed(event: KeyEvent) -> EventResult;
 
     horizontal-stretch: 1;
@@ -370,10 +382,25 @@ component WriterDocumentEditor inherits Rectangle {
                 ? TextHorizontalAlignment.center
                 : block.alignment == 2
                     ? TextHorizontalAlignment.right
-                    : block.alignment == 3
-                        ? TextHorizontalAlignment.left
-                        : TextHorizontalAlignment.left;
+                    : TextHorizontalAlignment.left;
             vertical-alignment: top;
+        }
+        // Persisted Justify paragraphs are intentionally not reflowed by the
+        // reference renderer. Keep their text readable while making the
+        // unsupported fallback explicit in the projection instead of silently
+        // presenting a left-aligned result as if it were justified.
+        for block in root.render-blocks : Text {
+            x: block.x * root.page-zoom;
+            y: block.y * root.page-zoom;
+            width: max(1px, block.width * root.page-zoom);
+            height: max(14px, min(18px, block.height * root.page-zoom));
+            text: block.unsupported ? block.unsupported-label : "";
+            color: Theme.palette().warning;
+            font-size: 10px * root.page-zoom;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            visible: block.unsupported;
+            accessible-role: none;
         }
         // Paint the caret after rich text so it remains visible at a collapsed
         // selection.  The visibility guard mirrors normal editor behavior but
@@ -422,21 +449,29 @@ component WriterDocumentEditor inherits Rectangle {
         key-pressed(event) => { return root.key-pressed(event); }
     }
 
-    // TextInput has one hit-test layout for the whole document.  Its body
-    // metrics match the core page projection, but a single input cannot map
-    // clicks faithfully onto heading-sized or centered/right-aligned rows.
-    // Shield those rows from misleading caret placement while retaining
-    // keyboard/IME editing through the focused editor.  Body rows leave the
-    // shield disabled, so TextInput keeps its native click-and-drag path for
-    // the geometry it can represent correctly.
-    for block in root.render-blocks : TouchArea {
-        x: block.x * root.page-zoom;
-        y: block.y * root.page-zoom;
-        width: max(1px, block.width * root.page-zoom);
-        height: max(1px, block.height * root.page-zoom);
-        enabled: block.alignment != 0 || block.font-size * root.page-zoom != root.font-size;
-        accessible-role: none;
-        clicked => { editor.focus(); }
+    // The display projection and native TextInput now share the core layout's
+    // coordinates. Route all pointer gestures through the controller's exact
+    // hit-test instead of letting TextInput infer offsets from body metrics.
+    // This keeps heading, alignment, paragraph-gap, and page-break geometry in
+    // one authoritative coordinate system while preserving native keyboard
+    // and IME editing after focus.
+    pointer-surface := TouchArea {
+        enabled: root.enabled;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                editor.focus();
+                root.pointer-pressed(self.mouse-x, self.mouse-y, event.modifiers.shift);
+            } else if (event.kind == PointerEventKind.up) {
+                root.pointer-released(self.mouse-x, self.mouse-y);
+            } else if (event.kind == PointerEventKind.cancel) {
+                root.pointer-cancelled();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.pointer-moved(self.mouse-x, self.mouse-y);
+            }
+        }
     }
 
     changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
@@ -456,8 +491,14 @@ export component WriterPageCanvas inherits CanvasSurface {
     in-out property <float> page-zoom: 1.0;
     in-out property <length> page-scroll-x: 0px;
     in-out property <length> page-scroll-y: 0px;
+    in property <int> page-count: 1;
+    in property <length> page-stack-height: 842px;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
     callback page-zoom-changed(float);
     callback page-scroll-changed(length, length);
     callback key-pressed(event: KeyEvent) -> EventResult;
@@ -480,7 +521,12 @@ export component WriterPageCanvas inherits CanvasSurface {
         x: max(24px, (page-scroll.width - self.width) / 2);
         y: 24px;
         width: 595px * root.page-zoom;
-        height: 842px * root.page-zoom;
+        // A single page keeps the established A4 surface. Multi-page
+        // documents use one continuous, scrollable paper stack whose height
+        // is derived from the same core page bounds used by the projection.
+        height: root.page-count > 1
+            ? (root.page-stack-height + 160px) * root.page-zoom
+            : 842px * root.page-zoom;
         border-radius: Theme.tokens.metrics.radius-small;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -527,6 +573,10 @@ export component WriterPageCanvas inherits CanvasSurface {
                 font-size: 11px * root.page-zoom;
                 edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                 selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                pointer-released(x, y) => { root.pointer-released(x, y); }
+                pointer-cancelled => { root.pointer-cancelled(); }
                 key-pressed(event) => { return root.key-pressed(event); }
             }
         }

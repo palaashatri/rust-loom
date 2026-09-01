@@ -31,8 +31,8 @@ use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{
-    floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, TextSelection,
-    WriterDocument,
+    floor_grapheme_boundary, grapheme_boundaries, grapheme_count, PageStyle, PageViewport,
+    RichBlock, TextSelection, WriterDocument,
 };
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
@@ -1131,6 +1131,8 @@ impl EditorHistory {
 struct GuiState {
     current: RefCell<WriterDocument>,
     viewport: RefCell<PageViewport>,
+    pointer_anchor: Cell<Option<usize>>,
+    pointer_active: Cell<bool>,
     save_path: RefCell<Option<PathBuf>>,
     history: RefCell<EditorHistory>,
     history_clock: Instant,
@@ -1268,6 +1270,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     // indeterminate rather than falsely highlighting Body/Left.
     let heading_level = inspector_heading_level(doc, &selection);
     let text_alignment = inspector_alignment(doc, &selection);
+    let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
 
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
@@ -1276,6 +1279,8 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
+    app.set_page_count(page_count);
+    app.set_page_stack_height(page_stack_height);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
     app.set_is_bold(formatting.bold);
     app.set_is_italic(formatting.italic);
@@ -1296,6 +1301,9 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
     let (render_blocks, selection_rects) = writer_render_projection(doc, viewport);
     app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
     app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
+    let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
+    app.set_page_count(page_count);
+    app.set_page_stack_height(page_stack_height);
 }
 
 /// Project the authoritative rich-text model into the display-only StyledText
@@ -1339,54 +1347,132 @@ fn writer_render_projection(
     let mut fallback_y = 0.0_f32;
 
     let mut rows = Vec::with_capacity(doc.blocks.len());
+    let base_page = layout
+        .as_ref()
+        .and_then(|page_layout| page_layout.page_bounds.first().copied());
     for block in &doc.blocks {
         let font_size = style.font_size_for_kind(block.kind.as_str());
         let fallback_height = writer_render_height_for_width(block, font_size, content_width);
-        let geometry = layout.as_ref().and_then(|page_layout| {
-            let fragments: Vec<_> = page_layout
+        let mut projected = false;
+        if let (Some(page_layout), Some(base_page)) = (layout.as_ref(), base_page) {
+            let zoom = page_layout.zoom.max(f32::EPSILON);
+            for fragment in page_layout
                 .fragments
                 .iter()
                 .filter(|fragment| fragment.block_id == block.id)
-                .collect();
-            let first = fragments.first()?;
-            let page_index = page_layout
-                .page_bounds
-                .iter()
-                .position(|page| first.bounds.y >= page.y && first.bounds.y < page.y + page.height)
-                .unwrap_or(0);
-            let page = page_layout.page_bounds.get(page_index)?;
-            let zoom = page_layout.zoom.max(f32::EPSILON);
-            let visible_fragments: Vec<_> = fragments
-                .iter()
-                .copied()
-                .filter(|fragment| {
-                    fragment.bounds.y >= page.y && fragment.bounds.y < page.y + page.height
-                })
-                .collect();
-            let last = visible_fragments.last().copied().unwrap_or(first);
-            let x = ((first.bounds.x - page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
-            let y = ((first.bounds.y - page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
-            let height = ((last.bounds.y + last.bounds.height - first.bounds.y) / zoom)
-                .max(fallback_line_height);
-            Some((x, y, height))
-        });
-        let (x, y, height) = geometry.unwrap_or((0.0, fallback_y, fallback_height));
-        let height = height.max(font_size * style.line_height);
-        fallback_y = y + height;
-        rows.push(WriterRenderBlock {
-            content: slint::StyledText::from_markdown(&writer_render_markup(block))
-                .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
-            x,
-            y,
-            width: content_width,
-            height,
-            font_size,
-            alignment: writer_render_alignment(block.style.alignment),
-        });
+            {
+                projected = true;
+                let fragment_block = writer_fragment_block(block, fragment.start, fragment.end);
+                let x = ((fragment.bounds.x - base_page.x - style.margin_left_pt * zoom) / zoom)
+                    .max(0.0);
+                let y = ((fragment.bounds.y - base_page.y - style.margin_top_pt * zoom) / zoom)
+                    .max(0.0);
+                let height = (fragment.bounds.height / zoom).max(font_size * style.line_height);
+                rows.push(writer_render_row(
+                    &fragment_block,
+                    x,
+                    y,
+                    content_width,
+                    height,
+                ));
+            }
+        }
+        if !projected {
+            let height = fallback_height.max(font_size * style.line_height);
+            rows.push(writer_render_row(
+                block,
+                0.0,
+                fallback_y,
+                content_width,
+                height,
+            ));
+            fallback_y += height;
+        }
     }
 
-    let selection_rects = writer_selection_rects(&style, layout.as_ref());
+    let mut selection_rects = writer_selection_rects(&style, layout.as_ref());
+    if selection_rects.is_empty() && doc.blocks.is_empty() {
+        selection_rects.push(WriterSelectionRect {
+            page_index: 0,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: fallback_line_height,
+            caret: true,
+        });
+    }
     (rows, selection_rects)
+}
+
+fn writer_projection_metrics(doc: &WriterDocument, viewport: PageViewport) -> (i32, f32) {
+    let style = PageStyle::default();
+    let layout_viewport = PageViewport {
+        width: style.width_pt,
+        height: style.height_pt,
+        zoom: normalize_page_zoom(viewport.zoom, 1.0),
+        scroll_x: normalize_page_scroll(viewport.scroll_x),
+        scroll_y: normalize_page_scroll(viewport.scroll_y),
+    };
+    let Some(layout) = doc.layout(&style, layout_viewport).ok() else {
+        return (1, style.height_pt);
+    };
+    let zoom = layout.zoom.max(f32::EPSILON);
+    let stack_height = match (layout.page_bounds.first(), layout.page_bounds.last()) {
+        (Some(first), Some(last)) => ((last.y + last.height - first.y) / zoom).max(style.height_pt),
+        _ => style.height_pt,
+    };
+    (
+        layout.page_bounds.len().max(1).min(i32::MAX as usize) as i32,
+        stack_height,
+    )
+}
+
+fn writer_fragment_block(block: &RichBlock, start: usize, end: usize) -> RichBlock {
+    let text = block.text.as_str();
+    let start = floor_char_boundary_for_render(text, start);
+    let end = floor_char_boundary_for_render(text, end).max(start);
+    let mut fragment = RichBlock::new(block.id, block.kind.as_str(), &text[start..end]);
+    fragment.style = block.style.clone();
+    fragment.runs = block
+        .runs
+        .iter()
+        .filter_map(|run| {
+            let run_start = run.start.max(start);
+            let run_end = run.end.min(end);
+            (run_start < run_end).then(|| loom_text::StyleRun {
+                start: run_start - start,
+                end: run_end - start,
+                style: run.style.clone(),
+            })
+        })
+        .collect();
+    fragment
+}
+
+fn writer_render_row(
+    block: &RichBlock,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> WriterRenderBlock {
+    let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
+    WriterRenderBlock {
+        content: slint::StyledText::from_markdown(&writer_render_markup(block))
+            .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
+        x,
+        y,
+        width,
+        height,
+        font_size: PageStyle::default().font_size_for_kind(block.kind.as_str()),
+        alignment: writer_render_alignment(block.style.alignment),
+        unsupported,
+        unsupported_label: if unsupported {
+            SharedString::from("Justify unavailable")
+        } else {
+            SharedString::default()
+        },
+    }
 }
 
 fn writer_selection_rects(
@@ -1397,26 +1483,113 @@ fn writer_selection_rects(
         return Vec::new();
     };
     let zoom = layout.zoom.max(f32::EPSILON);
+    let Some(base_page) = layout.page_bounds.first().copied() else {
+        return Vec::new();
+    };
     layout
         .selection_rects
         .iter()
         .filter_map(|selection| {
-            let page = layout.page_bounds.get(selection.page_index)?;
-            // The current surface contains one page.  Keep rectangles for
-            // that page only; later pagination can add page surfaces without
-            // changing the core selection contract.
-            if selection.page_index != 0 {
-                return None;
-            }
+            layout.page_bounds.get(selection.page_index)?;
             Some(WriterSelectionRect {
-                x: ((selection.rect.x - page.x - style.margin_left_pt * zoom) / zoom).max(0.0),
-                y: ((selection.rect.y - page.y - style.margin_top_pt * zoom) / zoom).max(0.0),
+                page_index: selection.page_index as i32,
+                x: ((selection.rect.x - base_page.x - style.margin_left_pt * zoom) / zoom).max(0.0),
+                y: ((selection.rect.y - base_page.y - style.margin_top_pt * zoom) / zoom).max(0.0),
                 width: (selection.rect.width / zoom).max(1.0),
                 height: (selection.rect.height / zoom).max(1.0),
                 caret: selection.start == selection.end,
             })
         })
         .collect()
+}
+
+/// Convert a pointer in the editor's local (zoomed) coordinates to the
+/// canonical UTF-8 byte offset used by `WriterDocument::selection`.
+///
+/// The hit-test deliberately consumes the same page fragments as the rich
+/// projection. It therefore accounts for heading metrics, paragraph spacing,
+/// centered/right alignment, and cumulative page offsets instead of asking a
+/// single body-metric TextInput to infer a line.
+fn writer_pointer_offset(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+    x: f32,
+    y: f32,
+) -> Option<usize> {
+    if doc.blocks.is_empty() {
+        return Some(0);
+    }
+    let style = PageStyle::default();
+    let zoom = normalize_page_zoom(viewport.zoom, 1.0);
+    let layout = doc
+        .layout(
+            &style,
+            PageViewport {
+                width: style.width_pt,
+                height: style.height_pt,
+                zoom: 1.0,
+                scroll_x: 0.0,
+                scroll_y: 0.0,
+            },
+        )
+        .ok()?;
+    let base_page = layout.page_bounds.first().copied()?;
+    let local_x = x / zoom;
+    let local_y = y / zoom;
+    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
+    let mut block_starts = Vec::with_capacity(doc.blocks.len());
+    let mut cursor = 0usize;
+    for (index, block) in doc.blocks.iter().enumerate() {
+        block_starts.push(cursor);
+        cursor += block.text.as_str().len() + usize::from(index + 1 < doc.blocks.len());
+    }
+
+    let mut nearest: Option<(f32, usize)> = None;
+    for fragment in &layout.fragments {
+        let block_index = doc
+            .blocks
+            .iter()
+            .position(|block| block.id == fragment.block_id)?;
+        let block = &doc.blocks[block_index];
+        let font_size = style.font_size_for_kind(block.kind.as_str());
+        let glyph_width = (font_size * 0.52).max(f32::EPSILON);
+        let fragment_y = fragment.bounds.y - base_page.y - style.margin_top_pt;
+        let fragment_height = fragment.bounds.height;
+        let distance = if local_y < fragment_y {
+            fragment_y - local_y
+        } else if local_y > fragment_y + fragment_height {
+            local_y - (fragment_y + fragment_height)
+        } else {
+            0.0
+        };
+        let alignment_offset = match block.style.alignment {
+            loom_text::Alignment::Center => {
+                ((content_width - fragment.bounds.width) / 2.0).max(0.0)
+            }
+            loom_text::Alignment::Right => (content_width - fragment.bounds.width).max(0.0),
+            loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+        };
+        let fragment_x = fragment.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
+        let text_boundaries = grapheme_boundaries(&fragment.text);
+        let grapheme_count = text_boundaries.len().saturating_sub(1);
+        let relative_x = ((local_x - fragment_x) / glyph_width).clamp(0.0, grapheme_count as f32);
+        let grapheme_index = relative_x.round() as usize;
+        let local_byte = text_boundaries
+            .get(grapheme_index.min(grapheme_count))
+            .copied()
+            .unwrap_or(fragment.text.len());
+        let offset = block_starts[block_index] + fragment.start + local_byte;
+        if distance <= f32::EPSILON {
+            return Some(offset);
+        }
+        if nearest
+            .map(|(best_distance, _)| distance < best_distance)
+            .unwrap_or(true)
+        {
+            nearest = Some((distance, offset));
+        }
+    }
+    nearest.map(|(_, offset)| offset)
 }
 
 #[allow(dead_code)]
@@ -2417,6 +2590,84 @@ fn wire_writer_shared_callbacks(
             }
         });
     }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_pointer_pressed(move |x, y, extend| {
+            if let Some(app) = app_ref.upgrade() {
+                let viewport = *state.viewport.borrow();
+                let current = state.current.borrow();
+                let Some(offset) = writer_pointer_offset(&current, viewport, x, y) else {
+                    state.pointer_active.set(false);
+                    state.pointer_anchor.set(None);
+                    return;
+                };
+                let anchor = if extend {
+                    current.selection().anchor
+                } else {
+                    offset
+                };
+                drop(current);
+                state.pointer_anchor.set(Some(anchor));
+                state.pointer_active.set(true);
+                app.invoke_selection_changed(
+                    anchor.min(i32::MAX as usize) as i32,
+                    offset.min(i32::MAX as usize) as i32,
+                );
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_pointer_moved(move |x, y| {
+            if !state.pointer_active.get() {
+                return;
+            }
+            if let Some(app) = app_ref.upgrade() {
+                let viewport = *state.viewport.borrow();
+                let current = state.current.borrow();
+                let Some(offset) = writer_pointer_offset(&current, viewport, x, y) else {
+                    return;
+                };
+                let anchor = state.pointer_anchor.get().unwrap_or(offset);
+                drop(current);
+                app.invoke_selection_changed(
+                    anchor.min(i32::MAX as usize) as i32,
+                    offset.min(i32::MAX as usize) as i32,
+                );
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_pointer_released(move |x, y| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.pointer_active.get() {
+                    let viewport = *state.viewport.borrow();
+                    let current = state.current.borrow();
+                    if let Some(offset) = writer_pointer_offset(&current, viewport, x, y) {
+                        let anchor = state.pointer_anchor.get().unwrap_or(offset);
+                        drop(current);
+                        app.invoke_selection_changed(
+                            anchor.min(i32::MAX as usize) as i32,
+                            offset.min(i32::MAX as usize) as i32,
+                        );
+                    }
+                }
+            }
+            state.pointer_active.set(false);
+            state.pointer_anchor.set(None);
+        });
+    }
+    {
+        let state = state.clone();
+        app.on_pointer_cancelled(move || {
+            state.pointer_active.set(false);
+            state.pointer_anchor.set(None);
+        });
+    }
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
@@ -2460,6 +2711,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
         viewport: RefCell::new(PageViewport::default()),
+        pointer_anchor: Cell::new(None),
+        pointer_active: Cell::new(false),
         save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
@@ -2894,6 +3147,8 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document.clone()),
         viewport: RefCell::new(PageViewport::default()),
+        pointer_anchor: Cell::new(None),
+        pointer_active: Cell::new(false),
         save_path: RefCell::new(None),
         history: RefCell::new(initial_history),
         history_clock: Instant::now(),
@@ -2978,9 +3233,13 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         ));
     }
     let render_rows = app.get_render_blocks();
-    if render_rows.row_count() != formatted_document.blocks.len() {
+    // A long block may wrap into multiple authoritative layout fragments, so
+    // the rich preview intentionally has one row per fragment rather than one
+    // row per model block. It must still retain at least one projected row for
+    // every block in the document.
+    if render_rows.row_count() < formatted_document.blocks.len() {
         return Err(format!(
-            "journey rich preview row count is stale (rows={}, blocks={})",
+            "journey rich preview is missing block rows (rows={}, blocks={})",
             render_rows.row_count(),
             formatted_document.blocks.len()
         ));
@@ -3381,6 +3640,8 @@ mod tests {
         let state = Rc::new(GuiState {
             current: RefCell::new(document),
             viewport: RefCell::new(PageViewport::default()),
+            pointer_anchor: Cell::new(None),
+            pointer_active: Cell::new(false),
             save_path: RefCell::new(None),
             history: RefCell::new(history),
             history_clock: Instant::now(),
@@ -3479,6 +3740,8 @@ mod tests {
         let state = GuiState {
             current: RefCell::new(text_document("hello")),
             viewport: RefCell::new(PageViewport::default()),
+            pointer_anchor: Cell::new(None),
+            pointer_active: Cell::new(false),
             save_path: RefCell::new(Some(PathBuf::from("/tmp/current.loomdoc"))),
             history: RefCell::new(EditorHistory::new()),
             history_clock: Instant::now(),
@@ -3844,6 +4107,90 @@ mod tests {
     }
 
     #[test]
+    fn persisted_justify_projection_exposes_an_explicit_unsupported_indicator() {
+        let mut document = text_document("justify remains readable");
+        document.blocks[0].style.alignment = loom_text::Alignment::Justify;
+        let (rows, _) = writer_render_projection(&document, PageViewport::default());
+        let row = rows.first().expect("render row");
+        assert_eq!(row.alignment, -1);
+        assert!(
+            row.unsupported,
+            "persisted Justify must be visibly marked unsupported rather than rendered as Left"
+        );
+        assert_eq!(row.unsupported_label, "Justify unavailable");
+    }
+
+    #[test]
+    fn render_projection_keeps_long_document_rows_on_their_page_flow() {
+        let mut document = WriterDocument::new("long", "Long document");
+        for id in 0..120 {
+            document.push(RichBlock::new(
+                id + 1,
+                "paragraph",
+                "A paragraph with enough text to exercise deterministic page wrapping.",
+            ));
+        }
+        // Selection geometry is only projected for the model's active range. Select the
+        // complete document so this regression exercises overlays on later pages as well
+        // as the cumulative row positions above.
+        let document_len = document.editor_text().len();
+        document.set_selection(TextSelection::range(0, document_len));
+        let (rows, selection_rects) = writer_render_projection(&document, PageViewport::default());
+        assert_eq!(rows.len(), document.blocks.len());
+        assert!(
+            rows.windows(2)
+                .all(|pair| { pair[1].y + 0.001 >= pair[0].y + pair[0].height }),
+            "rows from later pages must retain cumulative page offsets"
+        );
+        assert!(
+            rows.last()
+                .is_some_and(|row| row.y > PageStyle::default().height_pt),
+            "a long document must project rows beyond the first page"
+        );
+        assert!(
+            selection_rects.iter().any(|rect| rect.page_index > 0),
+            "selection overlays must follow the same multi-page policy"
+        );
+    }
+
+    #[test]
+    fn empty_document_projection_exposes_a_visible_insertion_caret() {
+        let document = WriterDocument::new("empty", "Empty");
+        let (_, selection_rects) = writer_render_projection(&document, PageViewport::default());
+        assert!(
+            selection_rects.iter().any(|rect| rect.caret),
+            "blank documents must expose a model caret for the empty insertion point"
+        );
+    }
+
+    #[test]
+    fn pointer_hit_test_selects_using_projected_heading_and_paragraph_geometry() {
+        set_platform();
+        let mut document = WriterDocument::new("pointer", "Pointer");
+        document.push(RichBlock::new(1, "heading1", "A centered heading"));
+        let mut body = RichBlock::new(2, "paragraph", "Body target");
+        body.style.alignment = loom_text::Alignment::Right;
+        document.push(body);
+        let dialogs: Rc<dyn FileDialogService> =
+            Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let (app, state) = test_state(document, dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        apply_state(&app, &state);
+
+        let rows = app.get_render_blocks();
+        let body_row = rows.row_data(1).expect("body render row");
+        let body_start = "A centered heading".len() + 1;
+        app.invoke_pointer_pressed(body_row.x + 1.0, body_row.y + 1.0, false);
+        app.invoke_pointer_released(body_row.x + 1.0, body_row.y + 1.0);
+        assert_eq!(
+            state.current.borrow().selection(),
+            TextSelection::caret(body_start)
+        );
+        assert_eq!(app.get_selection_anchor() as usize, body_start);
+        assert_eq!(app.get_selection_focus() as usize, body_start);
+    }
+
+    #[test]
     fn keyboard_selection_updates_authoritative_state_and_accessible_announcement() {
         set_platform();
         let app = WriterApp::new().expect("create WriterApp");
@@ -3992,6 +4339,8 @@ mod tests {
         let state = GuiState {
             current: RefCell::new(text_document("menu state")),
             viewport: RefCell::new(PageViewport::default()),
+            pointer_anchor: Cell::new(None),
+            pointer_active: Cell::new(false),
             save_path: RefCell::new(None),
             history: RefCell::new(EditorHistory::new()),
             history_clock: Instant::now(),

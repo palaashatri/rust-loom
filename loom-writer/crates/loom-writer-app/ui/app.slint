@@ -55,6 +55,8 @@ export component WriterApp inherits Window {
     in-out property <float> page-zoom: 1.0;
     in-out property <length> page-scroll-x: 0px;
     in-out property <length> page-scroll-y: 0px;
+    in-out property <int> page-count: 1;
+    in-out property <length> page-stack-height: 842px;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
 
@@ -77,6 +79,10 @@ export component WriterApp inherits Window {
     callback redo;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
     callback page-zoom-changed(float);
     callback page-scroll-changed(length, length);
     callback toggle-bold;
@@ -302,10 +308,16 @@ export component WriterApp inherits Window {
                     page-zoom <=> root.page-zoom;
                     page-scroll-x <=> root.page-scroll-x;
                     page-scroll-y <=> root.page-scroll-y;
+                    page-count: root.page-count;
+                    page-stack-height: root.page-stack-height;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                     selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                    pointer-released(x, y) => { root.pointer-released(x, y); }
+                    pointer-cancelled => { root.pointer-cancelled(); }
                     key-pressed(event) => { return reject; }
                 }
 
@@ -352,10 +364,16 @@ export component WriterApp inherits Window {
                     page-zoom <=> root.page-zoom;
                     page-scroll-x <=> root.page-scroll-x;
                     page-scroll-y <=> root.page-scroll-y;
+                    page-count: root.page-count;
+                    page-stack-height: root.page-stack-height;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                     selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                    pointer-released(x, y) => { root.pointer-released(x, y); }
+                    pointer-cancelled => { root.pointer-cancelled(); }
                     key-pressed(event) => { return reject; }
                 }
             }
