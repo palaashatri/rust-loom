@@ -21,6 +21,7 @@ export component VideoToolbarBody inherits DirectionalLayout {
     in-out property <string> active-nle-tool: "Select";
     in-out property <bool> snap-enabled: true;
     in property <bool> show-inspector: true;
+    in property <bool> inspector-available: true;
     in property <bool> labeled: false;
     in property <bool> overflow: false;
     in property <bool> exporting: false;
@@ -115,7 +116,8 @@ export component VideoToolbarBody inherits DirectionalLayout {
             icon: "format";
             label: "Inspector";
             checked: root.show-inspector;
-            clicked => { root.toggle-inspector(); }
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
         }
         IconOverLabelToolbarItem {
             icon: "export";
@@ -135,7 +137,8 @@ export component VideoToolbarBody inherits DirectionalLayout {
             icon: "format";
             label: "Inspector";
             checked: root.show-inspector;
-            clicked => { root.toggle-inspector(); }
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
         }
         IconOnlyToolbarItem {
             icon: "export";

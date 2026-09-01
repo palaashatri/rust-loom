@@ -14,9 +14,10 @@ use std::{
 };
 
 use loom_desktop::{
-    build_standard_menu_bar, CommandAction, FileDialogService, FileFilter, Menu, MenuActionSink,
-    MenuBar, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs, NativeMenuBar,
-    OpenFileRequest, SaveFileRequest, ScriptedFileDialogs,
+    build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
+    FileDialogService, FileFilter, Menu, MenuActionSink, MenuBar, MenuBarService, MenuItem,
+    MenuShortcut, NativeFileDialogs, NativeMenuBar, OpenFileRequest, SaveFileRequest,
+    ScriptedFileDialogs,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::PaletteProbe;
@@ -134,17 +135,21 @@ fn configure_responsive_layout(app: &VideoApp, width: u32) {
     app.set_icon_only_toolbar(state.icon_only);
     app.set_overflow_toolbar(state.overflow);
     app.set_labeled_toolbar(state.labeled);
+    app.set_inspector_available(!state.icon_only);
 }
 
 fn configure_direction(app: &VideoApp, rtl: bool) {
     app.set_rtl(rtl);
 }
 
-fn wire_responsive_layout(app: &VideoApp) {
+fn wire_responsive_layout(app: &VideoApp, menu_service: Arc<NativeMenuBar>) {
     let app_ref = app.as_weak();
     app.on_window_resized(move |width| {
         if let Some(app) = app_ref.upgrade() {
             configure_responsive_layout(&app, width.max(0.0) as u32);
+            let query = app.get_palette_query();
+            rebuild_palette(&app, query.as_str());
+            sync_menu_state(&menu_service, &app);
         }
     });
 }
@@ -1464,8 +1469,9 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             ],
         )],
     );
-    let _menu_service = install_video_menu(&app, menu_bar);
+    let menu_service = install_video_menu(&app, menu_bar);
     refresh(&app, &state);
+    sync_menu_state(&menu_service, &app);
 
     let mut steps = Vec::new();
     capture_workflow_step(
@@ -3118,7 +3124,39 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
     }
 }
 
-fn install_video_menu(app: &VideoApp, mut menu_bar: MenuBar) -> NativeMenuBar {
+fn menu_projection(
+    menu_service: &NativeMenuBar,
+    app: &VideoApp,
+) -> Result<CommandStateProjection, DesktopError> {
+    let menu_bar = menu_service
+        .installed_menu_bar()
+        .ok_or_else(|| DesktopError::InvalidRequest("Video menu bar is not installed".into()))?;
+    let mut projection = menu_bar.command_state_projection();
+    let mut inspector = projection.get("view.inspector").cloned().ok_or_else(|| {
+        DesktopError::InvalidRequest("Video menu is missing view.inspector".into())
+    })?;
+    let inspector_available = app.get_inspector_available();
+    inspector.enabled = inspector_available;
+    inspector.checked = Some(inspector_available && app.get_show_inspector());
+    projection.insert(inspector);
+    Ok(projection)
+}
+
+fn sync_menu_state_result(
+    menu_service: &NativeMenuBar,
+    app: &VideoApp,
+) -> Result<(), DesktopError> {
+    let projection = menu_projection(menu_service, app)?;
+    menu_service.sync_command_states(&projection)
+}
+
+fn sync_menu_state(menu_service: &NativeMenuBar, app: &VideoApp) {
+    if let Err(error) = sync_menu_state_result(menu_service, app) {
+        app.set_status_right(format!("Menu update failed: {error}").into());
+    }
+}
+
+fn install_video_menu(app: &VideoApp, mut menu_bar: MenuBar) -> Arc<NativeMenuBar> {
     menu_bar.disable_items_except([
         "file.new",
         "file.open",
@@ -3142,9 +3180,19 @@ fn install_video_menu(app: &VideoApp, mut menu_bar: MenuBar) -> NativeMenuBar {
         "help.shortcuts",
         "help.feedback",
     ]);
-    let service = NativeMenuBar::new();
+    let service = Arc::new(NativeMenuBar::new());
     let _ = service.install_menu_bar(&menu_bar);
     let weak = app.as_weak();
+    let menu_service = Arc::downgrade(&service);
+    let inspector_app = weak.clone();
+    let inspector_menu_service = menu_service.clone();
+    app.on_inspector_visibility_changed(move |_visible| {
+        if let (Some(app), Some(menu_service)) =
+            (inspector_app.upgrade(), inspector_menu_service.upgrade())
+        {
+            sync_menu_state(&menu_service, &app);
+        }
+    });
     let sink: MenuActionSink = Arc::new(move |action: CommandAction| {
         let Some(app) = weak.upgrade() else {
             return Ok(());
@@ -3160,7 +3208,11 @@ fn install_video_menu(app: &VideoApp, mut menu_bar: MenuBar) -> NativeMenuBar {
             "file.export_video" => app.invoke_export_timeline(app.get_export_path()),
             "clip.split" => app.invoke_split_clip(),
             "clip.delete" => app.invoke_remove_clip(),
-            "view.inspector" => app.set_show_inspector(!app.get_show_inspector()),
+            "view.inspector" => {
+                if app.get_inspector_available() {
+                    app.set_show_inspector(!app.get_show_inspector());
+                }
+            }
             "view.zoom_in" => app.set_timeline_zoom((app.get_timeline_zoom() + 0.5).min(4.0)),
             "view.zoom_out" => app.set_timeline_zoom((app.get_timeline_zoom() - 0.5).max(1.0)),
             "view.zoom_actual" => app.set_timeline_zoom(1.0),
@@ -3168,6 +3220,9 @@ fn install_video_menu(app: &VideoApp, mut menu_bar: MenuBar) -> NativeMenuBar {
             "help.shortcuts" => app.set_status_left("Use Ctrl/Cmd+K for commands".into()),
             "help.feedback" => app.set_status_left("Feedback is unavailable offline".into()),
             _ => {}
+        }
+        if let Some(menu_service) = menu_service.upgrade() {
+            sync_menu_state(&menu_service, &app);
         }
         Ok(())
     });
@@ -3194,7 +3249,6 @@ fn main() -> Result<(), String> {
     apply_theme(&app, &args.theme);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    wire_responsive_layout(&app);
     let recovered = initialize_snapshot_recovery()?;
     let (initial_proj, initial_path) = if args.open.is_some() {
         initial_session(&args)?
@@ -3249,10 +3303,12 @@ fn main() -> Result<(), String> {
             ],
         )],
     );
-    let _menu_service = install_video_menu(&app, menu_bar);
+    let menu_service = install_video_menu(&app, menu_bar);
 
+    wire_responsive_layout(&app, menu_service.clone());
     wire_palette(&app);
     refresh(&app, &state);
+    sync_menu_state(&menu_service, &app);
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
 }
@@ -3266,6 +3322,7 @@ enum PaletteAction {
     SaveAsProject,
     Undo,
     Redo,
+    ToggleInspector,
     ImportMedia,
     SplitClip,
     RemoveClip,
@@ -3283,6 +3340,15 @@ struct PaletteCommand {
 }
 
 const PALETTE_IMPORT_SOURCE: &str = "";
+
+fn palette_action_enabled(app: &VideoApp, action: &PaletteAction) -> bool {
+    match action {
+        PaletteAction::Undo => app.get_can_undo(),
+        PaletteAction::Redo => app.get_can_redo(),
+        PaletteAction::ToggleInspector => app.get_inspector_available(),
+        _ => true,
+    }
+}
 
 fn master_palette(app: &VideoApp) -> Vec<PaletteCommand> {
     vec![
@@ -3321,6 +3387,12 @@ fn master_palette(app: &VideoApp) -> Vec<PaletteCommand> {
             id: "video.redo",
             label: "Redo",
             shortcut: "Ctrl+Shift+Z",
+        },
+        PaletteCommand {
+            action: PaletteAction::ToggleInspector,
+            id: "video.inspector",
+            label: "Inspector",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::ImportMedia,
@@ -3366,11 +3438,7 @@ fn master_palette(app: &VideoApp) -> Vec<PaletteCommand> {
         },
     ]
     .into_iter()
-    .filter(|c| match c.action {
-        PaletteAction::Undo => app.get_can_undo(),
-        PaletteAction::Redo => app.get_can_redo(),
-        _ => true,
-    })
+    .filter(|command| palette_action_enabled(app, &command.action))
     .collect()
 }
 
@@ -3463,11 +3531,7 @@ fn wire_palette(app: &VideoApp) {
             if let Some(app) = app_ref.upgrade() {
                 let command = master_palette(&app)
                     .into_iter()
-                    .filter(|c| match c.action {
-                        PaletteAction::Undo => app.get_can_undo(),
-                        PaletteAction::Redo => app.get_can_redo(),
-                        _ => true,
-                    })
+                    .filter(|command| palette_action_enabled(&app, &command.action))
                     .filter(|c| {
                         let q = app.get_palette_query().trim().to_lowercase();
                         q.is_empty()
@@ -3484,6 +3548,11 @@ fn wire_palette(app: &VideoApp) {
                         PaletteAction::SaveAsProject => app.invoke_save_as_project(),
                         PaletteAction::Undo => app.invoke_undo(),
                         PaletteAction::Redo => app.invoke_redo(),
+                        PaletteAction::ToggleInspector => {
+                            if app.get_inspector_available() {
+                                app.set_show_inspector(!app.get_show_inspector());
+                            }
+                        }
                         PaletteAction::ImportMedia => {
                             app.invoke_import_media(PALETTE_IMPORT_SOURCE.into())
                         }
@@ -3925,6 +3994,185 @@ mod tests {
             assert_eq!(app.get_labeled_toolbar(), labeled);
             assert_eq!(compact_layout_for_width(&app, width), icon_only);
         }
+    }
+
+    #[test]
+    fn compact_layout_disables_inspector_without_mutating_preference() {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+
+        assert!(app.get_show_inspector());
+        assert!(app.get_inspector_available());
+        configure_responsive_layout(&app, 1179);
+        assert!(!app.get_inspector_available());
+        assert!(app.get_show_inspector());
+        assert!(app.get_icon_only_toolbar());
+
+        configure_responsive_layout(&app, 1180);
+        assert!(app.get_inspector_available());
+        assert!(app.get_show_inspector());
+        assert!(!app.get_icon_only_toolbar());
+    }
+
+    #[test]
+    fn compact_inspector_menu_action_does_not_mutate_preference() {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+        configure_responsive_layout(&app, 1179);
+        let menu = install_video_menu(
+            &app,
+            build_standard_menu_bar(
+                "Loom Video",
+                vec![],
+                vec![],
+                vec![MenuItem::check("view.inspector", "Inspector", true)],
+                vec![],
+            ),
+        );
+
+        sync_menu_state(&menu, &app);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                enabled: false,
+                checked: false,
+                ..
+            })
+        ));
+        assert!(menu.dispatch_action("view.inspector").is_err());
+        assert!(app.get_show_inspector());
+
+        configure_responsive_layout(&app, 1180);
+        sync_menu_state(&menu, &app);
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                enabled: true,
+                checked: true,
+                ..
+            })
+        ));
+        menu.dispatch_action("view.inspector")
+            .expect("dispatch available inspector menu action");
+        assert!(!app.get_show_inspector());
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                enabled: true,
+                checked: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn inspector_palette_action_respects_responsive_availability() {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+        wire_palette(&app);
+
+        configure_responsive_layout(&app, 1180);
+        assert!(app.get_inspector_available());
+        app.set_palette_query("inspector".into());
+        rebuild_palette(&app, "inspector");
+        assert_eq!(app.get_palette_commands().row_count(), 1);
+        assert_eq!(
+            app.get_palette_commands()
+                .row_data(0)
+                .expect("visible inspector command")
+                .id,
+            "video.inspector"
+        );
+        let before = app.get_show_inspector();
+        app.invoke_palette_invoked(0);
+        assert_ne!(app.get_show_inspector(), before);
+
+        configure_responsive_layout(&app, 1179);
+        assert!(!app.get_inspector_available());
+        app.set_show_inspector(true);
+        app.set_palette_query("inspector".into());
+        rebuild_palette(&app, "inspector");
+        assert_eq!(app.get_palette_commands().row_count(), 0);
+        app.invoke_palette_invoked(0);
+        assert!(app.get_show_inspector());
+    }
+
+    #[test]
+    fn inspector_toggle_paths_keep_native_menu_check_in_sync() {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+        configure_responsive_layout(&app, 1180);
+        let menu = install_video_menu(
+            &app,
+            build_standard_menu_bar(
+                "Loom Video",
+                vec![],
+                vec![],
+                vec![MenuItem::check("view.inspector", "Inspector", true)],
+                vec![],
+            ),
+        );
+        sync_menu_state(&menu, &app);
+        wire_palette(&app);
+
+        app.set_palette_query("inspector".into());
+        rebuild_palette(&app, "inspector");
+        app.invoke_palette_invoked(0);
+        slint::platform::update_timers_and_animations();
+        assert!(!app.get_show_inspector());
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                enabled: true,
+                checked: false,
+                ..
+            })
+        ));
+
+        app.set_show_inspector(true);
+        slint::platform::update_timers_and_animations();
+        assert!(matches!(
+            menu.installed_menu_bar()
+                .and_then(|bar| bar.find_item("view.inspector").cloned()),
+            Some(MenuItem::Check {
+                enabled: true,
+                checked: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn responsive_resize_rebuilds_palette_availability() {
+        set_platform();
+        let app = VideoApp::new().expect("create VideoApp");
+        configure_responsive_layout(&app, 1180);
+        let menu = install_video_menu(
+            &app,
+            build_standard_menu_bar(
+                "Loom Video",
+                vec![],
+                vec![],
+                vec![MenuItem::check("view.inspector", "Inspector", true)],
+                vec![],
+            ),
+        );
+        wire_responsive_layout(&app, menu);
+        wire_palette(&app);
+
+        app.set_palette_query("inspector".into());
+        rebuild_palette(&app, "inspector");
+        assert_eq!(app.get_palette_commands().row_count(), 1);
+
+        app.invoke_window_resized(1179.0);
+        assert_eq!(app.get_palette_commands().row_count(), 0);
+
+        app.invoke_window_resized(1180.0);
+        assert_eq!(app.get_palette_commands().row_count(), 1);
     }
 
     #[test]

@@ -482,6 +482,8 @@ enum PaletteAction {
     RemoveLayer,
     MoveLayer(i32),
     SelectTool(&'static str),
+    Zoom,
+    ToggleInspector,
     ExportPng,
     ExportJpeg,
 }
@@ -504,6 +506,7 @@ fn palette_action_enabled(app: &PhotoApp, action: &PaletteAction) -> bool {
                 app.get_can_move_down()
             }
         }
+        PaletteAction::ToggleInspector => app.get_inspector_available(),
         _ => true,
     }
 }
@@ -593,6 +596,18 @@ fn master_palette(app: &PhotoApp) -> Vec<PaletteCommand> {
             id: "photo.tool.pan",
             label: "Tool: Pan",
             shortcut: "H",
+        },
+        PaletteCommand {
+            action: PaletteAction::Zoom,
+            id: "photo.zoom",
+            label: "Zoom",
+            shortcut: "",
+        },
+        PaletteCommand {
+            action: PaletteAction::ToggleInspector,
+            id: "photo.inspector",
+            label: "Inspector",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::ExportPng,
@@ -2258,6 +2273,11 @@ fn wire_palette(app: &PhotoApp) {
                         PaletteAction::SelectTool(tool) => {
                             app.invoke_select_tool(SharedString::from(tool))
                         }
+                        PaletteAction::Zoom => {
+                            let zoom = app.get_zoom_value();
+                            app.set_zoom_value(if zoom >= 150.0 { 100.0 } else { zoom + 25.0 });
+                        }
+                        PaletteAction::ToggleInspector => app.invoke_toggle_inspector(),
                         PaletteAction::ExportPng => app.invoke_export_png(),
                         PaletteAction::ExportJpeg => app.invoke_export_jpeg(),
                     }
@@ -2985,5 +3005,60 @@ mod tests {
             0,
             "stale visible move-down must not dispatch move-up"
         );
+    }
+
+    #[test]
+    fn photo_overflow_palette_exposes_zoom_and_inspector() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+
+        // The 1180–1319px layout keeps the compact toolbar but hides its
+        // trailing Zoom/Inspector group behind the overflow affordance.
+        configure_responsive_width(&app, 1180);
+        rebuild_palette(&app, "");
+        let ids = (0..app.get_palette_commands().row_count())
+            .filter_map(|index| app.get_palette_commands().row_data(index))
+            .map(|item| item.id.to_string())
+            .collect::<Vec<_>>();
+        assert!(ids.iter().any(|id| id == "photo.zoom"));
+        assert!(ids.iter().any(|id| id == "photo.inspector"));
+
+        // At icon-only widths the inspector is unavailable, so the palette
+        // must preserve that disabled/no-op boundary instead of exposing a
+        // command that cannot mutate the existing inspector state.
+        configure_responsive_width(&app, 1179);
+        rebuild_palette(&app, "inspector");
+        assert_eq!(app.get_palette_commands().row_count(), 0);
+    }
+
+    #[test]
+    fn photo_overflow_palette_invocation_mutates_zoom_and_inspector_state() {
+        set_platform();
+        let app = PhotoApp::new().expect("create PhotoApp");
+        configure_responsive_width(&app, 1180);
+        let state = Rc::new(scripted_state());
+        wire_inspector_callback(&app, &state);
+        wire_palette(&app);
+
+        app.set_zoom_value(100.0);
+        app.set_palette_query("zoom".into());
+        rebuild_palette(&app, "zoom");
+        assert_eq!(app.get_palette_commands().row_count(), 1);
+        assert_eq!(
+            app.get_palette_commands()
+                .row_data(0)
+                .expect("zoom command")
+                .id,
+            "photo.zoom"
+        );
+        app.invoke_palette_invoked(0);
+        assert_eq!(app.get_zoom_value(), 125.0);
+
+        app.set_palette_query("inspector".into());
+        rebuild_palette(&app, "inspector");
+        assert_eq!(app.get_palette_commands().row_count(), 1);
+        let before = app.get_show_inspector();
+        app.invoke_palette_invoked(0);
+        assert_ne!(app.get_show_inspector(), before);
     }
 }

@@ -515,6 +515,7 @@ enum PaletteAction {
     StepBack,
     StepForward,
     ToggleLoop,
+    Zoom,
 }
 
 struct PaletteCommand {
@@ -597,6 +598,12 @@ fn master_palette(app: &MotionApp) -> Vec<PaletteCommand> {
             id: "motion.loop",
             label: "Toggle Loop",
             shortcut: "L",
+        },
+        PaletteCommand {
+            action: PaletteAction::Zoom,
+            id: "motion.zoom",
+            label: "Zoom",
+            shortcut: "",
         },
     ]
     .into_iter()
@@ -1909,6 +1916,10 @@ fn wire_palette(app: &MotionApp) {
                         PaletteAction::StepBack => app.invoke_step_back(),
                         PaletteAction::StepForward => app.invoke_step_forward(),
                         PaletteAction::ToggleLoop => app.invoke_toggle_loop(),
+                        PaletteAction::Zoom => {
+                            let zoom = app.get_zoom_value();
+                            app.set_zoom_value(if zoom >= 150.0 { 100.0 } else { zoom + 25.0 });
+                        }
                     }
                 }
             }
@@ -2422,5 +2433,36 @@ mod product_tests {
         assert_eq!(current.layers.len(), original.layers.len());
         assert!(history.redo(&mut current));
         assert_eq!(current.layers.len(), original.layers.len() + 1);
+    }
+
+    #[test]
+    fn motion_overflow_palette_exposes_and_invokes_zoom() {
+        set_platform();
+        let app = MotionApp::new().expect("create MotionApp");
+        configure_responsive_layout(&app, 1180);
+        wire_palette(&app);
+
+        app.set_palette_query("zoom".into());
+        rebuild_palette(&app, "zoom");
+        assert_eq!(app.get_palette_commands().row_count(), 1);
+        assert_eq!(
+            app.get_palette_commands()
+                .row_data(0)
+                .expect("zoom command")
+                .id,
+            "motion.zoom"
+        );
+
+        app.set_zoom_value(100.0);
+        app.invoke_palette_invoked(0);
+        assert_eq!(app.get_zoom_value(), 125.0);
+
+        // Keep the existing toolbar cycle semantics: the 150% step wraps to
+        // 100% rather than creating an unsupported out-of-range value.
+        app.set_zoom_value(150.0);
+        app.set_palette_query("zoom".into());
+        rebuild_palette(&app, "zoom");
+        app.invoke_palette_invoked(0);
+        assert_eq!(app.get_zoom_value(), 100.0);
     }
 }
