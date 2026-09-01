@@ -1,0 +1,48 @@
+schema_version = 1
+
+[limits]
+rust_max_bytes = 65536
+slint_max_bytes = 32768
+python_max_bytes = 32768
+shell_max_bytes = 16384
+recommended_rust_lines = 800
+recommended_slint_lines = 500
+recommended_script_lines = 600
+recommended_function_lines = 80
+
+[policy]
+legacy_files_may_not_grow = true
+new_dead_code_allows_forbidden = true
+broad_lint_suppression_forbidden = true
+new_generic_ui_must_live_in_foundation = true
+
+# Exact byte ceilings for legacy oversized source. These are debt ceilings,
+# not acceptable target sizes. Any meaningful edit should reduce them.
+[legacy_byte_caps]
+"loom-writer/crates/loom-writer-app/src/main.rs" = 194401
+"loom-sheets/crates/loom-sheets-app/src/main.rs" = 108783
+"loom-present/crates/loom-present-app/src/main.rs" = 123901
+"loom-photo/crates/loom-photo-app/src/main.rs" = 111647
+"loom-motion/crates/loom-motion-app/src/main.rs" = 88770
+"loom-video/crates/loom-video-app/src/main.rs" = 180040
+"loom-studio/crates/loom-studio-app/src/main.rs" = 143795
+"loom-encode/crates/loom-encode-app/src/main.rs" = 104013
+
+"loom-writer/crates/loom-writer-core/src/lib.rs" = 252727
+"loom-sheets/crates/loom-sheets-core/src/lib.rs" = 199529
+"loom-present/crates/loom-present-core/src/lib.rs" = 152566
+"loom-photo/crates/loom-photo-core/src/lib.rs" = 172614
+"loom-motion/crates/loom-motion-core/src/lib.rs" = 117356
+"loom-video/crates/loom-video-core/src/lib.rs" = 151115
+"loom-studio/crates/loom-studio-core/src/lib.rs" = 169114
+"loom-encode/crates/loom-encode-core/src/lib.rs" = 163017
+
+"loom-core/crates/loom-ui/ui/toolkit.slint" = 51906
+"loom-core/crates/loom-ui/ui/components.slint" = 41805
+"loom-writer/crates/loom-writer-app/ui/app.slint" = 36518
+"loom-sheets/crates/loom-sheets-app/ui/app.slint" = 41611
+"loom-present/crates/loom-present-app/ui/app.slint" = 42883
+"loom-present/crates/loom-present-app/ui/present_components.slint" = 34385
+"loom-motion/crates/loom-motion-app/ui/components.slint" = 42032
+"loom-video/crates/loom-video-app/ui/components.slint" = 41541
+"loom-studio/crates/loom-studio-app/ui/studio_arrangement.slint" = 33923
