@@ -50,6 +50,9 @@ export component WriterApp inherits Window {
     in property <string> status-left: "";
     in property <string> status-right: "";
     in property <string> selection-announcement: "No text selected";
+    in-out property <float> page-zoom: 1.0;
+    in-out property <length> page-scroll-x: 0px;
+    in-out property <length> page-scroll-y: 0px;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
 
@@ -72,6 +75,8 @@ export component WriterApp inherits Window {
     callback redo;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
+    callback page-zoom-changed(float);
+    callback page-scroll-changed(length, length);
     callback toggle-bold;
     callback toggle-italic;
     callback toggle-underline;
@@ -91,6 +96,10 @@ export component WriterApp inherits Window {
     callback palette-key-text(string);
     callback palette-backspace;
     callback palette-close;
+
+    changed page-zoom => { root.page-zoom-changed(root.page-zoom); }
+    changed page-scroll-x => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
+    changed page-scroll-y => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
 
     public function open-palette() {
         root.palette-open = true;
@@ -233,8 +242,10 @@ export component WriterApp inherits Window {
                     inspector-available: root.inspector-available;
                     inspector-visible: root.inspector-visible;
                     labeled-export: root.labeled-export;
+                    page-zoom: root.page-zoom;
                     toggle-inspector => { root.toggle-inspector(); }
                     export-pdf => { root.export-pdf(); }
+                    page-zoom-changed(value) => { root.page-zoom = value; }
                     overflow-requested => {
                         if (root.toolbar-overflow-open) {
                             root.close-toolbar-overflow();
@@ -253,8 +264,10 @@ export component WriterApp inherits Window {
                     inspector-available: root.inspector-available;
                     inspector-visible: root.inspector-visible;
                     labeled-export: root.labeled-export;
+                    page-zoom: root.page-zoom;
                     toggle-inspector => { root.toggle-inspector(); }
                     export-pdf => { root.export-pdf(); }
+                    page-zoom-changed(value) => { root.page-zoom = value; }
                     overflow-requested => {
                         if (root.toolbar-overflow-open) {
                             root.close-toolbar-overflow();
@@ -282,6 +295,11 @@ export component WriterApp inherits Window {
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement: root.selection-announcement;
+                    page-zoom <=> root.page-zoom;
+                    page-scroll-x <=> root.page-scroll-x;
+                    page-scroll-y <=> root.page-scroll-y;
+                    page-zoom-changed(value) => { root.page-zoom-changed(value); }
+                    page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                     selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
                     key-pressed(event) => { return reject; }
@@ -325,6 +343,11 @@ export component WriterApp inherits Window {
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement: root.selection-announcement;
+                    page-zoom <=> root.page-zoom;
+                    page-scroll-x <=> root.page-scroll-x;
+                    page-scroll-y <=> root.page-scroll-y;
+                    page-zoom-changed(value) => { root.page-zoom-changed(value); }
+                    page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                     selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
                     key-pressed(event) => { return reject; }

@@ -17,15 +17,21 @@ export component WriterToolbarBody inherits DirectionalLayout {
     in property <bool> inspector-available: true;
     in property <bool> inspector-visible: false;
     in property <bool> labeled-export: false;
+    in property <float> page-zoom: 1.0;
     callback toggle-inspector;
     callback export-pdf;
     callback overflow-requested;
+    callback page-zoom-changed(float);
 
     spacing: Theme.tokens.space.xs;
     leading-padding: 0px;
     trailing-padding: 0px;
     horizontal-stretch: 1;
     vertical-stretch: 1;
+
+    function next-page-zoom() -> float {
+        return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
+    }
 
     // The command groups are explicitly mirrored instead of relying on the
     // stable HorizontalLayout primitive to infer child order. This keeps the
@@ -42,9 +48,10 @@ export component WriterToolbarBody inherits DirectionalLayout {
         }
         IconOverLabelToolbarItem {
             icon: "zoom-in";
-            label: "Page Zoom";
-            accessible-label: "Page zoom unavailable";
-            enabled: false;
+            label: Math.round(root.page-zoom * 100) + "%";
+            accessible-label: "Page zoom";
+            enabled: true;
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
         }
         IconOverLabelToolbarItem {
             icon: "plus";
@@ -111,6 +118,12 @@ export component WriterToolbarBody inherits DirectionalLayout {
             enabled: root.inspector-available;
             clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
         }
+        IconOnlyToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            enabled: true;
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
+        }
         IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
     }
 
@@ -123,6 +136,12 @@ export component WriterToolbarBody inherits DirectionalLayout {
             checked: root.inspector-visible;
             enabled: root.inspector-available;
             clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            enabled: true;
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
         }
         IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
     }
@@ -138,6 +157,12 @@ export component WriterToolbarBody inherits DirectionalLayout {
             enabled: root.inspector-available;
             clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
         }
+        IconOnlyToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            enabled: true;
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
+        }
     }
     if root.rtl && root.overflow : ToolbarSpacer { }
 
@@ -150,6 +175,12 @@ export component WriterToolbarBody inherits DirectionalLayout {
             checked: root.inspector-visible;
             enabled: root.inspector-available;
             clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem {
+            icon: "zoom-in";
+            label: "Page Zoom";
+            enabled: true;
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
         }
     }
 
@@ -197,9 +228,10 @@ export component WriterToolbarBody inherits DirectionalLayout {
         }
         IconOverLabelToolbarItem {
             icon: "zoom-in";
-            label: "Page Zoom";
-            accessible-label: "Page zoom unavailable";
-            enabled: false;
+            label: Math.round(root.page-zoom * 100) + "%";
+            accessible-label: "Page zoom";
+            enabled: true;
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
         }
         IconOverLabelToolbarItem {
             icon: "eye";
@@ -308,19 +340,34 @@ export component WriterPageCanvas inherits CanvasSurface {
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in property <string> selection-announcement: "No text selected";
+    in-out property <float> page-zoom: 1.0;
+    in-out property <length> page-scroll-x: 0px;
+    in-out property <length> page-scroll-y: 0px;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
+    callback page-zoom-changed(float);
+    callback page-scroll-changed(length, length);
     callback key-pressed(event: KeyEvent) -> EventResult;
 
-    // The paper itself is document geometry, not shell chrome: keep its
-    // portrait constraint explicit while the surrounding shell uses layouts.
+    // The paper itself is document geometry, not shell chrome. Keep its
+    // A4 proportions and let the Flickable own real zoom/scroll state.
+    page-scroll := Flickable {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        viewport-width: max(parent.width, page.width + 48px);
+        viewport-height: max(parent.height, page.height + 48px);
+        viewport-x <=> root.page-scroll-x;
+        viewport-y <=> root.page-scroll-y;
+        flicked => { root.page-scroll-changed(self.viewport-x, self.viewport-y); }
+
     page := Rectangle {
-        private property <length> page-height: min(1080px, max(420px, parent.height - Theme.tokens.space.xxl * 2));
-        private property <length> page-padding: min(56px, max(32px, self.width * 0.1));
-        x: max(Theme.tokens.space.xxl, (parent.width - self.width) / 2);
-        y: max(Theme.tokens.space.xxl, (parent.height - self.height) / 2);
-        width: min(820px, max(320px, self.page-height * 0.72));
-        height: self.page-height;
+        private property <length> page-padding: 72px * root.page-zoom;
+        x: max(24px, (page-scroll.width - self.width) / 2);
+        y: 24px;
+        width: 595px * root.page-zoom;
+        height: 842px * root.page-zoom;
         border-radius: Theme.tokens.metrics.radius-small;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -331,15 +378,15 @@ export component WriterPageCanvas inherits CanvasSurface {
         clip: true;
 
         VerticalLayout {
-            padding-top: Theme.tokens.space.xxxl;
-            padding-bottom: Theme.tokens.space.xxxl;
+            padding-top: page.page-padding;
+            padding-bottom: page.page-padding;
             padding-left: page.page-padding;
             padding-right: page.page-padding;
             spacing: Theme.tokens.space.lg;
 
             Text {
                 text: root.doc-title;
-                font-size: Theme.tokens.typography.heading;
+                font-size: Theme.tokens.typography.heading * root.page-zoom;
                 font-weight: 700;
                 color: Theme.palette().paper-ink;
                 wrap: word-wrap;
@@ -347,7 +394,7 @@ export component WriterPageCanvas inherits CanvasSurface {
             }
             Text {
                 text: "Local-first document";
-                font-size: Theme.tokens.typography.body;
+                font-size: Theme.tokens.typography.body * root.page-zoom;
                 color: Theme.palette().paper-muted;
             }
             Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
@@ -357,13 +404,14 @@ export component WriterPageCanvas inherits CanvasSurface {
                 selection-anchor <=> root.selection-anchor;
                 selection-focus <=> root.selection-focus;
                 selection-announcement <=> root.selection-announcement;
-                font-size: Theme.tokens.typography.body-large;
+                font-size: Theme.tokens.typography.body-large * root.page-zoom;
                 edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                 selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
                 key-pressed(event) => { return root.key-pressed(event); }
             }
         }
     }
+}
 }
 
 /// A compact, localization-safe property row. Writer inspectors intentionally

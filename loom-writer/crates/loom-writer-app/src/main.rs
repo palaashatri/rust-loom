@@ -29,7 +29,10 @@ use loom_desktop::{
 use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
-use loom_writer_core::{RichBlock, TextSelection, WriterDocument};
+use loom_writer_core::{
+    floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, TextSelection,
+    WriterDocument,
+};
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
@@ -273,6 +276,18 @@ fn load_file(path: &Path) -> Result<WriterDocument, String> {
 
 fn save_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
     let bytes = loom_writer_core::save_document(doc).map_err(|error| error.to_string())?;
+    loom_storage::atomic_write(path, &bytes)
+        .map_err(|error| format!("atomic write {}: {error}", path.display()))
+}
+
+fn export_pdf_file(path: &Path, doc: &WriterDocument) -> Result<(), String> {
+    if path.as_os_str().is_empty() || path.file_name().is_none() {
+        return Err("PDF destination is empty".into());
+    }
+    let bytes = loom_writer_core::export_pdf(doc);
+    if bytes.is_empty() {
+        return Err("PDF export produced no bytes".into());
+    }
     loom_storage::atomic_write(path, &bytes)
         .map_err(|error| format!("atomic write {}: {error}", path.display()))
 }
@@ -1110,6 +1125,7 @@ impl EditorHistory {
 /// enablement guard and palette filtering goes through `registry.search`.
 struct GuiState {
     current: RefCell<WriterDocument>,
+    viewport: RefCell<PageViewport>,
     save_path: RefCell<Option<PathBuf>>,
     history: RefCell<EditorHistory>,
     history_clock: Instant,
@@ -1118,6 +1134,25 @@ struct GuiState {
     document_filter: FileFilter,
     pdf_filter: FileFilter,
     registry: Arc<Mutex<CommandRegistry>>,
+}
+
+const MIN_PAGE_ZOOM: f32 = 0.5;
+const MAX_PAGE_ZOOM: f32 = 2.0;
+
+fn normalize_page_zoom(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(MIN_PAGE_ZOOM, MAX_PAGE_ZOOM)
+    } else {
+        fallback.clamp(MIN_PAGE_ZOOM, MAX_PAGE_ZOOM)
+    }
+}
+
+fn normalize_page_scroll(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
 }
 
 fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
@@ -1246,15 +1281,17 @@ fn selection_from_app(app: &WriterApp) -> TextSelection {
 }
 
 fn selection_announcement(doc: &WriterDocument, selection: &TextSelection) -> String {
-    let (start, end) = selection.normalized_range();
+    let text = doc.editor_text();
+    let start = floor_grapheme_boundary(&text, selection.anchor);
+    let end = floor_grapheme_boundary(&text, selection.focus);
+    let (start, end) = (start.min(end), start.max(end));
     if start == end {
         return format!("Caret at {start}");
     }
-    let text = doc.editor_text();
     let selected = text
         .get(start.min(text.len())..end.min(text.len()))
         .unwrap_or_default();
-    format!("Selected {} characters", selected.chars().count())
+    format!("Selected {} characters", grapheme_count(selected))
 }
 
 /// Inspector heading level with mixed-state sentinel.
@@ -1384,6 +1421,10 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
         let _ = record_snapshot_recovery("writer state", bytes);
     }
     drop(current);
+    let viewport = *state.viewport.borrow();
+    app.set_page_zoom(viewport.zoom);
+    app.set_page_scroll_x(viewport.scroll_x);
+    app.set_page_scroll_y(viewport.scroll_y);
     {
         let history = state.history.borrow();
         app.set_can_undo(!history.undo.is_empty());
@@ -1577,6 +1618,456 @@ fn run_gui(args: &Args) -> Result<(), String> {
     run_gui_with_dialogs(args, Rc::new(NativeFileDialogs))
 }
 
+fn sync_writer_menu_if_present(
+    menu_service: &Option<Arc<NativeMenuBar>>,
+    app: &WriterApp,
+    state: &GuiState,
+) {
+    if let Some(menu_service) = menu_service.as_deref() {
+        sync_menu_state(menu_service, app, state);
+    }
+}
+
+/// Register callbacks shared by the native GUI and deterministic journey.
+/// `menu_service` is optional so headless runs exercise the exact same
+/// document, history, selection, and file-operation paths without requiring a
+/// platform menu backend.
+fn wire_writer_shared_callbacks(
+    app: &WriterApp,
+    state: &Rc<GuiState>,
+    menu_service: Option<Arc<NativeMenuBar>>,
+) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_open_doc(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "file.open",
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    return;
+                }
+                match state.dialogs.open_file(&writer_open_request(&state)) {
+                    Ok(Some(path)) => match load_file(&path) {
+                        Ok(document) => {
+                            replace_opened_document(&app, &state, path.clone(), document);
+                            sync_writer_menu_if_present(&menu_service, &app, &state);
+                            app.set_status_left(SharedString::from(format!(
+                                "Opened {}",
+                                path.display()
+                            )));
+                        }
+                        Err(error) => {
+                            app.set_status_left(SharedString::from(format!("Open failed: {error}")))
+                        }
+                    },
+                    Ok(None) => app.set_status_left("Open cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Open dialog failed: {error}"
+                    ))),
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_undo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                // All undo surfaces (toolbar, menu, shortcut, palette, a11y, test)
+                // share the same `edit.undo` id and registry guard.
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "edit.undo",
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    return;
+                }
+                let previous = { state.history.borrow_mut().undo() };
+                if let Some(prev) = previous {
+                    *state.current.borrow_mut() = prev;
+                    apply_state(&app, &state);
+                    sync_writer_menu_if_present(&menu_service, &app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_redo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "edit.redo",
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    return;
+                }
+                let next = { state.history.borrow_mut().redo() };
+                if let Some(next) = next {
+                    *state.current.borrow_mut() = next;
+                    apply_state(&app, &state);
+                    sync_writer_menu_if_present(&menu_service, &app, &state);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_document_edited(move |text, anchor, focus| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.syncing_editor.get() {
+                    return;
+                }
+                let mut next = state.current.borrow().clone();
+                let text_changed = match next.replace_editor_text(text.as_str()) {
+                    Ok(changed) => changed,
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!("Edit failed: {error}")));
+                        return;
+                    }
+                };
+                next.set_selection(TextSelection::range(
+                    anchor.max(0) as usize,
+                    focus.max(0) as usize,
+                ));
+                let current = state.current.borrow().clone();
+                if text_changed && next != current {
+                    apply_with_history(&app, &state, next, HistoryKind::Typing);
+                    sync_writer_menu_if_present(&menu_service, &app, &state);
+                } else if next != current {
+                    // A selection-only callback updates model/UI state but is
+                    // never an undoable document edit.
+                    *state.current.borrow_mut() = next;
+                    apply_state(&app, &state);
+                    sync_writer_menu_if_present(&menu_service, &app, &state);
+                } else if next.editor_text() != text.as_str() {
+                    // Extra blank lines and non-canonical line endings are a
+                    // view normalization, not a document edit. Rebind the
+                    // visible editor without adding a history transaction.
+                    apply_state(&app, &state);
+                    sync_writer_menu_if_present(&menu_service, &app, &state);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_toggle_bold(move || {
+            if let Some(app) = app_ref.upgrade() {
+                // Toolbar/Shortcut/A11y share one registry gate with the palette and menu.
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "writer.style.bold",
+                        InvocationSource::Toolbar,
+                    ));
+                if matches!(guard, Err(CommandError::Disabled(_))) {
+                    app.set_status_right("Select text to apply bold".into());
+                    return;
+                } else if guard.is_err() {
+                    app.set_status_right("Bold command failed".into());
+                    return;
+                }
+                let enabled = app.get_is_bold();
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    app.set_status_right("Select text to apply bold".into());
+                    return;
+                }
+                let mut next = state.current.borrow().clone();
+                // Selection-aware formatting maps the global TextSelection offsets
+                // to per-block spans (`selection_text_spans`), splits existing
+                // `StyleRun`s at the exact boundaries, coalesces identical
+                // neighbours, and preserves each `RichBlock.id` (no block is
+                // created or reordered by a style change). History entry is a
+                // named undo boundary that clears the redo stack.
+                set_selection_bold(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    !enabled,
+                );
+                next.set_selection(selection);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_writer_menu_if_present(&menu_service, &app, &state);
+                let announcement = if enabled {
+                    "Bold removed from selection"
+                } else {
+                    "Bold applied to selection"
+                };
+                app.set_status_right(SharedString::from(announcement));
+                app.set_selection_announcement(SharedString::from(announcement));
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_toggle_italic(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "writer.style.italic",
+                        InvocationSource::Toolbar,
+                    ));
+                if matches!(guard, Err(CommandError::Disabled(_))) {
+                    app.set_status_right("Select text to apply italic".into());
+                    return;
+                } else if guard.is_err() {
+                    app.set_status_right("Italic command failed".into());
+                    return;
+                }
+                let enabled = app.get_is_italic();
+                let selection = selection_from_app(&app);
+                if selection.is_collapsed() {
+                    app.set_status_right("Select text to apply italic".into());
+                    return;
+                }
+                let mut next = state.current.borrow().clone();
+                set_selection_italic(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    !enabled,
+                );
+                next.set_selection(selection);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_writer_menu_if_present(&menu_service, &app, &state);
+                let announcement = if enabled {
+                    "Italic removed from selection"
+                } else {
+                    "Italic applied to selection"
+                };
+                app.set_status_right(SharedString::from(announcement));
+                app.set_selection_announcement(SharedString::from(announcement));
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_select_heading(move |level| {
+            if let Some(app) = app_ref.upgrade() {
+                let heading_id = match level {
+                    1 => "writer.heading.h1",
+                    2 => "writer.heading.h2",
+                    3 => "writer.heading.h3",
+                    _ => "writer.heading.body",
+                };
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        heading_id,
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    return;
+                }
+                let selection = selection_from_app(&app);
+                let mut next = state.current.borrow().clone();
+                set_selection_heading(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    level,
+                );
+                next.set_selection(selection);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_writer_menu_if_present(&menu_service, &app, &state);
+                let label = match level {
+                    1 => "Heading 1",
+                    2 => "Heading 2",
+                    3 => "Heading 3",
+                    _ => "Body Text",
+                };
+                let announcement = format!("{label} applied to selected paragraph(s)");
+                app.set_status_right(SharedString::from(announcement.clone()));
+                app.set_selection_announcement(SharedString::from(announcement));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_page_zoom_changed(move |zoom| {
+            if let Some(app) = app_ref.upgrade() {
+                let next = {
+                    let mut viewport = state.viewport.borrow_mut();
+                    let next = normalize_page_zoom(zoom, viewport.zoom);
+                    viewport.zoom = next;
+                    next
+                };
+                // Slint exposes the same property to the toolbar, canvas, and
+                // controller. Rebind only when clamping was necessary so a
+                // normal click does not recursively emit another event.
+                if (app.get_page_zoom() - next).abs() > f32::EPSILON {
+                    app.set_page_zoom(next);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_page_scroll_changed(move |scroll_x, scroll_y| {
+            if let Some(app) = app_ref.upgrade() {
+                let (next_x, next_y) = {
+                    let mut viewport = state.viewport.borrow_mut();
+                    let next_x = normalize_page_scroll(scroll_x);
+                    let next_y = normalize_page_scroll(scroll_y);
+                    viewport.scroll_x = next_x;
+                    viewport.scroll_y = next_y;
+                    (next_x, next_y)
+                };
+                // Flickable normally clamps these values itself. The explicit
+                // rebinding also keeps headless/property-driven updates from
+                // leaving the controller with a negative or NaN offset.
+                if (app.get_page_scroll_x() - next_x).abs() > f32::EPSILON {
+                    app.set_page_scroll_x(next_x);
+                }
+                if (app.get_page_scroll_y() - next_y).abs() > f32::EPSILON {
+                    app.set_page_scroll_y(next_y);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_doc(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "file.save",
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    return;
+                }
+                if let Err(error) = save_current_document(&app, &state, false) {
+                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_as_doc(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "file.save_as",
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    return;
+                }
+                if let Err(error) = save_current_document(&app, &state, true) {
+                    app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_export_pdf(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(
+                        "file.export_pdf",
+                        InvocationSource::Toolbar,
+                    ));
+                if guard.is_err() {
+                    app.set_status_right("Add content before exporting PDF".into());
+                    return;
+                }
+                match state.dialogs.save_file(&writer_export_request(&state)) {
+                    Ok(Some(path)) => match export_pdf_file(&path, &state.current.borrow()) {
+                        Ok(()) => app.set_status_left(SharedString::from(format!(
+                            "Exported {}",
+                            path.display()
+                        ))),
+                        Err(error) => app
+                            .set_status_left(SharedString::from(format!("Export failed: {error}"))),
+                    },
+                    Ok(None) => app.set_status_left("Export cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Export dialog failed: {error}"
+                    ))),
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_selection_changed(move |anchor, focus| {
+            if let Some(app) = app_ref.upgrade() {
+                if state.syncing_editor.get() {
+                    return;
+                }
+                let mut current = state.current.borrow_mut();
+                let changed = project_selection_event(&app, &mut current, anchor, focus);
+                drop(current);
+                if changed {
+                    refresh_writer_registry(&app, &state);
+                    let registry = state.registry.lock().unwrap();
+                    rebuild_palette_with_registry(
+                        &app,
+                        &registry,
+                        app.get_palette_query().as_str(),
+                    );
+                    // Accessible announcement already updated via project_selection_event;
+                    // keep menu check states honest via toolbar/registry sync.
+                }
+            }
+        });
+    }
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
@@ -1617,6 +2108,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
+        viewport: RefCell::new(PageViewport::default()),
         save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
@@ -1630,6 +2122,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // registered sink below dispatches accepted native menu actions into the
     // same Slint callbacks used by toolbar and palette controls.
     let menu_service = Arc::new(NativeMenuBar::new());
+    wire_writer_shared_callbacks(&app, &state, Some(menu_service.clone()));
 
     {
         let state = state.clone();
@@ -1668,6 +2161,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
+
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -1756,332 +2250,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_open_doc(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.open",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                match state.dialogs.open_file(&writer_open_request(&state)) {
-                    Ok(Some(path)) => match load_file(&path) {
-                        Ok(document) => {
-                            replace_opened_document(&app, &state, path.clone(), document);
-                            sync_menu_state(&menu_service, &app, &state);
-                            app.set_status_left(SharedString::from(format!(
-                                "Opened {}",
-                                path.display()
-                            )));
-                        }
-                        Err(error) => {
-                            app.set_status_left(SharedString::from(format!("Open failed: {error}")))
-                        }
-                    },
-                    Ok(None) => app.set_status_left("Open cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Open dialog failed: {error}"
-                    ))),
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_save_doc(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.save",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                if let Err(error) = save_current_document(&app, &state, false) {
-                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_save_as_doc(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.save_as",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                if let Err(error) = save_current_document(&app, &state, true) {
-                    app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_export_pdf(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "file.export_pdf",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    app.set_status_right("Add content before exporting PDF".into());
-                    return;
-                }
-                match state.dialogs.save_file(&writer_export_request(&state)) {
-                    Ok(Some(path)) => {
-                        let bytes = loom_writer_core::export_pdf(&state.current.borrow());
-                        match loom_storage::atomic_write(&path, &bytes) {
-                            Ok(()) => app.set_status_left(SharedString::from(format!(
-                                "Exported {}",
-                                path.display()
-                            ))),
-                            Err(error) => app.set_status_left(SharedString::from(format!(
-                                "Export failed: {error}"
-                            ))),
-                        }
-                    }
-                    Ok(None) => app.set_status_left("Export cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Export dialog failed: {error}"
-                    ))),
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_undo(move || {
-            if let Some(app) = app_ref.upgrade() {
-                // All undo surfaces (toolbar, menu, shortcut, palette, a11y, test)
-                // share the same `edit.undo` id and registry guard.
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "edit.undo",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                if let Some(prev) = state.history.borrow_mut().undo() {
-                    *state.current.borrow_mut() = prev;
-                    apply_state(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_redo(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "edit.redo",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                if let Some(next) = state.history.borrow_mut().redo() {
-                    *state.current.borrow_mut() = next;
-                    apply_state(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_selection_changed(move |anchor, focus| {
-            if let Some(app) = app_ref.upgrade() {
-                if state.syncing_editor.get() {
-                    return;
-                }
-                let mut current = state.current.borrow_mut();
-                let changed = project_selection_event(&app, &mut current, anchor, focus);
-                drop(current);
-                if changed {
-                    refresh_writer_registry(&app, &state);
-                    let registry = state.registry.lock().unwrap();
-                    rebuild_palette_with_registry(
-                        &app,
-                        &registry,
-                        app.get_palette_query().as_str(),
-                    );
-                    // Accessible announcement already updated via project_selection_event;
-                    // keep menu check states honest via toolbar/registry sync.
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_document_edited(move |text, anchor, focus| {
-            if let Some(app) = app_ref.upgrade() {
-                if state.syncing_editor.get() {
-                    return;
-                }
-                let mut next = state.current.borrow().clone();
-                next.replace_paragraphs(text.as_str());
-                next.set_selection(TextSelection::range(
-                    anchor.max(0) as usize,
-                    focus.max(0) as usize,
-                ));
-                let current = state.current.borrow().clone();
-                if next != current {
-                    apply_with_history(&app, &state, next, HistoryKind::Typing);
-                    sync_menu_state(&menu_service, &app, &state);
-                } else if next.editor_text() != text.as_str() {
-                    // Extra blank lines and non-canonical line endings are a
-                    // view normalization, not a document edit. Rebind the
-                    // visible editor without adding a history transaction.
-                    apply_state(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_toggle_bold(move || {
-            if let Some(app) = app_ref.upgrade() {
-                // Toolbar/Shortcut/A11y share one registry gate with the palette and menu.
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "writer.style.bold",
-                        InvocationSource::Toolbar,
-                    ));
-                if matches!(guard, Err(CommandError::Disabled(_))) {
-                    app.set_status_right("Select text to apply bold".into());
-                    return;
-                } else if guard.is_err() {
-                    app.set_status_right("Bold command failed".into());
-                    return;
-                }
-                let enabled = app.get_is_bold();
-                let selection = selection_from_app(&app);
-                if selection.is_collapsed() {
-                    app.set_status_right("Select text to apply bold".into());
-                    return;
-                }
-                let mut next = state.current.borrow().clone();
-                // Selection-aware formatting maps the global TextSelection offsets
-                // to per-block spans (`selection_text_spans`), splits existing
-                // `StyleRun`s at the exact boundaries, coalesces identical
-                // neighbours, and preserves each `RichBlock.id` (no block is
-                // created or reordered by a style change). History entry is a
-                // named undo boundary that clears the redo stack.
-                set_selection_bold(
-                    &mut next,
-                    DocumentSelection::range(selection.anchor, selection.focus),
-                    !enabled,
-                );
-                next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-                sync_menu_state(&menu_service, &app, &state);
-                let announcement = if enabled {
-                    "Bold removed from selection"
-                } else {
-                    "Bold applied to selection"
-                };
-                app.set_status_right(SharedString::from(announcement));
-                app.set_selection_announcement(SharedString::from(announcement));
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_toggle_italic(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "writer.style.italic",
-                        InvocationSource::Toolbar,
-                    ));
-                if matches!(guard, Err(CommandError::Disabled(_))) {
-                    app.set_status_right("Select text to apply italic".into());
-                    return;
-                } else if guard.is_err() {
-                    app.set_status_right("Italic command failed".into());
-                    return;
-                }
-                let enabled = app.get_is_italic();
-                let selection = selection_from_app(&app);
-                if selection.is_collapsed() {
-                    app.set_status_right("Select text to apply italic".into());
-                    return;
-                }
-                let mut next = state.current.borrow().clone();
-                set_selection_italic(
-                    &mut next,
-                    DocumentSelection::range(selection.anchor, selection.focus),
-                    !enabled,
-                );
-                next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-                sync_menu_state(&menu_service, &app, &state);
-                let announcement = if enabled {
-                    "Italic removed from selection"
-                } else {
-                    "Italic applied to selection"
-                };
-                app.set_status_right(SharedString::from(announcement));
-                app.set_selection_announcement(SharedString::from(announcement));
-            }
-        });
-    }
+
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2128,51 +2297,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_select_heading(move |level| {
-            if let Some(app) = app_ref.upgrade() {
-                let heading_id = match level {
-                    1 => "writer.heading.h1",
-                    2 => "writer.heading.h2",
-                    3 => "writer.heading.h3",
-                    _ => "writer.heading.body",
-                };
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        heading_id,
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                let selection = selection_from_app(&app);
-                let mut next = state.current.borrow().clone();
-                set_selection_heading(
-                    &mut next,
-                    DocumentSelection::range(selection.anchor, selection.focus),
-                    level,
-                );
-                next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-                sync_menu_state(&menu_service, &app, &state);
-                let label = match level {
-                    1 => "Heading 1",
-                    2 => "Heading 2",
-                    3 => "Heading 3",
-                    _ => "Body Text",
-                };
-                let announcement = format!("{label} applied to selected paragraph(s)");
-                app.set_status_right(SharedString::from(announcement.clone()));
-                app.set_selection_announcement(SharedString::from(announcement));
-            }
-        });
-    }
+
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2387,35 +2512,398 @@ fn main() -> Result<(), String> {
     run_gui(&args)
 }
 
-/// Record the keyboard command-palette journey with per-step screenshots.
+fn capture_writer_journey_step(
+    app: &WriterApp,
+    args: &Args,
+    out_dir: &Path,
+    name: &str,
+) -> Result<String, String> {
+    let image = snapshot_component(app, args.size.0 as f32, args.size.1 as f32, 1.0)
+        .map_err(|error| format!("capture {name}: {error}"))?;
+    let file_name = format!("writer-selection-{name}.png");
+    let path = out_dir.join(&file_name);
+    loom_test_support::png::save_png(&path, &image)
+        .map_err(|error| format!("save {file_name}: {error}"))?;
+    let decoded = loom_test_support::png::load_png(&path)
+        .map_err(|error| format!("validate {file_name}: {error}"))?;
+    if decoded.dimensions() != (args.size.0, args.size.1) {
+        return Err(format!(
+            "invalid {file_name} dimensions: {:?}",
+            decoded.dimensions()
+        ));
+    }
+    Ok(file_name)
+}
+
+/// Wire the subset of controller callbacks exercised by the deterministic
+/// Writer workflow journey. The GUI registers the same callback logic in
+/// `run_gui_with_dialogs`; keeping this adapter explicit makes the journey
+/// exercise state transitions rather than only probing rendered labels.
+fn wire_writer_journey_callbacks(app: &WriterApp, state: &Rc<GuiState>) {
+    wire_writer_shared_callbacks(app, state, None);
+}
+
+/// Record the controller-backed Writer editing journey with per-step
+/// screenshots and serialized/reopened/exported artifacts.
 fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     set_platform();
+    let out_dir = Path::new(out_dir);
+    std::fs::create_dir_all(out_dir)
+        .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
-    let doc = match &args.open {
-        Some(p) => load_file(Path::new(p))?,
+    app.window()
+        .set_size(PhysicalSize::new(args.size.0, args.size.1));
+    apply_layout_breakpoints(&app, args.size.0);
+
+    let mut initial_document = match &args.open {
+        Some(path) => load_file(Path::new(path))?,
         None => args
             .template
             .map(template_document)
             .unwrap_or_else(sample_document),
     };
-    apply_document(&app, &doc);
+    if initial_document.is_empty() {
+        initial_document.push(RichBlock::new(1, "paragraph", "Draft"));
+    }
+    initial_document.set_selection(TextSelection::caret(0));
+
+    let save_path = out_dir.join("writer-selection.loomdoc");
+    let export_path = out_dir.join("writer-selection.pdf");
+    let dialogs: Rc<dyn FileDialogService> = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [Some(save_path.clone()), None],
+        [
+            Some(save_path.clone()),
+            Some(export_path.clone()),
+            None,
+            Some(PathBuf::new()),
+        ],
+    ));
+    let mut initial_registry = build_writer_registry();
+    let initial_history = EditorHistory::new();
+    sync_writer_registry_enablement(&mut initial_registry, &initial_document, &initial_history);
+    let state = Rc::new(GuiState {
+        current: RefCell::new(initial_document.clone()),
+        viewport: RefCell::new(PageViewport::default()),
+        save_path: RefCell::new(None),
+        history: RefCell::new(initial_history),
+        history_clock: Instant::now(),
+        syncing_editor: Cell::new(false),
+        dialogs,
+        document_filter: FileFilter::new("Writer", ["loomdoc"])
+            .map_err(|error| error.to_string())?,
+        pdf_filter: FileFilter::new("PDF", ["pdf"]).map_err(|error| error.to_string())?,
+        registry: Arc::new(Mutex::new(initial_registry)),
+    });
+
+    wire_writer_journey_callbacks(&app, &state);
     wire_palette(&app);
     rebuild_palette(&app, "");
-    app.window()
-        .set_size(PhysicalSize::new(args.size.0, args.size.1));
-    apply_layout_breakpoints(&app, args.size.0);
-    let report = record_keyboard_palette_journey(&app, "writer", Path::new(out_dir), "ex")
-        .map_err(|e| format!("journey failed: {e}"))?;
-    println!(
-        "keyboard journey: {} ({})",
-        if report.passed { "PASS" } else { "FAIL" },
-        out_dir
+    apply_state(&app, &state);
+    let mut screenshots = Vec::new();
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "initial")?);
+
+    let before_edit = state.current.borrow().clone();
+    let typed_text = format!("{} — typed", before_edit.editor_text());
+    app.invoke_document_edited(
+        SharedString::from(typed_text.as_str()),
+        0,
+        typed_text.len().min(i32::MAX as usize) as i32,
     );
-    if !report.passed {
-        return Err("keyboard journey invariants failed".to_string());
+    if state.current.borrow().editor_text() != typed_text {
+        return Err("journey typing did not update the document".into());
     }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "typed")?);
+
+    let selection_end = floor_grapheme_boundary(&typed_text, typed_text.len().min(5));
+    app.invoke_selection_changed(0, selection_end.min(i32::MAX as usize) as i32);
+    if state.current.borrow().selected_text() != typed_text[..selection_end] {
+        return Err("journey selection did not update the document".into());
+    }
+    if app.get_selection_announcement()
+        != format!(
+            "Selected {} characters",
+            grapheme_count(&typed_text[..selection_end])
+        )
+    {
+        return Err("journey selection announcement is not grapheme-aware".into());
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app, args, out_dir, "selected",
+    )?);
+
+    app.invoke_toggle_bold();
+    app.invoke_toggle_italic();
+    app.invoke_select_heading(1);
+    let formatted_document = state.current.borrow().clone();
+    if formatted_document
+        .blocks
+        .first()
+        .map(|block| block.kind.as_str())
+        != Some("heading1")
+    {
+        return Err("journey heading command did not update the selected paragraph".into());
+    }
+    if !formatted_document.blocks[0]
+        .runs
+        .iter()
+        .any(|run| run.start == 0 && run.end >= selection_end)
+    {
+        return Err("journey character formatting did not cover the selection".into());
+    }
+    let formatting = formatting_state_for_selection(
+        &formatted_document,
+        DocumentSelection::range(0, selection_end),
+    );
+    if !formatting.bold || !formatting.italic {
+        return Err(format!(
+            "journey character formatting did not apply bold and italic (bold={}, italic={})",
+            formatting.bold, formatting.italic
+        ));
+    }
+    if !app.get_is_bold() || !app.get_is_italic() {
+        return Err(format!(
+            "journey toolbar formatting state is stale (bold={}, italic={})",
+            app.get_is_bold(),
+            app.get_is_italic()
+        ));
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app,
+        args,
+        out_dir,
+        "formatted",
+    )?);
+
+    // Undo each named operation, including typing, and verify both content and
+    // persisted selection state return to the pre-edit snapshot.
+    for _ in 0..4 {
+        app.invoke_undo();
+    }
+    if *state.current.borrow() != before_edit {
+        return Err("journey undo did not restore content and selection".into());
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "undo")?);
+
+    for _ in 0..4 {
+        app.invoke_redo();
+    }
+    if *state.current.borrow() != formatted_document {
+        return Err("journey redo did not restore content and selection".into());
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "redo")?);
+
+    // Page zoom and scroll are controller-owned state, not status-only
+    // controls. Capture the changed geometry and require a visible projection.
+    let baseline_layout = state
+        .current
+        .borrow()
+        .layout(&PageStyle::default(), PageViewport::default())
+        .map_err(|error| format!("baseline page layout: {error}"))?;
+    // Invoke the same callback surface used by toolbar/flickable changes. A
+    // direct property write does not synchronously evaluate Slint's `changed`
+    // handlers in the headless component harness, so it would leave the
+    // controller viewport at its previous values and make the journey miss a
+    // real zoom/scroll transition.
+    app.invoke_page_zoom_changed(1.5);
+    app.invoke_page_scroll_changed(0.0, 48.0);
+    let zoomed_layout = state
+        .current
+        .borrow()
+        .layout(&PageStyle::default(), *state.viewport.borrow())
+        .map_err(|error| format!("zoomed page layout: {error}"))?;
+    let baseline_width = baseline_layout
+        .page_bounds
+        .first()
+        .map(|bounds| bounds.width);
+    let zoomed_width = zoomed_layout.page_bounds.first().map(|bounds| bounds.width);
+    if zoomed_width <= baseline_width {
+        return Err(format!(
+            "journey page zoom did not change rendered geometry (baseline={baseline_width:?}, zoomed={zoomed_width:?}, controller={:?})",
+            state.viewport.borrow().zoom
+        ));
+    }
+    if (state.viewport.borrow().scroll_y - 48.0).abs() > f32::EPSILON {
+        return Err("journey page scroll did not reach controller state".into());
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app,
+        args,
+        out_dir,
+        "zoom-scroll",
+    )?);
+
+    app.invoke_save_doc();
+    if !save_path.is_file() {
+        return Err(format!(
+            "journey save did not create {}",
+            save_path.display()
+        ));
+    }
+    let saved_document = state.current.borrow().clone();
+    let saved_bytes = std::fs::read(&save_path)
+        .map_err(|error| format!("read journey document '{}': {error}", save_path.display()))?;
+    let reopened_from_bytes = loom_writer_core::load_document(&saved_bytes)
+        .map_err(|error| format!("load journey document '{}': {error}", save_path.display()))?;
+    if reopened_from_bytes != saved_document {
+        return Err("journey package did not preserve content and selection".into());
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "save")?);
+
+    app.invoke_open_doc();
+    if *state.current.borrow() != saved_document {
+        return Err("journey save/reopen did not preserve content and selection".into());
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "reopen")?);
+
+    let before_open_cancel = state.current.borrow().clone();
+    app.invoke_open_doc();
+    if *state.current.borrow() != before_open_cancel {
+        return Err("journey open cancellation mutated the document".into());
+    }
+    if app.get_status_left() != "Open cancelled" {
+        return Err(format!(
+            "journey open cancellation status was '{}'",
+            app.get_status_left()
+        ));
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app,
+        args,
+        out_dir,
+        "open-cancelled",
+    )?);
+
+    app.invoke_export_pdf();
+    if !export_path.is_file() {
+        return Err(format!(
+            "journey export did not create {}",
+            export_path.display()
+        ));
+    }
+    let pdf_bytes = std::fs::read(&export_path)
+        .map_err(|error| format!("read journey PDF '{}': {error}", export_path.display()))?;
+    if !pdf_bytes.starts_with(b"%PDF") {
+        return Err("journey export did not produce a PDF payload".into());
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "export")?);
+
+    // A cancelled native save panel must not mutate either the document or
+    // operation history. The scripted dialog returns `None` for this step,
+    // matching the FileDialogService cancellation contract.
+    let before_cancel_document = state.current.borrow().clone();
+    let before_cancel_history = {
+        let history = state.history.borrow();
+        (history.undo.len(), history.redo.len(), history.total_bytes)
+    };
+    app.invoke_export_pdf();
+    if *state.current.borrow() != before_cancel_document {
+        return Err("journey export cancellation mutated the document".into());
+    }
+    let after_cancel_history = {
+        let history = state.history.borrow();
+        (history.undo.len(), history.redo.len(), history.total_bytes)
+    };
+    if after_cancel_history != before_cancel_history {
+        return Err("journey export cancellation mutated history".into());
+    }
+    if app.get_status_left() != "Export cancelled" {
+        return Err(format!(
+            "journey export cancellation status was '{}'",
+            app.get_status_left()
+        ));
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app,
+        args,
+        out_dir,
+        "export-cancelled",
+    )?);
+
+    // An empty picker destination is invalid. Export must report a real
+    // failure and leave content/history untouched rather than recording a
+    // phantom operation or replacing the saved document.
+    let before_failure_document = state.current.borrow().clone();
+    let before_failure_history = {
+        let history = state.history.borrow();
+        (history.undo.len(), history.redo.len(), history.total_bytes)
+    };
+    app.invoke_export_pdf();
+    if *state.current.borrow() != before_failure_document {
+        return Err("journey failed export mutated the document".into());
+    }
+    let after_failure_history = {
+        let history = state.history.borrow();
+        (history.undo.len(), history.redo.len(), history.total_bytes)
+    };
+    if after_failure_history != before_failure_history {
+        return Err("journey failed export mutated history".into());
+    }
+    if !app.get_status_left().starts_with("Export failed:") {
+        return Err(format!(
+            "journey failed export status was '{}'",
+            app.get_status_left()
+        ));
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app,
+        args,
+        out_dir,
+        "export-failed",
+    )?);
+
+    // Preserve the existing keyboard palette probe as a supplemental check,
+    // while the workflow above remains the primary acceptance journey.
+    let palette_report = record_keyboard_palette_journey(&app, "writer", out_dir, "ex")
+        .map_err(|error| format!("palette journey failed: {error}"))?;
+    if !palette_report.passed {
+        return Err("keyboard palette journey invariants failed".into());
+    }
+
+    for entry in std::fs::read_dir(out_dir)
+        .map_err(|error| format!("read journey output '{}': {error}", out_dir.display()))?
+    {
+        let path = entry
+            .map_err(|error| format!("read journey output entry: {error}"))?
+            .path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("png") {
+            let image = loom_test_support::png::load_png(&path)
+                .map_err(|error| format!("validate journey PNG '{}': {error}", path.display()))?;
+            if image.dimensions() != args.size {
+                return Err(format!(
+                    "journey PNG '{}' has dimensions {:?}, expected {:?}",
+                    path.display(),
+                    image.dimensions(),
+                    args.size
+                ));
+            }
+        }
+    }
+
+    let step_json = screenshots
+        .iter()
+        .map(|screenshot| format!("{{\"screenshot\":\"{screenshot}\"}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let transcript = format!(
+        "{{\n  \"app\": \"writer\",\n  \"journey\": \"type-select-bold-italic-heading-undo-redo-zoom-save-reopen-export\",\n  \"passed\": true,\n  \"size\": [ {}, {} ],\n  \"selection_announcement\": \"{}\",\n  \"saved_package\": \"{}\",\n  \"exported_pdf\": \"{}\",\n  \"steps\": [ {} ]\n}}\n",
+        args.size.0,
+        args.size.1,
+        app.get_selection_announcement(),
+        save_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("writer-selection.loomdoc"),
+        export_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("writer-selection.pdf"),
+        step_json
+    );
+    std::fs::write(out_dir.join("writer.json"), transcript)
+        .map_err(|error| format!("write journey transcript: {error}"))?;
+    println!("writer workflow journey: PASS ({})", out_dir.display());
     Ok(())
 }
 
@@ -2561,6 +3049,34 @@ mod tests {
         document
     }
 
+    fn test_state(
+        document: WriterDocument,
+        dialogs: Rc<dyn FileDialogService>,
+    ) -> (WriterApp, Rc<GuiState>) {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let mut registry = build_writer_registry();
+        let history = EditorHistory::new();
+        sync_writer_registry_enablement(&mut registry, &document, &history);
+        let state = Rc::new(GuiState {
+            current: RefCell::new(document),
+            viewport: RefCell::new(PageViewport::default()),
+            save_path: RefCell::new(None),
+            history: RefCell::new(history),
+            history_clock: Instant::now(),
+            syncing_editor: Cell::new(false),
+            dialogs,
+            document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("document filter"),
+            pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
+            registry: Arc::new(Mutex::new(registry)),
+        });
+        (app, state)
+    }
+
+    fn history_shape(history: &EditorHistory) -> (usize, usize, usize) {
+        (history.undo.len(), history.redo.len(), history.total_bytes)
+    }
+
     #[test]
     fn coalesces_adjacent_typing_edits() {
         let mut history = EditorHistory::with_budget(16, usize::MAX);
@@ -2642,6 +3158,7 @@ mod tests {
         ));
         let state = GuiState {
             current: RefCell::new(text_document("hello")),
+            viewport: RefCell::new(PageViewport::default()),
             save_path: RefCell::new(Some(PathBuf::from("/tmp/current.loomdoc"))),
             history: RefCell::new(EditorHistory::new()),
             history_clock: Instant::now(),
@@ -2657,6 +3174,112 @@ mod tests {
             state.dialogs.open_file(&request).expect("open"),
             Some(PathBuf::from("/tmp/next.loomdoc"))
         );
+    }
+
+    #[test]
+    fn save_panel_cancellation_preserves_document_and_history() {
+        let document = text_document("cancel save");
+        let dialogs: Rc<dyn FileDialogService> =
+            Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+        let (app, state) = test_state(document.clone(), dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        {
+            let mut history = state.history.borrow_mut();
+            history.record(
+                text_document("before save"),
+                document.clone(),
+                HistoryKind::DocumentAction,
+                0,
+            );
+        }
+        apply_state(&app, &state);
+        let before_history = history_shape(&state.history.borrow());
+
+        app.invoke_save_doc();
+
+        assert_eq!(*state.current.borrow(), document);
+        assert_eq!(*state.save_path.borrow(), None);
+        assert_eq!(history_shape(&state.history.borrow()), before_history);
+        assert_eq!(app.get_status_left(), "Save cancelled");
+    }
+
+    #[test]
+    fn open_panel_cancellation_preserves_document_and_history() {
+        let document = text_document("cancel open");
+        let dialogs: Rc<dyn FileDialogService> =
+            Rc::new(loom_desktop::ScriptedFileDialogs::new([None], []));
+        let (app, state) = test_state(document.clone(), dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        {
+            let mut history = state.history.borrow_mut();
+            history.record(
+                text_document("before open"),
+                document.clone(),
+                HistoryKind::DocumentAction,
+                0,
+            );
+        }
+        apply_state(&app, &state);
+        let before_history = history_shape(&state.history.borrow());
+
+        app.invoke_open_doc();
+
+        assert_eq!(*state.current.borrow(), document);
+        assert_eq!(history_shape(&state.history.borrow()), before_history);
+        assert_eq!(app.get_status_left(), "Open cancelled");
+    }
+
+    #[test]
+    fn failed_pdf_export_preserves_document_and_history() {
+        let document = text_document("failed export");
+        let dialogs: Rc<dyn FileDialogService> = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+            [],
+            [Some(PathBuf::new())],
+        ));
+        let (app, state) = test_state(document.clone(), dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        {
+            let mut history = state.history.borrow_mut();
+            history.record(
+                text_document("before export"),
+                document.clone(),
+                HistoryKind::DocumentAction,
+                0,
+            );
+        }
+        apply_state(&app, &state);
+        let before_history = history_shape(&state.history.borrow());
+
+        app.invoke_export_pdf();
+
+        assert_eq!(*state.current.borrow(), document);
+        assert_eq!(history_shape(&state.history.borrow()), before_history);
+        assert_eq!(
+            app.get_status_left(),
+            "Export failed: PDF destination is empty"
+        );
+    }
+
+    #[test]
+    fn viewport_callbacks_update_controller_and_clamp_inputs() {
+        let document = text_document("viewport");
+        let dialogs: Rc<dyn FileDialogService> =
+            Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let (app, state) = test_state(document.clone(), dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        apply_state(&app, &state);
+
+        app.invoke_page_zoom_changed(1.5);
+        app.invoke_page_scroll_changed(-20.0, 48.0);
+
+        let viewport = *state.viewport.borrow();
+        assert_eq!(viewport.zoom, 1.5);
+        assert_eq!(viewport.scroll_x, 0.0);
+        assert_eq!(viewport.scroll_y, 48.0);
+        let layout = document
+            .layout(&PageStyle::default(), viewport)
+            .expect("viewport layout");
+        assert!(layout.page_bounds[0].width > PageStyle::default().width_pt);
     }
 
     #[test]
@@ -2881,6 +3504,7 @@ mod tests {
         let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
         let state = GuiState {
             current: RefCell::new(text_document("menu state")),
+            viewport: RefCell::new(PageViewport::default()),
             save_path: RefCell::new(None),
             history: RefCell::new(EditorHistory::new()),
             history_clock: Instant::now(),

@@ -12,5 +12,6 @@ loom-package = { workspace = true }
 loom-text = { workspace = true }
 loom-command = { workspace = true }
 loom-pdf = { workspace = true }
+unicode-segmentation = "1.13"
 
 [dev-dependencies]

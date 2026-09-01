@@ -11,6 +11,7 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use loom_text::ParagraphStyle;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Stable document id.
 pub type DocId = String;
@@ -41,6 +42,181 @@ impl RichBlock {
             runs: Vec::new(),
         }
     }
+}
+
+/// Keyboard movement granularity for the Writer caret.
+///
+/// Offsets remain UTF-8 byte offsets, but every movement lands on a Unicode
+/// grapheme boundary. This keeps combining marks, emoji modifiers, and ZWJ
+/// sequences together when the editor moves a caret or extends a range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaretMovement {
+    /// Move to the previous grapheme cluster.
+    PreviousGrapheme,
+    /// Move to the next grapheme cluster.
+    NextGrapheme,
+    /// Move to the previous word boundary.
+    PreviousWord,
+    /// Move to the next word boundary.
+    NextWord,
+    /// Move to the beginning of the text.
+    Start,
+    /// Move to the end of the text.
+    End,
+}
+
+/// Short alias retained for callers that name keyboard movement a caret move.
+pub type CaretMove = CaretMovement;
+
+/// Return UTF-8 byte offsets for every extended grapheme boundary in `text`.
+/// The returned vector always includes `0` and `text.len()`.
+pub fn grapheme_boundaries(text: &str) -> Vec<usize> {
+    let mut boundaries: Vec<usize> = text
+        .grapheme_indices(true)
+        .map(|(offset, _)| offset)
+        .collect();
+    if boundaries.first().copied() != Some(0) {
+        boundaries.insert(0, 0);
+    }
+    if boundaries.last().copied() != Some(text.len()) {
+        boundaries.push(text.len());
+    }
+    boundaries
+}
+
+/// Count user-perceived characters (extended grapheme clusters) in `text`.
+pub fn grapheme_count(text: &str) -> usize {
+    text.graphemes(true).count()
+}
+
+/// Clamp a byte offset down to the preceding extended grapheme boundary.
+pub fn floor_grapheme_boundary(text: &str, offset: usize) -> usize {
+    let offset = offset.min(text.len());
+    grapheme_boundaries(text)
+        .into_iter()
+        .take_while(|boundary| *boundary <= offset)
+        .last()
+        .unwrap_or(0)
+}
+
+/// Clamp a byte offset up to the following extended grapheme boundary.
+pub fn ceil_grapheme_boundary(text: &str, offset: usize) -> usize {
+    let offset = offset.min(text.len());
+    grapheme_boundaries(text)
+        .into_iter()
+        .find(|boundary| *boundary >= offset)
+        .unwrap_or(text.len())
+}
+
+/// Return the next extended grapheme boundary after `offset`.
+pub fn next_grapheme_boundary(text: &str, offset: usize) -> usize {
+    let boundaries = grapheme_boundaries(text);
+    let current = floor_grapheme_boundary(text, offset);
+    let index = boundaries.binary_search(&current).unwrap_or(0);
+    boundaries[(index + 1).min(boundaries.len() - 1)]
+}
+
+/// Return the previous extended grapheme boundary before `offset`.
+pub fn previous_grapheme_boundary(text: &str, offset: usize) -> usize {
+    let boundaries = grapheme_boundaries(text);
+    let current = floor_grapheme_boundary(text, offset);
+    let index = boundaries.binary_search(&current).unwrap_or(0);
+    boundaries[index.saturating_sub(1)]
+}
+
+/// Move one caret by grapheme, word, or document boundaries.
+pub fn move_caret_offset(text: &str, offset: usize, movement: CaretMovement) -> usize {
+    let boundaries = grapheme_boundaries(text);
+    let current = floor_grapheme_boundary(text, offset);
+    match movement {
+        CaretMovement::PreviousGrapheme => previous_grapheme_boundary(text, current),
+        CaretMovement::NextGrapheme => next_grapheme_boundary(text, current),
+        CaretMovement::Start => 0,
+        CaretMovement::End => text.len(),
+        CaretMovement::PreviousWord => previous_word_boundary(text, current, &boundaries),
+        CaretMovement::NextWord => next_word_boundary(text, current, &boundaries),
+    }
+}
+
+/// Move or extend a text selection while preserving anchor direction.
+pub fn move_selection(
+    text: &str,
+    selection: &TextSelection,
+    movement: CaretMovement,
+    extend: bool,
+) -> TextSelection {
+    let anchor = floor_grapheme_boundary(text, selection.anchor);
+    let focus = floor_grapheme_boundary(text, selection.focus);
+    if extend {
+        let next_focus = move_caret_offset(text, focus, movement);
+        let affinity = match movement {
+            CaretMovement::PreviousGrapheme
+            | CaretMovement::PreviousWord
+            | CaretMovement::Start => CaretAffinity::Upstream,
+            CaretMovement::NextGrapheme | CaretMovement::NextWord | CaretMovement::End => {
+                CaretAffinity::Downstream
+            }
+        };
+        return TextSelection {
+            anchor,
+            focus: next_focus,
+            affinity,
+        };
+    }
+
+    let next = match movement {
+        CaretMovement::PreviousGrapheme | CaretMovement::PreviousWord | CaretMovement::Start => {
+            anchor.min(focus)
+        }
+        CaretMovement::NextGrapheme | CaretMovement::NextWord | CaretMovement::End => {
+            anchor.max(focus)
+        }
+    };
+    let affinity = match movement {
+        CaretMovement::PreviousGrapheme | CaretMovement::PreviousWord | CaretMovement::Start => {
+            CaretAffinity::Upstream
+        }
+        CaretMovement::NextGrapheme | CaretMovement::NextWord | CaretMovement::End => {
+            CaretAffinity::Downstream
+        }
+    };
+    TextSelection {
+        anchor: next,
+        focus: next,
+        affinity,
+    }
+}
+
+fn previous_word_boundary(text: &str, current: usize, boundaries: &[usize]) -> usize {
+    let mut index = boundaries.binary_search(&current).unwrap_or(0);
+    while index > 0 && grapheme_is_whitespace(text, boundaries[index - 1], boundaries[index]) {
+        index -= 1;
+    }
+    while index > 0 && !grapheme_is_whitespace(text, boundaries[index - 1], boundaries[index]) {
+        index -= 1;
+    }
+    boundaries[index]
+}
+
+fn next_word_boundary(text: &str, current: usize, boundaries: &[usize]) -> usize {
+    let mut index = boundaries.binary_search(&current).unwrap_or(0);
+    while index < boundaries.len().saturating_sub(1)
+        && grapheme_is_whitespace(text, boundaries[index], boundaries[index + 1])
+    {
+        index += 1;
+    }
+    while index < boundaries.len().saturating_sub(1)
+        && !grapheme_is_whitespace(text, boundaries[index], boundaries[index + 1])
+    {
+        index += 1;
+    }
+    boundaries[index]
+}
+
+fn grapheme_is_whitespace(text: &str, start: usize, end: usize) -> bool {
+    text.get(start..end)
+        .and_then(|grapheme| grapheme.chars().next())
+        .is_some_and(char::is_whitespace)
 }
 
 /// A Loom Writer document.
@@ -134,17 +310,73 @@ impl WriterDocument {
         self.selection = normalize_text_selection(&text, selection);
     }
 
+    /// Move the active caret or extend its range using grapheme-safe offsets.
+    /// Selection changes are model state only and do not create history entries.
+    pub fn move_selection(&mut self, movement: CaretMovement, extend: bool) -> TextSelection {
+        let text = self.editor_text();
+        let next = move_selection(&text, &self.selection, movement, extend);
+        self.selection = normalize_text_selection(&text, next);
+        self.selection.clone()
+    }
+
     /// Return the selected text from the canonical editor stream. Newline
     /// separators are included when a selection spans multiple blocks.
     pub fn selected_text(&self) -> String {
         let text = self.editor_text();
         let (mut start, mut end) = self.selection.normalized_range();
-        start = floor_char_boundary(&text, start.min(text.len()));
-        end = floor_char_boundary(&text, end.min(text.len()));
+        start = floor_grapheme_boundary(&text, start.min(text.len()));
+        end = floor_grapheme_boundary(&text, end.min(text.len()));
         if start >= end || start >= text.len() {
             return String::new();
         }
         text[start..end].to_string()
+    }
+
+    /// Replace the active selection with `replacement`, preserving rich-text
+    /// metadata outside the edit and inheriting the style at the selection's
+    /// start for newly inserted graphemes. The selection collapses after the
+    /// inserted text, as it does in a native text editor.
+    pub fn replace_selection_text(
+        &mut self,
+        replacement: &str,
+    ) -> Result<TextSelection, WriterError> {
+        let replacement = normalize_editor_text(replacement);
+        let text = self.editor_text();
+        let (start, end) = normalized_grapheme_range(&text, &self.selection);
+        let inherited = character_style_at_global(self, start, self.selection.affinity);
+        let mut next_text = String::with_capacity(text.len() - (end - start) + replacement.len());
+        next_text.push_str(&text[..start]);
+        next_text.push_str(&replacement);
+        next_text.push_str(&text[end..]);
+
+        if next_text != text {
+            self.replace_paragraphs(&next_text);
+            let inserted_end = start + replacement.len();
+            apply_global_character_style(self, start, inserted_end, inherited);
+        }
+
+        let caret = TextSelection::caret(start + replacement.len());
+        self.set_selection(caret.clone());
+        Ok(caret)
+    }
+
+    /// Replace the editor's canonical text after a native text-buffer edit.
+    /// The single changed range is inferred from old/new text so inserted
+    /// content inherits the style at its old caret without requiring a second
+    /// view-specific formatting path.
+    pub fn replace_editor_text(&mut self, new_text: &str) -> Result<bool, WriterError> {
+        let new_text = normalize_editor_text(new_text);
+        let old_text = self.editor_text();
+        if old_text == new_text {
+            self.set_selection(self.selection.clone());
+            return Ok(false);
+        }
+        let (old_start, _old_end, new_start, new_end) = changed_text_ranges(&old_text, &new_text);
+        let inherited = character_style_at_global(self, old_start, self.selection.affinity);
+        self.replace_paragraphs(&new_text);
+        apply_global_character_style(self, new_start, new_end, inherited);
+        self.set_selection(self.selection.clone());
+        Ok(true)
     }
 
     /// Replace the document's blocks from editable plain text paragraphs.
@@ -155,7 +387,7 @@ impl WriterDocument {
     /// style, and runs, even when an insertion or deletion moves them. The
     /// empty string represents an empty document rather than one empty block.
     pub fn replace_paragraphs(&mut self, plain_text: &str) {
-        let normalized = plain_text.replace("\r\n", "\n").replace('\r', "\n");
+        let normalized = normalize_editor_text(plain_text);
         let paragraphs = if normalized.is_empty() {
             Vec::new()
         } else {
@@ -1119,12 +1351,135 @@ fn floor_char_boundary(text: &str, offset: usize) -> usize {
     value
 }
 
+fn normalize_editor_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn normalized_grapheme_range(text: &str, selection: &TextSelection) -> (usize, usize) {
+    let anchor = floor_grapheme_boundary(text, selection.anchor);
+    let focus = floor_grapheme_boundary(text, selection.focus);
+    (anchor.min(focus), anchor.max(focus))
+}
+
+fn changed_text_ranges(old_text: &str, new_text: &str) -> (usize, usize, usize, usize) {
+    let old_graphemes: Vec<&str> = old_text.graphemes(true).collect();
+    let new_graphemes: Vec<&str> = new_text.graphemes(true).collect();
+    let prefix = old_graphemes
+        .iter()
+        .zip(&new_graphemes)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let max_suffix = (old_graphemes.len() - prefix).min(new_graphemes.len() - prefix);
+    let suffix = (0..max_suffix)
+        .take_while(|offset| {
+            old_graphemes[old_graphemes.len() - 1 - offset]
+                == new_graphemes[new_graphemes.len() - 1 - offset]
+        })
+        .count();
+    let old_start = old_graphemes
+        .iter()
+        .take(prefix)
+        .map(|grapheme| grapheme.len())
+        .sum();
+    let old_end = old_text.len()
+        - old_graphemes
+            .iter()
+            .rev()
+            .take(suffix)
+            .map(|grapheme| grapheme.len())
+            .sum::<usize>();
+    let new_start = new_graphemes
+        .iter()
+        .take(prefix)
+        .map(|grapheme| grapheme.len())
+        .sum();
+    let new_end = new_text.len()
+        - new_graphemes
+            .iter()
+            .rev()
+            .take(suffix)
+            .map(|grapheme| grapheme.len())
+            .sum::<usize>();
+    (old_start, old_end, new_start, new_end)
+}
+
+fn character_style_at_global(
+    document: &WriterDocument,
+    offset: usize,
+    affinity: CaretAffinity,
+) -> loom_text::CharacterStyle {
+    if document.blocks.is_empty() {
+        return loom_text::CharacterStyle::default();
+    }
+    let text = document.editor_text();
+    let offset = floor_grapheme_boundary(&text, offset);
+    let mut global_start = 0usize;
+    for (index, block) in document.blocks.iter().enumerate() {
+        let block_text = block.text.as_str();
+        let block_end = global_start + block_text.len();
+        let is_last = index + 1 == document.blocks.len();
+        let in_block = offset < block_end || (offset == block_end && is_last);
+        if in_block {
+            let local = offset.saturating_sub(global_start).min(block_text.len());
+            if local == block_text.len() && local > 0 {
+                let previous = block_text[..local]
+                    .char_indices()
+                    .last()
+                    .map(|(position, _)| position)
+                    .unwrap_or(0);
+                return style_at(block, previous);
+            }
+            return style_at(block, local);
+        }
+        if offset == block_end && !is_last && affinity == CaretAffinity::Upstream {
+            if block_text.is_empty() {
+                return loom_text::CharacterStyle::default();
+            }
+            let previous = block_text
+                .char_indices()
+                .last()
+                .map(|(position, _)| position)
+                .unwrap_or(0);
+            return style_at(block, previous);
+        }
+        global_start = block_end + 1;
+    }
+    document
+        .blocks
+        .last()
+        .map(|block| {
+            let text = block.text.as_str();
+            text.char_indices()
+                .last()
+                .map(|(position, _)| style_at(block, position))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
+fn apply_global_character_style(
+    document: &mut WriterDocument,
+    start: usize,
+    end: usize,
+    style: loom_text::CharacterStyle,
+) {
+    if start >= end {
+        return;
+    }
+    for (block_index, local_start, local_end) in
+        selection_text_spans(document, TextSelection::range(start, end))
+    {
+        let block_id = document.blocks[block_index].id;
+        let _ = document.format_block_range(block_id, local_start, local_end, style.clone());
+    }
+}
+
 /// Clamp a text selection to the supplied UTF-8 text while retaining anchor
 /// direction and caret affinity. Offsets are floored to the previous valid
 /// UTF-8 character boundary and clamped to the document bounds.
 fn normalize_text_selection(text: &str, mut selection: TextSelection) -> TextSelection {
-    selection.anchor = floor_char_boundary(text, selection.anchor);
-    selection.focus = floor_char_boundary(text, selection.focus);
+    selection.anchor = floor_grapheme_boundary(text, selection.anchor);
+    selection.focus = floor_grapheme_boundary(text, selection.focus);
     selection
 }
 
@@ -1150,8 +1505,8 @@ fn normalized_selection_offsets(
     let text = document.editor_text();
     let (start, end) = selection.normalized_range();
     (
-        floor_char_boundary(&text, start),
-        floor_char_boundary(&text, end),
+        floor_grapheme_boundary(&text, start),
+        floor_grapheme_boundary(&text, end),
     )
 }
 
@@ -1191,7 +1546,7 @@ fn block_at_offset(document: &WriterDocument, offset: usize) -> Option<usize> {
         return None;
     }
     let text = document.editor_text();
-    let offset = floor_char_boundary(&text, offset);
+    let offset = floor_grapheme_boundary(&text, offset);
     let mut global_start = 0usize;
     for (index, block) in document.blocks.iter().enumerate() {
         let global_end = global_start + block.text.as_str().len();
@@ -2805,6 +3160,140 @@ pub struct DocumentPage {
     pub fragments: Vec<PageFragment>,
 }
 
+/// A deterministic rectangle in page points. Coordinates are viewport-relative
+/// after zoom and scroll have been applied.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageRect {
+    /// Horizontal origin in points.
+    pub x: f32,
+    /// Vertical origin in points.
+    pub y: f32,
+    /// Width in points.
+    pub width: f32,
+    /// Height in points.
+    pub height: f32,
+}
+
+impl PageRect {
+    fn intersects(self, other: Self) -> bool {
+        self.x < other.x + other.width
+            && self.x + self.width > other.x
+            && self.y < other.y + other.height
+            && self.y + self.height > other.y
+    }
+}
+
+/// Viewport state used by the headless page layout and by the Slint canvas.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageViewport {
+    /// Viewport width in points.
+    pub width: f32,
+    /// Viewport height in points.
+    pub height: f32,
+    /// Page scale where `1.0` is 100%.
+    pub zoom: f32,
+    /// Horizontal scroll in points.
+    pub scroll_x: f32,
+    /// Vertical scroll in points.
+    pub scroll_y: f32,
+}
+
+impl Default for PageViewport {
+    fn default() -> Self {
+        Self {
+            width: 595.0,
+            height: 842.0,
+            zoom: 1.0,
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        }
+    }
+}
+
+/// A visible source range projected onto one page fragment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleRange {
+    /// Zero-based page index.
+    pub page_index: usize,
+    /// Source block id.
+    pub block_id: u64,
+    /// Start byte in the source block.
+    pub start: usize,
+    /// Exclusive end byte in the source block.
+    pub end: usize,
+}
+
+/// A fragment with deterministic page geometry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutFragment {
+    /// Source block id.
+    pub block_id: u64,
+    /// Start byte in the source block.
+    pub start: usize,
+    /// Exclusive end byte in the source block.
+    pub end: usize,
+    /// Text rendered by this fragment.
+    pub text: String,
+    /// Fragment bounds in viewport coordinates.
+    pub bounds: PageRect,
+}
+
+/// A selected text span projected to a page rectangle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectionRect {
+    /// Zero-based page index.
+    pub page_index: usize,
+    /// Source block id.
+    pub block_id: u64,
+    /// Start byte in the source block.
+    pub start: usize,
+    /// Exclusive end byte in the source block.
+    pub end: usize,
+    /// Selection highlight bounds in viewport coordinates.
+    pub rect: PageRect,
+}
+
+/// Deterministic page layout projection independent of Slint widgets.
+///
+/// `pages` retains the existing [`DocumentPage`] source ranges for callers
+/// that only need pagination. `fragments`, `visible_ranges`, and
+/// `selection_rects` add geometry and viewport projection for the editor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageLayout {
+    /// Existing page/source-range representation.
+    pub pages: Vec<DocumentPage>,
+    /// Page rectangles in viewport coordinates.
+    pub page_bounds: Vec<PageRect>,
+    /// Fragment rectangles in viewport coordinates.
+    pub fragments: Vec<LayoutFragment>,
+    /// Source ranges intersecting the viewport.
+    pub visible_ranges: Vec<VisibleRange>,
+    /// Selection highlight/caret rectangles.
+    pub selection_rects: Vec<SelectionRect>,
+    /// Effective viewport scale.
+    pub zoom: f32,
+    /// Effective horizontal scroll.
+    pub scroll_x: f32,
+    /// Effective vertical scroll.
+    pub scroll_y: f32,
+    /// Viewport dimensions in points.
+    pub viewport_width: f32,
+    /// Viewport dimensions in points.
+    pub viewport_height: f32,
+}
+
+impl PageLayout {
+    /// Alias for callers that prefer the long form name.
+    pub fn selection_rectangles(&self) -> &[SelectionRect] {
+        &self.selection_rects
+    }
+
+    /// Alias for callers that need only page bounds.
+    pub fn bounds(&self) -> &[PageRect] {
+        &self.page_bounds
+    }
+}
+
 /// Anchored comment thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentThread {
@@ -3264,6 +3753,218 @@ impl WriterDocument {
         }
         Ok(pages)
     }
+
+    /// Build a page-and-viewport projection from the same fragments returned
+    /// by [`Self::paginate`]. Geometry is deterministic and does not depend on
+    /// a window or renderer, which keeps selection and scroll tests faithful
+    /// to the editor's page model.
+    pub fn layout(&self, style: &PageStyle, viewport: PageViewport) -> Result<PageLayout, String> {
+        if !viewport.width.is_finite()
+            || !viewport.height.is_finite()
+            || !viewport.zoom.is_finite()
+            || !viewport.scroll_x.is_finite()
+            || !viewport.scroll_y.is_finite()
+            || viewport.width <= 0.0
+            || viewport.height <= 0.0
+            || viewport.zoom <= 0.0
+        {
+            return Err("page viewport has invalid geometry".into());
+        }
+
+        let pages = self.paginate(style)?;
+        let zoom = viewport.zoom;
+        let scroll_x = viewport.scroll_x.max(0.0);
+        let scroll_y = viewport.scroll_y.max(0.0);
+        let page_width = style.width_pt * zoom;
+        let page_height = style.height_pt * zoom;
+        let page_gap = 24.0 * zoom;
+        let glyph_width = style.body_font_size_pt * 0.52 * zoom;
+        let line_height = style.body_font_size_pt * style.line_height * zoom;
+        let viewport_rect = PageRect {
+            x: 0.0,
+            y: 0.0,
+            width: viewport.width,
+            height: viewport.height,
+        };
+
+        let mut page_bounds = Vec::with_capacity(pages.len());
+        let mut fragments = Vec::new();
+        for page in &pages {
+            let page_x = ((viewport.width - page_width) / 2.0).max(0.0) - scroll_x;
+            let page_y = page.index as f32 * (page_height + page_gap) - scroll_y;
+            let bounds = PageRect {
+                x: page_x,
+                y: page_y,
+                width: page_width,
+                height: page_height,
+            };
+            page_bounds.push(bounds);
+
+            let content_x = page_x + style.margin_left_pt * zoom;
+            let content_y = page_y + style.margin_top_pt * zoom;
+            for (line_index, source) in page.fragments.iter().enumerate() {
+                let character_count = source.text.graphemes(true).count();
+                let fragment_bounds = PageRect {
+                    x: content_x,
+                    y: content_y + line_index as f32 * line_height,
+                    width: character_count as f32 * glyph_width,
+                    height: line_height,
+                };
+                fragments.push(LayoutFragment {
+                    block_id: source.block_id,
+                    start: source.start,
+                    end: source.end,
+                    text: source.text.clone(),
+                    bounds: fragment_bounds,
+                });
+            }
+        }
+
+        let visible_ranges = fragments
+            .iter()
+            .filter_map(|fragment| {
+                if !fragment.bounds.intersects(viewport_rect) {
+                    return None;
+                }
+                let page_index = page_bounds
+                    .iter()
+                    .position(|page| {
+                        fragment.bounds.y >= page.y && fragment.bounds.y < page.y + page.height
+                    })
+                    .unwrap_or(0);
+                Some(VisibleRange {
+                    page_index,
+                    block_id: fragment.block_id,
+                    start: fragment.start,
+                    end: fragment.end,
+                })
+            })
+            .collect();
+
+        let selection_rects =
+            self.selection_rectangles(&fragments, &pages, style, zoom, glyph_width);
+
+        Ok(PageLayout {
+            pages,
+            page_bounds,
+            fragments,
+            visible_ranges,
+            selection_rects,
+            zoom,
+            scroll_x,
+            scroll_y,
+            viewport_width: viewport.width,
+            viewport_height: viewport.height,
+        })
+    }
+
+    /// Alias emphasizing that this projection extends the existing paginator.
+    pub fn paginate_with_viewport(
+        &self,
+        style: &PageStyle,
+        viewport: PageViewport,
+    ) -> Result<PageLayout, String> {
+        self.layout(style, viewport)
+    }
+
+    fn selection_rectangles(
+        &self,
+        fragments: &[LayoutFragment],
+        pages: &[DocumentPage],
+        style: &PageStyle,
+        zoom: f32,
+        glyph_width: f32,
+    ) -> Vec<SelectionRect> {
+        let text = self.editor_text();
+        let (selection_start, selection_end) = normalized_grapheme_range(&text, &self.selection);
+        let mut block_starts = Vec::with_capacity(self.blocks.len());
+        let mut cursor = 0usize;
+        for (index, block) in self.blocks.iter().enumerate() {
+            block_starts.push(cursor);
+            cursor += block.text.as_str().len() + usize::from(index + 1 < self.blocks.len());
+        }
+
+        let mut result = Vec::new();
+        let mut fragment_index = 0usize;
+        let mut previous_fragment_end = None;
+        for page in pages {
+            for source in &page.fragments {
+                let Some(fragment) = fragments.get(fragment_index) else {
+                    continue;
+                };
+                let current_fragment_index = fragment_index;
+                fragment_index += 1;
+                let Some(block_index) = self
+                    .blocks
+                    .iter()
+                    .position(|block| block.id == source.block_id)
+                else {
+                    continue;
+                };
+                let block_start = block_starts[block_index];
+                let fragment_global_start = block_start + source.start;
+                let fragment_global_end = block_start + source.end;
+                let overlap_start = selection_start.max(fragment_global_start);
+                let overlap_end = selection_end.min(fragment_global_end);
+                if overlap_start < overlap_end {
+                    let local_start = overlap_start - fragment_global_start;
+                    let local_end = overlap_end - fragment_global_start;
+                    let prefix = &source.text[..local_start.min(source.text.len())];
+                    let selected = &source.text
+                        [local_start.min(source.text.len())..local_end.min(source.text.len())];
+                    let x = fragment.bounds.x + prefix.graphemes(true).count() as f32 * glyph_width;
+                    let width = selected.graphemes(true).count() as f32 * glyph_width;
+                    result.push(SelectionRect {
+                        page_index: page.index,
+                        block_id: source.block_id,
+                        start: source.start + local_start,
+                        end: source.start + local_end,
+                        rect: PageRect {
+                            x,
+                            y: fragment.bounds.y,
+                            width,
+                            height: style.body_font_size_pt * style.line_height * zoom,
+                        },
+                    });
+                } else if selection_start == selection_end {
+                    let local = selection_start.saturating_sub(fragment_global_start);
+                    let at_start = selection_start == fragment_global_start;
+                    let at_end = selection_start == fragment_global_end;
+                    let strictly_inside = selection_start > fragment_global_start
+                        && selection_start < fragment_global_end;
+                    let has_previous_boundary =
+                        previous_fragment_end == Some(fragment_global_start);
+                    let is_last_fragment = current_fragment_index + 1 == fragments.len();
+                    let use_fragment = strictly_inside
+                        || (at_start
+                            && (!has_previous_boundary
+                                || self.selection.affinity == CaretAffinity::Downstream))
+                        || (at_end
+                            && (self.selection.affinity == CaretAffinity::Upstream
+                                || is_last_fragment));
+                    if use_fragment {
+                        let local = local.clamp(0, source.text.len());
+                        let prefix = &source.text[..local];
+                        result.push(SelectionRect {
+                            page_index: page.index,
+                            block_id: source.block_id,
+                            start: source.start + local,
+                            end: source.start + local,
+                            rect: PageRect {
+                                x: fragment.bounds.x
+                                    + prefix.graphemes(true).count() as f32 * glyph_width,
+                                y: fragment.bounds.y,
+                                width: 1.0,
+                                height: style.body_font_size_pt * style.line_height * zoom,
+                            },
+                        });
+                    }
+                }
+                previous_fragment_end = Some(fragment_global_end);
+            }
+        }
+        result
+    }
 }
 
 fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
@@ -3273,20 +3974,20 @@ fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let mut line_start = 0usize;
     let mut last_break = None;
-    let mut chars = 0usize;
-    for (index, character) in text.char_indices() {
-        chars += 1;
-        if character.is_whitespace() {
-            last_break = Some(index + character.len_utf8());
+    let mut graphemes = 0usize;
+    for (index, grapheme) in text.grapheme_indices(true) {
+        graphemes += 1;
+        if grapheme.chars().any(char::is_whitespace) {
+            last_break = Some(index + grapheme.len());
         }
-        if chars >= columns {
+        if graphemes >= columns {
             let end = last_break
                 .filter(|break_at| *break_at > line_start)
-                .unwrap_or(index + character.len_utf8());
+                .unwrap_or(index + grapheme.len());
             ranges.push((line_start, end));
             line_start = end;
-            chars = text[line_start..index + character.len_utf8()]
-                .chars()
+            graphemes = text[line_start..index + grapheme.len()]
+                .graphemes(true)
                 .count();
             last_break = None;
         }
@@ -4239,6 +4940,88 @@ mod tests {
         assert_eq!(loaded.selection(), d.selection());
         assert_eq!(loaded.editor_text(), d.editor_text());
         assert_eq!(loaded.blocks[0].runs, d.blocks[0].runs);
+    }
+
+    #[test]
+    fn caret_movement_stays_on_extended_grapheme_boundaries() {
+        let text = "A e\u{301} 👩‍💻 Z";
+        let boundaries = grapheme_boundaries(text);
+        assert_eq!(grapheme_count(text), 7);
+        assert!(boundaries
+            .windows(2)
+            .all(|pair| { text.is_char_boundary(pair[0]) && text.is_char_boundary(pair[1]) }));
+
+        let emoji_start = text.find('👩').expect("emoji");
+        let emoji_end = emoji_start + "👩‍💻".len();
+        assert_eq!(next_grapheme_boundary(text, emoji_start), emoji_end);
+        assert_eq!(floor_grapheme_boundary(text, emoji_start + 1), emoji_start);
+        assert_eq!(
+            move_caret_offset(text, emoji_end, CaretMovement::PreviousGrapheme),
+            emoji_start
+        );
+
+        let selection = TextSelection::range(emoji_start, emoji_start);
+        let extended = move_selection(text, &selection, CaretMovement::NextGrapheme, true);
+        assert_eq!(extended.normalized_range(), (emoji_start, emoji_end));
+    }
+
+    #[test]
+    fn replacement_inherits_active_style_and_collapses_selection() {
+        let mut document = WriterDocument::new("replace-style", "Replacement");
+        document.push(RichBlock::new(1, "paragraph", "before after"));
+        set_selection_bold(&mut document, TextSelection::range(0, 6), true);
+        document.set_selection(TextSelection::range(0, 6));
+
+        let caret = document
+            .replace_selection_text("new")
+            .expect("replace selection");
+        assert_eq!(document.editor_text(), "new after");
+        assert_eq!(caret, TextSelection::caret(3));
+        assert_eq!(document.selection(), caret);
+        assert!(document.blocks[0].runs.iter().any(|run| {
+            run.start == 0 && run.end == 3 && run.style.weight == loom_text::FontWeight::Bold
+        }));
+    }
+
+    #[test]
+    fn layout_exposes_zoom_scroll_visible_and_selection_geometry() {
+        let mut document = WriterDocument::new("layout", "Layout");
+        document.push(RichBlock::new(
+            1,
+            "paragraph",
+            "A short paragraph for layout.",
+        ));
+        document.set_selection(TextSelection::range(0, 7));
+        let style = PageStyle::default();
+        let baseline = document
+            .layout(
+                &style,
+                PageViewport {
+                    width: 420.0,
+                    height: 300.0,
+                    ..PageViewport::default()
+                },
+            )
+            .expect("baseline layout");
+        let zoomed = document
+            .layout(
+                &style,
+                PageViewport {
+                    width: 420.0,
+                    height: 300.0,
+                    zoom: 1.5,
+                    scroll_y: 50.0,
+                    ..PageViewport::default()
+                },
+            )
+            .expect("zoomed layout");
+        assert_eq!(baseline.pages, zoomed.pages);
+        assert!(zoomed.page_bounds[0].width > baseline.page_bounds[0].width);
+        assert_eq!(zoomed.zoom, 1.5);
+        assert_eq!(zoomed.scroll_y, 50.0);
+        assert!(!zoomed.visible_ranges.is_empty());
+        assert!(!zoomed.selection_rects.is_empty());
+        assert!(zoomed.selection_rects[0].rect.width > 0.0);
     }
 
     #[test]

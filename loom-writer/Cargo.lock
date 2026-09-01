@@ -2830,6 +2830,7 @@ dependencies = [
  "loom-package",
  "loom-pdf",
  "loom-text",
+ "unicode-segmentation",
 ]
 
 [[package]]

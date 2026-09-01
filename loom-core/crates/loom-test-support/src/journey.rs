@@ -70,7 +70,14 @@ fn capture_step<H: ComponentHandle + PaletteProbe>(
     out_dir: &Path,
     app_name: &str,
 ) -> Result<JourneyStep, String> {
-    let (width, height) = (1280.0f32, 800.0f32);
+    // Preserve the caller's configured viewport instead of forcing the
+    // reference 1280x800 size.  Application journeys accept arbitrary
+    // `--size` values, and the palette recorder is supplemental evidence in
+    // those same journeys; resetting the window here would make the palette
+    // captures disagree with the workflow captures and invalidate a
+    // non-default-size run.
+    let size = app.window().size();
+    let (width, height) = (size.width as f32, size.height as f32);
     let image = snapshot_component(app, width, height, 1.0).map_err(|e| format!("capture: {e}"))?;
     let file_name = format!("{app_name}-journey-{name}.png");
     let path = out_dir.join(&file_name);
