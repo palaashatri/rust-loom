@@ -8,6 +8,7 @@
 mod document_formatting;
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -1258,6 +1259,7 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
 
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
+    app.set_render_blocks(Rc::new(VecModel::from(writer_render_blocks(doc))).into());
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
@@ -1273,6 +1275,161 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
     app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
 }
 
+/// Project the authoritative rich-text model into the display-only StyledText
+/// rows used by the paper surface.  The native TextInput remains the editing
+/// path, but it is deliberately transparent so formatting is visible in the
+/// same place while selection, IME, and keyboard behavior stay native.
+fn writer_render_blocks(doc: &WriterDocument) -> Vec<WriterRenderBlock> {
+    doc.blocks
+        .iter()
+        .map(|block| {
+            let markup = writer_render_markup(block);
+            let content = slint::StyledText::from_markdown(&markup)
+                .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str()));
+            let font_size = writer_render_font_size(block.kind.as_str());
+            WriterRenderBlock {
+                content,
+                height: writer_render_height(block, font_size),
+                font_size,
+                alignment: writer_render_alignment(block.style.alignment),
+            }
+        })
+        .collect()
+}
+
+fn writer_render_height(block: &RichBlock, font_size: f32) -> f32 {
+    // StyledText computes height from the available width. Give each row a
+    // conservative explicit height so VerticalLayout cannot distribute the
+    // editor's remaining viewport among paragraphs as if they were spacers.
+    // The estimate intentionally rounds up; clipping is worse than a small
+    // amount of extra leading for long or mixed-script paragraphs.
+    let usable_width = 460.0_f32;
+    let average_glyph_width = (font_size * 0.55).max(1.0);
+    let chars_per_line = (usable_width / average_glyph_width).max(1.0);
+    let line_count = block
+        .text
+        .as_str()
+        .split('\n')
+        .map(|line| {
+            let graphemes = grapheme_count(line).max(1) as f32;
+            (graphemes / chars_per_line).ceil() as usize
+        })
+        .sum::<usize>()
+        .max(1);
+    font_size * (line_count as f32 * 1.35 + 0.25)
+}
+
+fn writer_render_font_size(kind: &str) -> f32 {
+    match kind {
+        "heading1" => 24.0,
+        "heading2" => 20.0,
+        "heading3" => 17.0,
+        "heading4" => 16.0,
+        "heading5" | "heading6" => 15.0,
+        _ => 14.0,
+    }
+}
+
+fn writer_render_alignment(alignment: loom_text::Alignment) -> i32 {
+    match alignment {
+        loom_text::Alignment::Left => 0,
+        loom_text::Alignment::Center => 1,
+        loom_text::Alignment::Right => 2,
+        // StyledText does not expose a justify mode. Keep the model value
+        // visible as a left-aligned paragraph until a line-layout renderer is
+        // available rather than claiming that the display is justified.
+        loom_text::Alignment::Justify => 0,
+    }
+}
+
+fn writer_render_markup(block: &RichBlock) -> String {
+    let text = block.text.as_str();
+    if text.is_empty() {
+        return String::new();
+    }
+
+    let mut boundaries = BTreeSet::from([0usize, text.len()]);
+    for run in &block.runs {
+        boundaries.insert(floor_char_boundary_for_render(text, run.start));
+        boundaries.insert(floor_char_boundary_for_render(text, run.end));
+    }
+    let boundaries = boundaries.into_iter().collect::<Vec<_>>();
+    let mut markup = String::with_capacity(text.len() + block.runs.len() * 8);
+    for pair in boundaries.windows(2) {
+        let (start, end) = (pair[0], pair[1]);
+        if start >= end {
+            continue;
+        }
+        let style = block
+            .runs
+            .iter()
+            .find(|run| run.start <= start && start < run.end)
+            .map(|run| &run.style);
+        let escaped = escape_writer_markdown(&text[start..end]);
+        append_writer_styled_span(&mut markup, &escaped, style);
+    }
+    markup
+}
+
+fn floor_char_boundary_for_render(text: &str, offset: usize) -> usize {
+    let mut value = offset.min(text.len());
+    while value > 0 && !text.is_char_boundary(value) {
+        value -= 1;
+    }
+    value
+}
+
+fn escape_writer_markdown(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '*' | '_' | '`' | '[' | ']' | '~' | '#' | '\\' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn append_writer_styled_span(
+    markup: &mut String,
+    escaped: &str,
+    style: Option<&loom_text::CharacterStyle>,
+) {
+    let Some(style) = style else {
+        markup.push_str(escaped);
+        return;
+    };
+
+    // Keep the wrappers properly nested so StyledText's CommonMark parser
+    // preserves combined bold/italic/underline runs.
+    let mut wrappers: Vec<(&str, &str)> = Vec::new();
+    if style.underline {
+        wrappers.push(("<u>", "</u>"));
+    }
+    if style.strikethrough {
+        wrappers.push(("~~", "~~"));
+    }
+    if style.italic {
+        wrappers.push(("*", "*"));
+    }
+    if style.weight.numeric() >= loom_text::FontWeight::Bold.numeric() {
+        wrappers.push(("**", "**"));
+    }
+    for (open, _) in &wrappers {
+        markup.push_str(open);
+    }
+    markup.push_str(escaped);
+    for (_, close) in wrappers.iter().rev() {
+        markup.push_str(close);
+    }
+}
+
 fn selection_from_app(app: &WriterApp) -> TextSelection {
     TextSelection::range(
         app.get_selection_anchor().max(0) as usize,
@@ -1286,7 +1443,11 @@ fn selection_announcement(doc: &WriterDocument, selection: &TextSelection) -> St
     let end = floor_grapheme_boundary(&text, selection.focus);
     let (start, end) = (start.min(end), start.max(end));
     if start == end {
-        return format!("Caret at {start}");
+        // Expose a user-facing character position rather than the model's
+        // UTF-8 byte offset. Positions are one-based, with the insertion
+        // point before the first grapheme reported as character 1.
+        let character_position = grapheme_count(&text[..start]) + 1;
+        return format!("Caret at character {character_position}");
     }
     let selected = text
         .get(start.min(text.len())..end.min(text.len()))
@@ -2669,6 +2830,18 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
             app.get_is_italic()
         ));
     }
+    let render_rows = app.get_render_blocks();
+    if render_rows.row_count() != formatted_document.blocks.len() {
+        return Err(format!(
+            "journey rich preview row count is stale (rows={}, blocks={})",
+            render_rows.row_count(),
+            formatted_document.blocks.len()
+        ));
+    }
+    let preview_markup = writer_render_markup(&formatted_document.blocks[0]);
+    if !preview_markup.contains("**") || !preview_markup.contains('*') {
+        return Err("journey rich preview did not project bold and italic markup".into());
+    }
     screenshots.push(capture_writer_journey_step(
         &app,
         args,
@@ -3353,6 +3526,86 @@ mod tests {
         assert_eq!(
             selection_announcement(&document, &document.selection()),
             "Selected 1 characters"
+        );
+    }
+
+    #[test]
+    fn collapsed_caret_announcement_reports_one_based_grapheme_position() {
+        let mut document = text_document("AéB");
+        document.set_selection(TextSelection::caret(0));
+        assert_eq!(
+            selection_announcement(&document, &document.selection()),
+            "Caret at character 1"
+        );
+        // Offset 3 is after the two-grapheme prefix (`Aé`), even though the
+        // second grapheme occupies two UTF-8 bytes.
+        document.set_selection(TextSelection::caret(3));
+        assert_eq!(
+            selection_announcement(&document, &document.selection()),
+            "Caret at character 3"
+        );
+    }
+
+    #[test]
+    fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
+        set_platform();
+        let app = WriterApp::new().expect("create WriterApp");
+        let mut document = text_document("Styled heading");
+        document.blocks[0].kind = "heading2".into();
+        document.blocks[0].style.alignment = loom_text::Alignment::Center;
+        document.set_selection(TextSelection::range(0, 6));
+        set_selection_bold(&mut document, DocumentSelection::range(0, 6), true);
+        set_selection_italic(&mut document, DocumentSelection::range(0, 6), true);
+        set_selection_underline(&mut document, DocumentSelection::range(0, 6), true);
+
+        let markup = writer_render_markup(&document.blocks[0]);
+        assert!(
+            markup.contains("**"),
+            "bold run must reach the display projection"
+        );
+        assert!(
+            markup.contains("*"),
+            "italic run must reach the display projection"
+        );
+        assert!(
+            markup.contains("<u>"),
+            "underline run must reach the display projection"
+        );
+        assert!(
+            slint::StyledText::from_markdown(&markup).is_ok(),
+            "combined character-style markup must be accepted by StyledText"
+        );
+
+        apply_document(&app, &document);
+        let rows = app.get_render_blocks();
+        assert_eq!(rows.row_count(), 1);
+        let row = rows.row_data(0).expect("render row");
+        assert_eq!(
+            row.alignment, 1,
+            "center alignment must reach the paper row"
+        );
+        assert_eq!(row.font_size, 20.0, "heading size must reach the paper row");
+        assert!(
+            row.height > row.font_size,
+            "wrapped row needs explicit layout height"
+        );
+        assert_ne!(
+            row.content,
+            slint::StyledText::from_plain_text(document.blocks[0].text.as_str()),
+            "styled rows must not silently fall back to plain text"
+        );
+        let content_debug = format!("{:?}", row.content);
+        assert!(
+            content_debug.contains("Strong"),
+            "bold span missing from StyledText"
+        );
+        assert!(
+            content_debug.contains("Emphasis"),
+            "italic span missing from StyledText"
+        );
+        assert!(
+            content_debug.contains("Underline"),
+            "underline span missing from StyledText"
         );
     }
 
@@ -4102,7 +4355,7 @@ mod tests {
         document.set_selection(TextSelection::caret(3));
         assert_eq!(
             selection_announcement(&document, &document.selection()),
-            "Caret at 3"
+            "Caret at character 4"
         );
         // UTF-8 char count, not byte count.
         let mut utf8 = text_document("AéB");

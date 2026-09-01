@@ -7,6 +7,20 @@ import {
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 
+/// A rendered paragraph projected from the Writer document model.
+///
+/// Editing still happens in the native `TextInput` below, while this model is
+/// rendered immediately underneath it. Keeping the projection as structured
+/// rows lets paragraph styles (heading size and alignment) and character runs
+/// remain visible without making the editable buffer responsible for rich
+/// layout.
+export struct WriterRenderBlock {
+    content: styled-text,
+    font-size: length,
+    height: length,
+    alignment: int,
+}
+
 /// Writer's responsive command surface. The slot host owns the row height;
 /// this component owns only command grouping and visibility. Keeping the
 /// groups local to Writer prevents the editor shell from growing a second,
@@ -262,6 +276,8 @@ export component WriterToolbarBody inherits DirectionalLayout {
 /// beside the paper surface that owns them.
 component WriterDocumentEditor inherits Rectangle {
     in-out property <string> text: "";
+    in property <[WriterRenderBlock]> render-blocks: [];
+    in property <float> page-zoom: 1.0;
     in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
     in property <length> font-size: Theme.tokens.typography.body;
@@ -303,6 +319,35 @@ component WriterDocumentEditor inherits Rectangle {
         accessible-role: none;
     }
 
+    // StyledText is a display projection only. The native editor remains the
+    // top-most child so pointer selection, IME composition, and keyboard
+    // editing continue to use the same authoritative text buffer.
+    preview := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        spacing: Theme.tokens.space.md;
+        padding: 0px;
+        for block in root.render-blocks : StyledText {
+            text: block.content;
+            width: root.width;
+            height: block.height * root.page-zoom;
+            horizontal-stretch: 1;
+            vertical-stretch: 0;
+            default-font-size: block.font-size * root.page-zoom;
+            default-color: Theme.palette().paper-ink;
+            horizontal-alignment: block.alignment == 1
+                ? TextHorizontalAlignment.center
+                : block.alignment == 2
+                    ? TextHorizontalAlignment.right
+                    : block.alignment == 3
+                        ? TextHorizontalAlignment.left
+                        : TextHorizontalAlignment.left;
+            vertical-alignment: top;
+        }
+    }
+
     editor := TextInput {
         x: 0px;
         y: 0px;
@@ -314,9 +359,15 @@ component WriterDocumentEditor inherits Rectangle {
         wrap: word-wrap;
         vertical-alignment: top;
         font-size: root.font-size;
-        color: root.enabled ? Theme.palette().paper-ink : Theme.palette().ink-disabled;
+        // Rich text is painted by `preview`; keeping the editable buffer's
+        // glyphs transparent avoids a duplicate plain-text layer while its
+        // selection highlight and caret remain native and interactive.
+        color: transparent;
         selection-background-color: Theme.palette().selection;
-        selection-foreground-color: Theme.palette().accent-ink;
+        // The rich projection underneath owns the selected glyph styling. Keep
+        // native selected glyphs transparent so the highlight remains visible
+        // without painting a second, differently-shaped glyph over it.
+        selection-foreground-color: transparent;
         accessible-role: none;
         edited => {
             root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte_offset);
@@ -337,6 +388,7 @@ component WriterDocumentEditor inherits Rectangle {
 export component WriterPageCanvas inherits CanvasSurface {
     in property <string> doc-title: "Untitled Document";
     in-out property <string> doc-content: "";
+    in property <[WriterRenderBlock]> render-blocks: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in property <string> selection-announcement: "No text selected";
@@ -401,9 +453,11 @@ export component WriterPageCanvas inherits CanvasSurface {
 
             document-editor := WriterDocumentEditor {
                 text <=> root.doc-content;
+                render-blocks <=> root.render-blocks;
                 selection-anchor <=> root.selection-anchor;
                 selection-focus <=> root.selection-focus;
                 selection-announcement <=> root.selection-announcement;
+                page-zoom: root.page-zoom;
                 font-size: Theme.tokens.typography.body-large * root.page-zoom;
                 edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                 selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
@@ -470,7 +524,7 @@ export component WriterInspector inherits InspectorSurface {
 
         SectionHeader { title: "Paragraph Style"; }
         SegmentedControl {
-            items: ["Body", "H1", "H2", "Title"];
+            items: ["Body", "H1", "H2", "H3"];
             current <=> root.heading-level;
             label: "Heading Style";
             selected(idx) => { root.select-heading(idx); }
