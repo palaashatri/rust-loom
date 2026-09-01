@@ -85,3 +85,38 @@ the 1280 px and wider captures keep the grid and inspector legible, while the
   established. No visible clipboard UX was added; range copy is covered in
   core tests. Add Sheet remains disabled because the controller is still
   single-sheet.
+
+## Review-fix round 1 — cumulative grid metrics and keyboard guards
+
+Implementation commit: `0a47b8ab35a977489927f11ccdb666bf05dab7be`
+
+Changed production files:
+
+- `loom-sheets/crates/loom-sheets-app/src/main.rs` — cumulative row/column
+  projection, offsets, clamping, and the custom-dimension regression.
+- `loom-sheets/crates/loom-sheets-app/ui/components.slint` — rejects named
+  non-printable `Key.*` values, maps Tab/Backtab navigation, and exposes the
+  polite table live region; the key regression covers Backspace, Delete, F1,
+  Home, PageUp, and Backtab.
+
+Fresh verification (exact commands and observed results):
+
+```text
+cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-core
+test result: ok. 59 passed; 0 failed; doc-tests 0 passed; 0 failed
+
+cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app
+test result: ok. 33 passed; 0 failed
+
+cargo fmt --all --manifest-path loom-sheets/Cargo.toml -- --check && git diff --check
+exit 0
+
+cargo clippy --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] (exit 0; existing loom-ui Slint export warnings only)
+
+cargo build --release --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app
+Finished `release` profile [optimized] (exit 0)
+
+loom-sheets/target/release/loom-sheets --smoke --size 1280x800
+smoke_exit=0; smoke_png=/var/folders/0x/c0gh1m0j0yxd01cvk4p6lxn40000gp/T/loom-sheets-smoke-33940.png; smoke_png_bytes=64425
+```
