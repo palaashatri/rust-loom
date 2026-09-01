@@ -120,3 +120,22 @@ Finished `release` profile [optimized] (exit 0)
 loom-sheets/target/release/loom-sheets --smoke --size 1280x800
 smoke_exit=0; smoke_png=/var/folders/0x/c0gh1m0j0yxd01cvk4p6lxn40000gp/T/loom-sheets-smoke-33940.png; smoke_png_bytes=64425
 ```
+
+### Regression-test identifiers and focused output
+
+The two review regressions are covered by these exact tests:
+
+- `tests::focused_grid_rejects_non_printable_edit_keys`
+- `tests::custom_dimensions_drive_viewport_projection_and_offsets`
+
+```text
+$ cargo test --quiet --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app 'tests::focused_grid_rejects_non_printable_edit_keys' -- --exact --nocapture
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.24s
+
+$ cargo test --quiet --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app 'tests::custom_dimensions_drive_viewport_projection_and_offsets' -- --exact --nocapture
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.21s
+```
