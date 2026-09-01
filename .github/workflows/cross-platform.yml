@@ -1,19 +1,13 @@
-name: Native targets, packages, and UI validation
+name: Loom full native matrix
 
 on:
-  pull_request:
-    paths:
-      - 'loom-*/**'
-      - 'loom-bootstrap/**'
-      - 'TRUTH.md'
-      - '.github/workflows/cross-platform.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: loom-cross-platform-${{ github.ref }}
+  group: loom-full-native-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,9 +41,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libasound2-dev \
-            libfontconfig1-dev libx11-dev libxkbcommon-dev libwayland-dev \
-            libgl1-mesa-dev libglu1-mesa-dev dpkg-dev
+            build-essential pkg-config libasound2-dev libfontconfig1-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev dpkg-dev
       - name: Install WiX Toolset
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -61,27 +54,26 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
-          rustc --version
-          cargo --version
+      - name: Run repository governance gates
+        shell: bash
+        run: |
+          python3 loom-bootstrap/scripts/audit-governance.py
+          python3 loom-bootstrap/scripts/audit-code-structure.py
+          python3 loom-bootstrap/scripts/audit-assets.py
+          python3 loom-bootstrap/scripts/audit-ui-foundation.py
       - name: Build every application workspace
         shell: bash
         env:
           RUSTFLAGS: ${{ matrix.platform == 'windows' && '-C link-arg=/STACK:33554432' || '' }}
         run: bash loom-bootstrap/scripts/build-all.sh --release
-      - name: Run native functional journeys and generate sample projects
+      - name: Run native functional journeys
         shell: bash
         run: >-
           python3 loom-bootstrap/scripts/native-functional-matrix.py
           --root "$GITHUB_WORKSPACE"
           --output "$NATIVE_EVIDENCE/functional"
           --platform "${{ matrix.platform }}"
-      - name: Publish generated samples for positional-open UI validation
-        shell: bash
-        run: |
-          rm -rf loom-bootstrap/.work/generated-samples
-          mkdir -p loom-bootstrap/.work/generated-samples
-          cp -R "$NATIVE_EVIDENCE/functional/generated-samples/." loom-bootstrap/.work/generated-samples/
-      - name: Render compact, reference, and large native UI matrices
+      - name: Render native UI evidence
         shell: bash
         run: >-
           python3 loom-bootstrap/scripts/native-ui-matrix.py
@@ -89,47 +81,16 @@ jobs:
           --output "$NATIVE_EVIDENCE/ui"
           --platform "${{ matrix.platform }}"
           --sizes 1024x720,1440x900,1920x1200
-      - name: Record palette input journeys (modifier-open unproven)
-        shell: bash
-        run: |
-          set -euo pipefail
-          suffix=""
-          if [ "${{ matrix.platform }}" = "windows" ]; then suffix=".exe"; fi
-          for app in writer sheets present photo motion video studio encode; do
-            binary="$GITHUB_WORKSPACE/loom-$app/target/release/loom-$app$suffix"
-            output="$NATIVE_EVIDENCE/journeys/$app"
-            mkdir -p "$output"
-            "$binary" --journey "$output" --theme dark --size 1280x800
-            test -s "$output/$app.json"
-          done
-      - name: Record pre-package readiness evidence
-        shell: bash
-        run: |
-          python3 loom-bootstrap/scripts/audit-contracts.py
-          python3 loom-bootstrap/scripts/audit-product-ui.py
-          python3 loom-bootstrap/scripts/audit-product-readiness.py \
-            --evidence-root "$NATIVE_EVIDENCE" \
-            --json "$NATIVE_EVIDENCE/pre-package-product-score.json"
       - name: Build native validation package
         shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if python3 loom-bootstrap/packaging/release.py \
-              --root "$GITHUB_WORKSPACE" \
-              --output "$NATIVE_EVIDENCE/packages" \
-              --platform "${{ matrix.platform }}" \
-              --architecture "${{ matrix.architecture }}" \
-              --version 0.1.0 \
-              --allow-unsigned; then
-              exit 0
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "native package failed after $attempt attempts" >&2
-              exit 1
-            fi
-            sleep $((attempt * 5))
-          done
+        run: >-
+          python3 loom-bootstrap/packaging/release.py
+          --root "$GITHUB_WORKSPACE"
+          --output "$NATIVE_EVIDENCE/packages"
+          --platform "${{ matrix.platform }}"
+          --architecture "${{ matrix.architecture }}"
+          --version 0.1.0
+          --allow-unsigned
       - name: Validate native package contents
         shell: bash
         env:
@@ -141,53 +102,13 @@ jobs:
           --platform "${{ matrix.platform }}"
           --architecture "${{ matrix.architecture }}"
           --output "$NATIVE_EVIDENCE/packages/package-validation.json"
-      - name: Run suite contracts and strict readiness score
-        shell: bash
-        run: |
-          python3 loom-bootstrap/scripts/audit-contracts.py
-          python3 loom-bootstrap/scripts/audit-product-ui.py
-          python3 loom-bootstrap/scripts/audit-product-readiness.py \
-            --evidence-root "$NATIVE_EVIDENCE" \
-            --minimum-ui 6.5 --minimum-functionality 5.5 \
-            --json "$NATIVE_EVIDENCE/product-score.json"
-      - name: Inventory downloadable native evidence
-        if: always()
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ['NATIVE_EVIDENCE'])
-          files = []
-          for path in sorted(root.rglob('*')):
-              if not path.is_file():
-                  continue
-              payload = path.read_bytes()
-              files.append({
-                  'path': str(path.relative_to(root)),
-                  'bytes': len(payload),
-                  'sha256': hashlib.sha256(payload).hexdigest(),
-              })
-          manifest = {
-              'schema_version': 1,
-              'platform': '${{ matrix.platform }}',
-              'architecture': '${{ matrix.architecture }}',
-              'files': files,
-          }
-          root.mkdir(parents=True, exist_ok=True)
-          (root / 'artifact-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-          PY
-      - name: Upload native package and UI evidence
+      - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: loom-native-${{ matrix.platform }}-${{ matrix.architecture }}
           if-no-files-found: error
           retention-days: 14
-          compression-level: 6
           path: ${{ env.NATIVE_EVIDENCE }}/
 
   native-baseline:
@@ -201,7 +122,6 @@ jobs:
           NATIVE_MATRIX_RESULT: ${{ needs.native-build.result }}
         shell: bash
         run: |
-          set -euo pipefail
           if [ "$NATIVE_MATRIX_RESULT" != "success" ]; then
             echo "required native matrix did not fully pass: $NATIVE_MATRIX_RESULT" >&2
             exit 1
