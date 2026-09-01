@@ -126,7 +126,7 @@ export component LoomTabStrip inherits Rectangle {
         cross-axis-alignment: stretch;
         for item[idx] in root.items : Rectangle {
             min-width: max(64px, tab-label.preferred-width + Theme.tokens.space.xxl);
-            preferred-width: root.min-width;
+            preferred-width: max(64px, tab-label.preferred-width + Theme.tokens.space.xxl);
             background: tab-touch.pressed ? Theme.palette().surface-sunken
                 : tab-touch.has-hover ? Theme.palette().surface-raised
                 : transparent;
@@ -194,8 +194,7 @@ export component LoomListRow inherits Rectangle {
     in property <bool> enabled: true;
     callback activated;
 
-    height: Theme.tokens.xxx;
-    height: 32px;
+    height: Theme.tokens.metrics.panel-header-height;
     min-width: 120px;
     border-radius: Theme.tokens.metrics.radius-small;
     border-width: row-focus.has-focus ? 2px : 0px;
