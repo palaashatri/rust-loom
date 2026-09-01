@@ -1,33 +1,23 @@
-//! Loom UI — the shared Slint component library and design-token set used
-//! by every Loom application.
+//! Loom UI — shared Slint infrastructure for the Loom desktop suite.
 //!
-//! Normative geometry and responsive behavior live in
-//! `loom-design-bible/contracts/desktop-ui.toml`; primitive/semantic values
-//! live in `loom-design-bible/tokens/loom.toml`. The Slint sources are the
-//! runtime implementation of those contracts, not an independent design
-//! authority.
-//!
-//! The `.slint` sources live in the `ui/` directory:
-//!
-//! * `ui/theme.slint` — light, dark, and high-contrast runtime tokens.
-//! * `ui/icons.slint` — the original Loom line-icon family.
-//! * `ui/components.slint` — shared controls/chrome/editor primitives.
-//! * `ui/smoke.slint` — deterministic component reference surface.
-//!
-//! Applications import these components directly. Standard controls and
-//! application chrome must not be forked or restyled in application code.
+//! `ui/foundation.slint` is the canonical vNext component surface. It is
+//! intentionally blocked from application consumption until the foundation
+//! acceptance gate is approved. `ui/toolkit.slint` and `ui/components.slint`
+//! remain legacy compatibility surfaces during migration.
 
 slint::include_modules!();
 
-/// Rust-side compatibility handle for the embeddable Slint `CommandPalette`
-/// Rectangle. Slint's default Rust generator exposes Window roots, so this
-/// alias points at the generated forwarding test/preview root while the
-/// production component remains a Rectangle for Slint application imports.
+/// Rust-side compatibility handle for the embeddable legacy command palette.
 pub type CommandPalette = CommandPaletteTestWindow;
 
 #[cfg(test)]
 mod smoke_window {
     include!(concat!(env!("OUT_DIR"), "/smoke.rs"));
+}
+
+#[cfg(test)]
+mod foundation_gallery {
+    include!(concat!(env!("OUT_DIR"), "/gallery.rs"));
 }
 
 /// Icon names available on the shared [`Icon`] component, kept sorted so
@@ -171,6 +161,7 @@ mod tests {
 
 #[cfg(test)]
 mod visual_tests {
+    use super::foundation_gallery::{FoundationGallery, Theme as FoundationTheme};
     use super::smoke_window::{DirectionalPropertyProbeWindow, SmokeWindow, Theme};
     use crate::{CommandPalette, CommandPaletteItem};
     use slint::Global;
@@ -194,10 +185,47 @@ mod visual_tests {
     }
 
     fn non_canvas_pixels(image: &image::RgbaImage) -> usize {
-        // Contract light canvas #F2F2F4. This is a coarse blank-window guard,
-        // not a design-quality score.
-        let canvas = image::Rgba([242, 242, 244, 255]);
+        let canvas = image::Rgba([244, 244, 246, 255]);
         image.pixels().filter(|pixel| **pixel != canvas).count()
+    }
+
+    #[test]
+    fn foundation_gallery_is_deterministic_at_contract_viewports() {
+        loom_test_support::capture::set_platform();
+        let window = FoundationGallery::new().expect("create Loom foundation gallery");
+        FoundationTheme::get(&window).set_active_theme("light".into());
+
+        for &(width, height) in VIEWPORTS {
+            let first = loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
+                .expect("capture foundation gallery");
+            let second = loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
+                .expect("repeat foundation gallery capture");
+            assert_eq!(first.as_raw(), second.as_raw());
+            assert!(
+                non_canvas_pixels(&first) > 20_000,
+                "foundation gallery looks blank at {width}x{height}"
+            );
+        }
+    }
+
+    #[test]
+    fn foundation_gallery_exposes_all_required_themes() {
+        loom_test_support::capture::set_platform();
+        let window = FoundationGallery::new().expect("create Loom foundation gallery");
+        let theme = FoundationTheme::get(&window);
+
+        theme.set_active_theme("light".into());
+        let light = loom_test_support::capture::snapshot_component(&window, 1280.0, 800.0, 1.0)
+            .expect("capture light foundation");
+        theme.set_active_theme("dark".into());
+        let dark = loom_test_support::capture::snapshot_component(&window, 1280.0, 800.0, 1.0)
+            .expect("capture dark foundation");
+        theme.set_active_theme("high-contrast".into());
+        let high = loom_test_support::capture::snapshot_component(&window, 1280.0, 800.0, 1.0)
+            .expect("capture high contrast foundation");
+
+        assert!(diff_ratio(&light, &dark) > 0.20);
+        assert!(diff_ratio(&dark, &high) > 0.08);
     }
 
     #[test]
@@ -378,8 +406,6 @@ mod visual_tests {
         let many_image = loom_test_support::capture::snapshot_component(&many, 1280.0, 800.0, 1.0)
             .expect("capture long command palette");
 
-        // At 1280x800 the palette surface is y=160..590. Rows must never
-        // alter the overlay/workspace pixels below that fixed bottom edge.
         let outside_bottom = 592;
         let leaked_pixels = (outside_bottom..800)
             .flat_map(|y| (0..1280).map(move |x| (x, y)))
