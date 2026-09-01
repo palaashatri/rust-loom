@@ -2559,6 +2559,24 @@ impl Default for PageStyle {
     }
 }
 
+impl PageStyle {
+    /// Return the reference font size used for a block kind in the page
+    /// layout.  Keeping this mapping beside the page style lets the app's
+    /// rich preview and the headless layout share one set of vertical metrics
+    /// instead of stacking heading glyphs on top of following paragraphs.
+    pub fn font_size_for_kind(&self, kind: &str) -> f32 {
+        let body = self.body_font_size_pt;
+        match kind {
+            "heading1" => body * (24.0 / 11.0),
+            "heading2" => body * (20.0 / 11.0),
+            "heading3" => body * (17.0 / 11.0),
+            "heading4" => body * (16.0 / 11.0),
+            "heading5" | "heading6" => body * (15.0 / 11.0),
+            _ => body,
+        }
+    }
+}
+
 /// Standard physical paper sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaperSize {
@@ -3778,8 +3796,7 @@ impl WriterDocument {
         let page_width = style.width_pt * zoom;
         let page_height = style.height_pt * zoom;
         let page_gap = 24.0 * zoom;
-        let glyph_width = style.body_font_size_pt * 0.52 * zoom;
-        let line_height = style.body_font_size_pt * style.line_height * zoom;
+        let body_line_height = style.body_font_size_pt * style.line_height * zoom;
         let viewport_rect = PageRect {
             x: 0.0,
             y: 0.0,
@@ -3802,11 +3819,18 @@ impl WriterDocument {
 
             let content_x = page_x + style.margin_left_pt * zoom;
             let content_y = page_y + style.margin_top_pt * zoom;
-            for (line_index, source) in page.fragments.iter().enumerate() {
+            let mut line_y = content_y;
+            for (fragment_index, source) in page.fragments.iter().enumerate() {
+                let block = self.blocks.iter().find(|block| block.id == source.block_id);
+                let font_size = block
+                    .map(|block| style.font_size_for_kind(block.kind.as_str()))
+                    .unwrap_or(style.body_font_size_pt);
+                let glyph_width = font_size * 0.52 * zoom;
+                let line_height = font_size * style.line_height * zoom;
                 let character_count = source.text.graphemes(true).count();
                 let fragment_bounds = PageRect {
                     x: content_x,
-                    y: content_y + line_index as f32 * line_height,
+                    y: line_y,
                     width: character_count as f32 * glyph_width,
                     height: line_height,
                 };
@@ -3817,6 +3841,17 @@ impl WriterDocument {
                     text: source.text.clone(),
                     bounds: fragment_bounds,
                 });
+                line_y += line_height;
+                let next_block_id = page
+                    .fragments
+                    .get(fragment_index + 1)
+                    .map(|fragment| fragment.block_id);
+                if next_block_id.is_some() && next_block_id != Some(source.block_id) {
+                    // Match the paginator's conservative paragraph break while
+                    // allowing larger heading metrics to occupy their actual
+                    // visual line box.
+                    line_y += body_line_height;
+                }
             }
         }
 
@@ -3841,8 +3876,7 @@ impl WriterDocument {
             })
             .collect();
 
-        let selection_rects =
-            self.selection_rectangles(&fragments, &pages, style, zoom, glyph_width);
+        let selection_rects = self.selection_rectangles(&fragments, &pages, style, zoom);
 
         Ok(PageLayout {
             pages,
@@ -3873,7 +3907,6 @@ impl WriterDocument {
         pages: &[DocumentPage],
         style: &PageStyle,
         zoom: f32,
-        glyph_width: f32,
     ) -> Vec<SelectionRect> {
         let text = self.editor_text();
         let (selection_start, selection_end) = normalized_grapheme_range(&text, &self.selection);
@@ -3901,6 +3934,25 @@ impl WriterDocument {
                 else {
                     continue;
                 };
+                let block = &self.blocks[block_index];
+                let fragment_graphemes = source.text.graphemes(true).count();
+                let glyph_width = if fragment_graphemes > 0 {
+                    fragment.bounds.width / fragment_graphemes as f32
+                } else {
+                    style.body_font_size_pt * 0.52 * zoom
+                };
+                let available_width =
+                    (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
+                let alignment_offset = match block.style.alignment {
+                    loom_text::Alignment::Center => {
+                        ((available_width - fragment.bounds.width) / 2.0).max(0.0)
+                    }
+                    loom_text::Alignment::Right => {
+                        (available_width - fragment.bounds.width).max(0.0)
+                    }
+                    loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
+                };
+                let fragment_x = fragment.bounds.x + alignment_offset;
                 let block_start = block_starts[block_index];
                 let fragment_global_start = block_start + source.start;
                 let fragment_global_end = block_start + source.end;
@@ -3912,7 +3964,7 @@ impl WriterDocument {
                     let prefix = &source.text[..local_start.min(source.text.len())];
                     let selected = &source.text
                         [local_start.min(source.text.len())..local_end.min(source.text.len())];
-                    let x = fragment.bounds.x + prefix.graphemes(true).count() as f32 * glyph_width;
+                    let x = fragment_x + prefix.graphemes(true).count() as f32 * glyph_width;
                     let width = selected.graphemes(true).count() as f32 * glyph_width;
                     result.push(SelectionRect {
                         page_index: page.index,
@@ -3923,7 +3975,7 @@ impl WriterDocument {
                             x,
                             y: fragment.bounds.y,
                             width,
-                            height: style.body_font_size_pt * style.line_height * zoom,
+                            height: fragment.bounds.height,
                         },
                     });
                 } else if selection_start == selection_end {
@@ -3951,11 +4003,10 @@ impl WriterDocument {
                             start: source.start + local,
                             end: source.start + local,
                             rect: PageRect {
-                                x: fragment.bounds.x
-                                    + prefix.graphemes(true).count() as f32 * glyph_width,
+                                x: fragment_x + prefix.graphemes(true).count() as f32 * glyph_width,
                                 y: fragment.bounds.y,
                                 width: 1.0,
-                                height: style.body_font_size_pt * style.line_height * zoom,
+                                height: fragment.bounds.height,
                             },
                         });
                     }
@@ -5022,6 +5073,45 @@ mod tests {
         assert!(!zoomed.visible_ranges.is_empty());
         assert!(!zoomed.selection_rects.is_empty());
         assert!(zoomed.selection_rects[0].rect.width > 0.0);
+    }
+
+    #[test]
+    fn layout_uses_block_metrics_for_heading_spacing_and_alignment() {
+        let mut document = WriterDocument::new("styled-layout", "Styled layout");
+        let mut heading = RichBlock::new(1, "heading1", "Centered heading");
+        heading.style.alignment = loom_text::Alignment::Center;
+        document.push(heading);
+        document.push(RichBlock::new(2, "paragraph", "Body follows heading"));
+        document.set_selection(TextSelection::range(0, "Centered heading".len()));
+
+        let style = PageStyle::default();
+        let layout = document
+            .layout(&style, PageViewport::default())
+            .expect("styled layout");
+        assert_eq!(layout.fragments.len(), 2);
+
+        let heading_fragment = &layout.fragments[0];
+        let body_fragment = &layout.fragments[1];
+        assert!(
+            heading_fragment.bounds.height > body_fragment.bounds.height,
+            "heading line box must use heading metrics"
+        );
+        assert!(
+            body_fragment.bounds.y >= heading_fragment.bounds.y + heading_fragment.bounds.height,
+            "following paragraphs must not overlap a heading"
+        );
+
+        let content_width = style.width_pt - style.margin_left_pt - style.margin_right_pt;
+        let heading_width = heading_fragment.bounds.width;
+        let expected_center_x = style.margin_left_pt + (content_width - heading_width) / 2.0;
+        let selection = layout
+            .selection_rects
+            .first()
+            .expect("heading selection geometry");
+        assert!(
+            (selection.rect.x - expected_center_x).abs() < 0.001,
+            "selection projection retains centered-line geometry"
+        );
     }
 
     #[test]

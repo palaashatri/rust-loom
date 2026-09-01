@@ -572,9 +572,10 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_order(100),
         CommandSpec::new("writer.align.justify", "Justify")
             .with_undo_label("Justify")
-            .with_description("Justify selected paragraphs")
+            .with_description("Justify is unavailable in the page editor")
             .with_category("format")
-            .with_order(110),
+            .with_order(110)
+            .with_enabled(false),
         CommandSpec::new("writer.align.left-all", "Align All Left")
             .with_undo_label("Align Left")
             .with_description("Align selected paragraphs to the left")
@@ -730,13 +731,16 @@ fn sync_writer_registry_enablement(
         "writer.align.left",
         "writer.align.center",
         "writer.align.right",
-        "writer.align.justify",
         "writer.align.left-all",
         "writer.align.center-all",
         "writer.align.right-all",
     ] {
         registry.set_enabled(&CommandId::new(id), has_blocks);
     }
+    // The reference StyledText/page renderer has no justified line layout.
+    // Keep the legacy command discoverable for persisted/old palette callers,
+    // but never expose it as an enabled mutation path.
+    registry.set_enabled(&CommandId::new("writer.align.justify"), false);
     for id in [
         "file.new",
         "file.open",
@@ -1238,6 +1242,14 @@ fn save_current_document(
 }
 
 fn apply_document(app: &WriterApp, doc: &WriterDocument) {
+    apply_document_with_viewport(app, doc, PageViewport::default());
+}
+
+/// Apply document-derived UI state using the same page layout projection that
+/// drives the rich preview and its selection/caret overlays.  The viewport is
+/// controller-owned so a zoom or scroll change can reproject geometry without
+/// mutating the document or adding a history entry.
+fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
     let text = doc.editor_text();
     let word_count = text.split_whitespace().count();
     let char_count = text.chars().count();
@@ -1259,7 +1271,9 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
 
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
-    app.set_render_blocks(Rc::new(VecModel::from(writer_render_blocks(doc))).into());
+    let (render_blocks, selection_rects) = writer_render_projection(doc, viewport);
+    app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
+    app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
@@ -1275,35 +1289,147 @@ fn apply_document(app: &WriterApp, doc: &WriterDocument) {
     app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
 }
 
+/// Recompute only the page display projection.  This is intentionally
+/// side-effect free with respect to document content, selection, history, and
+/// recovery state; it is used by viewport and selection callbacks.
+fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
+    let (render_blocks, selection_rects) = writer_render_projection(doc, viewport);
+    app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
+    app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
+}
+
 /// Project the authoritative rich-text model into the display-only StyledText
 /// rows used by the paper surface.  The native TextInput remains the editing
 /// path, but it is deliberately transparent so formatting is visible in the
 /// same place while selection, IME, and keyboard behavior stay native.
+#[allow(dead_code)]
 fn writer_render_blocks(doc: &WriterDocument) -> Vec<WriterRenderBlock> {
-    doc.blocks
+    writer_render_blocks_with_viewport(doc, PageViewport::default())
+}
+
+/// Project rich rows from the deterministic page layout.  The core layout
+/// reports viewport-relative rectangles (including zoom and scroll); the UI
+/// editor is nested inside the page's content box, so rows are converted back
+/// to logical content coordinates and the Slint page applies the live zoom.
+fn writer_render_blocks_with_viewport(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+) -> Vec<WriterRenderBlock> {
+    writer_render_projection(doc, viewport).0
+}
+
+fn writer_render_projection(
+    doc: &WriterDocument,
+    viewport: PageViewport,
+) -> (Vec<WriterRenderBlock>, Vec<WriterSelectionRect>) {
+    let style = PageStyle::default();
+    let layout_viewport = PageViewport {
+        // The page editor owns an A4 surface.  Keep the layout viewport in
+        // page points so the projection remains independent of shell width;
+        // scrolling and zoom are still taken from controller state.
+        width: style.width_pt,
+        height: style.height_pt,
+        zoom: normalize_page_zoom(viewport.zoom, 1.0),
+        scroll_x: normalize_page_scroll(viewport.scroll_x),
+        scroll_y: normalize_page_scroll(viewport.scroll_y),
+    };
+    let layout = doc.layout(&style, layout_viewport).ok();
+    let content_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
+    let fallback_line_height = style.body_font_size_pt * style.line_height;
+    let mut fallback_y = 0.0_f32;
+
+    let mut rows = Vec::with_capacity(doc.blocks.len());
+    for block in &doc.blocks {
+        let font_size = style.font_size_for_kind(block.kind.as_str());
+        let fallback_height = writer_render_height_for_width(block, font_size, content_width);
+        let geometry = layout.as_ref().and_then(|page_layout| {
+            let fragments: Vec<_> = page_layout
+                .fragments
+                .iter()
+                .filter(|fragment| fragment.block_id == block.id)
+                .collect();
+            let first = fragments.first()?;
+            let page_index = page_layout
+                .page_bounds
+                .iter()
+                .position(|page| first.bounds.y >= page.y && first.bounds.y < page.y + page.height)
+                .unwrap_or(0);
+            let page = page_layout.page_bounds.get(page_index)?;
+            let zoom = page_layout.zoom.max(f32::EPSILON);
+            let visible_fragments: Vec<_> = fragments
+                .iter()
+                .copied()
+                .filter(|fragment| {
+                    fragment.bounds.y >= page.y && fragment.bounds.y < page.y + page.height
+                })
+                .collect();
+            let last = visible_fragments.last().copied().unwrap_or(first);
+            let x = ((first.bounds.x - page.x - style.margin_left_pt * zoom) / zoom).max(0.0);
+            let y = ((first.bounds.y - page.y - style.margin_top_pt * zoom) / zoom).max(0.0);
+            let height = ((last.bounds.y + last.bounds.height - first.bounds.y) / zoom)
+                .max(fallback_line_height);
+            Some((x, y, height))
+        });
+        let (x, y, height) = geometry.unwrap_or((0.0, fallback_y, fallback_height));
+        let height = height.max(font_size * style.line_height);
+        fallback_y = y + height;
+        rows.push(WriterRenderBlock {
+            content: slint::StyledText::from_markdown(&writer_render_markup(block))
+                .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str())),
+            x,
+            y,
+            width: content_width,
+            height,
+            font_size,
+            alignment: writer_render_alignment(block.style.alignment),
+        });
+    }
+
+    let selection_rects = writer_selection_rects(&style, layout.as_ref());
+    (rows, selection_rects)
+}
+
+fn writer_selection_rects(
+    style: &PageStyle,
+    layout: Option<&loom_writer_core::PageLayout>,
+) -> Vec<WriterSelectionRect> {
+    let Some(layout) = layout else {
+        return Vec::new();
+    };
+    let zoom = layout.zoom.max(f32::EPSILON);
+    layout
+        .selection_rects
         .iter()
-        .map(|block| {
-            let markup = writer_render_markup(block);
-            let content = slint::StyledText::from_markdown(&markup)
-                .unwrap_or_else(|_| slint::StyledText::from_plain_text(block.text.as_str()));
-            let font_size = writer_render_font_size(block.kind.as_str());
-            WriterRenderBlock {
-                content,
-                height: writer_render_height(block, font_size),
-                font_size,
-                alignment: writer_render_alignment(block.style.alignment),
+        .filter_map(|selection| {
+            let page = layout.page_bounds.get(selection.page_index)?;
+            // The current surface contains one page.  Keep rectangles for
+            // that page only; later pagination can add page surfaces without
+            // changing the core selection contract.
+            if selection.page_index != 0 {
+                return None;
             }
+            Some(WriterSelectionRect {
+                x: ((selection.rect.x - page.x - style.margin_left_pt * zoom) / zoom).max(0.0),
+                y: ((selection.rect.y - page.y - style.margin_top_pt * zoom) / zoom).max(0.0),
+                width: (selection.rect.width / zoom).max(1.0),
+                height: (selection.rect.height / zoom).max(1.0),
+                caret: selection.start == selection.end,
+            })
         })
         .collect()
 }
 
+#[allow(dead_code)]
 fn writer_render_height(block: &RichBlock, font_size: f32) -> f32 {
+    let style = PageStyle::default();
+    let usable_width = (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0);
+    writer_render_height_for_width(block, font_size, usable_width)
+}
+
+fn writer_render_height_for_width(block: &RichBlock, font_size: f32, usable_width: f32) -> f32 {
     // StyledText computes height from the available width. Give each row a
-    // conservative explicit height so VerticalLayout cannot distribute the
-    // editor's remaining viewport among paragraphs as if they were spacers.
-    // The estimate intentionally rounds up; clipping is worse than a small
-    // amount of extra leading for long or mixed-script paragraphs.
-    let usable_width = 460.0_f32;
+    // conservative explicit height derived from the same PageStyle content
+    // width used by the core layout; clipping is worse than a little leading.
     let average_glyph_width = (font_size * 0.55).max(1.0);
     let chars_per_line = (usable_width / average_glyph_width).max(1.0);
     let line_count = block
@@ -1319,26 +1445,15 @@ fn writer_render_height(block: &RichBlock, font_size: f32) -> f32 {
     font_size * (line_count as f32 * 1.35 + 0.25)
 }
 
-fn writer_render_font_size(kind: &str) -> f32 {
-    match kind {
-        "heading1" => 24.0,
-        "heading2" => 20.0,
-        "heading3" => 17.0,
-        "heading4" => 16.0,
-        "heading5" | "heading6" => 15.0,
-        _ => 14.0,
-    }
-}
-
 fn writer_render_alignment(alignment: loom_text::Alignment) -> i32 {
     match alignment {
         loom_text::Alignment::Left => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
-        // StyledText does not expose a justify mode. Keep the model value
-        // visible as a left-aligned paragraph until a line-layout renderer is
-        // available rather than claiming that the display is justified.
-        loom_text::Alignment::Justify => 0,
+        // StyledText does not expose a justify mode.  Preserve an explicit
+        // unsupported sentinel so persisted Justify documents are not falsely
+        // projected as left-aligned paragraphs.
+        loom_text::Alignment::Justify => -1,
     }
 }
 
@@ -1485,10 +1600,10 @@ fn inspector_heading_level(doc: &WriterDocument, selection: &TextSelection) -> i
     }
 }
 
-/// Inspector alignment with mixed-state sentinel. Uniform selections preserve
-/// `0..3` (Left/Center/Right/Justify); mixed selections return `-1` so the
-/// `SegmentedControl` shows no active segment (indeterminate) rather than
-/// falsely highlighting Left.
+/// Inspector alignment with mixed-state/unsupported sentinel. Uniform
+/// selections preserve `0..2` (Left/Center/Right); persisted Justify values
+/// return `-1` so the three-option inspector shows no active segment instead
+/// of falsely highlighting Left.
 fn inspector_alignment(doc: &WriterDocument, selection: &TextSelection) -> i32 {
     let indices = loom_writer_core::selected_block_indices(doc, selection.clone());
     if indices.is_empty() {
@@ -1498,7 +1613,7 @@ fn inspector_alignment(doc: &WriterDocument, selection: &TextSelection) -> i32 {
         loom_text::Alignment::Left => 0,
         loom_text::Alignment::Center => 1,
         loom_text::Alignment::Right => 2,
-        loom_text::Alignment::Justify => 3,
+        loom_text::Alignment::Justify => -1,
     };
     let first = align_index(doc.blocks[indices[0]].style.alignment);
     let uniform = indices
@@ -1559,6 +1674,17 @@ fn project_selection_event(
     let announcement = selection_announcement(document, &selection);
     app.set_selection_announcement(SharedString::from(announcement.clone()));
     app.set_status_right(SharedString::from(format!("Offline · {announcement}")));
+    refresh_writer_render_projection(
+        app,
+        document,
+        PageViewport {
+            width: PageStyle::default().width_pt,
+            height: PageStyle::default().height_pt,
+            zoom: app.get_page_zoom(),
+            scroll_x: app.get_page_scroll_x(),
+            scroll_y: app.get_page_scroll_y(),
+        },
+    );
     true
 }
 
@@ -1576,13 +1702,13 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
     // TextEdit owns a native text buffer. Rebinding it after a model/history
     // operation must not be observed as another user edit transaction.
     state.syncing_editor.set(true);
+    let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
-    apply_document(app, &current);
+    apply_document_with_viewport(app, &current, viewport);
     if let Ok(bytes) = loom_writer_core::save_document(&current) {
         let _ = record_snapshot_recovery("writer state", bytes);
     }
     drop(current);
-    let viewport = *state.viewport.borrow();
     app.set_page_zoom(viewport.zoom);
     app.set_page_scroll_x(viewport.scroll_x);
     app.set_page_scroll_y(viewport.scroll_y);
@@ -2082,6 +2208,64 @@ fn wire_writer_shared_callbacks(
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_select_alignment(move |align| {
+            if let Some(app) = app_ref.upgrade() {
+                if align == 3 {
+                    // Keep the legacy callback value understood but inert:
+                    // this reference page renderer cannot perform justified
+                    // line layout, so silently mutating the model would be a
+                    // visible formatting placebo.
+                    app.set_status_right(
+                        "Justify alignment is unavailable in the page editor".into(),
+                    );
+                    app.set_selection_announcement(
+                        "Justify alignment is unavailable in the page editor".into(),
+                    );
+                    return;
+                }
+                let align_id = match align {
+                    0 => "writer.align.left",
+                    1 => "writer.align.center",
+                    2 => "writer.align.right",
+                    _ => {
+                        app.set_status_right("Unsupported alignment option".into());
+                        return;
+                    }
+                };
+                let guard = state
+                    .registry
+                    .lock()
+                    .unwrap()
+                    .invoke(&CommandInvocation::new(align_id, InvocationSource::Toolbar));
+                if guard.is_err() {
+                    return;
+                }
+                let selection = selection_from_app(&app);
+                let mut next = state.current.borrow().clone();
+                set_selection_alignment(
+                    &mut next,
+                    DocumentSelection::range(selection.anchor, selection.focus),
+                    align,
+                );
+                next.set_selection(selection);
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                sync_writer_menu_if_present(&menu_service, &app, &state);
+                let label = match align {
+                    1 => "Center",
+                    2 => "Right",
+                    _ => "Left",
+                };
+                let announcement = format!("{label} alignment applied to selected paragraph(s)");
+                app.set_status_right(SharedString::from(announcement.clone()));
+                app.set_selection_announcement(SharedString::from(announcement));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
         app.on_page_zoom_changed(move |zoom| {
             if let Some(app) = app_ref.upgrade() {
                 let next = {
@@ -2096,6 +2280,8 @@ fn wire_writer_shared_callbacks(
                 if (app.get_page_zoom() - next).abs() > f32::EPSILON {
                     app.set_page_zoom(next);
                 }
+                let current = state.current.borrow().clone();
+                refresh_writer_render_projection(&app, &current, *state.viewport.borrow());
             }
         });
     }
@@ -2121,6 +2307,8 @@ fn wire_writer_shared_callbacks(
                 if (app.get_page_scroll_y() - next_y).abs() > f32::EPSILON {
                     app.set_page_scroll_y(next_y);
                 }
+                let current = state.current.borrow().clone();
+                refresh_writer_render_projection(&app, &current, *state.viewport.borrow());
             }
         });
     }
@@ -2214,6 +2402,8 @@ fn wire_writer_shared_callbacks(
                 let changed = project_selection_event(&app, &mut current, anchor, focus);
                 drop(current);
                 if changed {
+                    let current = state.current.borrow().clone();
+                    refresh_writer_render_projection(&app, &current, *state.viewport.borrow());
                     refresh_writer_registry(&app, &state);
                     let registry = state.registry.lock().unwrap();
                     rebuild_palette_with_registry(
@@ -2454,49 +2644,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     "Underline applied to selection"
                 };
                 app.set_status_right(SharedString::from(announcement));
-                app.set_selection_announcement(SharedString::from(announcement));
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_select_alignment(move |align| {
-            if let Some(app) = app_ref.upgrade() {
-                let align_id = match align {
-                    1 => "writer.align.center",
-                    2 => "writer.align.right",
-                    3 => "writer.align.justify",
-                    _ => "writer.align.left",
-                };
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(align_id, InvocationSource::Toolbar));
-                if guard.is_err() {
-                    return;
-                }
-                let selection = selection_from_app(&app);
-                let mut next = state.current.borrow().clone();
-                set_selection_alignment(
-                    &mut next,
-                    DocumentSelection::range(selection.anchor, selection.focus),
-                    align,
-                );
-                next.set_selection(selection);
-                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-                sync_menu_state(&menu_service, &app, &state);
-                let label = match align {
-                    1 => "Center",
-                    2 => "Right",
-                    3 => "Justify",
-                    _ => "Left",
-                };
-                let announcement = format!("{label} alignment applied to selected paragraph(s)");
-                app.set_status_right(SharedString::from(announcement.clone()));
                 app.set_selection_announcement(SharedString::from(announcement));
             }
         });
@@ -3606,6 +3753,93 @@ mod tests {
         assert!(
             content_debug.contains("Underline"),
             "underline span missing from StyledText"
+        );
+    }
+
+    #[test]
+    fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
+        let mut document = text_document("layout-backed selection");
+        document.set_selection(TextSelection::range(0, 6));
+        let (rows, selection_rects) = writer_render_projection(
+            &document,
+            PageViewport {
+                zoom: 1.5,
+                scroll_y: 48.0,
+                ..PageViewport::default()
+            },
+        );
+
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        let style = PageStyle::default();
+        assert_eq!(row.x, 0.0, "rows are relative to the content box");
+        assert_eq!(row.y, 0.0, "first fragment starts at the content origin");
+        assert_eq!(
+            row.width,
+            style.width_pt - style.margin_left_pt - style.margin_right_pt,
+            "row width must come from PageStyle content width"
+        );
+        assert!(
+            selection_rects
+                .iter()
+                .any(|rect| !rect.caret && rect.width > 0.0),
+            "a non-collapsed selection must produce a visible highlight rectangle"
+        );
+
+        let (zoomed_rows, _) = writer_render_projection(
+            &document,
+            PageViewport {
+                zoom: 2.0,
+                ..PageViewport::default()
+            },
+        );
+        assert_eq!(
+            zoomed_rows[0].width, row.width,
+            "rows remain logical page coordinates while the UI applies zoom"
+        );
+        assert!(
+            (zoomed_rows[0].height - row.height).abs() < 0.0001,
+            "rows remain logical page coordinates while the UI applies zoom"
+        );
+    }
+
+    #[test]
+    fn justify_is_disabled_and_persisted_projection_is_indeterminate() {
+        set_platform();
+        let mut document = text_document("justify remains readable");
+        document.blocks[0].style.alignment = loom_text::Alignment::Justify;
+        document.set_selection(TextSelection::range(0, 7));
+        let dialogs: Rc<dyn FileDialogService> =
+            Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+        let (app, state) = test_state(document.clone(), dialogs);
+        wire_writer_shared_callbacks(&app, &state, None);
+        apply_state(&app, &state);
+
+        assert_eq!(app.get_text_alignment(), -1);
+        assert_eq!(
+            app.get_render_blocks()
+                .row_data(0)
+                .expect("render row")
+                .alignment,
+            -1,
+            "persisted Justify must not be projected as Left"
+        );
+        assert!(
+            !state
+                .registry
+                .lock()
+                .unwrap()
+                .get(&CommandId::new("writer.align.justify"))
+                .expect("legacy Justify command")
+                .enabled
+        );
+
+        let before = state.current.borrow().clone();
+        app.invoke_select_alignment(3);
+        assert_eq!(*state.current.borrow(), before);
+        assert_eq!(
+            app.get_status_right(),
+            "Justify alignment is unavailable in the page editor"
         );
     }
 

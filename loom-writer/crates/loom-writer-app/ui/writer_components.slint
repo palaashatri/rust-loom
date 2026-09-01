@@ -16,9 +16,26 @@ import { Icon } from "icons.slint";
 /// layout.
 export struct WriterRenderBlock {
     content: styled-text,
+    /// Body-editor coordinates in logical page points.  The Rust projection
+    /// derives these from `WriterDocument::layout`; the editor applies the
+    /// current zoom when painting the row.
+    x: length,
+    y: length,
+    width: length,
     font-size: length,
     height: length,
     alignment: int,
+}
+
+/// A selection highlight or collapsed caret rectangle projected from the
+/// authoritative Writer page layout.  `caret` distinguishes a one-pixel
+/// insertion marker from a non-collapsed text highlight.
+export struct WriterSelectionRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    caret: bool,
 }
 
 /// Writer's responsive command surface. The slot host owns the row height;
@@ -277,6 +294,7 @@ export component WriterToolbarBody inherits DirectionalLayout {
 component WriterDocumentEditor inherits Rectangle {
     in-out property <string> text: "";
     in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
     in property <float> page-zoom: 1.0;
     in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
@@ -320,21 +338,32 @@ component WriterDocumentEditor inherits Rectangle {
     }
 
     // StyledText is a display projection only. The native editor remains the
-    // top-most child so pointer selection, IME composition, and keyboard
-    // editing continue to use the same authoritative text buffer.
-    preview := VerticalLayout {
+    // top-most *editing* child so pointer selection, IME composition, and
+    // keyboard editing continue to use the same authoritative text buffer.
+    // Selection and caret overlays are painted here because the native
+    // TextInput's glyphs are intentionally transparent while rich runs are
+    // visible.
+    preview := Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
-        spacing: Theme.tokens.space.md;
-        padding: 0px;
+        clip: true;
+        for selection in root.selection-rects : Rectangle {
+            x: selection.x * root.page-zoom;
+            y: selection.y * root.page-zoom;
+            width: max(1px, selection.width * root.page-zoom);
+            height: max(1px, selection.height * root.page-zoom);
+            background: selection.caret ? transparent : Theme.palette().selection;
+            visible: !selection.caret;
+            accessible-role: none;
+        }
         for block in root.render-blocks : StyledText {
+            x: block.x * root.page-zoom;
+            y: block.y * root.page-zoom;
             text: block.content;
-            width: root.width;
+            width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
-            horizontal-stretch: 1;
-            vertical-stretch: 0;
             default-font-size: block.font-size * root.page-zoom;
             default-color: Theme.palette().paper-ink;
             horizontal-alignment: block.alignment == 1
@@ -345,6 +374,19 @@ component WriterDocumentEditor inherits Rectangle {
                         ? TextHorizontalAlignment.left
                         : TextHorizontalAlignment.left;
             vertical-alignment: top;
+        }
+        // Paint the caret after rich text so it remains visible at a collapsed
+        // selection.  The visibility guard mirrors normal editor behavior but
+        // keeps a deterministic caret in headless captures when the insertion
+        // point is collapsed and the editor has not yet received focus.
+        for selection in root.selection-rects : Rectangle {
+            x: selection.x * root.page-zoom;
+            y: selection.y * root.page-zoom;
+            width: max(1px, selection.width * root.page-zoom);
+            height: max(1px, selection.height * root.page-zoom);
+            background: Theme.palette().paper-ink;
+            visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
+            accessible-role: none;
         }
     }
 
@@ -360,13 +402,14 @@ component WriterDocumentEditor inherits Rectangle {
         vertical-alignment: top;
         font-size: root.font-size;
         // Rich text is painted by `preview`; keeping the editable buffer's
-        // glyphs transparent avoids a duplicate plain-text layer while its
-        // selection highlight and caret remain native and interactive.
+        // glyphs transparent avoids a duplicate plain-text layer.  Native
+        // selection paint is also transparent because the layout-derived
+        // overlay above keeps styled glyphs visible inside the highlight.
         color: transparent;
-        selection-background-color: Theme.palette().selection;
-        // The rich projection underneath owns the selected glyph styling. Keep
-        // native selected glyphs transparent so the highlight remains visible
-        // without painting a second, differently-shaped glyph over it.
+        selection-background-color: transparent;
+        // The rich projection owns selected glyph styling; the custom caret
+        // overlay supplies the insertion marker that a transparent TextInput
+        // cannot draw on non-Apple platforms.
         selection-foreground-color: transparent;
         accessible-role: none;
         edited => {
@@ -379,6 +422,23 @@ component WriterDocumentEditor inherits Rectangle {
         key-pressed(event) => { return root.key-pressed(event); }
     }
 
+    // TextInput has one hit-test layout for the whole document.  Its body
+    // metrics match the core page projection, but a single input cannot map
+    // clicks faithfully onto heading-sized or centered/right-aligned rows.
+    // Shield those rows from misleading caret placement while retaining
+    // keyboard/IME editing through the focused editor.  Body rows leave the
+    // shield disabled, so TextInput keeps its native click-and-drag path for
+    // the geometry it can represent correctly.
+    for block in root.render-blocks : TouchArea {
+        x: block.x * root.page-zoom;
+        y: block.y * root.page-zoom;
+        width: max(1px, block.width * root.page-zoom);
+        height: max(1px, block.height * root.page-zoom);
+        enabled: block.alignment != 0 || block.font-size * root.page-zoom != root.font-size;
+        accessible-role: none;
+        clicked => { editor.focus(); }
+    }
+
     changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
     changed selection-focus => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
 }
@@ -389,6 +449,7 @@ export component WriterPageCanvas inherits CanvasSurface {
     in property <string> doc-title: "Untitled Document";
     in-out property <string> doc-content: "";
     in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in property <string> selection-announcement: "No text selected";
@@ -454,11 +515,16 @@ export component WriterPageCanvas inherits CanvasSurface {
             document-editor := WriterDocumentEditor {
                 text <=> root.doc-content;
                 render-blocks <=> root.render-blocks;
+                selection-rects <=> root.selection-rects;
                 selection-anchor <=> root.selection-anchor;
                 selection-focus <=> root.selection-focus;
                 selection-announcement <=> root.selection-announcement;
                 page-zoom: root.page-zoom;
-                font-size: Theme.tokens.typography.body-large * root.page-zoom;
+                // Keep the native hit-test buffer on the same body metric as
+                // `PageStyle::body_font_size_pt` used by the core layout.
+                // Rich heading rows are shielded above because one TextInput
+                // cannot expose per-block hit testing.
+                font-size: 11px * root.page-zoom;
                 edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
                 selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
                 key-pressed(event) => { return root.key-pressed(event); }
@@ -548,7 +614,10 @@ export component WriterInspector inherits InspectorSurface {
 
         SectionHeader { title: "Alignment"; }
         SegmentedControl {
-            items: ["Left", "Center", "Right", "Justify"];
+            // Justified line layout is not implemented by the reference
+            // StyledText renderer.  Keep persisted Justify paragraphs
+            // indeterminate instead of exposing an enabled placebo option.
+            items: ["Left", "Center", "Right"];
             current <=> root.text-alignment;
             label: "Text Alignment";
             selected(idx) => { root.select-alignment(idx); }

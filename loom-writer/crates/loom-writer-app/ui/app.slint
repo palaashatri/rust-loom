@@ -8,7 +8,7 @@ import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterToolbarBody, WriterPageCanvas, WriterInspector, WriterStatusBar,
-    WriterToolbarOverflow, WriterRenderBlock
+    WriterToolbarOverflow, WriterRenderBlock, WriterSelectionRect
 } from "writer_components.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
@@ -46,6 +46,7 @@ export component WriterApp inherits Window {
     in property <string> doc-title: "Untitled Document";
     in-out property <string> doc-content: "";
     in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in property <string> status-left: "";
@@ -294,6 +295,7 @@ export component WriterApp inherits Window {
                     doc-title: root.doc-title;
                     doc-content <=> root.doc-content;
                     render-blocks <=> root.render-blocks;
+                    selection-rects <=> root.selection-rects;
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement: root.selection-announcement;
@@ -343,6 +345,7 @@ export component WriterApp inherits Window {
                     doc-title: root.doc-title;
                     doc-content <=> root.doc-content;
                     render-blocks <=> root.render-blocks;
+                    selection-rects <=> root.selection-rects;
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement: root.selection-announcement;
