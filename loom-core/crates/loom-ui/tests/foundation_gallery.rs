@@ -3,12 +3,7 @@ include!(concat!(env!("OUT_DIR"), "/gallery.rs"));
 use slint::Global;
 use std::path::PathBuf;
 
-const VIEWPORTS: &[(u32, u32)] = &[
-    (1024, 720),
-    (1280, 800),
-    (1440, 900),
-    (1920, 1200),
-];
+const VIEWPORTS: &[(u32, u32)] = &[(1024, 720), (1280, 800), (1440, 900), (1920, 1200)];
 const THEMES: &[&str] = &["light", "dark", "high-contrast"];
 
 #[test]
@@ -33,7 +28,9 @@ fn capture_foundation_review_matrix() {
             )
             .expect("capture foundation gallery");
             let path = output.join(format!("foundation-{theme_name}-{width}x{height}.png"));
-            image.save(&path).expect("write foundation gallery screenshot");
+            image
+                .save(&path)
+                .expect("write foundation gallery screenshot");
         }
     }
 }
