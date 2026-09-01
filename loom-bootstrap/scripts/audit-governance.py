@@ -54,6 +54,8 @@ for stale in (
 
 agents_text = AGENTS.read_text(encoding="utf-8") if AGENTS.is_file() else ""
 truth_text = TRUTH.read_text(encoding="utf-8") if TRUTH.is_file() else ""
+agents_lower = agents_text.lower()
+truth_lower = truth_text.lower()
 for phrase in (
     "highest-authority engineering instruction",
     "ACTIVE PHASE: UI FOUNDATION LOCK",
@@ -61,7 +63,7 @@ for phrase in (
     "Visual foundation gate",
     "commercially redistributable assets",
 ):
-    if phrase not in agents_text:
+    if phrase.lower() not in agents_lower:
         fail(f"AGENTS.MD missing required constitutional clause: {phrase}")
 
 for phrase in (
@@ -70,7 +72,7 @@ for phrase in (
     "APPLICATION DEVELOPMENT: LOCKED",
     "Current complete-suite readiness remains approximately **29/100**",
 ):
-    if phrase not in truth_text:
+    if phrase.lower() not in truth_lower:
         fail(f"TRUTH.md missing required active-state statement: {phrase}")
 
 # While the foundation is blocked, application views may not consume it.
