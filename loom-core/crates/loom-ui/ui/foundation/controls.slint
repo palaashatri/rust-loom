@@ -1,0 +1,398 @@
+import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
+
+export component LoomButton inherits Rectangle {
+    in property <string> label: "Action";
+    in property <string> icon: "";
+    in property <string> variant: "secondary";
+    in property <bool> enabled: true;
+    in property <bool> selected: false;
+    callback clicked;
+
+    private property <bool> primary: root.variant == "primary";
+    private property <bool> destructive: root.variant == "danger";
+    private property <bool> ghost: root.variant == "ghost";
+    private property <color> foreground: !root.enabled ? Theme.palette().ink-disabled
+        : root.primary ? Theme.palette().accent-ink
+        : root.destructive ? Theme.palette().danger
+        : Theme.palette().ink;
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: max(Theme.tokens.metrics.control-height,
+        label-text.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
+    preferred-width: root.min-width;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : root.ghost ? 0px : 1px;
+    border-color: focus.has-focus ? Theme.palette().focus
+        : root.destructive ? Theme.palette().danger
+        : root.primary ? Theme.palette().accent
+        : root.selected ? Theme.palette().border-strong
+        : Theme.palette().border;
+    background: !root.enabled ? Theme.palette().surface-sunken
+        : root.primary ? (touch.pressed ? Theme.palette().accent-pressed : touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
+        : root.destructive ? (touch.pressed ? Theme.palette().danger-surface : touch.has-hover ? Theme.palette().danger-surface : Theme.palette().surface)
+        : root.ghost ? (touch.pressed ? Theme.palette().surface-sunken : touch.has-hover ? Theme.palette().surface-raised : transparent)
+        : touch.pressed ? Theme.palette().surface-sunken
+        : root.selected ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-raised
+        : Theme.palette().surface;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
+        alignment: center;
+        cross-axis-alignment: center;
+
+        if root.icon != "" : Icon {
+            size: Theme.tokens.metrics.icon-size;
+            icon: root.icon;
+            tint: root.foreground;
+        }
+        label-text := Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.primary || root.selected ? 600 : 500;
+            color: root.foreground;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { focus.focus(); root.clicked(); }
+    }
+}
+
+export component LoomIconButton inherits Rectangle {
+    in property <string> icon: "more";
+    in property <string> label: "Action";
+    in property <string> tooltip: root.label;
+    in property <bool> enabled: true;
+    in property <bool> selected: false;
+    in property <bool> destructive: false;
+    callback clicked;
+
+    width: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.control-height;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : root.selected ? 1px : 0px;
+    border-color: focus.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().border-strong : transparent;
+    background: !root.enabled ? transparent
+        : touch.pressed ? Theme.palette().surface-sunken
+        : root.selected ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-description: root.tooltip;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    Icon {
+        x: (root.width - Theme.tokens.metrics.icon-size) / 2;
+        y: (root.height - Theme.tokens.metrics.icon-size) / 2;
+        size: Theme.tokens.metrics.icon-size;
+        icon: root.icon;
+        tint: !root.enabled ? Theme.palette().ink-disabled
+            : root.destructive ? Theme.palette().danger
+            : root.selected ? Theme.palette().accent
+            : Theme.palette().ink-secondary;
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { focus.focus(); root.clicked(); }
+    }
+}
+
+export component LoomTextField inherits Rectangle {
+    in property <string> label: "Field";
+    in property <string> placeholder: "";
+    in-out property <string> value: "";
+    in property <bool> enabled: true;
+    in property <bool> invalid: false;
+    callback edited(string);
+    callback accepted(string);
+    callback cancelled;
+    public function focus-input() { input.focus(); }
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 140px;
+    horizontal-stretch: 1;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: root.invalid ? Theme.palette().danger
+        : input.has-focus ? Theme.palette().focus
+        : Theme.palette().border-strong;
+    background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.label;
+
+    input := TextInput {
+        x: Theme.tokens.space.md;
+        width: root.width - Theme.tokens.space.xl;
+        height: root.height;
+        text: root.value;
+        enabled: root.enabled;
+        single-line: true;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+        edited => { root.value = input.text; root.edited(input.text); }
+        accepted => { root.accepted(input.text); }
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.cancelled(); return accept; }
+            return reject;
+        }
+    }
+    if root.value == "" : Text {
+        x: Theme.tokens.space.md;
+        width: root.width - Theme.tokens.space.xl;
+        height: root.height;
+        text: root.placeholder;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink-disabled;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    TouchArea { enabled: root.enabled; clicked => { input.focus(); } }
+}
+
+export component LoomSearchField inherits Rectangle {
+    in property <string> label: "Search";
+    in property <string> placeholder: "Search";
+    in-out property <string> value: "";
+    in property <bool> enabled: true;
+    callback edited(string);
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 180px;
+    horizontal-stretch: 1;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: root.label;
+
+    Icon {
+        x: Theme.tokens.space.md;
+        y: (root.height - Theme.tokens.metrics.icon-small) / 2;
+        size: Theme.tokens.metrics.icon-small;
+        icon: "search";
+        tint: Theme.palette().ink-secondary;
+    }
+    input := TextInput {
+        x: Theme.tokens.space.xxxl;
+        width: root.width - Theme.tokens.space.xxxxl;
+        height: root.height;
+        text: root.value;
+        enabled: root.enabled;
+        single-line: true;
+        vertical-alignment: center;
+        font-size: Theme.tokens.typography.body;
+        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+        edited => { root.value = input.text; root.edited(input.text); }
+    }
+    if root.value == "" : Text {
+        x: Theme.tokens.space.xxxl;
+        width: root.width - Theme.tokens.space.xxxxl;
+        height: root.height;
+        text: root.placeholder;
+        font-size: Theme.tokens.typography.body;
+        color: Theme.palette().ink-disabled;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    TouchArea { enabled: root.enabled; clicked => { input.focus(); } }
+}
+
+export component LoomToggle inherits Rectangle {
+    in property <string> label: "Option";
+    in-out property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 64px;
+    background: transparent;
+    accessible-role: checkbox;
+    accessible-label: root.label;
+    accessible-checked: root.checked;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 34px;
+            height: 20px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: focus.has-focus ? 2px : 1px;
+            border-color: focus.has-focus ? Theme.palette().focus
+                : root.checked ? Theme.palette().accent
+                : Theme.palette().border-strong;
+            background: !root.enabled ? Theme.palette().surface-sunken
+                : root.checked ? Theme.palette().accent
+                : Theme.palette().surface-sunken;
+            Rectangle {
+                x: root.checked ? 16px : 2px;
+                y: 2px;
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                background: root.checked ? Theme.palette().accent-ink : Theme.palette().ink-secondary;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            focus.focus();
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+export component LoomSegmentedControl inherits Rectangle {
+    in property <[string]> items: [];
+    in property <string> label: "Options";
+    in property <bool> enabled: true;
+    in-out property <int> current: 0;
+    callback selected(int);
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 160px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.palette().focus : Theme.palette().border;
+    background: Theme.palette().surface-sunken;
+    accessible-role: radio-group;
+    accessible-label: root.label;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        padding: Theme.tokens.space.xs;
+        for item[idx] in root.items : Rectangle {
+            horizontal-stretch: 1;
+            min-width: max(48px, item-label.preferred-width + Theme.tokens.space.xl);
+            border-radius: Theme.tokens.metrics.radius-small;
+            border-width: idx == root.current ? 1px : 0px;
+            border-color: idx == root.current ? Theme.palette().border-strong : transparent;
+            background: idx == root.current ? Theme.palette().surface-raised
+                : item-touch.pressed ? Theme.palette().surface-sunken
+                : item-touch.has-hover ? Theme.palette().surface
+                : transparent;
+            item-label := Text {
+                text: item;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: idx == root.current ? 600 : 500;
+                color: root.enabled ? (idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            item-touch := TouchArea {
+                enabled: root.enabled;
+                clicked => { focus.focus(); root.current = idx; root.selected(idx); }
+            }
+            accessible-role: button;
+            accessible-label: item;
+            accessible-action-default => {
+                if (root.enabled) { root.current = idx; root.selected(idx); }
+            }
+        }
+    }
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled || root.items.length == 0) { return reject; }
+            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+                root.current = max(0, root.current - 1);
+                root.selected(root.current);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+                root.current = min(root.items.length - 1, root.current + 1);
+                root.selected(root.current);
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component LoomProgressBar inherits Rectangle {
+    in property <float> value: 0.0;
+    in property <float> minimum: 0.0;
+    in property <float> maximum: 1.0;
+    in property <string> label: "Progress";
+
+    height: Theme.tokens.space.md;
+    min-width: 120px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    background: Theme.palette().surface-sunken;
+    accessible-role: progress-indicator;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+
+    Rectangle {
+        width: root.maximum > root.minimum
+            ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * parent.width, 0px, parent.width)
+            : 0px;
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: Theme.palette().accent;
+    }
+}
