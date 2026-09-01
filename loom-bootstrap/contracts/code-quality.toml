@@ -41,6 +41,7 @@ new_generic_ui_must_live_in_foundation = true
 "loom-core/crates/loom-ui/ui/components.slint" = 41805
 "loom-writer/crates/loom-writer-app/ui/app.slint" = 36518
 "loom-sheets/crates/loom-sheets-app/ui/app.slint" = 41611
+"loom-sheets/crates/loom-sheets-app/ui/components.slint" = 38163
 "loom-present/crates/loom-present-app/ui/app.slint" = 42883
 "loom-present/crates/loom-present-app/ui/present_components.slint" = 34385
 "loom-motion/crates/loom-motion-app/ui/components.slint" = 42032
