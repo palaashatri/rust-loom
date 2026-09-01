@@ -474,6 +474,7 @@ export component SheetTable inherits Rectangle {
     accessible-role: table;
     accessible-label: root.sheet-name + " table";
     accessible-description: root.selection-announcement;
+    accessible-live-region: AccessibleLiveness.polite;
 
     VerticalLayout {
         spacing: 0px;
@@ -667,12 +668,19 @@ export component SheetGridSurface inherits CanvasSurface {
 
     grid-focus := FocusScope {
         key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
+                return reject;
+            }
             if (event.text == Key.Return) {
                 root.begin-edit(root.selection-formula);
                 return accept;
             }
             if (event.text == Key.Tab) {
-                root.navigate-selection(0, 1);
+                root.navigate-selection(0, event.modifiers.shift ? -1 : 1);
+                return accept;
+            }
+            if (event.text == Key.Backtab) {
+                root.navigate-selection(0, -1);
                 return accept;
             }
             if (event.text == Key.LeftArrow) {
@@ -694,6 +702,26 @@ export component SheetGridSurface inherits CanvasSurface {
                 if (event.modifiers.shift) { root.extend-selection(1, 0); }
                 else { root.navigate-selection(1, 0); }
                 return accept;
+            }
+            // Backspace/Delete and other named keys are not printable cell
+            // input. Leave them unhandled until cell-edit commands exist.
+            if (event.text == Key.Backspace || event.text == Key.Delete || event.text == Key.Insert
+                || event.text == Key.Home || event.text == Key.End || event.text == Key.PageUp
+                || event.text == Key.PageDown || event.text == Key.F1 || event.text == Key.F2
+                || event.text == Key.F3 || event.text == Key.F4 || event.text == Key.F5
+                || event.text == Key.F6 || event.text == Key.F7 || event.text == Key.F8
+                || event.text == Key.F9 || event.text == Key.F10 || event.text == Key.F11
+                || event.text == Key.F12 || event.text == Key.F13 || event.text == Key.F14
+                || event.text == Key.F15 || event.text == Key.F16 || event.text == Key.F17
+                || event.text == Key.F18 || event.text == Key.F19 || event.text == Key.F20
+                || event.text == Key.F21 || event.text == Key.F22 || event.text == Key.F23
+                || event.text == Key.F24 || event.text == Key.Shift || event.text == Key.Control
+                || event.text == Key.Alt || event.text == Key.AltGr || event.text == Key.CapsLock
+                || event.text == Key.ShiftR || event.text == Key.ControlR || event.text == Key.Meta
+                || event.text == Key.MetaR || event.text == Key.ScrollLock || event.text == Key.Pause
+                || event.text == Key.SysReq || event.text == Key.Stop || event.text == Key.Menu
+                || event.text == Key.Back) {
+                return reject;
             }
             if (event.text != "" && event.text != Key.Escape && !event.modifiers.control && !event.modifiers.meta && !event.modifiers.alt) {
                 root.begin-edit(event.text);

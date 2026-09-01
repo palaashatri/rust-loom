@@ -314,22 +314,23 @@ fn valid_dimension(value: f32, fallback: f32) -> f32 {
     }
 }
 
-fn column_width(sheet: &Sheet, col: u32, default_width: f32) -> f32 {
+fn dimension_size(
+    index: u32,
+    default_size: f32,
+    custom: &std::collections::BTreeMap<u32, f32>,
+) -> f32 {
     valid_dimension(
-        sheet.col_widths.get(&col).copied().unwrap_or(default_width),
-        default_width,
+        custom.get(&index).copied().unwrap_or(default_size),
+        default_size,
     )
 }
 
+fn column_width(sheet: &Sheet, col: u32, default_width: f32) -> f32 {
+    dimension_size(col, default_width, &sheet.col_widths)
+}
+
 fn row_height(sheet: &Sheet, row: u32) -> f32 {
-    valid_dimension(
-        sheet
-            .row_heights
-            .get(&row)
-            .copied()
-            .unwrap_or(GRID_ROW_HEIGHT),
-        GRID_ROW_HEIGHT,
-    )
+    dimension_size(row, GRID_ROW_HEIGHT, &sheet.row_heights)
 }
 
 fn dimension_extent(
@@ -360,10 +361,144 @@ fn dimension_offset(
     offset.max(0.0)
 }
 
+/// Maps a cumulative pixel offset to the worksheet index containing it.
+/// Custom dimensions are sparse, so default-sized runs are skipped in one
+/// step while the handful of persisted overrides are visited explicitly.
+fn dimension_index_at_offset(
+    offset: f32,
+    count: u32,
+    default_size: f32,
+    custom: &std::collections::BTreeMap<u32, f32>,
+) -> u32 {
+    let count = count.max(1);
+    let default_size = valid_dimension(default_size, 1.0);
+    let offset = if offset.is_finite() {
+        offset.max(0.0)
+    } else {
+        0.0
+    };
+    let mut index = 0_u32;
+    let mut consumed = 0.0_f32;
+
+    for (&custom_index, &custom_size) in custom {
+        if custom_index >= count
+            || custom_index < index
+            || !custom_size.is_finite()
+            || custom_size <= 0.0
+        {
+            continue;
+        }
+        if custom_index > index {
+            let span = (custom_index - index) as f32 * default_size;
+            if offset < consumed + span {
+                return (index + ((offset - consumed) / default_size).floor().max(0.0) as u32)
+                    .min(count - 1);
+            }
+            consumed += span;
+            index = custom_index;
+        }
+        if offset < consumed + custom_size {
+            return index;
+        }
+        consumed += custom_size;
+        index = custom_index.saturating_add(1);
+    }
+
+    if index < count {
+        return (index + ((offset - consumed) / default_size).floor().max(0.0) as u32)
+            .min(count - 1);
+    }
+    count - 1
+}
+
+fn dimension_visible_count(
+    first: u32,
+    count: u32,
+    viewport_size: f32,
+    default_size: f32,
+    custom: &std::collections::BTreeMap<u32, f32>,
+) -> u32 {
+    let count = count.max(1);
+    let first = first.min(count - 1);
+    let viewport_size = if viewport_size.is_finite() && viewport_size > 0.0 {
+        viewport_size
+    } else {
+        default_size
+    };
+    let mut consumed = 0.0_f32;
+    let mut index = first;
+    while index < count && (consumed < viewport_size || index == first) {
+        consumed += dimension_size(index, default_size, custom);
+        index += 1;
+    }
+    index.saturating_sub(first).max(1)
+}
+
+fn viewport_from_dimensions(
+    (scroll_x, scroll_y): (f32, f32),
+    (viewport_width, viewport_height): (f32, f32),
+    dimensions: SheetDimensions,
+    default_col_width: f32,
+    row_heights: &std::collections::BTreeMap<u32, f32>,
+    col_widths: &std::collections::BTreeMap<u32, f32>,
+) -> SheetViewport {
+    let dimensions = SheetDimensions::new(dimensions.rows, dimensions.cols);
+    let default_col_width = valid_dimension(default_col_width, GRID_COL_WIDTH);
+    let viewport_width = if viewport_width.is_finite() && viewport_width > 0.0 {
+        viewport_width
+    } else {
+        default_col_width
+    };
+    let viewport_height = if viewport_height.is_finite() && viewport_height > 0.0 {
+        viewport_height
+    } else {
+        GRID_ROW_HEIGHT
+    };
+    let content_width = dimension_extent(dimensions.cols, default_col_width, col_widths);
+    let content_height = dimension_extent(dimensions.rows, GRID_ROW_HEIGHT, row_heights);
+    let max_scroll_x = (content_width - viewport_width).max(0.0);
+    let max_scroll_y = (content_height - viewport_height).max(0.0);
+    let scroll_x = if scroll_x.is_finite() {
+        scroll_x.clamp(0.0, max_scroll_x)
+    } else {
+        0.0
+    };
+    let scroll_y = if scroll_y.is_finite() {
+        scroll_y.clamp(0.0, max_scroll_y)
+    } else {
+        0.0
+    };
+    let first_col =
+        dimension_index_at_offset(scroll_x, dimensions.cols, default_col_width, col_widths);
+    let first_row =
+        dimension_index_at_offset(scroll_y, dimensions.rows, GRID_ROW_HEIGHT, row_heights);
+    let visible_cols = dimension_visible_count(
+        first_col,
+        dimensions.cols,
+        viewport_width,
+        default_col_width,
+        col_widths,
+    )
+    .min(dimensions.cols - first_col);
+    let visible_rows = dimension_visible_count(
+        first_row,
+        dimensions.rows,
+        viewport_height,
+        GRID_ROW_HEIGHT,
+        row_heights,
+    )
+    .min(dimensions.rows - first_row);
+    SheetViewport {
+        first_row,
+        first_col,
+        visible_rows: visible_rows.max(1),
+        visible_cols: visible_cols.max(1),
+    }
+}
+
 /// Concrete dimensions/offsets consumed by the Slint projection. Persisted
-/// row and column sizes are retained for materialized cells and for the full
-/// scroll extents, while the core viewport still computes the sparse window
-/// from one stable default metric.
+/// row and column sizes are retained for materialized cells, viewport indexing,
+/// and the full scroll extents.
 struct GridGeometry {
     default_col_width: f32,
     column_widths: Vec<f32>,
@@ -428,14 +563,16 @@ fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
     let default_col_width = grid_default_col_width(sheet, dimensions, viewport_width);
     let scroll_x = (-app.get_grid_scroll_x()).max(0.0);
     let scroll_y = (-app.get_grid_scroll_y()).max(0.0);
-    SheetViewport::from_scroll(
-        scroll_x,
-        scroll_y,
-        (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
-        (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(GRID_ROW_HEIGHT),
-        GRID_ROW_HEIGHT,
-        default_col_width,
+    viewport_from_dimensions(
+        (scroll_x, scroll_y),
+        (
+            (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
+            (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(GRID_ROW_HEIGHT),
+        ),
         dimensions,
+        default_col_width,
+        &sheet.row_heights,
+        &sheet.col_widths,
     )
 }
 
@@ -2169,6 +2306,29 @@ mod tests {
     }
 
     #[test]
+    fn custom_dimensions_drive_viewport_projection_and_offsets() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        app.set_grid_viewport_width(400.0);
+        app.set_grid_viewport_height(200.0);
+        app.set_grid_scroll_x(-170.0);
+        app.set_grid_scroll_y(-50.0);
+
+        let mut sheet = Sheet::new("custom viewport");
+        sheet.set_col_width(0, 160.0);
+        sheet.set_row_height(0, 48.0);
+        sheet.set_str("B2", "target");
+
+        apply_sheet_without_reveal(&app, &sheet);
+
+        assert_eq!(app.get_column_headers().row_data(0).as_deref(), Some("B"));
+        assert_eq!(app.get_row_headers().row_data(0).as_deref(), Some("2"));
+        assert_eq!(app.get_cells().row_data(0).as_deref(), Some("target"));
+        assert_eq!(app.get_grid_col_offset(), 160.0);
+        assert_eq!(app.get_grid_row_offset(), 48.0);
+    }
+
+    #[test]
     fn sparse_tail_scroll_materializes_tail_headers_and_values() {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
@@ -2374,6 +2534,42 @@ mod tests {
                 text: slint::platform::Key::Tab.into(),
             });
         assert_eq!(moves.get(), (0, 1));
+    }
+
+    #[test]
+    fn focused_grid_rejects_non_printable_edit_keys() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        let begins = Rc::new(std::cell::Cell::new(0));
+        let begins_ref = begins.clone();
+        app.on_begin_edit(move |_| begins_ref.set(begins_ref.get() + 1));
+        let moves = Rc::new(std::cell::Cell::new((0, 0)));
+        let moves_ref = moves.clone();
+        app.on_navigate_selection(move |row_delta, col_delta| {
+            moves_ref.set((row_delta, col_delta));
+        });
+
+        for text in [
+            slint::platform::Key::Backspace.into(),
+            slint::platform::Key::Delete.into(),
+            slint::platform::Key::F1.into(),
+            slint::platform::Key::Home.into(),
+            slint::platform::Key::PageUp.into(),
+        ] {
+            app.invoke_focus_grid();
+            app.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
+        }
+        assert_eq!(begins.get(), 0);
+        assert_eq!(moves.get(), (0, 0));
+
+        app.invoke_focus_grid();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Backtab.into(),
+            });
+        assert_eq!(begins.get(), 0);
+        assert_eq!(moves.get(), (0, -1));
     }
 
     #[test]
