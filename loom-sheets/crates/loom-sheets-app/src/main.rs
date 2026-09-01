@@ -17,10 +17,11 @@ use loom_desktop::{
 };
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
+#[cfg(test)]
+use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellEditTransaction, CellRange,
-    CellRef, GridSelection, RangeEdit, Sheet, SheetDimensions, SheetViewport, Value,
-    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellRange, CellRef, GridSelection,
+    RangeEdit, Sheet, SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
@@ -466,38 +467,42 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
     }
     app.set_view_row_origin(viewport.first_row as i32);
     app.set_view_col_origin(viewport.first_col as i32);
-    // Flickable coordinates are negative because its content is translated
-    // opposite to the positive worksheet scroll offset. Preserve fractional
-    // wheel/touchpad offsets while snapping only when selection auto-reveal
-    // moved the projected window.
-    if viewport.first_col != projected_before_reveal.first_col {
-        let geometry = grid_geometry(
-            sheet,
-            editor_dimensions,
-            viewport,
-            app.get_grid_viewport_width(),
-        );
-        app.set_grid_scroll_x(-geometry.col_offset);
-    } else {
-        app.set_grid_scroll_x(-current_scroll_x);
-    }
-    if viewport.first_row != projected_before_reveal.first_row {
-        let geometry = grid_geometry(
-            sheet,
-            editor_dimensions,
-            viewport,
-            app.get_grid_viewport_width(),
-        );
-        app.set_grid_scroll_y(-geometry.row_offset);
-    } else {
-        app.set_grid_scroll_y(-current_scroll_y);
-    }
     let geometry = grid_geometry(
         sheet,
         editor_dimensions,
         viewport,
         app.get_grid_viewport_width(),
     );
+    // Flickable coordinates are negative because its content is translated
+    // opposite to the positive worksheet scroll offset. Preserve fractional
+    // wheel/touchpad offsets while snapping only when selection auto-reveal
+    // moved the projected window. Direct headless/property updates can be
+    // outside Flickable's legal range, so clamp the retained offset to the
+    // same extents as the materialized content.
+    if viewport.first_col != projected_before_reveal.first_col {
+        app.set_grid_scroll_x(-geometry.col_offset);
+    } else {
+        let viewport_width = if app.get_grid_viewport_width() > 1.0 {
+            app.get_grid_viewport_width()
+        } else {
+            GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
+        };
+        let max_scroll_x =
+            (geometry.content_width + GRID_ROW_HEADER_WIDTH - viewport_width).max(0.0);
+        app.set_grid_scroll_x(-current_scroll_x.min(max_scroll_x));
+    }
+    if viewport.first_row != projected_before_reveal.first_row {
+        app.set_grid_scroll_y(-geometry.row_offset);
+    } else {
+        let viewport_height = if app.get_grid_viewport_height() > 1.0 {
+            app.get_grid_viewport_height()
+        } else {
+            GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
+        };
+        let max_scroll_y =
+            (geometry.content_height + GRID_COLUMN_HEADER_HEIGHT - viewport_height).max(0.0);
+        app.set_grid_scroll_y(-current_scroll_y.min(max_scroll_y));
+    }
     let grid = project_sheet_grid_with_values(sheet, &vals, viewport);
 
     app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
@@ -693,37 +698,34 @@ fn update_selection_range(
 /// Apply one committed formula-bar edit and record one undo transaction.
 fn commit_formula_edit(
     sheet: &mut Sheet,
-    undo_stack: &mut Vec<String>,
-    redo_stack: &mut Vec<String>,
+    undo_stack: &mut Vec<RangeEdit>,
+    redo_stack: &mut Vec<RangeEdit>,
     selected: CellRef,
     draft: &str,
 ) -> bool {
-    let mut transaction = CellEditTransaction::begin(sheet.raw(selected));
-    transaction.update(draft.to_owned());
-    let Some(edit) = transaction.commit() else {
+    let edit = RangeEdit::replace(sheet, selected, Some(draft.to_owned()));
+    if edit.is_noop() {
         return false;
-    };
-    undo_stack.push(sheet_to_json(sheet));
+    }
+    edit.apply(sheet);
+    undo_stack.push(edit);
     redo_stack.clear();
-    sheet.set_raw(selected, edit.after().to_owned());
     true
 }
 
-/// Apply a sparse range edit as one undoable transaction.  The serialized
-/// snapshot is deliberately kept at the controller boundary for now so all
-/// existing save/reopen and recovery paths observe the same document state.
+/// Apply a sparse range edit as one undoable transaction.
 fn commit_range_edit(
     sheet: &mut Sheet,
-    undo_stack: &mut Vec<String>,
-    redo_stack: &mut Vec<String>,
+    undo_stack: &mut Vec<RangeEdit>,
+    redo_stack: &mut Vec<RangeEdit>,
     edit: RangeEdit,
 ) -> bool {
     if edit.is_empty() || edit.is_noop() {
         return false;
     }
-    undo_stack.push(sheet_to_json(sheet));
-    redo_stack.clear();
     edit.apply(sheet);
+    undo_stack.push(edit);
+    redo_stack.clear();
     true
 }
 
@@ -732,8 +734,8 @@ fn commit_range_edit(
 /// in the UI rather than pretending to perform an operation.
 fn fill_selection_down(
     sheet: &mut Sheet,
-    undo_stack: &mut Vec<String>,
-    redo_stack: &mut Vec<String>,
+    undo_stack: &mut Vec<RangeEdit>,
+    redo_stack: &mut Vec<RangeEdit>,
     selection: GridSelection,
 ) -> bool {
     let source = selection.range();
@@ -938,8 +940,8 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
 struct GuiState {
     current: RefCell<Sheet>,
     save_path: RefCell<Option<PathBuf>>,
-    undo_stack: RefCell<Vec<String>>,
-    redo_stack: RefCell<Vec<String>>,
+    undo_stack: RefCell<Vec<RangeEdit>>,
+    redo_stack: RefCell<Vec<RangeEdit>>,
     dialogs: Rc<dyn FileDialogService>,
     workbook_filter: FileFilter,
     import_filter: FileFilter,
@@ -1140,6 +1142,15 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
     {
+        let app_ref = app.as_weak();
+        app.on_begin_edit(move |initial_text| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_formula_edit_buffer(initial_text);
+                app.invoke_focus_formula_bar();
+            }
+        });
+    }
+    {
         let state = state.clone();
         let app_ref = app.as_weak();
         let menu_service = menu_service.clone();
@@ -1251,16 +1262,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Some(prev) = state.undo_stack.borrow_mut().pop() {
-                    if let Ok(sheet) = sheet_from_json(&prev) {
-                        state
-                            .redo_stack
-                            .borrow_mut()
-                            .push(sheet_to_json(&state.current.borrow()));
-                        *state.current.borrow_mut() = sheet;
-                        apply_sheet(&app, &state.current.borrow());
-                        sync_menu_state(&menu_service, &app, &state);
-                    }
+                if let Some(edit) = state.undo_stack.borrow_mut().pop() {
+                    let mut sheet = state.current.borrow_mut();
+                    edit.revert(&mut sheet);
+                    state.redo_stack.borrow_mut().push(edit);
+                    apply_sheet(&app, &sheet);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -1271,16 +1278,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Some(next) = state.redo_stack.borrow_mut().pop() {
-                    if let Ok(sheet) = sheet_from_json(&next) {
-                        state
-                            .undo_stack
-                            .borrow_mut()
-                            .push(sheet_to_json(&state.current.borrow()));
-                        *state.current.borrow_mut() = sheet;
-                        apply_sheet(&app, &state.current.borrow());
-                        sync_menu_state(&menu_service, &app, &state);
-                    }
+                if let Some(edit) = state.redo_stack.borrow_mut().pop() {
+                    let mut sheet = state.current.borrow_mut();
+                    edit.apply(&mut sheet);
+                    state.undo_stack.borrow_mut().push(edit);
+                    apply_sheet(&app, &sheet);
+                    sync_menu_state(&menu_service, &app, &state);
                 }
             }
         });
@@ -1623,7 +1626,7 @@ fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String> {
 
     // Enter a formula in the active cell's adjacent column, then restore the
     // range as the fill source.  Each operation contributes exactly one
-    // snapshot to the existing undo stack.
+    // typed operation to the existing undo stack.
     let formula_cell = CellRef::parse("B995").expect("valid formula coordinate");
     assert!(commit_formula_edit(
         &mut sheet,
@@ -1663,12 +1666,11 @@ fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String> {
         return Err("sparse fill journey wrote unexpected values".to_string());
     }
 
-    let before_undo = sheet_to_json(&sheet);
-    let Some(previous) = undo.pop() else {
+    let Some(edit) = undo.pop() else {
         return Err("sparse fill journey did not record undo".to_string());
     };
-    redo.push(before_undo);
-    sheet = sheet_from_json(&previous).map_err(|error| format!("journey undo: {error}"))?;
+    edit.revert(&mut sheet);
+    redo.push(edit);
     apply_sheet(&app, &sheet);
     capture_journey_frame(&app, out_dir, "06-undo", args.size)?;
     if sheet.raw(CellRef::parse("A997").unwrap()).is_some()
@@ -2107,7 +2109,11 @@ mod tests {
         let selected = CellRef::parse("A1").unwrap();
         sheet.set_str("A1", "old");
         let mut undo = Vec::new();
-        let mut redo = vec!["redo".to_string()];
+        let mut redo = vec![RangeEdit::replace(
+            &sheet,
+            selected,
+            Some("redo".to_string()),
+        )];
 
         assert!(commit_formula_edit(
             &mut sheet, &mut undo, &mut redo, selected, "new",
@@ -2163,6 +2169,31 @@ mod tests {
     }
 
     #[test]
+    fn sparse_tail_scroll_materializes_tail_headers_and_values() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        app.window().set_size(PhysicalSize::new(1280, 800));
+        apply_layout_breakpoints(&app, 1280);
+        apply_headless_viewport_size(&app, 1280, 800);
+        app.set_grid_scroll_y(-26_600.0);
+
+        let mut sheet = Sheet::new("Sparse 1000");
+        sheet.set_str("A995", "10");
+        sheet.set_str("A996", "20");
+        sheet.set_str("A1000", "tail");
+        apply_sheet_without_reveal(&app, &sheet);
+
+        let row_headers = app.get_row_headers();
+        assert_eq!(row_headers.row_data(0).as_deref(), Some("979"));
+        assert_eq!(row_headers.row_data(21).as_deref(), Some("1000"));
+        let cells = app.get_cells();
+        assert_eq!(cells.row_data(16 * 8).as_deref(), Some("10"));
+        assert_eq!(cells.row_data(17 * 8).as_deref(), Some("20"));
+        assert_eq!(cells.row_data(21 * 8).as_deref(), Some("tail"));
+        assert!((app.get_grid_scroll_y() + 23_478.0).abs() < 0.1);
+    }
+
+    #[test]
     fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
         set_platform();
         let app = SheetsApp::new().expect("create SheetsApp");
@@ -2193,7 +2224,7 @@ mod tests {
     }
 
     #[test]
-    fn fill_down_records_one_undo_snapshot_and_restores_sparse_cells() {
+    fn fill_down_records_one_undo_operation_and_restores_sparse_cells() {
         let mut sheet = Sheet::new("fill");
         sheet.set_str("A1", "10");
         sheet.set_str("A2", "20");
@@ -2209,8 +2240,8 @@ mod tests {
         assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), Some("10"));
         assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), Some("20"));
 
-        let previous = undo.pop().expect("fill undo snapshot");
-        sheet = sheet_from_json(&previous).expect("restore fill snapshot");
+        let previous = undo.pop().expect("fill undo operation");
+        previous.revert(&mut sheet);
         assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), None);
         assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), None);
         assert!(!fill_selection_down(
@@ -2297,6 +2328,81 @@ mod tests {
                 text: slint::platform::Key::RightArrow.into(),
             });
         assert_eq!(calls.get(), (0, 1));
+    }
+
+    #[test]
+    fn focused_grid_starts_formula_edits_and_tab_navigates_selection() {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        app.set_selection_formula("=A1+1".into());
+        let app_ref = app.as_weak();
+        app.on_begin_edit(move |initial_text| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_formula_edit_buffer(initial_text);
+                app.invoke_focus_formula_bar();
+            }
+        });
+        let cancels = Rc::new(std::cell::Cell::new(0));
+        let cancels_ref = cancels.clone();
+        app.on_cancel_selected_cell(move || cancels_ref.set(cancels_ref.get() + 1));
+        app.invoke_focus_grid();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Return.into(),
+            });
+        assert_eq!(app.get_formula_edit_buffer().as_str(), "=A1+1");
+
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+        assert_eq!(cancels.get(), 1);
+
+        app.invoke_focus_grid();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "x".into() });
+        assert_eq!(app.get_formula_edit_buffer().as_str(), "x");
+
+        let moves = Rc::new(std::cell::Cell::new((0, 0)));
+        let moves_ref = moves.clone();
+        app.on_navigate_selection(move |row_delta, col_delta| {
+            moves_ref.set((row_delta, col_delta));
+        });
+        app.invoke_focus_grid();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Tab.into(),
+            });
+        assert_eq!(moves.get(), (0, 1));
+    }
+
+    #[test]
+    fn typed_history_undo_redo_restores_exact_raw_values() {
+        let mut sheet = Sheet::new("history");
+        let cell = CellRef::parse("A1").unwrap();
+        sheet.set_raw(cell, "old");
+        let mut undo = Vec::new();
+        let mut redo = Vec::new();
+
+        assert!(commit_formula_edit(
+            &mut sheet, &mut undo, &mut redo, cell, ""
+        ));
+        assert_eq!(sheet.raw(cell), Some(""));
+        let edit = undo.pop().expect("typed edit");
+        edit.revert(&mut sheet);
+        assert_eq!(sheet.raw(cell), Some("old"));
+        redo.push(edit);
+        let edit = redo.pop().expect("redo edit");
+        edit.apply(&mut sheet);
+        assert_eq!(sheet.raw(cell), Some(""));
+
+        let absent = CellRef::parse("B1").unwrap();
+        assert!(commit_formula_edit(
+            &mut sheet, &mut undo, &mut redo, absent, ""
+        ));
+        assert_eq!(sheet.raw(absent), Some(""));
+        undo.pop().expect("absent edit").revert(&mut sheet);
+        assert_eq!(sheet.raw(absent), None);
     }
 
     #[test]

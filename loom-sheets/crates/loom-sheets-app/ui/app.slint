@@ -89,7 +89,7 @@ export component SheetsApp inherits Window {
     in property <string> selection-range: "A1";
     in property <int> selection-count: 1;
     in property <string> selection-formula: "";
-    property <string> formula-edit-buffer: "";
+    in-out property <string> formula-edit-buffer: "";
     in property <string> selection-value: "";
     in property <string> selection-announcement: "A1 selected; value: Empty";
     in property <string> table-rows-label: "1";
@@ -113,6 +113,7 @@ export component SheetsApp inherits Window {
     callback cell-clicked(int, int);
     callback commit-selected-cell(string);
     callback cancel-selected-cell;
+    callback begin-edit(string);
     callback quick-formula(string);
     callback navigate-selection(int, int);
     callback extend-selection(int, int);
@@ -146,6 +147,10 @@ export component SheetsApp inherits Window {
     // after a formula-bar or toolbar interaction.
     public function focus-grid() {
         grid-surface.focus-grid();
+    }
+
+    public function focus-formula-bar() {
+        formula-bar.focus-formula-bar();
     }
 
     public function reset-formula-edit-buffer() {
@@ -326,7 +331,7 @@ export component SheetsApp inherits Window {
                 }
             }
 
-            FormulaNameBar {
+            formula-bar := FormulaNameBar {
                 selection-range: root.selection-range;
                 selection-formula: root.selection-formula;
                 selection-count: root.selection-count;
@@ -376,6 +381,7 @@ export component SheetsApp inherits Window {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
                     sheet-name: root.sheet-name;
+                    selection-formula: root.selection-formula;
                     rows: root.rows;
                     cols: root.cols;
                     column-headers: root.column-headers;
@@ -389,6 +395,7 @@ export component SheetsApp inherits Window {
                     selection-start-col: root.selection-start-col;
                     selection-end-row: root.selection-end-row;
                     selection-end-col: root.selection-end-col;
+                    selection-announcement: root.selection-announcement;
                     grid-col-offset: root.grid-col-offset;
                     grid-row-offset: root.grid-row-offset;
                     grid-visible-width: root.grid-visible-width;
@@ -409,6 +416,9 @@ export component SheetsApp inherits Window {
                     }
                     navigate-selection(row-delta, col-delta) => { root.navigate-selection(row-delta, col-delta); }
                     extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
+                    begin-edit(initial-text) => {
+                        root.begin-edit(initial-text);
+                    }
                 }
 
                 if !root.rtl && root.inspector-visible : SheetInspector {

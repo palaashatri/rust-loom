@@ -426,6 +426,7 @@ export component Field inherits Rectangle {
     callback edited(string);
     callback accepted(string);
     callback cancelled;
+    public function focus-input() { input.focus(); }
     height: Theme.tokens.metrics.control-height;
     min-width: 120px;
     // Fields in inspector/property rows should consume the available control

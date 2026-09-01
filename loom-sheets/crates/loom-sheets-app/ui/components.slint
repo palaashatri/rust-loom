@@ -178,6 +178,8 @@ export component FormulaNameBar inherits Rectangle {
     callback quick-formula(string);
     callback fill-selection;
 
+    public function focus-formula-bar() { field.focus-input(); }
+
     min-height: 32px;
     max-height: 32px;
     background: Theme.palette().chrome;
@@ -216,7 +218,7 @@ export component FormulaNameBar inherits Rectangle {
             vertical-alignment: center;
         }
 
-        Field {
+        field := Field {
             label: "Selected cell formula or value";
             placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
             value <=> root.formula-edit-buffer;
@@ -445,6 +447,7 @@ export component SheetTable inherits Rectangle {
     in property <int> selection-start-col: 0;
     in property <int> selection-end-row: 0;
     in property <int> selection-end-col: 0;
+    in property <string> selection-announcement: "";
     in property <length> grid-col-offset: 0px;
     in property <length> grid-row-offset: 0px;
     in property <length> grid-visible-width: 640px;
@@ -470,6 +473,7 @@ export component SheetTable inherits Rectangle {
     clip: true;
     accessible-role: table;
     accessible-label: root.sheet-name + " table";
+    accessible-description: root.selection-announcement;
 
     VerticalLayout {
         spacing: 0px;
@@ -509,7 +513,7 @@ export component SheetTable inherits Rectangle {
                 viewport-y <=> root.grid-scroll-y;
                 flicked => { root.grid-scrolled(); }
 
-                projected-grid := GridLayout {
+        projected-grid := GridLayout {
                     x: root.grid-col-offset;
                     y: root.grid-row-offset;
                     width: 36px + root.grid-visible-width;
@@ -577,6 +581,9 @@ export component SheetTable inherits Rectangle {
                             background: is-active || in-selection
                                 ? Theme.palette().selection-soft
                                 : (Math.mod(global-row, 2) == 1) ? Theme.palette().surface-sunken : Theme.palette().surface;
+                            accessible-role: text;
+                            accessible-label: root.column-headers[c] + root.row-headers[r];
+                            accessible-value: root.cells[r * root.cols.length + c];
 
                             Text {
                                 x: 8px;
@@ -625,6 +632,7 @@ export component SheetTable inherits Rectangle {
 /// table's dominant surface separate from the surrounding app chrome.
 export component SheetGridSurface inherits CanvasSurface {
     in property <string> sheet-name: "Untitled";
+    in property <string> selection-formula: "";
     in property <[int]> rows: [];
     in property <[int]> cols: [];
     in property <[string]> column-headers: [];
@@ -638,6 +646,7 @@ export component SheetGridSurface inherits CanvasSurface {
     in property <int> selection-start-col: 0;
     in property <int> selection-end-row: 0;
     in property <int> selection-end-col: 0;
+    in property <string> selection-announcement: "";
     in property <length> grid-col-offset: 0px;
     in property <length> grid-row-offset: 0px;
     in property <length> grid-visible-width: 640px;
@@ -654,9 +663,18 @@ export component SheetGridSurface inherits CanvasSurface {
     callback grid-viewport-changed(length, length);
     callback navigate-selection(int, int);
     callback extend-selection(int, int);
+    callback begin-edit(string);
 
     grid-focus := FocusScope {
         key-pressed(event) => {
+            if (event.text == Key.Return) {
+                root.begin-edit(root.selection-formula);
+                return accept;
+            }
+            if (event.text == Key.Tab) {
+                root.navigate-selection(0, 1);
+                return accept;
+            }
             if (event.text == Key.LeftArrow) {
                 if (event.modifiers.shift) { root.extend-selection(0, -1); }
                 else { root.navigate-selection(0, -1); }
@@ -675,6 +693,10 @@ export component SheetGridSurface inherits CanvasSurface {
             if (event.text == Key.DownArrow) {
                 if (event.modifiers.shift) { root.extend-selection(1, 0); }
                 else { root.navigate-selection(1, 0); }
+                return accept;
+            }
+            if (event.text != "" && event.text != Key.Escape && !event.modifiers.control && !event.modifiers.meta && !event.modifiers.alt) {
+                root.begin-edit(event.text);
                 return accept;
             }
             return reject;
@@ -704,6 +726,7 @@ export component SheetGridSurface inherits CanvasSurface {
         selection-start-col: root.selection-start-col;
         selection-end-row: root.selection-end-row;
         selection-end-col: root.selection-end-col;
+        selection-announcement: root.selection-announcement;
         grid-col-offset: root.grid-col-offset;
         grid-row-offset: root.grid-row-offset;
         grid-visible-width: root.grid-visible-width;
@@ -713,7 +736,7 @@ export component SheetGridSurface inherits CanvasSurface {
         grid-column-widths: root.grid-column-widths;
         grid-row-heights: root.grid-row-heights;
         grid-scroll-x <=> root.grid-scroll-x;
-        grid-scroll-y <=> root.grid-scroll-y;
+                grid-scroll-y <=> root.grid-scroll-y;
         cell-clicked(row, col) => {
             // A cell click establishes the grid's keyboard scope before the
             // controller updates selection, matching spreadsheet focus rules.

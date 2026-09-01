@@ -2815,6 +2815,18 @@ pub struct RangeEdit {
 }
 
 impl RangeEdit {
+    /// Builds an edit that replaces a single cell's raw value, preserving absent cells.
+    pub fn replace(sheet: &Sheet, cell: CellRef, after: Option<String>) -> Self {
+        let mut before = BTreeMap::new();
+        let mut after_map = BTreeMap::new();
+        before.insert(cell, sheet.raw(cell).map(str::to_owned));
+        after_map.insert(cell, after);
+        Self {
+            before,
+            after: after_map,
+        }
+    }
+
     /// Builds an edit that copies `source` to a destination top-left cell.
     pub fn copy(sheet: &Sheet, source: CellRange, destination: CellRef) -> Self {
         let source_values: BTreeMap<CellRef, Option<String>> = source
@@ -5803,5 +5815,31 @@ mod tests {
             CellRef::parse("A1").unwrap(),
         );
         assert!(noop.is_noop());
+    }
+
+    #[test]
+    fn range_edit_replace_preserves_present_empty_and_absent_raw_values() {
+        let mut sheet = Sheet::new("replace");
+        let cell = CellRef::parse("A1").unwrap();
+
+        let insert_empty = RangeEdit::replace(&sheet, cell, Some(String::new()));
+        assert!(!insert_empty.is_noop());
+        insert_empty.apply(&mut sheet);
+        assert_eq!(sheet.raw(cell), Some(""));
+        insert_empty.revert(&mut sheet);
+        assert_eq!(sheet.raw(cell), None);
+
+        sheet.set_raw(cell, "old");
+        let clear_to_empty = RangeEdit::replace(&sheet, cell, Some(String::new()));
+        clear_to_empty.apply(&mut sheet);
+        assert_eq!(sheet.raw(cell), Some(""));
+        clear_to_empty.revert(&mut sheet);
+        assert_eq!(sheet.raw(cell), Some("old"));
+
+        let remove = RangeEdit::replace(&sheet, cell, None);
+        remove.apply(&mut sheet);
+        assert_eq!(sheet.raw(cell), None);
+        remove.revert(&mut sheet);
+        assert_eq!(sheet.raw(cell), Some("old"));
     }
 }
