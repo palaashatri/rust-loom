@@ -1,0 +1,50 @@
+schema_version = 1
+phase = "ui-foundation"
+foundation_status = "ACCEPTANCE_BLOCKED"
+application_development_locked = true
+consumer_imports_allowed = false
+next_application = "sheets"
+
+application_order = [
+  "sheets",
+  "writer",
+  "present",
+  "photo",
+  "motion",
+  "video",
+  "studio",
+  "encode",
+]
+
+allowed_active_prefixes = [
+  ".github/",
+  "AGENTS.MD",
+  "TRUTH.md",
+  "README.md",
+  "loom-bootstrap/",
+  "loom-core/crates/loom-ui/",
+  "loom-design-bible/contracts/",
+  "loom-design-bible/tokens/",
+]
+
+[foundation_gate]
+mechanical_required = true
+human_visual_approval_required = true
+approved_baseline_required_after_acceptance = true
+status = "ACCEPTANCE_BLOCKED"
+
+[foundation_gate.required_evidence]
+viewports = ["1024x720", "1280x800", "1440x900", "1920x1200"]
+themes = ["light", "dark", "high-contrast"]
+text_scales = [1.0, 1.25, 1.5]
+directions = ["ltr", "rtl"]
+
+[application_status]
+sheets = "NOT_STARTED"
+writer = "LOCKED"
+present = "LOCKED"
+photo = "LOCKED"
+motion = "LOCKED"
+video = "LOCKED"
+studio = "LOCKED"
+encode = "LOCKED"
