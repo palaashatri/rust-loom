@@ -1,0 +1,283 @@
+import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
+import { LoomIconButton } from "controls.slint";
+
+export component LoomToolbar inherits Rectangle {
+    min-height: Theme.tokens.metrics.toolbar-height;
+    max-height: Theme.tokens.metrics.toolbar-height;
+    background: Theme.palette().chrome;
+    border-width: 0px;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        @children
+    }
+    Rectangle {
+        x: 0px;
+        y: root.height - 1px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+
+export component LoomToolbarGroup inherits Rectangle {
+    min-height: Theme.tokens.metrics.toolbar-height;
+    max-height: Theme.tokens.metrics.toolbar-height;
+    background: transparent;
+    HorizontalLayout {
+        spacing: Theme.tokens.space.xs;
+        cross-axis-alignment: center;
+        @children
+    }
+}
+
+export component LoomToolbarSpacer inherits Rectangle {
+    horizontal-stretch: 1;
+    background: transparent;
+}
+
+export component LoomToolbarDivider inherits Rectangle {
+    width: 1px;
+    height: Theme.tokens.space.xxl;
+    background: Theme.palette().border;
+}
+
+export component LoomOverflowButton inherits LoomIconButton {
+    icon: "more";
+    label: "More actions";
+    tooltip: "More actions";
+}
+
+export component LoomPanel inherits Rectangle {
+    in property <string> title: "";
+    in property <string> detail: "";
+    background: Theme.palette().panel;
+    border-width: 0px;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        if root.title != "" : LoomSectionHeader {
+            title: root.title;
+            detail: root.detail;
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().panel;
+            @children
+        }
+    }
+}
+
+export component LoomSectionHeader inherits Rectangle {
+    in property <string> title: "Section";
+    in property <string> detail: "";
+    min-height: Theme.tokens.metrics.panel-header-height;
+    max-height: Theme.tokens.metrics.panel-header-height;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
+        cross-axis-alignment: center;
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.title;
+            font-weight: 600;
+            color: Theme.palette().ink;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 180px;
+            overflow: elide;
+        }
+        @children
+    }
+}
+
+export component LoomTabStrip inherits Rectangle {
+    in property <[string]> items: [];
+    in-out property <int> current: 0;
+    in property <string> label: "Tabs";
+    in property <bool> enabled: true;
+    callback selected(int);
+
+    height: Theme.tokens.metrics.sheet-tab-height;
+    background: Theme.palette().chrome;
+    accessible-role: tab;
+    accessible-label: root.label;
+
+    HorizontalLayout {
+        spacing: 0px;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: stretch;
+        for item[idx] in root.items : Rectangle {
+            min-width: max(64px, tab-label.preferred-width + Theme.tokens.space.xxl);
+            preferred-width: root.min-width;
+            background: tab-touch.pressed ? Theme.palette().surface-sunken
+                : tab-touch.has-hover ? Theme.palette().surface-raised
+                : transparent;
+            Rectangle {
+                x: Theme.tokens.space.sm;
+                y: parent.height - 2px;
+                width: parent.width - Theme.tokens.space.md;
+                height: 2px;
+                border-radius: 1px;
+                background: idx == root.current ? Theme.palette().accent : transparent;
+            }
+            tab-label := Text {
+                text: item;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: idx == root.current ? 600 : 500;
+                color: !root.enabled ? Theme.palette().ink-disabled
+                    : idx == root.current ? Theme.palette().ink
+                    : Theme.palette().ink-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            tab-touch := TouchArea {
+                enabled: root.enabled;
+                clicked => { tabs-focus.focus(); root.current = idx; root.selected(idx); }
+            }
+            accessible-role: tab;
+            accessible-label: item;
+            accessible-action-default => {
+                if (root.enabled) { root.current = idx; root.selected(idx); }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+    tabs-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled || root.items.length == 0) { return reject; }
+            if (event.text == Key.LeftArrow) {
+                root.current = max(0, root.current - 1);
+                root.selected(root.current);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.current = min(root.items.length - 1, root.current + 1);
+                root.selected(root.current);
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component LoomListRow inherits Rectangle {
+    in property <string> label: "Item";
+    in property <string> detail: "";
+    in property <string> icon: "";
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback activated;
+
+    height: Theme.tokens.xxx;
+    height: 32px;
+    min-width: 120px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: row-focus.has-focus ? 2px : 0px;
+    border-color: row-focus.has-focus ? Theme.palette().focus : transparent;
+    background: root.selected ? Theme.palette().selection-soft
+        : row-touch.pressed ? Theme.palette().surface-sunken
+        : row-touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+    accessible-role: list-item;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.activated(); } }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        if root.icon != "" : Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: root.icon;
+            tint: root.selected ? Theme.palette().accent : Theme.palette().ink-secondary;
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 160px;
+            overflow: elide;
+        }
+    }
+    row-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    row-touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { row-focus.focus(); root.activated(); }
+    }
+}
+
+export component LoomStatusBar inherits Rectangle {
+    min-height: Theme.tokens.metrics.status-height;
+    max-height: Theme.tokens.metrics.status-height;
+    background: Theme.palette().chrome;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+    HorizontalLayout {
+        spacing: Theme.tokens.space.lg;
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
+        cross-axis-alignment: center;
+        @children
+    }
+}
+
+export component LoomStatusText inherits Text {
+    in property <bool> strong: false;
+    font-size: Theme.tokens.typography.caption;
+    font-weight: root.strong ? 600 : 500;
+    color: root.strong ? Theme.palette().ink : Theme.palette().ink-secondary;
+    vertical-alignment: center;
+    overflow: elide;
+}
