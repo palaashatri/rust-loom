@@ -52,27 +52,6 @@ export component LoomOverflowButton inherits LoomIconButton {
     tooltip: "More actions";
 }
 
-export component LoomPanel inherits Rectangle {
-    in property <string> title: "";
-    in property <string> detail: "";
-    background: Theme.palette().panel;
-    border-width: 0px;
-
-    VerticalLayout {
-        spacing: 0px;
-        padding: 0px;
-        if root.title != "" : LoomSectionHeader {
-            title: root.title;
-            detail: root.detail;
-        }
-        Rectangle {
-            vertical-stretch: 1;
-            background: Theme.palette().panel;
-            @children
-        }
-    }
-}
-
 export component LoomSectionHeader inherits Rectangle {
     in property <string> title: "Section";
     in property <string> detail: "";
@@ -104,6 +83,27 @@ export component LoomSectionHeader inherits Rectangle {
             overflow: elide;
         }
         @children
+    }
+}
+
+export component LoomPanel inherits Rectangle {
+    in property <string> title: "";
+    in property <string> detail: "";
+    background: Theme.palette().panel;
+    border-width: 0px;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        if root.title != "" : LoomSectionHeader {
+            title: root.title;
+            detail: root.detail;
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().panel;
+            @children
+        }
     }
 }
 
