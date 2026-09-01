@@ -1,0 +1,48 @@
+schema_version = 1
+
+[policy]
+commercial_redistribution_required = true
+unknown_license_forbidden = true
+noncommercial_forbidden = true
+personal_use_forbidden = true
+editorial_only_forbidden = true
+scraped_proprietary_assets_forbidden = true
+prefer_original_or_generated = true
+
+# Project-generated screenshots are evidence, not shipped third-party artwork.
+[[allow]]
+glob = "loom-*/docs/screenshot.png"
+origin = "Loom project-generated screenshot"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
+glob = "loom-vision/crates/loom-vision-cli/fixtures/hello.png"
+origin = "Loom-generated test fixture"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+# Test/conformance packages are repository-created fixtures. They are not
+# third-party templates or user-facing bundled creative assets.
+[[allow]]
+glob = "loom-samples/conformance/**"
+origin = "Loom-generated conformance fixture"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[allowed_external_license_families]
+values = [
+  "CC0-1.0",
+  "Public-Domain",
+  "OFL-1.1",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Apache-2.0",
+]
