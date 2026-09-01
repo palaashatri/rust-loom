@@ -198,8 +198,9 @@ mod visual_tests {
         for &(width, height) in VIEWPORTS {
             let first = loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
                 .expect("capture foundation gallery");
-            let second = loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
-                .expect("repeat foundation gallery capture");
+            let second =
+                loom_test_support::capture::snapshot_component(&window, width, height, 1.0)
+                    .expect("repeat foundation gallery capture");
             assert_eq!(first.as_raw(), second.as_raw());
             assert!(
                 non_canvas_pixels(&first) > 20_000,
