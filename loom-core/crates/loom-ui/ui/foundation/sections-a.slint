@@ -1,0 +1,226 @@
+import { Theme } from "../theme.slint";
+import {
+    LoomButton, LoomIconButton, LoomTextField, LoomSearchField,
+    LoomToggle, LoomSegmentedControl, LoomProgressBar,
+    LoomTabStrip,
+} from "../foundation.slint";
+
+export component GallerySection inherits Rectangle {
+    in property <string> title: "Section";
+    in property <string> detail: "";
+    background: transparent;
+    min-height: 104px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-bottom: Theme.tokens.space.xl;
+        HorizontalLayout {
+            spacing: Theme.tokens.space.lg;
+            Text {
+                text: root.title;
+                font-size: Theme.tokens.typography.body-large;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.detail;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+        }
+        @children
+    }
+}
+
+export component ButtonsSection inherits Rectangle {
+    background: transparent;
+    min-height: 104px;
+
+    VerticalLayout {
+        GallerySection {
+            title: "Buttons";
+            detail: "Primary, secondary, ghost, destructive, disabled, icon-only";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                alignment: start;
+                cross-axis-alignment: center;
+                LoomButton { label: "Create"; icon: "plus"; variant: "primary"; }
+                LoomButton { label: "Duplicate"; icon: "document"; }
+                LoomButton { label: "More detail"; variant: "ghost"; }
+                LoomButton { label: "Delete"; icon: "trash"; variant: "danger"; }
+                LoomButton { label: "Unavailable"; enabled: false; }
+                LoomIconButton { icon: "settings"; label: "Settings"; tooltip: "Open settings"; }
+                LoomIconButton { icon: "eye"; label: "Preview"; tooltip: "Toggle preview"; selected: true; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}
+
+export component FieldsSection inherits Rectangle {
+    in-out property <string> sample-value: "Quarterly plan";
+    in-out property <string> search-value: "";
+    background: transparent;
+    min-height: 104px;
+
+    VerticalLayout {
+        GallerySection {
+            title: "Fields";
+            detail: "Normal, invalid, search, long content";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.lg;
+                alignment: start;
+                LoomTextField {
+                    width: 240px;
+                    value <=> root.sample-value;
+                    label: "Document title";
+                    title: "Document title";
+                    placeholder: "Untitled";
+                }
+                LoomTextField {
+                    width: 220px;
+                    value: "Invalid value";
+                    label: "Invalid example";
+                    title: "Invalid example";
+                    invalid: true;
+                }
+                LoomSearchField {
+                    width: 260px;
+                    value <=> root.search-value;
+                    title: "Search this gallery";
+                    placeholder: "Search this gallery";
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}
+
+export component ChoiceSection inherits Rectangle {
+    in-out property <int> alignment: 0;
+    in-out property <bool> autosave: true;
+    background: transparent;
+    min-height: 104px;
+
+    VerticalLayout {
+        GallerySection {
+            title: "Choice and state";
+            detail: "Keyboard-operable selection, toggle, and progress";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xxl;
+                alignment: start;
+                cross-axis-alignment: center;
+                LoomSegmentedControl {
+                    width: 280px;
+                    label: "Alignment";
+                    items: ["Left", "Center", "Right"];
+                    current <=> root.alignment;
+                }
+                LoomToggle { label: "Autosave"; checked <=> root.autosave; }
+                VerticalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    Text {
+                        text: "Background export";
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    LoomProgressBar { width: 220px; value: 0.63; label: "Background export"; }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}
+
+export component NavigationSection inherits Rectangle {
+    in-out property <int> current-tab: 0;
+    background: transparent;
+    min-height: 104px;
+
+    VerticalLayout {
+        GallerySection {
+            title: "Navigation";
+            detail: "Tabs use an underline hierarchy rather than pill-shaped cards";
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                LoomTabStrip {
+                    items: ["Document", "Comments", "Versions"];
+                    current <=> root.current-tab;
+                }
+                Rectangle {
+                    height: 88px;
+                    background: Theme.palette().surface;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    Text {
+                        x: Theme.tokens.space.xl;
+                        y: Theme.tokens.space.xl;
+                        width: parent.width - Theme.tokens.space.xxxl;
+                        text: root.current-tab == 0 ? "Document settings and content belong here."
+                            : root.current-tab == 1 ? "Comments retain the same shared navigation grammar."
+                            : "Version history is a product surface, not a decorative card.";
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ButtonsSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        ButtonsSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component FieldsSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        FieldsSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component ChoiceSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        ChoiceSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component NavigationSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        NavigationSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

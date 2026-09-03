@@ -1,0 +1,311 @@
+// Loom overlay primitives: menus, popovers, and dialogs.
+//
+// Transient surfaces that share the foundation keyboard grammar (Return and
+// Space activate, arrows move, Escape dismisses) and the overlay token ramp.
+// Geometry, palette, spacing, radius, and typography come from Theme only.
+// Slint 1.17 exposes no menu, menu-item, or dialog accessible roles, so the
+// menu maps to list and list-item and the titled surfaces map to groupbox,
+// each with an explicit accessible label.
+
+import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
+
+export component LoomMenu inherits Rectangle {
+    in property <[string]> items: ["First item", "Second item", "Third item"];
+    in property <string> label: "Menu";
+    in-out property <int> current: 0;
+    in-out property <bool> open: false;
+    in property <bool> enabled: true;
+    callback selected(int);
+    callback cancelled();
+
+    min-width: 200px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: menu-focus.has-focus ? 2px : 1px;
+    border-color: menu-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: Theme.palette().overlay;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+    accessible-role: list;
+    accessible-label: root.label;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.open = !root.open;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            height: Theme.tokens.metrics.control-height;
+            background: trigger-touch.has-hover && root.enabled ? Theme.palette().surface-raised : transparent;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                cross-axis-alignment: center;
+                Text {
+                    text: root.label;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 600;
+                    color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Icon {
+                    size: Theme.tokens.metrics.icon-small;
+                    icon: root.open ? "chevron-up" : "chevron-down";
+                    tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+                }
+            }
+            trigger-touch := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    menu-focus.focus();
+                    root.open = !root.open;
+                }
+            }
+        }
+
+        if root.open : Rectangle {
+            height: 1px;
+            background: Theme.palette().border;
+        }
+
+        if root.open : VerticalLayout {
+            spacing: 0px;
+            padding-top: Theme.tokens.space.xs;
+            padding-bottom: Theme.tokens.space.xs;
+            if root.items.length == 0 : Text {
+                text: "No items";
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                horizontal-alignment: center;
+            }
+            for item[idx] in root.items : Rectangle {
+                height: Theme.tokens.metrics.panel-header-height;
+                background: idx == root.current ? Theme.palette().selection-soft
+                    : item-touch.has-hover ? Theme.palette().surface-raised
+                    : transparent;
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    cross-axis-alignment: center;
+                    Text {
+                        text: item;
+                        font-size: Theme.tokens.typography.body;
+                        font-weight: idx == root.current ? 600 : 500;
+                        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    if idx == root.current : Icon {
+                        size: Theme.tokens.metrics.icon-small;
+                        icon: "check";
+                        tint: Theme.palette().accent;
+                    }
+                }
+                item-touch := TouchArea {
+                    enabled: root.enabled;
+                    clicked => {
+                        menu-focus.focus();
+                        root.current = idx;
+                        root.open = false;
+                        root.selected(idx);
+                    }
+                }
+                accessible-role: list-item;
+                accessible-label: item;
+                accessible-action-default => {
+                    if (root.enabled) {
+                        root.current = idx;
+                        root.open = false;
+                        root.selected(idx);
+                    }
+                }
+            }
+        }
+    }
+
+    menu-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) {
+                return reject;
+            }
+            if (event.text == Key.Escape) {
+                if (root.open) {
+                    root.open = false;
+                    root.cancelled();
+                    return accept;
+                }
+                return reject;
+            }
+            if (event.text == Key.DownArrow) {
+                if (!root.open) {
+                    root.open = true;
+                    return accept;
+                }
+                if (root.items.length > 0) {
+                    root.current = min(root.items.length - 1, root.current + 1);
+                    return accept;
+                }
+                return reject;
+            }
+            if (event.text == Key.UpArrow) {
+                if (root.open && root.items.length > 0) {
+                    root.current = max(0, root.current - 1);
+                    return accept;
+                }
+                return reject;
+            }
+            if (event.text == Key.Return || event.text == Key.Space) {
+                if (root.open) {
+                    if (root.items.length == 0) {
+                        return reject;
+                    }
+                    root.open = false;
+                    root.selected(root.current);
+                    return accept;
+                }
+                root.open = true;
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component LoomPopover inherits Rectangle {
+    in property <string> label: "Popover";
+    in property <string> title: "";
+    in-out property <bool> open: false;
+    in property <bool> enabled: true;
+    callback dismissed();
+    public function close() {
+        root.open = false;
+        root.dismissed();
+    }
+
+    visible: root.open;
+    min-width: 240px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: pop-focus.has-focus ? 2px : 1px;
+    border-color: pop-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: Theme.palette().overlay;
+    drop-shadow-blur: 20px;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: Theme.palette().shadow;
+    accessible-role: groupbox;
+    accessible-label: root.title != "" ? root.title : root.label;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.lg;
+        if root.title != "" : Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.title;
+            font-weight: 600;
+            color: Theme.palette().ink;
+            overflow: elide;
+        }
+        @children
+    }
+
+    pop-focus := FocusScope {
+        enabled: root.enabled && root.open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    TouchArea {
+        enabled: root.enabled && root.open;
+        clicked => { pop-focus.focus(); }
+    }
+}
+
+export component LoomDialog inherits Rectangle {
+    in property <string> title: "Confirm action";
+    in property <string> body: "Describe the consequence before confirming.";
+    in property <string> label: root.title;
+    in property <bool> enabled: true;
+    callback confirmed();
+    callback cancelled();
+    public function confirm() {
+        if (root.enabled) {
+            root.confirmed();
+        }
+    }
+    public function cancel() {
+        root.cancelled();
+    }
+
+    min-width: 320px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: dlg-focus.has-focus ? 2px : 1px;
+    border-color: dlg-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: Theme.palette().overlay;
+    drop-shadow-blur: 28px;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 10px;
+    drop-shadow-color: Theme.palette().shadow;
+    accessible-role: groupbox;
+    accessible-label: root.label;
+    accessible-description: root.body;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.xl;
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.body-large;
+            font-weight: 700;
+            color: Theme.palette().ink;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.body;
+            font-size: Theme.tokens.typography.body;
+            color: Theme.palette().ink-secondary;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.md;
+            alignment: end;
+            @children
+        }
+    }
+
+    dlg-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) {
+                return reject;
+            }
+            if (event.text == Key.Return) {
+                root.confirm();
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { dlg-focus.focus(); }
+    }
+}

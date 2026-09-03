@@ -30,6 +30,7 @@ export component LoomToolbarGroup inherits Rectangle {
     background: transparent;
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
+        alignment: start;
         cross-axis-alignment: center;
         @children
     }
@@ -67,7 +68,7 @@ export component LoomSectionHeader inherits Rectangle {
         Text {
             text: root.title;
             font-size: Theme.tokens.typography.title;
-            font-weight: 600;
+            font-weight: 700;
             color: Theme.palette().ink;
             vertical-alignment: center;
             horizontal-stretch: 1;

@@ -1,0 +1,170 @@
+// Loom data-display primitives: single-row table rows and data placeholders.
+//
+// Token-driven rows and empty/error states that share the foundation keyboard
+// grammar (Return and Space activate, focus is always visible) and the
+// surface/ink token ramp. Geometry, palette, spacing, radius, and typography
+// come from Theme only.
+// Slint 1.17 exposes no table, row, or alert accessible roles, so the row
+// maps to list-item and the titled placeholders map to groupbox, each with
+// an explicit accessible label.
+
+import { Theme } from "../theme.slint";
+import { LoomButton } from "controls.slint";
+
+export component LoomTableRow inherits Rectangle {
+    in property <string> label: "Row";
+    in property <string> detail: "";
+    in property <string> status: "";
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback activated;
+
+    height: Theme.tokens.metrics.panel-header-height;
+    min-width: 120px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: row-focus.has-focus ? 2px : 0px;
+    border-color: row-focus.has-focus ? Theme.palette().focus : transparent;
+    background: root.selected ? Theme.palette().selection-soft
+        : row-touch.pressed ? Theme.palette().surface-sunken
+        : row-touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+    accessible-role: list-item;
+    accessible-label: root.label;
+    accessible-description: root.detail;
+    accessible-action-default => { if (root.enabled) { root.activated(); } }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 160px;
+            overflow: elide;
+        }
+        if root.status != "" : Text {
+            text: root.status;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: !root.enabled ? Theme.palette().ink-disabled
+                : root.selected ? Theme.palette().accent
+                : Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 120px;
+            overflow: elide;
+        }
+    }
+    row-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == Key.Space) {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    row-touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { row-focus.focus(); root.activated(); }
+    }
+}
+
+export component LoomEmptyState inherits Rectangle {
+    in property <string> title: "No rows";
+    in property <string> hint: "Rows will appear here once they exist.";
+    in property <string> action-label: "";
+    in property <bool> enabled: true;
+    callback requested();
+
+    min-height: 112px;
+    background: transparent;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+    accessible-description: root.hint;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.xl;
+        alignment: center;
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.body-large;
+            font-weight: 600;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.hint;
+            font-size: Theme.tokens.typography.body;
+            color: Theme.palette().ink-secondary;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        if root.action-label != "" : HorizontalLayout {
+            alignment: center;
+            LoomButton {
+                label: root.action-label;
+                enabled: root.enabled;
+                clicked => { root.requested(); }
+            }
+        }
+    }
+}
+
+export component LoomErrorState inherits Rectangle {
+    in property <string> title: "Something went wrong";
+    in property <string> message: "Rows could not be loaded.";
+    in property <string> retry-label: "Retry";
+    in property <bool> enabled: true;
+    callback retried();
+
+    min-height: 112px;
+    background: transparent;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+    accessible-description: root.message;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.xl;
+        alignment: center;
+        Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.body-large;
+            font-weight: 600;
+            color: root.enabled ? Theme.palette().danger : Theme.palette().ink-disabled;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.message;
+            font-size: Theme.tokens.typography.body;
+            color: Theme.palette().ink-secondary;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        if root.retry-label != "" : HorizontalLayout {
+            alignment: center;
+            LoomButton {
+                label: root.retry-label;
+                enabled: root.enabled;
+                clicked => { root.retried(); }
+            }
+        }
+    }
+}

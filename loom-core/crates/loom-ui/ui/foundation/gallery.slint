@@ -1,43 +1,33 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+export { Theme } from "../theme.slint";
 import {
     LoomButton, LoomIconButton, LoomTextField, LoomSearchField,
     LoomToggle, LoomSegmentedControl, LoomProgressBar,
     LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
     LoomOverflowButton, LoomPanel, LoomSectionHeader, LoomTabStrip,
     LoomListRow, LoomStatusBar, LoomStatusText,
+    LoomMenu, LoomPopover, LoomDialog,
+    LoomTableRow, LoomEmptyState, LoomErrorState,
+    LoomCanvasHandle, LoomTimelineRuler, LoomTimelineMarker,
 } from "../foundation.slint";
-
-component GallerySection inherits Rectangle {
-    in property <string> title: "Section";
-    in property <string> detail: "";
-    background: transparent;
-    min-height: 104px;
-
-    VerticalLayout {
-        spacing: Theme.tokens.space.md;
-        padding-bottom: Theme.tokens.space.xl;
-        HorizontalLayout {
-            spacing: Theme.tokens.space.lg;
-            Text {
-                text: root.title;
-                font-size: Theme.tokens.typography.body-large;
-                font-weight: 600;
-                color: Theme.palette().ink;
-                vertical-alignment: center;
-            }
-            Text {
-                text: root.detail;
-                font-size: Theme.tokens.typography.caption;
-                color: Theme.palette().ink-secondary;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-        }
-        @children
-    }
-}
+import {
+    GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+} from "sections-a.slint";
+import {
+    RowsSection, OverlaysSection, DataSection, CanvasSection,
+} from "sections-b.slint";
+export {
+    GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+    ButtonsSectionWindow, FieldsSectionWindow, ChoiceSectionWindow, NavigationSectionWindow,
+} from "sections-a.slint";
+import {
+    RowsSection, OverlaysSection, DataSection, CanvasSection,
+} from "sections-b.slint";
+export {
+    RowsSection, OverlaysSection, DataSection, CanvasSection,
+    RowsSectionWindow, OverlaysSectionWindow, DataSectionWindow, CanvasSectionWindow,
+} from "sections-b.slint";
 
 export component FoundationGallery inherits Window {
     title: "Loom UI Foundation Gallery";
@@ -52,6 +42,12 @@ export component FoundationGallery inherits Window {
     in-out property <bool> autosave: true;
     in-out property <int> alignment: 0;
     in-out property <int> current-tab: 0;
+    in-out property <string> menu-status: "No menu choice yet";
+    in-out property <string> popover-status: "Popover is open";
+    in-out property <string> dialog-status: "No dialog action yet";
+    in-out property <string> data-status: "No data action yet";
+    in-out property <float> playhead-position: 0.35;
+    in-out property <string> canvas-status: "Playhead at 35%";
 
     VerticalLayout {
         spacing: 0px;
@@ -118,37 +114,31 @@ export component FoundationGallery inherits Window {
             LoomOverflowButton { }
         }
 
-        Rectangle {
+        content-row := HorizontalLayout {
+            spacing: 0px;
             vertical-stretch: 1;
-            background: Theme.palette().canvas;
-            HorizontalLayout {
-                spacing: 0px;
 
-                LoomPanel {
-                    width: 220px;
-                    min-width: 220px;
-                    max-width: 220px;
-                    title: "Foundation";
-                    detail: "vNext";
-                    VerticalLayout {
-                        spacing: Theme.tokens.space.xs;
-                        padding-left: Theme.tokens.space.md;
-                        padding-right: Theme.tokens.space.md;
-                        padding-top: Theme.tokens.space.md;
-                        LoomListRow { label: "Controls"; icon: "slider"; selected: true; }
-                        LoomListRow { label: "Chrome"; icon: "view"; }
-                        LoomListRow { label: "States"; icon: "check"; }
-                        LoomListRow { label: "Accessibility"; icon: "keyboard"; detail: "A11y"; }
-                    }
+            LoomPanel {
+                width: 220px;
+                title: "Foundation";
+                detail: "vNext";
+                VerticalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    padding-top: Theme.tokens.space.md;
+                    LoomListRow { label: "Controls"; icon: "slider"; selected: true; }
+                    LoomListRow { label: "Chrome"; icon: "view"; }
+                    LoomListRow { label: "States"; icon: "check"; }
+                    LoomListRow { label: "Accessibility"; icon: "keyboard"; detail: "A11y"; }
                 }
+            }
 
-                Rectangle { width: 1px; background: Theme.palette().border; }
+            Rectangle { width: 1px; background: Theme.palette().border; }
 
-                ScrollView {
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-                    viewport-width: self.width;
-                    viewport-height: content.preferred-height;
+            ScrollView {
+                horizontal-stretch: 1;
+                viewport-width: self.width;
 
                     content := Rectangle {
                         width: parent.viewport-width;
@@ -161,132 +151,51 @@ export component FoundationGallery inherits Window {
                             padding-top: Theme.tokens.space.xxl;
                             padding-bottom: Theme.tokens.space.xxxl;
 
-                            GallerySection {
-                                title: "Buttons";
-                                detail: "Primary, secondary, ghost, destructive, disabled, icon-only";
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md;
-                                    cross-axis-alignment: center;
-                                    LoomButton { label: "Create"; icon: "plus"; variant: "primary"; }
-                                    LoomButton { label: "Duplicate"; icon: "document"; }
-                                    LoomButton { label: "More detail"; variant: "ghost"; }
-                                    LoomButton { label: "Delete"; icon: "trash"; variant: "danger"; }
-                                    LoomButton { label: "Unavailable"; enabled: false; }
-                                    LoomIconButton { icon: "settings"; label: "Settings"; tooltip: "Open settings"; }
-                                    LoomIconButton { icon: "eye"; label: "Preview"; tooltip: "Toggle preview"; selected: true; }
-                                }
+                            ButtonsSection { }
+
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+
+                            FieldsSection {
+                                sample-value <=> root.sample-value;
+                                search-value <=> root.search-value;
                             }
 
                             Rectangle { height: 1px; background: Theme.palette().border; }
 
-                            GallerySection {
-                                title: "Fields";
-                                detail: "Normal, invalid, search, long content";
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.lg;
-                                    LoomTextField {
-                                        width: 240px;
-                                        value <=> root.sample-value;
-                                        label: "Document title";
-                                        placeholder: "Untitled";
-                                    }
-                                    LoomTextField {
-                                        width: 220px;
-                                        value: "Invalid value";
-                                        label: "Invalid example";
-                                        invalid: true;
-                                    }
-                                    LoomSearchField {
-                                        width: 260px;
-                                        value <=> root.search-value;
-                                        placeholder: "Search this gallery";
-                                    }
-                                }
+                            ChoiceSection {
+                                alignment <=> root.alignment;
+                                autosave <=> root.autosave;
                             }
 
                             Rectangle { height: 1px; background: Theme.palette().border; }
 
-                            GallerySection {
-                                title: "Choice and state";
-                                detail: "Keyboard-operable selection, toggle, and progress";
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.xxl;
-                                    cross-axis-alignment: center;
-                                    LoomSegmentedControl {
-                                        width: 280px;
-                                        label: "Alignment";
-                                        items: ["Left", "Center", "Right"];
-                                        current <=> root.alignment;
-                                    }
-                                    LoomToggle { label: "Autosave"; checked <=> root.autosave; }
-                                    VerticalLayout {
-                                        spacing: Theme.tokens.space.sm;
-                                        Text {
-                                            text: "Background export";
-                                            font-size: Theme.tokens.typography.caption;
-                                            color: Theme.palette().ink-secondary;
-                                        }
-                                        LoomProgressBar { width: 220px; value: 0.63; label: "Background export"; }
-                                    }
-                                }
+                            NavigationSection { current-tab <=> root.current-tab; }
+
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+
+                            RowsSection { }
+
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+
+                            OverlaysSection {
+                                menu-status <=> root.menu-status;
+                                popover-status <=> root.popover-status;
+                                dialog-status <=> root.dialog-status;
                             }
 
                             Rectangle { height: 1px; background: Theme.palette().border; }
 
-                            GallerySection {
-                                title: "Navigation";
-                                detail: "Tabs use an underline hierarchy rather than pill-shaped cards";
-                                VerticalLayout {
-                                    spacing: Theme.tokens.space.md;
-                                    LoomTabStrip {
-                                        items: ["Document", "Comments", "Versions"];
-                                        current <=> root.current-tab;
-                                    }
-                                    Rectangle {
-                                        height: 88px;
-                                        background: Theme.palette().surface;
-                                        border-width: 1px;
-                                        border-color: Theme.palette().border;
-                                        border-radius: Theme.tokens.metrics.radius-medium;
-                                        Text {
-                                            x: Theme.tokens.space.xl;
-                                            y: Theme.tokens.space.xl;
-                                            width: parent.width - Theme.tokens.space.xxxl;
-                                            text: root.current-tab == 0 ? "Document settings and content belong here."
-                                                : root.current-tab == 1 ? "Comments retain the same shared navigation grammar."
-                                                : "Version history is a product surface, not a decorative card.";
-                                            font-size: Theme.tokens.typography.body;
-                                            color: Theme.palette().ink;
-                                        }
-                                    }
-                                }
-                            }
+                            DataSection { data-status <=> root.data-status; }
 
                             Rectangle { height: 1px; background: Theme.palette().border; }
 
-                            GallerySection {
-                                title: "Rows and density";
-                                detail: "Selected rows remain subordinate to user content";
-                                Rectangle {
-                                    width: 520px;
-                                    min-height: 104px;
-                                    background: Theme.palette().surface;
-                                    border-width: 1px;
-                                    border-color: Theme.palette().border;
-                                    border-radius: Theme.tokens.metrics.radius-medium;
-                                    VerticalLayout {
-                                        spacing: Theme.tokens.space.xs;
-                                        padding: Theme.tokens.space.sm;
-                                        LoomListRow { label: "Hero image"; icon: "image"; detail: "2048 × 1365"; selected: true; }
-                                        LoomListRow { label: "Headline"; icon: "text"; detail: "Text layer"; }
-                                        LoomListRow { label: "Archived option with a deliberately long name"; icon: "layers"; detail: "Hidden"; enabled: false; }
-                                    }
-                                }
+                            CanvasSection {
+                                playhead-position <=> root.playhead-position;
+                                canvas-status <=> root.canvas-status;
                             }
                         }
                     }
                 }
-            }
         }
 
         LoomStatusBar {
