@@ -48,6 +48,7 @@ export component LoomButton inherits Rectangle {
 
     accessible-role: button;
     accessible-label: root.label;
+    accessible-description: root.label;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     if !Theme.rtl : HorizontalLayout {
@@ -174,6 +175,7 @@ export component LoomTextField inherits VerticalLayout {
     horizontal-stretch: 1;
     accessible-role: AccessibleRole.text-input;
     accessible-label: root.label;
+    accessible-description: root.title != "" ? root.title : root.label;
 
     if root.title != "" : Text {
         text: root.title;
@@ -241,6 +243,7 @@ export component LoomSearchField inherits VerticalLayout {
     horizontal-stretch: 1;
     accessible-role: AccessibleRole.text-input;
     accessible-label: root.label;
+    accessible-description: root.title != "" ? root.title : root.label;
 
     if root.title != "" : Text {
         text: root.title;
@@ -322,6 +325,7 @@ export component LoomToggle inherits Rectangle {
     background: transparent;
     accessible-role: checkbox;
     accessible-label: root.label;
+    accessible-description: root.label;
     accessible-checked: root.checked;
     accessible-action-default => {
         if (root.enabled) {
@@ -429,6 +433,7 @@ export component LoomSegmentedControl inherits Rectangle {
     background: Theme.palette().surface-sunken;
     accessible-role: radio-group;
     accessible-label: root.label;
+    accessible-description: root.label;
 
     HorizontalLayout {
         spacing: Theme.tokens.space.xs;
@@ -457,6 +462,7 @@ export component LoomSegmentedControl inherits Rectangle {
             }
             accessible-role: button;
             accessible-label: root.items[rel];
+            accessible-description: root.items[rel];
             accessible-action-default => {
                 if (root.enabled) { root.current = rel; root.selected(rel); }
             }
@@ -467,19 +473,30 @@ export component LoomSegmentedControl inherits Rectangle {
         enabled: root.enabled;
         key-pressed(event) => {
             if (!root.enabled || root.items.length == 0) { return reject; }
-            // In RTL the visual order is mirrored, so the left/right keys
-            // move in the opposite logical direction.
-            if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
+            // Horizontal arrows follow visual order, so they mirror in RTL.
+            if (event.text == Key.LeftArrow) {
                 root.current = Theme.rtl
                     ? min(root.items.length - 1, root.current + 1)
                     : max(0, root.current - 1);
                 root.selected(root.current);
                 return accept;
             }
-            if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
+            if (event.text == Key.RightArrow) {
                 root.current = Theme.rtl
                     ? max(0, root.current - 1)
                     : min(root.items.length - 1, root.current + 1);
+                root.selected(root.current);
+                return accept;
+            }
+            // Vertical arrows keep their logical previous/next semantics in
+            // both directions; bidi mirroring must not invert Up and Down.
+            if (event.text == Key.UpArrow) {
+                root.current = max(0, root.current - 1);
+                root.selected(root.current);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.current = min(root.items.length - 1, root.current + 1);
                 root.selected(root.current);
                 return accept;
             }
@@ -500,6 +517,7 @@ export component LoomProgressBar inherits Rectangle {
     background: Theme.palette().surface-sunken;
     accessible-role: progress-indicator;
     accessible-label: root.label;
+    accessible-description: root.label;
     accessible-value: root.value;
     accessible-value-minimum: root.minimum;
     accessible-value-maximum: root.maximum;
