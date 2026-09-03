@@ -33,7 +33,7 @@ export component LoomTableRow inherits Rectangle {
     accessible-description: root.detail;
     accessible-action-default => { if (root.enabled) { root.activated(); } }
 
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
@@ -64,6 +64,40 @@ export component LoomTableRow inherits Rectangle {
                 : Theme.palette().ink-secondary;
             vertical-alignment: center;
             max-width: 120px;
+            overflow: elide;
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        if root.status != "" : Text {
+            text: root.status;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: !root.enabled ? Theme.palette().ink-disabled
+                : root.selected ? Theme.palette().accent
+                : Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 120px;
+            overflow: elide;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 160px;
+            overflow: elide;
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
             overflow: elide;
         }
     }

@@ -42,7 +42,7 @@ export component LoomMenu inherits Rectangle {
         Rectangle {
             height: Theme.tokens.metrics.control-height;
             background: trigger-touch.has-hover && root.enabled ? Theme.palette().surface-raised : transparent;
-            HorizontalLayout {
+            if !Theme.rtl : HorizontalLayout {
                 spacing: Theme.tokens.space.md;
                 padding-left: Theme.tokens.space.md;
                 padding-right: Theme.tokens.space.md;
@@ -60,6 +60,26 @@ export component LoomMenu inherits Rectangle {
                     size: Theme.tokens.metrics.icon-small;
                     icon: root.open ? "chevron-up" : "chevron-down";
                     tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+                }
+            }
+            if Theme.rtl : HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                cross-axis-alignment: center;
+                Icon {
+                    size: Theme.tokens.metrics.icon-small;
+                    icon: root.open ? "chevron-up" : "chevron-down";
+                    tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+                }
+                Text {
+                    text: root.label;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 600;
+                    color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
                 }
             }
             trigger-touch := TouchArea {
@@ -91,7 +111,7 @@ export component LoomMenu inherits Rectangle {
                 background: idx == root.current ? Theme.palette().selection-soft
                     : item-touch.has-hover ? Theme.palette().surface-raised
                     : transparent;
-                HorizontalLayout {
+                if !Theme.rtl : HorizontalLayout {
                     spacing: Theme.tokens.space.md;
                     padding-left: Theme.tokens.space.md;
                     padding-right: Theme.tokens.space.md;
@@ -109,6 +129,26 @@ export component LoomMenu inherits Rectangle {
                         size: Theme.tokens.metrics.icon-small;
                         icon: "check";
                         tint: Theme.palette().accent;
+                    }
+                }
+                if Theme.rtl : HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    cross-axis-alignment: center;
+                    if idx == root.current : Icon {
+                        size: Theme.tokens.metrics.icon-small;
+                        icon: "check";
+                        tint: Theme.palette().accent;
+                    }
+                    Text {
+                        text: item;
+                        font-size: Theme.tokens.typography.body;
+                        font-weight: idx == root.current ? 600 : 500;
+                        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
                     }
                 }
                 item-touch := TouchArea {
@@ -282,7 +322,7 @@ export component LoomDialog inherits Rectangle {
         }
         HorizontalLayout {
             spacing: Theme.tokens.space.md;
-            alignment: end;
+            alignment: Theme.rtl ? start : end;
             @children
         }
     }

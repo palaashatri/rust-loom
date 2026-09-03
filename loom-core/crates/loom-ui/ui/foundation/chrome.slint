@@ -126,6 +126,7 @@ export component LoomTabStrip inherits Rectangle {
         padding-right: Theme.tokens.space.md;
         cross-axis-alignment: stretch;
         for item[idx] in root.items : Rectangle {
+            property <int> rel: Theme.rtl ? root.items.length - 1 - idx : idx;
             min-width: max(64px, tab-label.preferred-width + Theme.tokens.space.xxl);
             preferred-width: max(64px, tab-label.preferred-width + Theme.tokens.space.xxl);
             background: tab-touch.pressed ? Theme.palette().surface-sunken
@@ -137,26 +138,26 @@ export component LoomTabStrip inherits Rectangle {
                 width: parent.width - Theme.tokens.space.md;
                 height: 2px;
                 border-radius: 1px;
-                background: idx == root.current ? Theme.palette().accent : transparent;
+                background: rel == root.current ? Theme.palette().accent : transparent;
             }
             tab-label := Text {
-                text: item;
+                text: root.items[rel];
                 font-size: Theme.tokens.typography.caption;
-                font-weight: idx == root.current ? 600 : 500;
+                font-weight: rel == root.current ? 600 : 500;
                 color: !root.enabled ? Theme.palette().ink-disabled
-                    : idx == root.current ? Theme.palette().ink
+                    : rel == root.current ? Theme.palette().ink
                     : Theme.palette().ink-secondary;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
             tab-touch := TouchArea {
                 enabled: root.enabled;
-                clicked => { tabs-focus.focus(); root.current = idx; root.selected(idx); }
+                clicked => { tabs-focus.focus(); root.current = rel; root.selected(rel); }
             }
             accessible-role: tab;
-            accessible-label: item;
+            accessible-label: root.items[rel];
             accessible-action-default => {
-                if (root.enabled) { root.current = idx; root.selected(idx); }
+                if (root.enabled) { root.current = rel; root.selected(rel); }
             }
         }
         Rectangle { horizontal-stretch: 1; background: transparent; }
@@ -173,12 +174,16 @@ export component LoomTabStrip inherits Rectangle {
         key-pressed(event) => {
             if (!root.enabled || root.items.length == 0) { return reject; }
             if (event.text == Key.LeftArrow) {
-                root.current = max(0, root.current - 1);
+                root.current = Theme.rtl
+                    ? min(root.items.length - 1, root.current + 1)
+                    : max(0, root.current - 1);
                 root.selected(root.current);
                 return accept;
             }
             if (event.text == Key.RightArrow) {
-                root.current = min(root.items.length - 1, root.current + 1);
+                root.current = Theme.rtl
+                    ? max(0, root.current - 1)
+                    : min(root.items.length - 1, root.current + 1);
                 root.selected(root.current);
                 return accept;
             }
@@ -208,7 +213,7 @@ export component LoomListRow inherits Rectangle {
     accessible-label: root.label;
     accessible-action-default => { if (root.enabled) { root.activated(); } }
 
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
@@ -234,6 +239,34 @@ export component LoomListRow inherits Rectangle {
             vertical-alignment: center;
             max-width: 160px;
             overflow: elide;
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 160px;
+            overflow: elide;
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.icon != "" : Icon {
+            size: Theme.tokens.metrics.icon-small;
+            icon: root.icon;
+            tint: root.selected ? Theme.palette().accent : Theme.palette().ink-secondary;
         }
     }
     row-focus := FocusScope {

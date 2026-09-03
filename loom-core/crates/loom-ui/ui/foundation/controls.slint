@@ -19,8 +19,17 @@ export component LoomButton inherits Rectangle {
         : Theme.palette().ink;
 
     height: Theme.tokens.metrics.control-height;
+    // Unconditional measurer: the visible label lives in a direction branch
+    // below, and branch-local ids are not visible to this scope, so width
+    // is measured once here (invisible text still reports font metrics).
+    measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: Theme.tokens.typography.body;
+        font-weight: 600;
+    }
     min-width: max(Theme.tokens.metrics.control-height,
-        label-text.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
+        measure.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
     preferred-width: root.min-width;
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: focus.has-focus ? 2px : root.ghost ? 0px : 1px;
@@ -41,7 +50,7 @@ export component LoomButton inherits Rectangle {
     accessible-label: root.label;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.lg;
         padding-right: Theme.tokens.space.lg;
@@ -53,12 +62,32 @@ export component LoomButton inherits Rectangle {
             icon: root.icon;
             tint: root.foreground;
         }
-        label-text := Text {
+        label-ltr := Text {
             text: root.label;
             font-size: Theme.tokens.typography.body;
             font-weight: 600;
             color: root.foreground;
             vertical-alignment: center;
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.lg;
+        padding-right: Theme.tokens.space.lg;
+        alignment: center;
+        cross-axis-alignment: center;
+
+        label-rtl := Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: 600;
+            color: root.foreground;
+            vertical-alignment: center;
+        }
+        if root.icon != "" : Icon {
+            size: Theme.tokens.metrics.icon-size;
+            icon: root.icon;
+            tint: root.foreground;
         }
     }
 
@@ -230,14 +259,18 @@ export component LoomSearchField inherits VerticalLayout {
         background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
 
         Icon {
-            x: Theme.tokens.space.md;
+            x: Theme.rtl
+                ? parent.width - Theme.tokens.space.md - Theme.tokens.metrics.icon-small
+                : Theme.tokens.space.md;
             y: (parent.height - Theme.tokens.metrics.icon-small) / 2;
             size: Theme.tokens.metrics.icon-small;
             icon: "search";
             tint: Theme.palette().ink-secondary;
         }
         input := TextInput {
-            x: Theme.tokens.space.xxxl;
+            x: Theme.rtl
+                ? Theme.tokens.space.xxxxl - Theme.tokens.space.xxxl
+                : Theme.tokens.space.xxxl;
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
             text: root.value;
@@ -249,7 +282,9 @@ export component LoomSearchField inherits VerticalLayout {
             edited => { root.value = input.text; root.edited(input.text); }
         }
         if root.value == "" : Text {
-            x: Theme.tokens.space.xxxl;
+            x: Theme.rtl
+                ? Theme.tokens.space.xxxxl - Theme.tokens.space.xxxl
+                : Theme.tokens.space.xxxl;
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
             text: root.placeholder;
@@ -274,7 +309,16 @@ export component LoomToggle inherits Rectangle {
     callback toggled(bool);
 
     height: Theme.tokens.metrics.control-height;
-    min-width: 64px;
+    // Same unconditional-measurer pattern as LoomButton: the visible row
+    // lives in a direction branch, and branch layouts do not drive the
+    // root preferred width, so width is measured once here.
+    measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: Theme.tokens.typography.body;
+        font-weight: 500;
+    }
+    min-width: max(64px, measure.preferred-width + 34px + Theme.tokens.space.md);
     background: transparent;
     accessible-role: checkbox;
     accessible-label: root.label;
@@ -286,7 +330,7 @@ export component LoomToggle inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
+    if !Theme.rtl : HorizontalLayout {
         spacing: Theme.tokens.space.md;
         cross-axis-alignment: center;
         Rectangle {
@@ -301,7 +345,7 @@ export component LoomToggle inherits Rectangle {
                 : root.checked ? Theme.palette().accent
                 : Theme.palette().surface-sunken;
             Rectangle {
-                x: root.checked ? 16px : 2px;
+                x: root.checked != Theme.rtl ? 16px : 2px;
                 y: 2px;
                 width: 14px;
                 height: 14px;
@@ -315,6 +359,37 @@ export component LoomToggle inherits Rectangle {
             font-weight: 500;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             vertical-alignment: center;
+        }
+    }
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            width: 34px;
+            height: 20px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: focus.has-focus ? 2px : 1px;
+            border-color: focus.has-focus ? Theme.palette().focus
+                : root.checked ? Theme.palette().accent
+                : Theme.palette().border-strong;
+            background: !root.enabled ? Theme.palette().surface-sunken
+                : root.checked ? Theme.palette().accent
+                : Theme.palette().surface-sunken;
+            Rectangle {
+                x: root.checked != Theme.rtl ? 16px : 2px;
+                y: 2px;
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                background: root.checked ? Theme.palette().accent-ink : Theme.palette().ink-secondary;
+            }
         }
     }
 
@@ -360,29 +435,30 @@ export component LoomSegmentedControl inherits Rectangle {
         padding: Theme.tokens.space.xs;
         for item[idx] in root.items : Rectangle {
             horizontal-stretch: 1;
+            property <int> rel: Theme.rtl ? root.items.length - 1 - idx : idx;
             min-width: max(48px, item-label.preferred-width + Theme.tokens.space.xl);
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 0px;
-            background: idx == root.current ? Theme.palette().surface-raised
+            background: rel == root.current ? Theme.palette().surface-raised
                 : item-touch.pressed ? Theme.palette().surface-sunken
                 : item-touch.has-hover ? Theme.palette().surface
                 : transparent;
             item-label := Text {
-                text: item;
+                text: root.items[rel];
                 font-size: Theme.tokens.typography.caption;
-                font-weight: idx == root.current ? 600 : 500;
-                color: root.enabled ? (idx == root.current ? Theme.palette().ink : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
+                font-weight: rel == root.current ? 600 : 500;
+                color: root.enabled ? (rel == root.current ? Theme.palette().ink : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
             item-touch := TouchArea {
                 enabled: root.enabled;
-                clicked => { focus.focus(); root.current = idx; root.selected(idx); }
+                clicked => { focus.focus(); root.current = rel; root.selected(rel); }
             }
             accessible-role: button;
-            accessible-label: item;
+            accessible-label: root.items[rel];
             accessible-action-default => {
-                if (root.enabled) { root.current = idx; root.selected(idx); }
+                if (root.enabled) { root.current = rel; root.selected(rel); }
             }
         }
     }
@@ -391,13 +467,19 @@ export component LoomSegmentedControl inherits Rectangle {
         enabled: root.enabled;
         key-pressed(event) => {
             if (!root.enabled || root.items.length == 0) { return reject; }
+            // In RTL the visual order is mirrored, so the left/right keys
+            // move in the opposite logical direction.
             if (event.text == Key.LeftArrow || event.text == Key.UpArrow) {
-                root.current = max(0, root.current - 1);
+                root.current = Theme.rtl
+                    ? min(root.items.length - 1, root.current + 1)
+                    : max(0, root.current - 1);
                 root.selected(root.current);
                 return accept;
             }
             if (event.text == Key.RightArrow || event.text == Key.DownArrow) {
-                root.current = min(root.items.length - 1, root.current + 1);
+                root.current = Theme.rtl
+                    ? max(0, root.current - 1)
+                    : min(root.items.length - 1, root.current + 1);
                 root.selected(root.current);
                 return accept;
             }
@@ -423,9 +505,12 @@ export component LoomProgressBar inherits Rectangle {
     accessible-value-maximum: root.maximum;
 
     Rectangle {
-        width: root.maximum > root.minimum
+        property <length> fill-width: root.maximum > root.minimum
             ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * parent.width, 0px, parent.width)
             : 0px;
+        // Progress fills from the leading edge: left in LTR, right in RTL.
+        x: Theme.rtl ? parent.width - self.fill-width : 0px;
+        width: self.fill-width;
         height: parent.height;
         border-radius: parent.border-radius;
         background: Theme.palette().accent;
