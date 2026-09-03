@@ -57,13 +57,13 @@ jobs:
       - name: Test and render foundation gallery
         working-directory: loom-core
         env:
-          LOOM_FOUNDATION_EVIDENCE: ../loom-bootstrap/.work/foundation-gallery
+          LOOM_FOUNDATION_EVIDENCE: ${{ github.workspace }}/loom-bootstrap/.work/foundation-gallery
         run: cargo test -p loom-ui
       - name: Upload reviewable foundation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: loom-ui-foundation-gallery
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
           path: loom-bootstrap/.work/foundation-gallery/
