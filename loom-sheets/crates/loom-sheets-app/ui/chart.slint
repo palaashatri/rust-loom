@@ -1,5 +1,5 @@
 import {
-    LoomCanvasHandle, LoomIconButton
+    LoomCanvasHandle, LoomIconButton, LoomButton
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 
@@ -40,25 +40,12 @@ export component SheetChart inherits Rectangle {
                 overflow: elide;
             }
 
-            Rectangle {
-                width: 76px;
-                height: 22px;
-                border-radius: 4px;
-                background: Theme.palette().surface-sunken;
-                border-width: 1px;
-                border-color: Theme.palette().border;
-                Text {
-                    text: root.is-line-chart ? "Line Chart" : "Bar Chart";
-                    font-size: Theme.tokens.typography.micro;
-                    color: Theme.palette().ink-secondary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                TouchArea {
-                    clicked => {
-                        root.is-line-chart = !root.is-line-chart;
-                        root.toggle-kind();
-                    }
+            LoomButton {
+                variant: "ghost";
+                label: root.is-line-chart ? "Line Chart" : "Bar Chart";
+                clicked => {
+                    root.is-line-chart = !root.is-line-chart;
+                    root.toggle-kind();
                 }
             }
 

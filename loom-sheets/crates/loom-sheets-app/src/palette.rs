@@ -11,11 +11,18 @@ use crate::{dispatch_command, CommandPaletteItem, SheetsApp};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteAction {
     NewSheet,
+    NewFromTemplate,
     OpenSheet,
     SaveSheet,
     SaveAsSheet,
     ExportCsv,
     ExportXlsx,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    AddRow,
+    AddCol,
     Undo,
     Redo,
 }
@@ -24,11 +31,18 @@ pub enum PaletteAction {
 pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
     match action {
         PaletteAction::NewSheet => dispatch_command(app, "sheets.new"),
+        PaletteAction::NewFromTemplate => dispatch_command(app, "sheets.new-template"),
         PaletteAction::OpenSheet => dispatch_command(app, "sheets.open"),
         PaletteAction::SaveSheet => dispatch_command(app, "sheets.save"),
         PaletteAction::SaveAsSheet => dispatch_command(app, "sheets.save-as"),
         PaletteAction::ExportCsv => dispatch_command(app, "sheets.export-csv"),
         PaletteAction::ExportXlsx => dispatch_command(app, "sheets.export-xlsx"),
+        PaletteAction::Cut => dispatch_command(app, "sheets.cut"),
+        PaletteAction::Copy => dispatch_command(app, "sheets.copy"),
+        PaletteAction::Paste => dispatch_command(app, "sheets.paste"),
+        PaletteAction::SelectAll => dispatch_command(app, "sheets.select-all"),
+        PaletteAction::AddRow => dispatch_command(app, "table.add_row"),
+        PaletteAction::AddCol => dispatch_command(app, "table.add_col"),
         PaletteAction::Undo if app.get_can_undo() => dispatch_command(app, "sheets.undo"),
         PaletteAction::Redo if app.get_can_redo() => dispatch_command(app, "sheets.redo"),
         PaletteAction::Undo | PaletteAction::Redo => false,
@@ -39,11 +53,18 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
 pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
     match id {
         "sheets.new" => Some(PaletteAction::NewSheet),
+        "sheets.new-template" => Some(PaletteAction::NewFromTemplate),
         "sheets.open" => Some(PaletteAction::OpenSheet),
         "sheets.save" => Some(PaletteAction::SaveSheet),
         "sheets.save-as" => Some(PaletteAction::SaveAsSheet),
         "sheets.export-csv" => Some(PaletteAction::ExportCsv),
         "sheets.export-xlsx" => Some(PaletteAction::ExportXlsx),
+        "sheets.cut" => Some(PaletteAction::Cut),
+        "sheets.copy" => Some(PaletteAction::Copy),
+        "sheets.paste" => Some(PaletteAction::Paste),
+        "sheets.select-all" => Some(PaletteAction::SelectAll),
+        "table.add_row" => Some(PaletteAction::AddRow),
+        "table.add_col" => Some(PaletteAction::AddCol),
         "sheets.undo" => Some(PaletteAction::Undo),
         "sheets.redo" => Some(PaletteAction::Redo),
         _ => None,
@@ -60,6 +81,12 @@ pub struct PaletteCommand {
 pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     [
         (PaletteAction::NewSheet, "sheets.new", "New Sheet", "Ctrl+N"),
+        (
+            PaletteAction::NewFromTemplate,
+            "sheets.new-template",
+            "New from Template...",
+            "",
+        ),
         (
             PaletteAction::OpenSheet,
             "sheets.open",
@@ -90,6 +117,17 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "Export Excel (.xlsx)",
             "",
         ),
+        (PaletteAction::Cut, "sheets.cut", "Cut", "Ctrl+X"),
+        (PaletteAction::Copy, "sheets.copy", "Copy", "Ctrl+C"),
+        (PaletteAction::Paste, "sheets.paste", "Paste", "Ctrl+V"),
+        (
+            PaletteAction::SelectAll,
+            "sheets.select-all",
+            "Select All",
+            "Ctrl+A",
+        ),
+        (PaletteAction::AddRow, "table.add_row", "Add Row", ""),
+        (PaletteAction::AddCol, "table.add_col", "Add Column", ""),
         (PaletteAction::Undo, "sheets.undo", "Undo", "Ctrl+Z"),
         (PaletteAction::Redo, "sheets.redo", "Redo", "Ctrl+Shift+Z"),
     ]

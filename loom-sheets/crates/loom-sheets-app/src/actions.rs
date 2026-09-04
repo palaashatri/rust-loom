@@ -6,13 +6,14 @@ use std::sync::Arc;
 use loom_desktop::{CommandAction, DesktopError, NativeMenuBar};
 use loom_sheets_core::{
     compute_pivot, evaluate, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
-    PivotAggregation, Sheet, SheetModel,
+    PivotAggregation, RangeEdit, Sheet, SheetModel,
 };
 use slint::{ComponentHandle, SharedString, VecModel};
 
 use crate::{
-    apply_sheet, cell_value, clear_selection, commit_formula_edit, select_cell, selection_from_app,
-    set_selection_alignment, sync_menu_state, GuiState, SheetsApp,
+    apply_sheet, cell_value, clear_selection, commit_formula_edit, commit_transaction, select_cell,
+    selection_from_app, set_selection_alignment, sync_menu_state, update_selection_range,
+    GridSelection, GuiState, SheetTransaction, SheetsApp,
 };
 
 /// Synchronize the sheet tab labels and active selection with the Slint UI.
@@ -570,6 +571,180 @@ pub(crate) fn register_sheet_actions(
             }
         });
     }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_copy_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                let data = copy_selection(&state.current.borrow(), sel);
+                let cell_count = data.iter().map(|r| r.len()).sum::<usize>();
+                *state.clipboard.borrow_mut() = Some(data);
+                app.set_status_left(SharedString::from(format!(
+                    "Copied {} ({} cells)",
+                    sel.label(),
+                    cell_count
+                )));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_cut_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                let data = copy_selection(&state.current.borrow(), sel);
+                let cell_count = data.iter().map(|r| r.len()).sum::<usize>();
+                *state.clipboard.borrow_mut() = Some(data);
+                let changed = clear_selection(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                );
+                if changed {
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                }
+                app.set_status_left(SharedString::from(format!(
+                    "Cut {} ({} cells)",
+                    sel.label(),
+                    cell_count
+                )));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_paste_selection(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let clip = state.clipboard.borrow().clone();
+                if let Some(data) = clip {
+                    let sel = selection_from_app(&app);
+                    let pasted = paste_selection(
+                        &mut state.current.borrow_mut(),
+                        &mut state.undo_stack.borrow_mut(),
+                        &mut state.redo_stack.borrow_mut(),
+                        sel,
+                        &data,
+                    );
+                    if pasted > 0 {
+                        apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Pasted {} cells at {}",
+                            pasted,
+                            sel.focus.to_a1()
+                        )));
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_all(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sheet = state.current.borrow();
+                let sel = select_all_range(&sheet);
+                let vals = evaluate(&sheet);
+                update_selection_range(&app, &sheet, &vals, sel);
+                apply_sheet(&app, &sheet);
+                app.set_status_left(SharedString::from(format!(
+                    "Selected all ({})",
+                    sel.label()
+                )));
+            }
+        });
+    }
+}
+
+/// Copy values from a worksheet selection into a 2D matrix of raw strings.
+pub(crate) fn copy_selection(sheet: &Sheet, sel: GridSelection) -> Vec<Vec<String>> {
+    let range = sel.range();
+    let mut rows = Vec::new();
+    for r in range.start.row..=range.end.row {
+        let mut row = Vec::new();
+        for c in range.start.col..=range.end.col {
+            let val = sheet
+                .raw(CellRef { row: r, col: c })
+                .unwrap_or_default()
+                .to_string();
+            row.push(val);
+        }
+        rows.push(row);
+    }
+    rows
+}
+
+/// Paste a 2D matrix into a worksheet with full undo transaction recording.
+pub(crate) fn paste_selection(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    target_sel: GridSelection,
+    data: &[Vec<String>],
+) -> usize {
+    if data.is_empty() || data[0].is_empty() {
+        return 0;
+    }
+    let is_single = data.len() == 1 && data[0].len() == 1;
+    let target_range = target_sel.range();
+    let mut edits = Vec::new();
+
+    if is_single && target_range.start != target_range.end {
+        let val = &data[0][0];
+        for r in target_range.start.row..=target_range.end.row {
+            for c in target_range.start.col..=target_range.end.col {
+                let cell = CellRef { row: r, col: c };
+                let edit = RangeEdit::replace(sheet, cell, Some(val.clone()));
+                edits.push(edit);
+            }
+        }
+    } else {
+        let origin = target_sel.focus;
+        for (r_off, row) in data.iter().enumerate() {
+            for (c_off, val) in row.iter().enumerate() {
+                let cell = CellRef {
+                    row: origin.row.saturating_add(r_off as u32),
+                    col: origin.col.saturating_add(c_off as u32),
+                };
+                let edit = RangeEdit::replace(sheet, cell, Some(val.clone()));
+                edits.push(edit);
+            }
+        }
+    }
+
+    let count = edits.len();
+    if count > 0 {
+        commit_transaction(
+            sheet,
+            undo_stack,
+            redo_stack,
+            SheetTransaction::Batch(edits),
+        );
+    }
+    count
+}
+
+/// Create a selection spanning all populated cells in the sheet.
+pub(crate) fn select_all_range(sheet: &Sheet) -> GridSelection {
+    let dims = sheet.dimensions();
+    let start = CellRef { row: 0, col: 0 };
+    let end = CellRef {
+        row: dims.rows.max(1).saturating_sub(1),
+        col: dims.cols.max(1).saturating_sub(1),
+    };
+    GridSelection::new(start, end)
 }
 
 /// Dispatch canonical command IDs through the same Slint callbacks used by
@@ -577,6 +752,9 @@ pub(crate) fn register_sheet_actions(
 pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
     match id {
         "file.new" | "sheets.new" => app.invoke_new_sheet(),
+        "file.new_template" | "sheets.new-template" => {
+            app.set_template_chooser_open(true);
+        }
         "file.open" | "sheets.open" => app.invoke_open_sheet(),
         "file.save" | "sheets.save" => app.invoke_save_sheet(),
         "file.save_as" | "sheets.save-as" => app.invoke_save_as_sheet(),
@@ -584,9 +762,14 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "file.export_xlsx" | "sheets.export-xlsx" => app.invoke_export_xlsx(),
         "edit.undo" | "sheets.undo" => app.invoke_undo(),
         "edit.redo" | "sheets.redo" => app.invoke_redo(),
+        "edit.cut" | "sheets.cut" => app.invoke_cut_selection(),
+        "edit.copy" | "sheets.copy" => app.invoke_copy_selection(),
+        "edit.paste" | "sheets.paste" => app.invoke_paste_selection(),
+        "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
         "app.palette" => app.invoke_open_palette(),
         "view.inspector" => app.invoke_toggle_inspector(),
         "table.add_row" => app.invoke_add_row(),
+        "table.add_col" | "sheets.add-col" => app.invoke_add_table_col(),
         "sheets.organize" => app.invoke_organize(),
         _ => return false,
     }
@@ -1010,5 +1193,107 @@ mod tests {
         let bytes = loom_sheets_core::export_xlsx_from_grid(&grid).expect("export xlsx");
         // Check zip header signature PK\x03\x04
         assert!(bytes.starts_with(b"PK\x03\x04"));
+    }
+
+    #[test]
+    fn test_copy_selection() {
+        let state = make_test_state();
+        let sheet = state.current.borrow();
+        let sel = GridSelection::new(CellRef { row: 0, col: 0 }, CellRef { row: 1, col: 1 });
+        let data = copy_selection(&sheet, sel);
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0].len(), 2);
+        assert_eq!(data[0][0], "Item");
+        assert_eq!(data[0][1], "Amount");
+        assert_eq!(data[1][0], "Rent");
+        assert_eq!(data[1][1], "1200");
+    }
+
+    #[test]
+    fn test_paste_single_into_range_with_undo() {
+        let state = make_test_state();
+        let mut sheet = state.current.borrow_mut();
+        let mut undo = state.undo_stack.borrow_mut();
+        let mut redo = state.redo_stack.borrow_mut();
+
+        let target_sel =
+            GridSelection::new(CellRef { row: 10, col: 0 }, CellRef { row: 11, col: 1 });
+        let data = vec![vec!["$99.00".to_string()]];
+        let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
+        assert_eq!(pasted, 4);
+        assert_eq!(sheet.raw(CellRef { row: 10, col: 0 }), Some("$99.00"));
+        assert_eq!(sheet.raw(CellRef { row: 11, col: 1 }), Some("$99.00"));
+        assert_eq!(undo.len(), 1);
+
+        // Revert undo
+        undo.pop().unwrap().revert(&mut sheet);
+        assert_eq!(sheet.raw(CellRef { row: 10, col: 0 }), None);
+        assert_eq!(sheet.raw(CellRef { row: 11, col: 1 }), None);
+    }
+
+    #[test]
+    fn test_paste_matrix_with_undo_redo() {
+        let state = make_test_state();
+        let mut sheet = state.current.borrow_mut();
+        let mut undo = state.undo_stack.borrow_mut();
+        let mut redo = state.redo_stack.borrow_mut();
+
+        let target_sel = GridSelection::new(CellRef { row: 5, col: 5 }, CellRef { row: 5, col: 5 });
+        let data = vec![
+            vec!["Alpha".to_string(), "Beta".to_string()],
+            vec!["Gamma".to_string(), "Delta".to_string()],
+        ];
+        let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
+        assert_eq!(pasted, 4);
+        assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
+        assert_eq!(sheet.raw(CellRef { row: 5, col: 6 }), Some("Beta"));
+        assert_eq!(sheet.raw(CellRef { row: 6, col: 5 }), Some("Gamma"));
+        assert_eq!(sheet.raw(CellRef { row: 6, col: 6 }), Some("Delta"));
+
+        // Revert
+        let tx = undo.pop().unwrap();
+        tx.revert(&mut sheet);
+        assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), None);
+        assert_eq!(sheet.raw(CellRef { row: 5, col: 6 }), None);
+
+        // Re-apply
+        tx.apply(&mut sheet);
+        assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
+        assert_eq!(sheet.raw(CellRef { row: 6, col: 6 }), Some("Delta"));
+    }
+
+    #[test]
+    fn test_cut_selection_with_undo_redo() {
+        let state = make_test_state();
+        let mut sheet = state.current.borrow_mut();
+        let mut undo = state.undo_stack.borrow_mut();
+        let mut redo = state.redo_stack.borrow_mut();
+
+        let sel = GridSelection::new(CellRef { row: 1, col: 0 }, CellRef { row: 1, col: 1 });
+        let data = copy_selection(&sheet, sel);
+        assert_eq!(data[0][0], "Rent");
+        assert_eq!(data[0][1], "1200");
+
+        let cleared = clear_selection(&mut sheet, &mut undo, &mut redo, sel.range());
+        assert!(cleared);
+        assert_eq!(sheet.raw(CellRef { row: 1, col: 0 }), None);
+        assert_eq!(sheet.raw(CellRef { row: 1, col: 1 }), None);
+        assert_eq!(undo.len(), 1);
+
+        // Undo restore
+        undo.pop().unwrap().revert(&mut sheet);
+        assert_eq!(sheet.raw(CellRef { row: 1, col: 0 }), Some("Rent"));
+        assert_eq!(sheet.raw(CellRef { row: 1, col: 1 }), Some("1200"));
+    }
+
+    #[test]
+    fn test_select_all_range() {
+        let state = make_test_state();
+        let sheet = state.current.borrow();
+        let sel = select_all_range(&sheet);
+        assert_eq!(sel.anchor, CellRef { row: 0, col: 0 });
+        let dims = sheet.dimensions();
+        assert_eq!(sel.focus.row, dims.rows - 1);
+        assert_eq!(sel.focus.col, dims.cols - 1);
     }
 }

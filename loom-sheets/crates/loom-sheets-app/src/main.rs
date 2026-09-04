@@ -1245,6 +1245,7 @@ pub(crate) struct GuiState {
     pub(crate) import_filter: FileFilter,
     pub(crate) csv_filter: FileFilter,
     pub(crate) xlsx_filter: FileFilter,
+    pub(crate) clipboard: RefCell<Option<Vec<Vec<String>>>>,
 }
 
 impl GuiState {
@@ -1270,6 +1271,7 @@ impl GuiState {
             import_filter,
             csv_filter,
             xlsx_filter,
+            clipboard: RefCell::new(None),
         }
     }
 }
@@ -1900,6 +1902,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let mut menu_bar = build_standard_menu_bar(
         "Loom Sheets",
         vec![
+            MenuItem::action("file.new_template", "New from Template..."),
             MenuItem::action_with_shortcut(
                 "file.export_csv",
                 "Export to CSV...",
@@ -1919,10 +1922,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     );
     // Only commands with a registered Sheets/controller sink are enabled.
     // Application/window/help entries remain disabled until a real native
-    // host bridge is installed for them. Table actions and unsupported
-    // standard commands therefore cannot appear executable.
+    // host bridge is installed for them.
     menu_bar.disable_items_except([
         "file.new",
+        "file.new_template",
         "file.open",
         "file.save",
         "file.save_as",
@@ -1930,8 +1933,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         "file.export_xlsx",
         "edit.undo",
         "edit.redo",
+        "edit.cut",
+        "edit.copy",
+        "edit.paste",
+        "edit.select_all",
         "app.palette",
         "view.inspector",
+        "table.add_row",
+        "table.add_col",
     ]);
     menu_service
         .install_menu_bar(&menu_bar)
@@ -2654,10 +2663,10 @@ mod tests {
         app.set_can_redo(true);
         wire_palette(&app);
         rebuild_palette(&app, "");
-        assert_eq!(app.get_palette_commands().row_count(), 8);
+        assert_eq!(app.get_palette_commands().row_count(), 15);
         assert_eq!(
             app.get_palette_commands()
-                .row_data(7)
+                .row_data(14)
                 .expect("rendered Redo row")
                 .id
                 .as_str(),
@@ -2665,7 +2674,7 @@ mod tests {
         );
 
         app.set_can_undo(false);
-        app.invoke_palette_invoked(7);
+        app.invoke_palette_invoked(14);
 
         assert_eq!(redo_calls.get(), 1);
         assert!(!app.get_palette_open());
@@ -2677,6 +2686,7 @@ mod tests {
         let mut menu = build_standard_menu_bar(
             "Loom Sheets",
             vec![
+                MenuItem::action("file.new_template", "New from Template..."),
                 MenuItem::action("file.export_csv", "Export to CSV..."),
                 MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
             ],
@@ -2692,6 +2702,7 @@ mod tests {
         );
         menu.disable_items_except([
             "file.new",
+            "file.new_template",
             "file.open",
             "file.save",
             "file.save_as",
@@ -2699,23 +2710,32 @@ mod tests {
             "file.export_xlsx",
             "edit.undo",
             "edit.redo",
+            "edit.cut",
+            "edit.copy",
+            "edit.paste",
+            "edit.select_all",
             "app.palette",
             "view.inspector",
+            "table.add_row",
+            "table.add_col",
         ]);
+        for id in ["view.zoom_in", "view.zoom_out", "view.zoom_actual"] {
+            assert!(
+                !menu.find_item(id).expect("menu command").is_enabled(),
+                "unhandled Sheets command {id} must be disabled"
+            );
+        }
         for id in [
             "edit.cut",
             "edit.copy",
             "edit.paste",
             "edit.select_all",
-            "view.zoom_in",
-            "view.zoom_out",
-            "view.zoom_actual",
             "table.add_row",
             "table.add_col",
         ] {
             assert!(
-                !menu.find_item(id).expect("menu command").is_enabled(),
-                "unhandled Sheets command {id} must be disabled"
+                menu.find_item(id).expect("menu command").is_enabled(),
+                "handled Sheets command {id} must be enabled"
             );
         }
     }

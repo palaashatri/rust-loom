@@ -147,6 +147,10 @@ export component SheetsApp inherits Window {
     callback set-cell-format(int);
     callback set-cell-alignment(int);
     callback clear-selected-cells;
+    callback copy-selection;
+    callback cut-selection;
+    callback paste-selection;
+    callback select-all;
     callback close-chart;
     callback toggle-chart-kind;
 
@@ -263,6 +267,22 @@ export component SheetsApp inherits Window {
                 }
                 if (event.text == "z" || event.text == "Z") {
                     if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                    return accept;
+                }
+                if (event.text == "c" || event.text == "C") {
+                    root.copy-selection();
+                    return accept;
+                }
+                if (event.text == "x" || event.text == "X") {
+                    root.cut-selection();
+                    return accept;
+                }
+                if (event.text == "v" || event.text == "V") {
+                    root.paste-selection();
+                    return accept;
+                }
+                if (event.text == "a" || event.text == "A") {
+                    root.select-all();
                     return accept;
                 }
             }
