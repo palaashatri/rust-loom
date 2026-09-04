@@ -1,6 +1,6 @@
 import {
     LoomTextField, LoomSearchField, LoomTabStrip,
-    LoomPanel, LoomSectionHeader, LoomToggle,
+    LoomPanel, LoomSectionHeader, LoomToggle, LoomButton, LoomIconButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 
@@ -31,8 +31,13 @@ export component SheetInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
     in property <bool> inspector-show-table: true;
     in property <bool> inspector-show-cell: true;
+    in property <int> cell-format: 0;
     callback inspector-search-edited(string);
     callback inspector-context-changed(int);
+    callback rename-sheet(string);
+    callback add-table-row;
+    callback add-table-col;
+    callback set-cell-format(int);
 
     title: root.selection-range + " selection";
     width: 280px;
@@ -68,15 +73,27 @@ export component SheetInspector inherits LoomPanel {
                     LoomSectionHeader { title: "Table"; }
                     SheetPropertyRow {
                         label: "Name";
-                        LoomTextField { label: "Table name"; value: root.sheet-name; enabled: false; }
+                        LoomTextField {
+                            label: "Table name";
+                            value: root.sheet-name;
+                            edited(name) => { root.rename-sheet(name); }
+                        }
                     }
                     SheetPropertyRow {
                         label: "Rows";
-                        LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; }
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "plus"; tooltip: "Add row"; clicked => { root.add-table-row(); } }
+                        }
                     }
                     SheetPropertyRow {
                         label: "Columns";
-                        LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; }
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "plus"; tooltip: "Add column"; clicked => { root.add-table-col(); } }
+                        }
                     }
                 }
 
@@ -94,6 +111,25 @@ export component SheetInspector inherits LoomPanel {
                     SheetPropertyRow {
                         label: "Formula";
                         LoomTextField { label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; enabled: false; }
+                    }
+                    LoomSectionHeader { title: "Data Format"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "123";
+                            variant: root.cell-format == 0 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(0); }
+                        }
+                        LoomButton {
+                            label: "$";
+                            variant: root.cell-format == 1 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(1); }
+                        }
+                        LoomButton {
+                            label: "%";
+                            variant: root.cell-format == 2 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(2); }
+                        }
                     }
                     SheetPropertyRow {
                         label: "Row height";

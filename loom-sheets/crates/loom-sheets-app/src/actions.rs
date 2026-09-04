@@ -27,6 +27,66 @@ pub(crate) fn sync_sheet_tabs(app: &SheetsApp, state: &GuiState) {
     app.set_active_sheet_index(*state.active_sheet_index.borrow() as i32);
 }
 
+/// Synchronize active chart data from the worksheet model to the Slint UI.
+pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
+    if !app.get_chart_visible() {
+        return;
+    }
+    let vals = evaluate(sheet);
+    let dims = sheet.dimensions();
+    let mut categories = Vec::new();
+    let mut values = Vec::new();
+    let mut display_values = Vec::new();
+    for r in 1..dims.rows {
+        let cat = cell_value(sheet, &vals, r, 0);
+        let val_str = cell_value(sheet, &vals, r, 1);
+        let clean = val_str.trim().trim_start_matches('$').trim_end_matches('%');
+        if let Ok(num) = clean.parse::<f64>() {
+            categories.push(cat);
+            values.push(num);
+            display_values.push(val_str);
+        }
+    }
+    if categories.is_empty() {
+        return;
+    }
+    let spec = ChartSpec {
+        kind: ChartKind::Bar,
+        title: format!("{} Chart", sheet.name),
+        series: vec![ChartSeries {
+            name: "Series 1".into(),
+            categories: categories.clone(),
+            values: values.clone(),
+        }],
+    };
+    if let Ok(normalized_series) = spec.normalized_points() {
+        let norm = normalized_series[0]
+            .iter()
+            .map(|&v| v as f32)
+            .collect::<Vec<f32>>();
+        app.set_chart_title(SharedString::from(spec.title));
+        app.set_chart_categories(
+            Rc::new(VecModel::from(
+                categories
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+        app.set_chart_values_display(
+            Rc::new(VecModel::from(
+                display_values
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect::<Vec<_>>(),
+            ))
+            .into(),
+        );
+        app.set_chart_normalized(Rc::new(VecModel::from(norm)).into());
+    }
+}
+
 /// Register all toolbar, sheet-tab, and menu actions on the Slint window.
 pub(crate) fn register_sheet_actions(
     app: &SheetsApp,
@@ -177,38 +237,128 @@ pub(crate) fn register_sheet_actions(
         app.on_insert_chart(move || {
             if let Some(app) = app_ref.upgrade() {
                 let sheet = state.current.borrow();
-                let vals = evaluate(&sheet);
-                let dims = sheet.dimensions();
-                let mut categories = Vec::new();
-                let mut values = Vec::new();
-                for r in 1..dims.rows {
-                    let cat = cell_value(&sheet, &vals, r, 0);
-                    let val_str = cell_value(&sheet, &vals, r, 1);
-                    if let Ok(num) = val_str.trim().parse::<f64>() {
-                        categories.push(cat);
-                        values.push(num);
+                app.set_chart_visible(true);
+                sync_chart_to_app(&app, &sheet);
+                app.set_status_left(SharedString::from(format!(
+                    "Inserted {} (Bar)",
+                    app.get_chart_title()
+                )));
+                app.set_formula_feedback("Chart rendered on worksheet".into());
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_close_chart(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_chart_visible(false);
+                app.set_status_left("Chart dismissed".into());
+            }
+        });
+    }
+
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_chart_kind(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_left("Toggled chart display style".into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_rename_sheet(move |new_name| {
+            if let Some(app) = app_ref.upgrade() {
+                let trimmed = new_name.trim();
+                if !trimmed.is_empty() {
+                    let active_idx = *state.active_sheet_index.borrow();
+                    state.current.borrow_mut().name = trimmed.to_string();
+                    if active_idx < state.sheets.borrow().len() {
+                        state.sheets.borrow_mut()[active_idx].name = trimmed.to_string();
                     }
+                    sync_sheet_tabs(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Renamed sheet to {trimmed}")));
                 }
-                let spec = ChartSpec {
-                    kind: ChartKind::Bar,
-                    title: format!("{} Chart", sheet.name),
-                    series: vec![ChartSeries {
-                        name: "Series 1".into(),
-                        categories,
-                        values,
-                    }],
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_add_table_col(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let dims = state.current.borrow().dimensions();
+                let next_col = dims.cols;
+                let cell = CellRef {
+                    row: 0,
+                    col: next_col,
                 };
-                if spec.validate().is_ok() {
-                    app.set_status_left(SharedString::from(format!(
-                        "Inserted {} (Bar)",
-                        spec.title
-                    )));
-                    app.set_formula_feedback(SharedString::from(format!(
-                        "Chart created with {} data points",
-                        spec.series[0].values.len()
-                    )));
-                } else {
-                    app.set_status_left("Insert chart: enter numeric data in Column B".into());
+                let col_letter = cell.to_a1().trim_end_matches('1').to_string();
+                let committed = commit_formula_edit(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    cell,
+                    &col_letter,
+                );
+                if committed {
+                    select_cell(&app, &state.current.borrow(), 0, next_col as i32);
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Added column {col_letter}")));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_set_cell_format(move |fmt_idx| {
+            if let Some(app) = app_ref.upgrade() {
+                if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
+                    let current_raw = state
+                        .current
+                        .borrow()
+                        .raw(cell)
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    let clean = current_raw
+                        .trim()
+                        .trim_start_matches('$')
+                        .trim_end_matches('%');
+                    if let Ok(num) = clean.parse::<f64>() {
+                        let new_val = match fmt_idx {
+                            1 => format!("${num:.2}"),
+                            2 => format!("{:.1}%", num * 100.0),
+                            _ => format!("{num}"),
+                        };
+                        let committed = commit_formula_edit(
+                            &mut state.current.borrow_mut(),
+                            &mut state.undo_stack.borrow_mut(),
+                            &mut state.redo_stack.borrow_mut(),
+                            cell,
+                            &new_val,
+                        );
+                        if committed {
+                            app.set_cell_format(fmt_idx);
+                            apply_sheet(&app, &state.current.borrow());
+                            sync_menu_state(&menu_service, &app, &state);
+                            app.set_status_left(SharedString::from(format!(
+                                "Formatted cell {} as {}",
+                                cell.to_a1(),
+                                new_val
+                            )));
+                        }
+                    }
                 }
             }
         });
@@ -497,5 +647,110 @@ mod tests {
             }],
         };
         assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn test_sheet_renaming() {
+        let state = make_test_state();
+        assert_eq!(state.current.borrow().name, "Budget");
+        state.current.borrow_mut().name = "Financial Plan".to_string();
+        let active_idx = *state.active_sheet_index.borrow();
+        state.sheets.borrow_mut()[active_idx].name = "Financial Plan".to_string();
+        assert_eq!(state.current.borrow().name, "Financial Plan");
+        assert_eq!(state.sheets.borrow()[0].name, "Financial Plan");
+    }
+
+    #[test]
+    fn test_add_table_col_and_undo() {
+        let state = make_test_state();
+        let initial_cols = state.current.borrow().dimensions().cols;
+        let cell = CellRef {
+            row: 0,
+            col: initial_cols,
+        };
+        let col_letter = cell.to_a1().trim_end_matches('1').to_string();
+        let committed = commit_formula_edit(
+            &mut state.current.borrow_mut(),
+            &mut state.undo_stack.borrow_mut(),
+            &mut state.redo_stack.borrow_mut(),
+            cell,
+            &col_letter,
+        );
+        assert!(committed);
+        assert_eq!(state.current.borrow().raw(cell), Some(col_letter.as_str()));
+        assert!(state.current.borrow().dimensions().cols > initial_cols);
+
+        // Undo
+        let edit = state.undo_stack.borrow_mut().pop().expect("undo edit");
+        edit.revert(&mut state.current.borrow_mut());
+        assert_eq!(state.current.borrow().raw(cell), None);
+    }
+
+    #[test]
+    fn test_cell_format_and_undo() {
+        let state = make_test_state();
+        let cell = CellRef { row: 1, col: 1 };
+        state.current.borrow_mut().set_str("B2", "1250");
+
+        // Format as Currency: $1250.00
+        let current_raw = state.current.borrow().raw(cell).unwrap().to_string();
+        let num = current_raw.parse::<f64>().unwrap();
+        let formatted = format!("${num:.2}");
+        let committed = commit_formula_edit(
+            &mut state.current.borrow_mut(),
+            &mut state.undo_stack.borrow_mut(),
+            &mut state.redo_stack.borrow_mut(),
+            cell,
+            &formatted,
+        );
+        assert!(committed);
+        assert_eq!(state.current.borrow().raw(cell), Some("$1250.00"));
+
+        // Undo format
+        let edit = state.undo_stack.borrow_mut().pop().expect("undo edit");
+        edit.revert(&mut state.current.borrow_mut());
+        assert_eq!(state.current.borrow().raw(cell), Some("1250"));
+    }
+
+    #[test]
+    fn test_chart_spec_normalization_pipeline() {
+        let mut sheet = Sheet::new("Sales");
+        sheet.set_str("A1", "Region");
+        sheet.set_str("B1", "Revenue");
+        sheet.set_str("A2", "North");
+        sheet.set_str("B2", "$100.00");
+        sheet.set_str("A3", "South");
+        sheet.set_str("B3", "$300.00");
+
+        let vals = evaluate(&sheet);
+        let dims = sheet.dimensions();
+        let mut categories = Vec::new();
+        let mut values = Vec::new();
+        for r in 1..dims.rows {
+            let cat = cell_value(&sheet, &vals, r, 0);
+            let val_str = cell_value(&sheet, &vals, r, 1);
+            let clean = val_str.trim().trim_start_matches('$').trim_end_matches('%');
+            if let Ok(num) = clean.parse::<f64>() {
+                categories.push(cat);
+                values.push(num);
+            }
+        }
+        assert_eq!(categories, vec!["North", "South"]);
+        assert_eq!(values, vec![100.0, 300.0]);
+
+        let spec = ChartSpec {
+            kind: ChartKind::Bar,
+            title: format!("{} Chart", sheet.name),
+            series: vec![ChartSeries {
+                name: "Series 1".into(),
+                categories: categories.clone(),
+                values: values.clone(),
+            }],
+        };
+        let norm = spec.normalized_points().expect("normalized points");
+        assert_eq!(norm.len(), 1);
+        assert_eq!(norm[0].len(), 2);
+        assert!((norm[0][0] - 0.0).abs() < 1e-5);
+        assert!((norm[0][1] - 1.0).abs() < 1e-5);
     }
 }

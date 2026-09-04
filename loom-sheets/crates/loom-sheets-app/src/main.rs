@@ -57,6 +57,7 @@ pub(crate) struct Args {
     pub(crate) screenshot: Option<String>,
     pub(crate) smoke: bool,
     pub(crate) palette: bool,
+    pub(crate) chart: bool,
     pub(crate) journey: Option<String>,
     pub(crate) size: (u32, u32),
     pub(crate) theme: String,
@@ -78,6 +79,7 @@ where
         screenshot: None,
         smoke: false,
         palette: false,
+        chart: false,
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
@@ -91,6 +93,7 @@ where
             "--screenshot" => args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?),
             "--smoke" => args.smoke = true,
             "--palette" => args.palette = true,
+            "--chart" => args.chart = true,
             "--journey" => {
                 args.journey = Some(it.next().ok_or("--journey needs an output directory")?)
             }
@@ -701,7 +704,10 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
         sheet.cells.len(),
         formulas
     )));
-    app.set_status_right("Offline".into());
+    if app.get_selection_count() <= 1 {
+        app.set_status_right("Offline".into());
+    }
+    actions::sync_chart_to_app(app, sheet);
     let _ = record_snapshot_recovery("sheets state", sheet_to_json(sheet).into_bytes());
 }
 
@@ -837,6 +843,25 @@ pub(crate) fn update_selection_range(
         selected.row,
         selected.col,
     )));
+    let cell_count = range.cells().len();
+    if cell_count > 1 {
+        let mut sum = 0.0;
+        let mut count = 0;
+        for c in range.cells() {
+            let val = cell_value(sheet, vals, c.row, c.col);
+            let clean = val.trim().trim_start_matches('$').trim_end_matches('%');
+            if let Ok(n) = clean.parse::<f64>() {
+                sum += n;
+                count += 1;
+            }
+        }
+        if count > 0 {
+            let avg = sum / count as f64;
+            app.set_status_right(SharedString::from(format!(
+                "SUM: {sum:.2}  AVG: {avg:.2}  COUNT: {count}"
+            )));
+        }
+    }
 }
 
 /// Apply one committed formula-bar edit and record one undo transaction.
@@ -1075,6 +1100,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     }
     if args.template_chooser {
         app.set_template_chooser_open(true);
+    }
+    if args.chart {
+        app.set_chart_visible(true);
+        sync_chart_to_app(&app, &sheet);
     }
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
     loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
@@ -1332,7 +1361,16 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_quick_formula(move |func| {
             if let Some(app) = app_ref.upgrade() {
                 if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
-                    let formula_text = format!("={func}(A1:A5)");
+                    let range_str = app.get_selection_range();
+                    let formula_text = if range_str.contains(':') {
+                        format!("={func}({range_str})")
+                    } else {
+                        let col = cell
+                            .to_a1()
+                            .trim_end_matches(|c: char| c.is_ascii_digit())
+                            .to_string();
+                        format!("={func}({col}1:{col}5)")
+                    };
                     let committed = {
                         let mut current = state.current.borrow_mut();
                         let mut undo = state.undo_stack.borrow_mut();
@@ -1714,6 +1752,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     sync_sheet_tabs(&app, &state);
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
+    if args.chart {
+        app.set_chart_visible(true);
+        sync_chart_to_app(&app, &state.current.borrow());
+    }
     app.show().map_err(|e| e.to_string())?;
     // A visible selection is not enough to receive keyboard input. Focus the
     // grid after the native window is shown; winit may replace the focus item

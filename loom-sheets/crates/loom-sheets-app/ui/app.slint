@@ -2,6 +2,7 @@ import { TemplateCard } from "toolkit.slint";
 import {
     LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
 } from "foundation.slint";
+import { SheetChart } from "chart.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     FormulaNameBar, SheetActionToolbar, SheetGridSurface, SheetInspector, SheetSelectionOverlay,
@@ -139,6 +140,18 @@ export component SheetsApp inherits Window {
     callback add-shape;
     callback add-category;
     callback pivot-table;
+    callback rename-sheet(string);
+    callback add-table-col;
+    callback set-cell-format(int);
+    callback close-chart;
+    callback toggle-chart-kind;
+
+    in-out property <bool> chart-visible: false;
+    in-out property <string> chart-title: "Chart";
+    in-out property <[string]> chart-categories: [];
+    in-out property <[string]> chart-values-display: [];
+    in-out property <[float]> chart-normalized: [];
+    in-out property <int> cell-format: 0;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -364,56 +377,77 @@ export component SheetsApp inherits Window {
                     table-cols-label: root.table-cols-label;
                     selected-row-height: root.selected-row-height;
                     selected-col-width: root.selected-col-width;
+                    cell-format: root.cell-format;
                     inspector-search <=> root.inspector-search;
                     inspector-tab <=> root.inspector-tab;
                     inspector-show-table: root.inspector-show-table;
                     inspector-show-cell: root.inspector-show-cell;
                     inspector-search-edited(query) => { root.inspector-search-edited(query); }
                     inspector-context-changed(index) => { root.inspector-context-changed(index); }
+                    rename-sheet(name) => { root.rename-sheet(name); }
+                    add-table-row => { root.add-row(); }
+                    add-table-col => { root.add-table-col(); }
+                    set-cell-format(fmt) => { root.set-cell-format(fmt); }
                 }
 
-                grid-surface := SheetGridSurface {
+                Rectangle {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
-                    sheet-name: root.sheet-name;
-                    selection-formula: root.selection-formula;
-                    rows: root.rows;
-                    cols: root.cols;
-                    column-headers: root.column-headers;
-                    row-headers: root.row-headers;
-                    cells: root.cells;
-                    view-row-origin: root.view-row-origin;
-                    view-col-origin: root.view-col-origin;
-                    selected-row: root.selected-row;
-                    selected-col: root.selected-col;
-                    selection-start-row: root.selection-start-row;
-                    selection-start-col: root.selection-start-col;
-                    selection-end-row: root.selection-end-row;
-                    selection-end-col: root.selection-end-col;
-                    selection-announcement: root.selection-announcement;
-                    grid-col-offset: root.grid-col-offset;
-                    grid-row-offset: root.grid-row-offset;
-                    grid-visible-width: root.grid-visible-width;
-                    grid-visible-height: root.grid-visible-height;
-                    grid-content-width: root.grid-content-width;
-                    grid-content-height: root.grid-content-height;
-                    grid-column-widths: root.grid-column-widths;
-                    grid-row-heights: root.grid-row-heights;
-                    grid-scroll-x <=> root.grid-scroll-x;
-                    grid-scroll-y <=> root.grid-scroll-y;
-                    cell-clicked(row, col) => { root.cell-clicked(row, col); }
-                    fill-selection => { root.fill-selection(); }
-                    grid-scrolled => { root.grid-scrolled(); }
-                    grid-viewport-changed(width, height) => {
-                        root.grid-viewport-width = width;
-                        root.grid-viewport-height = height;
-                        root.grid-viewport-changed(width, height);
+
+                    grid-surface := SheetGridSurface {
+                        width: parent.width;
+                        height: parent.height;
+                        sheet-name: root.sheet-name;
+                        selection-formula: root.selection-formula;
+                        rows: root.rows;
+                        cols: root.cols;
+                        column-headers: root.column-headers;
+                        row-headers: root.row-headers;
+                        cells: root.cells;
+                        view-row-origin: root.view-row-origin;
+                        view-col-origin: root.view-col-origin;
+                        selected-row: root.selected-row;
+                        selected-col: root.selected-col;
+                        selection-start-row: root.selection-start-row;
+                        selection-start-col: root.selection-start-col;
+                        selection-end-row: root.selection-end-row;
+                        selection-end-col: root.selection-end-col;
+                        selection-announcement: root.selection-announcement;
+                        grid-col-offset: root.grid-col-offset;
+                        grid-row-offset: root.grid-row-offset;
+                        grid-visible-width: root.grid-visible-width;
+                        grid-visible-height: root.grid-visible-height;
+                        grid-content-width: root.grid-content-width;
+                        grid-content-height: root.grid-content-height;
+                        grid-column-widths: root.grid-column-widths;
+                        grid-row-heights: root.grid-row-heights;
+                        grid-scroll-x <=> root.grid-scroll-x;
+                        grid-scroll-y <=> root.grid-scroll-y;
+                        cell-clicked(row, col) => { root.cell-clicked(row, col); }
+                        fill-selection => { root.fill-selection(); }
+                        grid-scrolled => { root.grid-scrolled(); }
+                        grid-viewport-changed(width, height) => {
+                            root.grid-viewport-width = width;
+                            root.grid-viewport-height = height;
+                            root.grid-viewport-changed(width, height);
+                        }
+                        navigate-selection(row-delta, col-delta) => { root.navigate-selection(row-delta, col-delta); }
+                        extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
+                        begin-edit(initial-text) => {
+                            root.is-editing = true;
+                            root.begin-edit(initial-text);
+                        }
                     }
-                    navigate-selection(row-delta, col-delta) => { root.navigate-selection(row-delta, col-delta); }
-                    extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
-                    begin-edit(initial-text) => {
-                        root.is-editing = true;
-                        root.begin-edit(initial-text);
+
+                    if root.chart-visible : SheetChart {
+                        x: min(parent.width - 400px, 120px);
+                        y: min(parent.height - 260px, 180px);
+                        title: root.chart-title;
+                        categories: root.chart-categories;
+                        values-display: root.chart-values-display;
+                        normalized: root.chart-normalized;
+                        close-chart => { root.chart-visible = false; root.close-chart(); }
+                        toggle-kind => { root.toggle-chart-kind(); }
                     }
                 }
 
@@ -426,12 +460,17 @@ export component SheetsApp inherits Window {
                     table-cols-label: root.table-cols-label;
                     selected-row-height: root.selected-row-height;
                     selected-col-width: root.selected-col-width;
+                    cell-format: root.cell-format;
                     inspector-search <=> root.inspector-search;
                     inspector-tab <=> root.inspector-tab;
                     inspector-show-table: root.inspector-show-table;
                     inspector-show-cell: root.inspector-show-cell;
                     inspector-search-edited(query) => { root.inspector-search-edited(query); }
                     inspector-context-changed(index) => { root.inspector-context-changed(index); }
+                    rename-sheet(name) => { root.rename-sheet(name); }
+                    add-table-row => { root.add-row(); }
+                    add-table-col => { root.add-table-col(); }
+                    set-cell-format(fmt) => { root.set-cell-format(fmt); }
                 }
             }
 
