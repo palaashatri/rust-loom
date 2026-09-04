@@ -20,9 +20,9 @@ export component LoomCanvasHandle inherits Rectangle {
     callback nudged(int, int);
     callback picked();
 
-    width: Theme.tokens.space.lg;
-    height: Theme.tokens.space.lg;
-    border-radius: Theme.tokens.metrics.radius-small;
+    width: Theme.tokens.space.md;
+    height: Theme.tokens.space.md;
+    border-radius: 1px;
     border-width: handle-focus.has-focus ? 2px : 1px;
     border-color: handle-focus.has-focus ? Theme.palette().focus
         : root.selected ? Theme.palette().accent
@@ -41,7 +41,7 @@ export component LoomCanvasHandle inherits Rectangle {
         y: (parent.height - Theme.tokens.space.xs) / 2;
         width: Theme.tokens.space.xs;
         height: Theme.tokens.space.xs;
-        border-radius: 1px;
+        border-radius: 0.5px;
         background: root.selected ? Theme.palette().accent-ink : transparent;
     }
 
@@ -58,6 +58,10 @@ export component LoomCanvasHandle inherits Rectangle {
         }
     }
     handle-touch := TouchArea {
+        x: (parent.width - 20px) / 2;
+        y: (parent.height - 20px) / 2;
+        width: 20px;
+        height: 20px;
         enabled: root.enabled;
         clicked => { handle-focus.focus(); root.picked(); }
     }
@@ -69,7 +73,7 @@ export component LoomTimelineRuler inherits Rectangle {
     in property <string> end-label: "End";
     in property <int> tick-count: 9;
 
-    height: Theme.tokens.metrics.control-height;
+    height: Theme.tokens.metrics.panel-header-height;
     min-width: 160px;
     background: Theme.palette().chrome;
     accessible-role: text;
@@ -83,39 +87,37 @@ export component LoomTimelineRuler inherits Rectangle {
         background: Theme.palette().border;
     }
 
-    HorizontalLayout {
-        spacing: Theme.tokens.space.md;
+    VerticalLayout {
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
-        cross-axis-alignment: center;
-        Text {
-            text: root.start-label;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-secondary;
-            vertical-alignment: center;
-            max-width: 120px;
-            overflow: elide;
-        }
-        Rectangle {
-            horizontal-stretch: 1;
-            background: transparent;
-            HorizontalLayout {
-                spacing: 0px;
-                alignment: space-between;
-                for idx in root.tick-count : Rectangle {
-                    width: 1px;
-                    height: Math.mod(idx, 4) == 0 ? Theme.tokens.space.md : Theme.tokens.space.sm;
-                    background: Theme.palette().border-strong;
-                }
+        padding-top: Theme.tokens.space.xs;
+        padding-bottom: 2px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            Text {
+                text: root.start-label;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.end-label;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
             }
         }
-        Text {
-            text: root.end-label;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-secondary;
-            vertical-alignment: center;
-            max-width: 120px;
-            overflow: elide;
+
+        HorizontalLayout {
+            spacing: 0px;
+            alignment: space-between;
+            for idx in root.tick-count : Rectangle {
+                width: 1px;
+                height: Math.mod(idx, 4) == 0 ? Theme.tokens.space.md : Theme.tokens.space.sm;
+                background: Theme.palette().border-strong;
+            }
         }
     }
 }
@@ -135,10 +137,13 @@ export component LoomTimelineMarker inherits Rectangle {
     accessible-value-minimum: 0.0;
     accessible-value-maximum: 1.0;
 
+    property <length> track-inset: Theme.tokens.space.md;
+    property <length> track-w: root.width - track-inset * 2;
+
     Rectangle {
-        x: 0px;
+        x: root.track-inset;
         y: (parent.height - Theme.tokens.space.sm) / 2;
-        width: parent.width;
+        width: root.track-w;
         height: Theme.tokens.space.sm;
         border-radius: 2px;
         border-width: 1px;
@@ -152,7 +157,7 @@ export component LoomTimelineMarker inherits Rectangle {
         }
     }
     Rectangle {
-        x: clamp(root.position * (root.width - Theme.tokens.space.lg), 0px, root.width - Theme.tokens.space.lg);
+        x: root.track-inset + clamp(root.position * (root.track-w - Theme.tokens.space.lg), 0px, root.track-w - Theme.tokens.space.lg);
         y: (root.height - Theme.tokens.metrics.icon-size) / 2;
         width: Theme.tokens.space.lg;
         height: Theme.tokens.metrics.icon-size;
@@ -186,13 +191,13 @@ export component LoomTimelineMarker inherits Rectangle {
         moved => {
             if (self.pressed) {
                 marker-focus.focus();
-                root.position = max(0.0, min(1.0, self.mouse-x / root.width));
+                root.position = max(0.0, min(1.0, (self.mouse-x - root.track-inset) / root.track-w));
                 root.moved(root.position);
             }
         }
         clicked => {
             marker-focus.focus();
-            root.position = max(0.0, min(1.0, self.mouse-x / root.width));
+            root.position = max(0.0, min(1.0, (self.mouse-x - root.track-inset) / root.track-w));
             root.moved(root.position);
         }
     }

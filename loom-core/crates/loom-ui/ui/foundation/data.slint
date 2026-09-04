@@ -9,6 +9,7 @@
 // an explicit accessible label.
 
 import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
 import { LoomButton } from "controls.slint";
 
 export component LoomTableRow inherits Rectangle {
@@ -121,19 +122,37 @@ export component LoomEmptyState inherits Rectangle {
     in property <string> title: "No rows";
     in property <string> hint: "Rows will appear here once they exist.";
     in property <string> action-label: "";
+    in property <string> icon: "document";
     in property <bool> enabled: true;
     callback requested();
 
-    min-height: 112px;
+    min-height: empty-layout.min-height;
+    preferred-height: empty-layout.preferred-height;
     background: transparent;
     accessible-role: groupbox;
     accessible-label: root.title;
     accessible-description: root.hint;
 
-    VerticalLayout {
+    empty-layout := VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: Theme.tokens.space.xl;
         alignment: center;
+        if root.icon != "" : HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: Theme.tokens.metrics.radius-large;
+                background: Theme.palette().surface-sunken;
+                Icon {
+                    x: (parent.width - Theme.tokens.metrics.icon-size) / 2;
+                    y: (parent.height - Theme.tokens.metrics.icon-size) / 2;
+                    size: Theme.tokens.metrics.icon-size;
+                    icon: root.icon;
+                    tint: Theme.palette().ink-secondary;
+                }
+            }
+        }
         Text {
             text: root.title;
             font-size: Theme.tokens.typography.body-large;
@@ -164,19 +183,37 @@ export component LoomErrorState inherits Rectangle {
     in property <string> title: "Something went wrong";
     in property <string> message: "Rows could not be loaded.";
     in property <string> retry-label: "Retry";
+    in property <string> icon: "info";
     in property <bool> enabled: true;
     callback retried();
 
-    min-height: 112px;
+    min-height: error-layout.min-height;
+    preferred-height: error-layout.preferred-height;
     background: transparent;
     accessible-role: groupbox;
     accessible-label: root.title;
     accessible-description: root.message;
 
-    VerticalLayout {
+    error-layout := VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: Theme.tokens.space.xl;
         alignment: center;
+        if root.icon != "" : HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: Theme.tokens.metrics.radius-large;
+                background: Theme.palette().danger-surface;
+                Icon {
+                    x: (parent.width - Theme.tokens.metrics.icon-size) / 2;
+                    y: (parent.height - Theme.tokens.metrics.icon-size) / 2;
+                    size: Theme.tokens.metrics.icon-size;
+                    icon: root.icon;
+                    tint: Theme.palette().danger;
+                }
+            }
+        }
         Text {
             text: root.title;
             font-size: Theme.tokens.typography.body-large;

@@ -24,16 +24,13 @@ export component LoomToolbar inherits Rectangle {
     }
 }
 
-export component LoomToolbarGroup inherits Rectangle {
+export component LoomToolbarGroup inherits HorizontalLayout {
+    horizontal-stretch: 0;
     min-height: Theme.tokens.metrics.toolbar-height;
     max-height: Theme.tokens.metrics.toolbar-height;
-    background: transparent;
-    HorizontalLayout {
-        spacing: Theme.tokens.space.xs;
-        alignment: start;
-        cross-axis-alignment: center;
-        @children
-    }
+    spacing: Theme.tokens.space.xs;
+    alignment: start;
+    cross-axis-alignment: center;
 }
 
 export component LoomToolbarSpacer inherits Rectangle {
@@ -43,7 +40,7 @@ export component LoomToolbarSpacer inherits Rectangle {
 
 export component LoomToolbarDivider inherits Rectangle {
     width: 1px;
-    height: Theme.tokens.space.xxl;
+    height: Theme.tokens.space.xl;
     background: Theme.palette().border;
 }
 
@@ -62,7 +59,7 @@ export component LoomSectionHeader inherits Rectangle {
 
     HorizontalLayout {
         spacing: Theme.tokens.space.md;
-        padding-left: Theme.tokens.space.lg;
+        padding-left: Theme.tokens.space.xl;
         padding-right: Theme.tokens.space.lg;
         cross-axis-alignment: center;
         Text {
@@ -142,7 +139,7 @@ export component LoomTabStrip inherits Rectangle {
             }
             tab-label := Text {
                 text: root.items[rel];
-                font-size: Theme.tokens.typography.caption;
+                font-size: Theme.tokens.typography.body;
                 font-weight: rel == root.current ? 600 : 500;
                 color: !root.enabled ? Theme.palette().ink-disabled
                     : rel == root.current ? Theme.palette().ink
@@ -164,7 +161,7 @@ export component LoomTabStrip inherits Rectangle {
     }
     Rectangle {
         x: 0px;
-        y: 0px;
+        y: root.height - 1px;
         width: root.width;
         height: 1px;
         background: Theme.palette().border;
@@ -202,7 +199,7 @@ export component LoomListRow inherits Rectangle {
 
     height: Theme.tokens.metrics.panel-header-height;
     min-width: 120px;
-    border-radius: Theme.tokens.metrics.radius-small;
+    border-radius: Theme.tokens.metrics.radius-medium;
     border-width: row-focus.has-focus ? 2px : 0px;
     border-color: row-focus.has-focus ? Theme.palette().focus : transparent;
     background: root.selected ? Theme.palette().selection-soft
@@ -213,40 +210,18 @@ export component LoomListRow inherits Rectangle {
     accessible-label: root.label;
     accessible-action-default => { if (root.enabled) { root.activated(); } }
 
-    if !Theme.rtl : HorizontalLayout {
+    HorizontalLayout {
         spacing: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.md;
         padding-right: Theme.tokens.space.md;
         cross-axis-alignment: center;
-        if root.icon != "" : Icon {
+
+        if !Theme.rtl && root.icon != "" : Icon {
             size: Theme.tokens.metrics.icon-small;
             icon: root.icon;
             tint: root.selected ? Theme.palette().accent : Theme.palette().ink-secondary;
         }
-        Text {
-            text: root.label;
-            font-size: Theme.tokens.typography.body;
-            font-weight: root.selected ? 600 : 500;
-            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-            overflow: elide;
-        }
-        if root.detail != "" : Text {
-            text: root.detail;
-            font-size: Theme.tokens.typography.caption;
-            color: Theme.palette().ink-secondary;
-            vertical-alignment: center;
-            max-width: 160px;
-            overflow: elide;
-        }
-    }
-    if Theme.rtl : HorizontalLayout {
-        spacing: Theme.tokens.space.md;
-        padding-left: Theme.tokens.space.md;
-        padding-right: Theme.tokens.space.md;
-        cross-axis-alignment: center;
-        if root.detail != "" : Text {
+        if Theme.rtl && root.detail != "" : Text {
             text: root.detail;
             font-size: Theme.tokens.typography.caption;
             color: Theme.palette().ink-secondary;
@@ -263,7 +238,15 @@ export component LoomListRow inherits Rectangle {
             horizontal-stretch: 1;
             overflow: elide;
         }
-        if root.icon != "" : Icon {
+        if !Theme.rtl && root.detail != "" : Text {
+            text: root.detail;
+            font-size: Theme.tokens.typography.caption;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: center;
+            max-width: 160px;
+            overflow: elide;
+        }
+        if Theme.rtl && root.icon != "" : Icon {
             size: Theme.tokens.metrics.icon-small;
             icon: root.icon;
             tint: root.selected ? Theme.palette().accent : Theme.palette().ink-secondary;

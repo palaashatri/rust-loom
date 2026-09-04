@@ -15,15 +15,15 @@ The score is intentionally frozen during the UI-foundation reset unless verified
 ## Active gate
 
 ```text
-ACTIVE PHASE: UI FOUNDATION
-FOUNDATION STATUS: ACCEPTANCE_BLOCKED
-APPLICATION DEVELOPMENT: LOCKED
-NEXT APPLICATION AFTER FOUNDATION: SHEETS
+ACTIVE PHASE: SHEETS
+FOUNDATION STATUS: ACCEPTED
+ACTIVE APPLICATION: SHEETS (IN_PROGRESS)
+LOCKED APPLICATIONS: WRITER, PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-The current application UIs are **legacy implementation surfaces**, not approved visual references. Existing application screenshots and historical visual baselines must not be used as aesthetic targets for new work.
+The shared UI foundation has achieved explicit human visual acceptance. Approved baselines are established under `loom-core/crates/loom-ui/baselines/foundation`.
 
-No Writer, Sheets, Present, Photo, Motion, Video, Studio, or Encode feature work may begin while the foundation status is `ACCEPTANCE_BLOCKED`.
+Application development is unlocked **strictly for Loom Sheets** per `AGENTS.MD` Section 4. All other applications remain locked until Sheets passes its complete acceptance gate.
 
 ## Why the reset is necessary
 
@@ -47,26 +47,9 @@ The overall score is not an arithmetic mean. User-visible workflow completion, r
 
 ## Shared UI foundation status
 
-Status: `ACCEPTANCE_BLOCKED`
+Status: `ACCEPTED`
 
-The new shared UI foundation is the only product-facing implementation work currently unlocked. It must be built independently of application redesign and proven through a dedicated component gallery.
-
-Required before foundation acceptance:
-
-- one canonical import surface for new generic components;
-- token-driven light, dark, and high-contrast rendering;
-- buttons, icon buttons, fields/search, toggles, segmented controls, menus/popovers, tabs, toolbars/overflow, panels/inspectors, list/table rows, status/progress, dialogs, scroll treatment, selection/focus treatment, canvas handles, and timeline primitives as applicable;
-- keyboard activation and visible focus for every interactive control;
-- accessible labels/roles and tooltip contract for icon-only controls;
-- responsive behavior at 1024×720, 1280×800, 1440×900, and 1920×1200;
-- long-label and overflow evidence;
-- right-to-left evidence where direction matters;
-- zero unintended overlap and zero clipped action labels;
-- no application-local styling fork;
-- no unlicensed visual assets;
-- reviewed screenshots judged production-quality by a human.
-
-No screenshot baseline is currently approved for the new foundation. A baseline may be introduced only after explicit visual acceptance.
+The shared UI foundation (`loom-core/crates/loom-ui/ui/foundation.slint`) is accepted with approved baselines and full mechanical CI passing. Consumer imports are now unlocked for the active application (Sheets). Approved screenshot baselines are recorded under `loom-core/crates/loom-ui/baselines/foundation`.
 
 ## Legacy UI status
 

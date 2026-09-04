@@ -1,9 +1,9 @@
 schema_version = 1
-phase = "ui-foundation"
-foundation_status = "ACCEPTANCE_BLOCKED"
-application_development_locked = true
-consumer_imports_allowed = false
-next_application = "sheets"
+phase = "sheets"
+foundation_status = "ACCEPTED"
+application_development_locked = false
+consumer_imports_allowed = true
+next_application = "writer"
 
 application_order = [
   "sheets",
@@ -25,13 +25,14 @@ allowed_active_prefixes = [
   "loom-core/crates/loom-ui/",
   "loom-design-bible/contracts/",
   "loom-design-bible/tokens/",
+  "loom-sheets/",
 ]
 
 [foundation_gate]
 mechanical_required = true
 human_visual_approval_required = true
 approved_baseline_required_after_acceptance = true
-status = "ACCEPTANCE_BLOCKED"
+status = "ACCEPTED"
 
 [foundation_gate.required_evidence]
 viewports = ["1024x720", "1280x800", "1440x900", "1920x1200"]
@@ -40,7 +41,7 @@ text_scales = [1.0, 1.25, 1.5]
 directions = ["ltr", "rtl"]
 
 [application_status]
-sheets = "NOT_STARTED"
+sheets = "IN_PROGRESS"
 writer = "LOCKED"
 present = "LOCKED"
 photo = "LOCKED"

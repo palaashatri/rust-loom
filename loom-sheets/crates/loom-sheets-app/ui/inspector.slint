@@ -1,0 +1,123 @@
+import {
+    LoomTextField, LoomSearchField, LoomTabStrip,
+    LoomPanel, LoomSectionHeader, LoomToggle,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+component SheetPropertyRow inherits HorizontalLayout {
+    in property <string> label: "";
+    spacing: Theme.tokens.space.md;
+    cross-axis-alignment: center;
+    Text {
+        text: root.label;
+        width: 80px;
+        font-size: Theme.tokens.typography.caption;
+        color: Theme.palette().ink-secondary;
+        overflow: elide;
+    }
+    @children
+}
+
+export component SheetInspector inherits LoomPanel {
+    in property <string> selection-range: "A1";
+    in property <string> selection-value: "";
+    in property <string> selection-formula: "";
+    in property <string> sheet-name: "Untitled";
+    in property <string> table-rows-label: "1";
+    in property <string> table-cols-label: "1";
+    in property <string> selected-row-height: "24 px";
+    in property <string> selected-col-width: "80 px";
+    in-out property <string> inspector-search: "";
+    in-out property <int> inspector-tab: 0;
+    in property <bool> inspector-show-table: true;
+    in property <bool> inspector-show-cell: true;
+    callback inspector-search-edited(string);
+    callback inspector-context-changed(int);
+
+    title: root.selection-range + " selection";
+    width: 280px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+
+        LoomSearchField {
+            placeholder: "Search properties…";
+            value <=> root.inspector-search;
+            edited(text) => { root.inspector-search-edited(text); }
+        }
+
+        LoomTabStrip {
+            items: ["Table", "Cell"];
+            current <=> root.inspector-tab;
+            selected(idx) => { root.inspector-context-changed(idx); }
+        }
+
+        Flickable {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: parent.width;
+            viewport-height: max(parent.height, 460px);
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: Theme.tokens.space.lg;
+
+                if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSectionHeader { title: "Table"; }
+                    SheetPropertyRow {
+                        label: "Name";
+                        LoomTextField { label: "Table name"; value: root.sheet-name; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Rows";
+                        LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Columns";
+                        LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; }
+                    }
+                }
+
+                if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSectionHeader { title: "Cell"; }
+                    SheetPropertyRow {
+                        label: "Selection";
+                        LoomTextField { label: "Selected range"; value: root.selection-range; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Value";
+                        LoomTextField { label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Formula";
+                        LoomTextField { label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Row height";
+                        LoomTextField { label: "Selected row height"; value: root.selected-row-height; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Column width";
+                        LoomTextField { label: "Selected column width"; value: root.selected-col-width; enabled: false; }
+                    }
+                }
+
+                if (root.inspector-tab == 0 && !root.inspector-show-table)
+                    || (root.inspector-tab == 1 && !root.inspector-show-cell) : Rectangle {
+                    height: 72px;
+                    Text {
+                        text: "No matching properties";
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}

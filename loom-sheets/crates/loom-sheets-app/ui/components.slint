@@ -1,64 +1,42 @@
-// Sheets-specific workspace objects.  Shared chrome and controls continue to
-// come from loom-ui; this module owns the domain boundaries and their state
-// wiring so the Numbers surface is inspectable without a monolithic Window.
 import {
-    ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton,
-    DirectionalLayout, IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem,
-    StatusBar, CanvasSurface, InspectorSurface, SectionHeader, Field,
-    SearchField, PropertyRow, SheetTabStrip
-} from "toolkit.slint";
+    LoomButton, LoomIconButton, LoomTextField, LoomSearchField, LoomSegmentedControl,
+    LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider, LoomOverflowButton,
+    LoomSectionHeader, LoomTabStrip, LoomCanvasHandle,
+} from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 
-/// The workbook tab strip is deliberately content-sized.  The active tab is
-/// the live sheet name supplied by the controller; adding a sheet remains
-/// disabled until a real workbook mutation is available.
 export component SheetTabs inherits Rectangle {
-    in property <string> sheet-name: "Untitled";
-    in property <bool> can-add-sheet: false;
+    in property <[string]> sheets: ["Sheet 1"];
+    in property <int> active-sheet: 0;
+    in property <bool> can-add-sheet: true;
+    callback select-sheet(int);
     callback add-sheet;
 
-    height: 32px;
+    height: Theme.tokens.metrics.sheet-tab-height;
     background: Theme.palette().chrome;
 
     HorizontalLayout {
         spacing: Theme.tokens.space.sm;
-        padding-left: Theme.tokens.space.lg;
-        padding-right: Theme.tokens.space.lg;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
         cross-axis-alignment: center;
 
-        Rectangle {
-            width: 128px;
-            height: 26px;
-            border-radius: Theme.tokens.metrics.radius-small;
-            background: Theme.palette().accent;
-            accessible-role: AccessibleRole.tab;
-            accessible-label: root.sheet-name;
-
-            HorizontalLayout {
-                alignment: center;
-                spacing: Theme.tokens.space.sm;
-                Icon { size: 14px; icon: "table"; tint: Theme.palette().accent-ink; }
-                sheet-label := Text {
-                    text: root.sheet-name;
-                    max-width: parent.width - 34px;
-                    font-size: Theme.tokens.typography.caption;
-                    font-weight: 600;
-                    color: Theme.palette().accent-ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-        }
-
-        IconOnlyToolbarItem {
+        LoomIconButton {
             icon: "plus";
-            label: root.can-add-sheet ? "Add sheet" : "Add sheet unavailable";
+            label: "Add sheet";
+            tooltip: "Add sheet";
             enabled: root.can-add-sheet;
             clicked => { root.add-sheet(); }
         }
 
-        ToolbarSpacer { }
+        LoomTabStrip {
+            items: root.sheets;
+            current: root.active-sheet;
+            selected(idx) => { root.select-sheet(idx); }
+        }
+
+        LoomToolbarSpacer { }
     }
 
     Rectangle {
@@ -70,109 +48,15 @@ export component SheetTabs inherits Rectangle {
     }
 }
 
-/// Action toolbar shared by the compact and labeled hosts.  Every enabled
-/// action has a controller callback; unsupported insertion commands stay
-/// disabled instead of presenting Numbers-like theatre.
-export component SheetActionToolbar inherits DirectionalLayout {
-    in property <bool> wide: false;
-    in property <bool> overflow: false;
-    in property <bool> inspector-available: true;
-    in property <bool> inspector-visible: false;
-    in property <bool> labeled-export: false;
-    callback toggle-inspector;
-    callback export-csv;
-    callback overflow-requested;
+export { SheetActionToolbar } from "toolbar.slint";
 
-    spacing: Theme.tokens.space.sm;
-    leading-padding: 0px;
-    trailing-padding: 0px;
-    horizontal-stretch: 1;
-    vertical-stretch: 1;
-
-    if root.wide : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "eye";
-            label: "View";
-            accessible-label: "View";
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem { icon: "zoom-in"; label: "Page Zoom"; accessible-label: "Page zoom unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "plus"; label: "Add Category"; accessible-label: "Add category unavailable"; enabled: false; }
-    }
-
-    if !root.wide : ToolbarGroup { labeled-slot: false;
-        if !root.overflow : IconOnlyToolbarItem {
-            icon: "eye";
-            label: "View";
-            enabled: root.inspector-available;
-            clicked => { root.toggle-inspector(); }
-        }
-        if root.overflow : Overflow {
-            label: "More Sheets actions";
-            clicked => { root.overflow-requested(); }
-        }
-    }
-
-    if !root.overflow : ToolbarSpacer { }
-
-    if root.wide : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "grid"; label: "Pivot Table"; accessible-label: "Insert pivot table unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
-    }
-
-    if !root.overflow : ToolbarSpacer { }
-
-    if root.wide : ToolbarGroup { labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "format";
-            label: "Format";
-            accessible-label: "Format inspector";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem { icon: "organize"; label: "Organize"; accessible-label: "Organize unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "export";
-            label: "Export";
-            accessible-label: "Export CSV";
-            clicked => { root.export-csv(); }
-        }
-    }
-
-    if !root.wide && !root.overflow : ToolbarGroup { labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem { icon: "export"; label: "Export CSV"; clicked => { root.export-csv(); } }
-    }
-
-    if root.overflow : ToolbarSpacer { }
-    if root.overflow : ToolbarGroup { labeled-slot: false;
-        IconOnlyToolbarItem { icon: "export"; label: "Export CSV"; clicked => { root.export-csv(); } }
-    }
-}
-
-/// Formula/name bar.  The value is an in-out draft: typing only changes the
-/// draft, while Enter or the check action emits commit. Escape and the close
-/// action restore the selected cell's exact raw state before emitting cancel.
 export component FormulaNameBar inherits Rectangle {
     in property <string> selection-range: "A1";
     in property <string> selection-formula: "";
     in property <int> selection-count: 1;
     in property <bool> show-quick-formulas: false;
     in-out property <string> formula-edit-buffer: "";
+    in property <bool> is-editing: false;
     callback commit(string);
     callback cancel;
     callback quick-formula(string);
@@ -180,18 +64,19 @@ export component FormulaNameBar inherits Rectangle {
 
     public function focus-formula-bar() { field.focus-input(); }
 
-    min-height: 32px;
-    max-height: 32px;
+    min-height: Theme.tokens.metrics.formula-bar-height;
+    max-height: Theme.tokens.metrics.formula-bar-height;
     background: Theme.palette().chrome;
 
     HorizontalLayout {
         spacing: Theme.tokens.space.sm;
-        padding-left: Theme.tokens.space.lg;
-        padding-right: Theme.tokens.space.lg;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
         cross-axis-alignment: center;
 
+        // Coordinate pill
         Rectangle {
-            width: 78px;
+            width: 68px;
             height: 24px;
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
@@ -218,7 +103,7 @@ export component FormulaNameBar inherits Rectangle {
             vertical-alignment: center;
         }
 
-        field := Field {
+        field := LoomTextField {
             label: "Selected cell formula or value";
             placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
             value <=> root.formula-edit-buffer;
@@ -232,26 +117,29 @@ export component FormulaNameBar inherits Rectangle {
 
         if root.show-quick-formulas : HorizontalLayout {
             spacing: Theme.tokens.space.xs;
-            ToolbarButton { label: "SUM"; clicked => { root.quick-formula("SUM"); } }
-            ToolbarButton { label: "AVG"; clicked => { root.quick-formula("AVERAGE"); } }
-            ToolbarButton { label: "COUNT"; clicked => { root.quick-formula("COUNT"); } }
+            LoomButton { label: "SUM"; variant: "ghost"; clicked => { root.quick-formula("SUM"); } }
+            LoomButton { label: "AVG"; variant: "ghost"; clicked => { root.quick-formula("AVERAGE"); } }
+            LoomButton { label: "COUNT"; variant: "ghost"; clicked => { root.quick-formula("COUNT"); } }
         }
 
-        IconOnlyToolbarItem {
+        LoomIconButton {
             icon: "check";
             label: "Commit formula";
+            tooltip: "Commit formula (Return)";
             clicked => { root.commit(root.formula-edit-buffer); }
         }
-        IconOnlyToolbarItem {
+        LoomIconButton {
             icon: "close";
             label: "Cancel editing";
+            tooltip: "Cancel editing (Escape)";
             clicked => {
                 root.formula-edit-buffer = root.selection-formula;
                 root.cancel();
             }
         }
-        ToolbarButton {
+        LoomButton {
             label: "Fill down";
+            variant: "ghost";
             enabled: root.selection-count > 1;
             clicked => { root.fill-selection(); }
         }
@@ -266,9 +154,6 @@ export component FormulaNameBar inherits Rectangle {
     }
 }
 
-/// Selection overlay and fill handle used by every materialized cell.  The
-/// cell remains the hit target for selection; the handle is a separate named
-/// affordance and only emits the real fill callback.
 export component SheetSelectionOverlay inherits Rectangle {
     in property <bool> active: false;
     in property <bool> in-selection: false;
@@ -278,18 +163,28 @@ export component SheetSelectionOverlay inherits Rectangle {
     y: 0px;
     background: transparent;
     border-width: root.active ? 2px : root.in-selection ? 1px : 0px;
-    border-color: Theme.palette().accent;
-    // The interactive role belongs to the handle below.  Keeping the overlay
-    // itself non-interactive avoids exposing every painted range cell as a
-    // duplicate button to screen readers.
+    border-color: Theme.palette().selection;
 
     if root.active : Rectangle {
-        x: parent.width - 7px;
-        y: parent.height - 7px;
-        width: 8px;
-        height: 8px;
-        border-radius: 2px;
-        background: Theme.palette().accent;
+        x: -2.5px;
+        y: -2.5px;
+        width: 5px;
+        height: 5px;
+        border-radius: 2.5px;
+        background: Theme.palette().paper;
+        border-width: 1px;
+        border-color: Theme.palette().selection;
+    }
+
+    if root.active : Rectangle {
+        x: parent.width - 2.5px;
+        y: parent.height - 2.5px;
+        width: 5px;
+        height: 5px;
+        border-radius: 2.5px;
+        background: Theme.palette().selection;
+        border-width: 1px;
+        border-color: Theme.palette().paper;
         accessible-role: button;
         accessible-label: "Selected cell fill handle";
         TouchArea {
@@ -350,47 +245,18 @@ component SheetScrollBar inherits Rectangle {
             : Theme.palette().border-strong;
     }
 
+    function set-pos(pos: length) {
+        let span = max(1px, (root.horizontal ? root.width : root.height) - root.handle-length);
+        root.value = -clamp((pos - root.handle-length / 2.0) / span, 0.0, 1.0) * root.maximum;
+    }
+
     scroll-track := TouchArea {
-        x: 0px;
-        y: 0px;
         width: root.width;
         height: root.height;
-        moved => {
-            if (self.pressed) {
-                if (root.horizontal) {
-                    root.value = -clamp(
-                        (self.mouse-x - root.handle-length / 2.0)
-                            / max(1px, root.width - root.handle-length),
-                        0.0,
-                        1.0
-                    ) * root.maximum;
-                } else {
-                    root.value = -clamp(
-                        (self.mouse-y - root.handle-length / 2.0)
-                            / max(1px, root.height - root.handle-length),
-                        0.0,
-                        1.0
-                    ) * root.maximum;
-                }
-            }
-        }
+        moved => { if (self.pressed) { root.set-pos(root.horizontal ? self.mouse-x : self.mouse-y); } }
         clicked => {
             scroll-focus.focus();
-            if (root.horizontal) {
-                root.value = -clamp(
-                    (self.mouse-x - root.handle-length / 2.0)
-                        / max(1px, root.width - root.handle-length),
-                    0.0,
-                    1.0
-                ) * root.maximum;
-            } else {
-                root.value = -clamp(
-                    (self.mouse-y - root.handle-length / 2.0)
-                        / max(1px, root.height - root.handle-length),
-                    0.0,
-                    1.0
-                ) * root.maximum;
-            }
+            root.set-pos(root.horizontal ? self.mouse-x : self.mouse-y);
         }
     }
 }
@@ -428,10 +294,6 @@ export component SheetScrollbars inherits Rectangle {
     }
 }
 
-/// A real table boundary containing the bounded materialized worksheet slice.
-/// The parent `SheetGridSurface` supplies keyboard focus and canvas geometry;
-/// this object owns the table name, headers, cells, selection affordances, and
-/// scrollbars.
 export component SheetTable inherits Rectangle {
     in property <string> sheet-name: "Untitled";
     in property <[int]> rows: [];
@@ -463,14 +325,7 @@ export component SheetTable inherits Rectangle {
     callback grid-scrolled;
     callback grid-viewport-changed(length, length);
 
-    border-radius: Theme.tokens.metrics.radius-small;
-    border-width: 1px;
-    border-color: Theme.palette().border;
-    background: Theme.palette().surface;
-    drop-shadow-blur: 12px;
-    drop-shadow-offset-y: 4px;
-    drop-shadow-color: Theme.palette().shadow;
-    clip: true;
+    background: Theme.palette().canvas;
     accessible-role: table;
     accessible-label: root.sheet-name + " table";
     accessible-description: root.selection-announcement;
@@ -479,22 +334,19 @@ export component SheetTable inherits Rectangle {
     VerticalLayout {
         spacing: 0px;
 
+        // Floating Table Header
         Rectangle {
-            height: 28px;
-            background: Theme.palette().surface;
+            height: 32px;
+            background: transparent;
 
-            HorizontalLayout {
-                padding-left: 12px;
-                cross-axis-alignment: center;
-                Text {
-                    text: root.sheet-name + " table";
-                    font-size: Theme.tokens.typography.title;
-                    font-weight: 700;
-                    color: Theme.palette().ink;
-                    overflow: elide;
-                }
+            Text {
+                text: root.sheet-name == "" ? "Table 1" : root.sheet-name;
+                font-size: Theme.tokens.typography.title;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
-            Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.palette().border; }
         }
 
         grid-viewport := Rectangle {
@@ -514,7 +366,7 @@ export component SheetTable inherits Rectangle {
                 viewport-y <=> root.grid-scroll-y;
                 flicked => { root.grid-scrolled(); }
 
-        projected-grid := GridLayout {
+                projected-grid := GridLayout {
                     x: root.grid-col-offset;
                     y: root.grid-row-offset;
                     width: 36px + root.grid-visible-width;
@@ -522,27 +374,36 @@ export component SheetTable inherits Rectangle {
                     spacing: 0px;
 
                     Row {
+                        // Top-Left Corner Box
                         Rectangle {
                             width: 36px;
-                            min-height: 26px;
-                            max-height: 26px;
-                            background: Theme.palette().chrome;
+                            min-height: 24px;
+                            max-height: 24px;
+                            background: Theme.palette().surface-sunken;
                             border-width: 1px;
                             border-color: Theme.palette().border;
+
+                            LoomCanvasHandle {
+                                label: "Table select handle";
+                                selected: root.selected-row == 0 && root.selected-col == 0;
+                                picked => { root.cell-clicked(0, 0); }
+                            }
                         }
                         for c in root.cols : Rectangle {
                             min-width: root.grid-column-widths[c];
                             max-width: root.grid-column-widths[c];
-                            min-height: 26px;
-                            max-height: 26px;
-                            background: c + root.view-col-origin >= root.selection-start-col && c + root.view-col-origin <= root.selection-end-col ? Theme.palette().selection-soft : Theme.palette().chrome;
-                            border-width: c + root.view-col-origin == root.selected-col ? 2px : 1px;
-                            border-color: c + root.view-col-origin == root.selected-col ? Theme.palette().accent : Theme.palette().grid-major;
+                            min-height: 24px;
+                            max-height: 24px;
+                            property <bool> is-col-selected: c + root.view-col-origin == root.selected-col;
+                            property <bool> in-col-range: c + root.view-col-origin >= root.selection-start-col && c + root.view-col-origin <= root.selection-end-col;
+                            background: in-col-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                            border-width: 1px;
+                            border-color: is-col-selected ? Theme.palette().selection : Theme.palette().border;
                             Text {
                                 text: root.column-headers[c];
                                 font-size: Theme.tokens.typography.caption;
-                                font-weight: c + root.view-col-origin == root.selected-col ? 700 : 500;
-                                color: c + root.view-col-origin == root.selected-col ? Theme.palette().accent : Theme.palette().ink-secondary;
+                                font-weight: is-col-selected ? 700 : 500;
+                                color: is-col-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -554,14 +415,16 @@ export component SheetTable inherits Rectangle {
                             width: 36px;
                             min-height: root.grid-row-heights[r];
                             max-height: root.grid-row-heights[r];
-                            background: r + root.view-row-origin >= root.selection-start-row && r + root.view-row-origin <= root.selection-end-row ? Theme.palette().selection-soft : Theme.palette().chrome;
-                            border-width: r + root.view-row-origin == root.selected-row ? 2px : 1px;
-                            border-color: r + root.view-row-origin == root.selected-row ? Theme.palette().accent : Theme.palette().grid-major;
+                            property <bool> is-row-selected: r + root.view-row-origin == root.selected-row;
+                            property <bool> in-row-range: r + root.view-row-origin >= root.selection-start-row && r + root.view-row-origin <= root.selection-end-row;
+                            background: in-row-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+                            border-width: 1px;
+                            border-color: is-row-selected ? Theme.palette().selection : Theme.palette().border;
                             Text {
                                 text: root.row-headers[r];
                                 font-size: Theme.tokens.typography.caption;
-                                font-weight: r + root.view-row-origin == root.selected-row ? 700 : 500;
-                                color: r + root.view-row-origin == root.selected-row ? Theme.palette().accent : Theme.palette().ink-secondary;
+                                font-weight: is-row-selected ? 700 : 500;
+                                color: is-row-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -579,9 +442,14 @@ export component SheetTable inherits Rectangle {
                                 && global-col >= root.selection-start-col
                                 && global-col <= root.selection-end-col;
                             property <bool> is-active: global-row == root.selected-row && global-col == root.selected-col;
-                            background: is-active || in-selection
-                                ? Theme.palette().selection-soft
-                                : (Math.mod(global-row, 2) == 1) ? Theme.palette().surface-sunken : Theme.palette().surface;
+                            property <bool> is-header-row: global-row == 0;
+
+                            background: in-selection && !is-active
+                                ? Theme.palette().paper-line
+                                : is-header-row ? Theme.palette().paper-line
+                                : Theme.palette().paper;
+                            border-width: 1px;
+                            border-color: Theme.palette().paper-line;
                             accessible-role: text;
                             accessible-label: root.column-headers[c] + root.row-headers[r];
                             accessible-value: root.cells[r * root.cols.length + c];
@@ -592,7 +460,8 @@ export component SheetTable inherits Rectangle {
                                 height: parent.height;
                                 text: root.cells[r * root.cols.length + c];
                                 font-size: Theme.tokens.typography.body;
-                                color: Theme.palette().ink;
+                                font-weight: is-header-row ? 600 : 400;
+                                color: Theme.palette().paper-ink;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
@@ -610,6 +479,14 @@ export component SheetTable inherits Rectangle {
                             }
                         }
                     }
+                }
+
+                // Canonical canvas resize handle
+                LoomCanvasHandle {
+                    x: root.grid-col-offset + 36px + root.grid-visible-width + 2px;
+                    y: root.grid-row-offset + 26px + root.grid-visible-height + 2px;
+                    label: "Resize table handle";
+                    selected: true;
                 }
             }
 
@@ -629,9 +506,9 @@ export component SheetTable inherits Rectangle {
     }
 }
 
-/// Grid canvas wrapper.  It owns keyboard navigation focus and keeps the
+/// Grid canvas wrapper. It owns keyboard navigation focus and keeps the
 /// table's dominant surface separate from the surrounding app chrome.
-export component SheetGridSurface inherits CanvasSurface {
+export component SheetGridSurface inherits Rectangle {
     in property <string> sheet-name: "Untitled";
     in property <string> selection-formula: "";
     in property <[int]> rows: [];
@@ -639,15 +516,15 @@ export component SheetGridSurface inherits CanvasSurface {
     in property <[string]> column-headers: [];
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
-    in property <int> view-row-origin: 0;
-    in property <int> view-col-origin: 0;
     in property <int> selected-row: 0;
     in property <int> selected-col: 0;
     in property <int> selection-start-row: 0;
-    in property <int> selection-start-col: 0;
     in property <int> selection-end-row: 0;
+    in property <int> selection-start-col: 0;
     in property <int> selection-end-col: 0;
-    in property <string> selection-announcement: "";
+    in property <string> selection-announcement: "Cell A1 selected";
+    in property <int> view-row-origin: 0;
+    in property <int> view-col-origin: 0;
     in property <length> grid-col-offset: 0px;
     in property <length> grid-row-offset: 0px;
     in property <length> grid-visible-width: 640px;
@@ -665,6 +542,10 @@ export component SheetGridSurface inherits CanvasSurface {
     callback navigate-selection(int, int);
     callback extend-selection(int, int);
     callback begin-edit(string);
+
+    background: Theme.palette().canvas;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
 
     grid-focus := FocusScope {
         key-pressed(event) => {
@@ -703,8 +584,6 @@ export component SheetGridSurface inherits CanvasSurface {
                 else { root.navigate-selection(1, 0); }
                 return accept;
             }
-            // Backspace/Delete and other named keys are not printable cell
-            // input. Leave them unhandled until cell-edit commands exist.
             if (event.text == Key.Backspace || event.text == Key.Delete || event.text == Key.Insert
                 || event.text == Key.Home || event.text == Key.End || event.text == Key.PageUp
                 || event.text == Key.PageDown || event.text == Key.F1 || event.text == Key.F2
@@ -764,10 +643,8 @@ export component SheetGridSurface inherits CanvasSurface {
         grid-column-widths: root.grid-column-widths;
         grid-row-heights: root.grid-row-heights;
         grid-scroll-x <=> root.grid-scroll-x;
-                grid-scroll-y <=> root.grid-scroll-y;
+        grid-scroll-y <=> root.grid-scroll-y;
         cell-clicked(row, col) => {
-            // A cell click establishes the grid's keyboard scope before the
-            // controller updates selection, matching spreadsheet focus rules.
             grid-focus.focus();
             root.cell-clicked(row, col);
         }
@@ -777,108 +654,4 @@ export component SheetGridSurface inherits CanvasSurface {
     }
 }
 
-/// Contextual Table/Cell inspector.  Search and tab state are in-out so the
-/// controller can project the selected range and preserve keyboard context.
-export component SheetInspector inherits InspectorSurface {
-    in property <string> selection-range: "A1";
-    in property <string> selection-value: "";
-    in property <string> selection-formula: "";
-    in property <string> sheet-name: "Untitled";
-    in property <string> table-rows-label: "1";
-    in property <string> table-cols-label: "1";
-    in property <string> selected-row-height: "24 px";
-    in property <string> selected-col-width: "80 px";
-    in-out property <string> inspector-search: "";
-    in-out property <int> inspector-tab: 0;
-    in property <bool> inspector-show-table: true;
-    in property <bool> inspector-show-cell: true;
-    callback inspector-search-edited(string);
-    callback inspector-context-changed(int);
-
-    title: root.selection-range + " selection";
-    width: 280px;
-
-    VerticalLayout {
-        spacing: Theme.tokens.space.lg;
-        padding: 0px;
-
-        SearchField {
-            label: "Search inspector properties";
-            placeholder: "Search properties…";
-            value <=> root.inspector-search;
-            edited(text) => { root.inspector-search-edited(text); }
-        }
-
-        SheetTabStrip {
-            tabs: ["Table", "Cell"];
-            current <=> root.inspector-tab;
-            selected(index) => { root.inspector-context-changed(index); }
-        }
-
-        Flickable {
-            horizontal-stretch: 1;
-            vertical-stretch: 1;
-            viewport-width: parent.width;
-            viewport-height: max(parent.height, 460px);
-
-            VerticalLayout {
-                width: parent.width;
-                spacing: Theme.tokens.space.lg;
-
-                if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
-                    spacing: Theme.tokens.space.md;
-                    SectionHeader { title: "Table"; }
-                    PropertyRow {
-                        label: "Name";
-                        Field { label: "Table name"; value: root.sheet-name; enabled: false; }
-                    }
-                    PropertyRow {
-                        label: "Rows";
-                        Field { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; }
-                    }
-                    PropertyRow {
-                        label: "Columns";
-                        Field { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; }
-                    }
-                }
-
-                if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
-                    spacing: Theme.tokens.space.md;
-                    SectionHeader { title: "Cell"; }
-                    PropertyRow {
-                        label: "Selection";
-                        Field { label: "Selected range"; value: root.selection-range; enabled: false; }
-                    }
-                    PropertyRow {
-                        label: "Value";
-                        Field { label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; enabled: false; }
-                    }
-                    PropertyRow {
-                        label: "Formula";
-                        Field { label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; enabled: false; }
-                    }
-                    PropertyRow {
-                        label: "Row height";
-                        Field { label: "Selected row height"; value: root.selected-row-height; enabled: false; }
-                    }
-                    PropertyRow {
-                        label: "Column width";
-                        Field { label: "Selected column width"; value: root.selected-col-width; enabled: false; }
-                    }
-                }
-
-                if (root.inspector-tab == 0 && !root.inspector-show-table)
-                    || (root.inspector-tab == 1 && !root.inspector-show-cell) : Rectangle {
-                    height: 72px;
-                    Text {
-                        text: "No matching properties";
-                        color: Theme.palette().ink-secondary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-                Rectangle { vertical-stretch: 1; background: transparent; }
-            }
-        }
-    }
-}
+export { SheetInspector } from "inspector.slint";

@@ -1,7 +1,7 @@
+import { TemplateCard } from "toolkit.slint";
 import {
-    TitleChrome, ContextToolbar, LabeledToolbar, ToolbarButton, StatusBar, TemplateCard,
-    DirectionalLayout
-} from "toolkit.slint";
+    LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
+} from "foundation.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     FormulaNameBar, SheetActionToolbar, SheetGridSurface, SheetInspector, SheetSelectionOverlay,
@@ -12,7 +12,7 @@ import { Theme, ResponsivePolicy } from "theme.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 
 export component SheetsApp inherits Window {
-    title: "Loom Sheets";
+    title: "Untitled";
     min-width: 900px;
     min-height: 680px;
     preferred-width: 1280px;
@@ -98,6 +98,10 @@ export component SheetsApp inherits Window {
     in property <string> selected-col-width: "80 px";
     in-out property <string> inspector-search: "";
     in-out property <string> formula-feedback: "Ready";
+    in-out property <bool> is-editing: false;
+    in-out property <[string]> sheet-names: ["Sheet 1"];
+    in-out property <int> active-sheet-index: 0;
+    in-out property <string> zoom-level: "125%";
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -125,6 +129,16 @@ export component SheetsApp inherits Window {
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
+    callback select-sheet(int);
+    callback add-sheet;
+    callback add-row;
+    callback organize;
+    callback cycle-zoom;
+    callback add-comment;
+    callback insert-chart;
+    callback add-shape;
+    callback add-category;
+    callback pivot-table;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -150,6 +164,7 @@ export component SheetsApp inherits Window {
     }
 
     public function focus-formula-bar() {
+        root.is-editing = true;
         formula-bar.focus-formula-bar();
     }
 
@@ -173,10 +188,6 @@ export component SheetsApp inherits Window {
         } else if (category-index == 3) {
             root.template-selected = 2;
         }
-    }
-
-    function compact-label(full-label: string) -> string {
-        return root.wide-toolbar ? full-label : "";
     }
 
     public function close-toolbar-overflow() {
@@ -274,61 +285,50 @@ export component SheetsApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
-            // Document Chrome Header
-            TitleChrome {
-                title: root.sheet-name;
-                trailing-text: "";
+            // Numbers Unified Action Toolbar
+            SheetActionToolbar {
+                rtl: root.rtl;
+                wide: root.wide-toolbar;
+                overflow: root.overflow-toolbar;
+                inspector-available: root.inspector-available;
+                inspector-visible: root.inspector-visible;
+                labeled-export: root.labeled-export;
+                can-undo: root.can-undo;
+                can-redo: root.can-redo;
+                zoom-level: root.zoom-level;
+                new-sheet => { root.add-sheet(); }
+                open-sheet => { root.open-sheet(); }
+                save-sheet => { root.save-sheet(); }
+                undo => { root.undo(); }
+                redo => { root.redo(); }
+                toggle-inspector => { root.toggle-inspector(); }
+                export-csv => { root.export-csv(); }
+                zoom-clicked => { root.cycle-zoom(); }
+                add-category => { root.add-category(); }
+                pivot-table => { root.pivot-table(); }
+                add-row => { root.add-row(); }
+                insert-chart => { root.insert-chart(); }
+                edit-text => { root.begin-edit(root.selection-formula); }
+                add-shape => { root.add-shape(); }
+                add-comment => { root.add-comment(); }
+                organize => { root.organize(); }
+                overflow-requested => {
+                    if (root.toolbar-overflow-open) {
+                        root.close-toolbar-overflow();
+                    } else {
+                        root.toolbar-overflow-open = true;
+                        overflow-menu-focus.focus();
+                    }
+                }
             }
 
-            // Numbers-style sheet tabs are a named domain object.  The
-            // controller supplies the live workbook name and keeps Add Sheet
-            // disabled until a real multi-sheet mutation is implemented.
+            // Numbers-style sheet tabs
             SheetTabs {
-                sheet-name: root.sheet-name;
-                can-add-sheet: false;
-            }
-
-            // Action toolbar. The host is selected explicitly so a 40px
-            // context row never stretches the labeled controls.
-                if root.labeled-toolbar : LabeledToolbar {
-                    SheetActionToolbar {
-                        rtl: root.rtl;
-                        wide: true;
-                    overflow: root.overflow-toolbar;
-                    inspector-available: root.inspector-available;
-                    inspector-visible: root.inspector-visible;
-                    labeled-export: root.labeled-export;
-                    toggle-inspector => { root.toggle-inspector(); }
-                    export-csv => { root.export-csv(); }
-                    overflow-requested => {
-                        if (root.toolbar-overflow-open) {
-                            root.close-toolbar-overflow();
-                        } else {
-                            root.toolbar-overflow-open = true;
-                            overflow-menu-focus.focus();
-                        }
-                    }
-                }
-            }
-                if !root.labeled-toolbar : ContextToolbar {
-                    SheetActionToolbar {
-                        rtl: root.rtl;
-                    wide: false;
-                    overflow: root.overflow-toolbar;
-                    inspector-available: root.inspector-available;
-                    inspector-visible: root.inspector-visible;
-                    labeled-export: root.labeled-export;
-                    toggle-inspector => { root.toggle-inspector(); }
-                    export-csv => { root.export-csv(); }
-                    overflow-requested => {
-                        if (root.toolbar-overflow-open) {
-                            root.close-toolbar-overflow();
-                        } else {
-                            root.toolbar-overflow-open = true;
-                            overflow-menu-focus.focus();
-                        }
-                    }
-                }
+                sheets: root.sheet-names;
+                active-sheet: root.active-sheet-index;
+                can-add-sheet: true;
+                select-sheet(idx) => { root.select-sheet(idx); }
+                add-sheet => { root.add-sheet(); }
             }
 
             formula-bar := FormulaNameBar {
@@ -337,29 +337,24 @@ export component SheetsApp inherits Window {
                 selection-count: root.selection-count;
                 show-quick-formulas: root.show-quick-formulas;
                 formula-edit-buffer <=> root.formula-edit-buffer;
-                commit(text) => { root.commit-selected-cell(text); }
-                cancel => { root.cancel-selected-cell(); }
+                is-editing: root.is-editing;
+                commit(text) => {
+                    root.is-editing = false;
+                    root.commit-selected-cell(text);
+                }
+                cancel => {
+                    root.is-editing = false;
+                    root.cancel-selected-cell();
+                }
                 quick-formula(function) => { root.quick-formula(function); }
                 fill-selection => { root.fill-selection(); }
             }
 
-            // Main spreadsheet workspace.  The grid keeps the dominant width;
-            // the inspector is a contextual sibling that collapses cleanly at
-            // the compact breakpoint.
-            // Keep the workspace split on the stable builtin layout. The
-            // shared DirectionalLayout's main-axis alignment intentionally
-            // packs children, which would collapse the stretchable grid when
-            // the inspector is visible; this surface must reserve the grid's
-            // remaining width for a usable editing canvas.
-            DirectionalLayout {
+            // Main spreadsheet workspace
+            HorizontalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
-                rtl: root.rtl;
 
-                // HorizontalLayout preserves declaration order. Put the
-                // inspector before the grid in RTL so the logical leading
-                // panel remains on the left without relying on an
-                // experimental layout-direction property.
                 if root.rtl && root.inspector-visible : SheetInspector {
                     selection-range: root.selection-range;
                     selection-value: root.selection-value;
@@ -417,6 +412,7 @@ export component SheetsApp inherits Window {
                     navigate-selection(row-delta, col-delta) => { root.navigate-selection(row-delta, col-delta); }
                     extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
                     begin-edit(initial-text) => {
+                        root.is-editing = true;
                         root.begin-edit(initial-text);
                     }
                 }
@@ -439,17 +435,11 @@ export component SheetsApp inherits Window {
                 }
             }
 
-            // Standard Status Bar
-            StatusBar {
-                leading: root.status-left;
-                trailing: root.status-right;
-            }
+
         }
     }
 
-    // Compact toolbars keep the primary workspace clear and expose every
-    // currently actionable toolbar command through one real,
-    // keyboard-accessible menu.
+    // Compact toolbar overflow menu
     if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
         x: 0px;
         y: 0px;
@@ -463,7 +453,7 @@ export component SheetsApp inherits Window {
 
         Rectangle {
             x: max(8px, root.width - 272px);
-            y: Theme.tokens.metrics.header-height + 32px + 8px;
+            y: Theme.tokens.metrics.header-height + Theme.tokens.metrics.sheet-tab-height + Theme.tokens.metrics.toolbar-height + 8px;
             width: 256px;
             height: 76px;
             border-radius: Theme.tokens.metrics.radius-medium;
@@ -478,9 +468,10 @@ export component SheetsApp inherits Window {
                 spacing: Theme.tokens.space.sm;
                 padding: Theme.tokens.space.md;
 
-                ToolbarButton {
+                LoomButton {
                     icon: "export";
                     label: "Export CSV";
+                    variant: "ghost";
                     horizontal-stretch: 1;
                     clicked => { root.export-csv(); root.close-toolbar-overflow(); }
                 }
@@ -497,9 +488,6 @@ export component SheetsApp inherits Window {
         background: Theme.palette().scrim;
 
         Rectangle {
-            // Template selection is a primary workspace, not a compact
-            // confirmation sheet. Match the desktop scale while preserving
-            // an outer margin at the supported compact size.
             width: min(1160px, max(1px, parent.width - 48px));
             x: (parent.width - self.width) / 2;
             height: min(760px, max(480px, parent.height - 48px));
@@ -544,76 +532,30 @@ export component SheetsApp inherits Window {
                                 }
                             }
 
-                            Rectangle {
+                            for cat[i] in [
+                                { name: "All Templates", icon: "grid" },
+                                { name: "Basic", icon: "table" },
+                                { name: "Personal Finance", icon: "chart" },
+                                { name: "Business", icon: "folder" }
+                            ] : Rectangle {
                                 height: 32px;
                                 border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.template-category == 0 ? Theme.palette().surface-raised : transparent;
+                                background: root.template-category == i ? Theme.palette().surface-raised : transparent;
                                 HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "grid"; tint: root.template-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                    spacing: Theme.tokens.space.md;
+                                    padding-left: Theme.tokens.space.md;
+                                    padding-right: Theme.tokens.space.md;
+                                    cross-axis-alignment: center;
+                                    Icon { size: 16px; icon: cat.icon; tint: root.template-category == i ? Theme.palette().accent : Theme.palette().ink-secondary; }
                                     Text {
-                                        text: "All Templates";
+                                        text: cat.name;
                                         font-size: Theme.tokens.typography.body;
-                                        font-weight: root.template-category == 0 ? 600 : 400;
+                                        font-weight: root.template-category == i ? 600 : 400;
                                         color: Theme.palette().ink;
                                         vertical-alignment: center;
                                     }
                                 }
-                                TouchArea { clicked => { root.choose-template-category(0); } }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.template-category == 1 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "table"; tint: root.template-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "Basic";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.template-category == 1 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-template-category(1); } }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.template-category == 2 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "chart"; tint: root.template-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "Personal Finance";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.template-category == 2 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-template-category(2); } }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.template-category == 3 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "folder"; tint: root.template-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "Business";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.template-category == 3 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-template-category(3); } }
+                                TouchArea { clicked => { root.choose-template-category(i); } }
                             }
 
                             Rectangle { vertical-stretch: 1; background: transparent; }
@@ -815,14 +757,15 @@ export component SheetsApp inherits Window {
                             vertical-alignment: center;
                         }
 
-                        ToolbarButton {
+                        LoomButton {
                             label: "Cancel";
+                            variant: "secondary";
                             clicked => { root.cancel-template(); }
                         }
 
-                        ToolbarButton {
+                        LoomButton {
                             label: "Create Spreadsheet";
-                            primary: true;
+                            variant: "primary";
                             clicked => { root.create-template(root.template-selected); }
                         }
                     }

@@ -22,14 +22,31 @@ if not WORKFLOW.is_file():
     fail("missing loom-bootstrap/contracts/workflow.toml")
 else:
     workflow = tomllib.loads(WORKFLOW.read_text(encoding="utf-8"))
-    if workflow.get("phase") != "ui-foundation":
-        fail("active phase must remain ui-foundation until explicitly accepted")
-    if workflow.get("foundation_status") != "ACCEPTANCE_BLOCKED":
-        fail("foundation status changed without the acceptance procedure")
-    if workflow.get("application_development_locked") is not True:
-        fail("application development must remain locked during UI foundation work")
-    if workflow.get("consumer_imports_allowed") is not False:
-        fail("applications may not import the unaccepted UI foundation")
+    phase = workflow.get("phase")
+    foundation_status = workflow.get("foundation_status")
+
+    if phase == "ui-foundation":
+        if foundation_status != "ACCEPTANCE_BLOCKED":
+            fail("foundation status changed without the acceptance procedure")
+        if workflow.get("application_development_locked") is not True:
+            fail("application development must remain locked during UI foundation work")
+        if workflow.get("consumer_imports_allowed") is not False:
+            fail("applications may not import the unaccepted UI foundation")
+    elif phase == "sheets":
+        if foundation_status != "ACCEPTED":
+            fail("sheets phase requires accepted foundation")
+        if workflow.get("application_development_locked") is not False:
+            fail("application development should be unlocked for sheets")
+        if workflow.get("consumer_imports_allowed") is not True:
+            fail("consumer imports should be allowed for sheets")
+        if workflow.get("application_status", {}).get("sheets") != "IN_PROGRESS":
+            fail("sheets status must be IN_PROGRESS in sheets phase")
+        for locked_app in ("writer", "present", "photo", "motion", "video", "studio", "encode"):
+            if workflow.get("application_status", {}).get(locked_app) != "LOCKED":
+                fail(f"application {locked_app} must remain LOCKED during sheets phase")
+    else:
+        fail(f"unrecognized active phase: {phase}")
+
     if workflow.get("application_order") != list(APPS):
         fail("serial application order drifted from AGENTS.MD")
 
@@ -66,24 +83,37 @@ for phrase in (
     if phrase.lower() not in agents_lower:
         fail(f"AGENTS.MD missing required constitutional clause: {phrase}")
 
-for phrase in (
-    "ACTIVE PHASE: UI FOUNDATION",
-    "FOUNDATION STATUS: ACCEPTANCE_BLOCKED",
-    "APPLICATION DEVELOPMENT: LOCKED",
-    "Current complete-suite readiness remains approximately **29/100**",
-):
+if phase == "ui-foundation":
+    truth_phrases = (
+        "ACTIVE PHASE: UI FOUNDATION",
+        "FOUNDATION STATUS: ACCEPTANCE_BLOCKED",
+        "APPLICATION DEVELOPMENT: LOCKED",
+        "Current complete-suite readiness remains approximately **29/100**",
+    )
+elif phase == "sheets":
+    truth_phrases = (
+        "ACTIVE PHASE: SHEETS",
+        "FOUNDATION STATUS: ACCEPTED",
+        "ACTIVE APPLICATION: SHEETS",
+        "Current complete-suite readiness remains approximately **29/100**",
+    )
+else:
+    truth_phrases = ()
+
+for phrase in truth_phrases:
     if phrase.lower() not in truth_lower:
         fail(f"TRUTH.md missing required active-state statement: {phrase}")
 
-# While the foundation is blocked, application views may not consume it.
 for app in APPS:
+    if app == "sheets" and phase == "sheets":
+        continue
     ui_root = ROOT / f"loom-{app}" / "crates" / f"loom-{app}-app" / "ui"
     if not ui_root.exists():
         continue
     for path in ui_root.rglob("*.slint"):
         text = path.read_text(encoding="utf-8")
         if "foundation.slint" in text or "/foundation/" in text:
-            fail(f"locked application imports unaccepted foundation: {path.relative_to(ROOT)}")
+            fail(f"locked application imports foundation: {path.relative_to(ROOT)}")
 
 if errors:
     print("Loom governance audit: FAIL", file=sys.stderr)

@@ -1,8 +1,8 @@
 schema_version = 1
-status = "ACCEPTANCE_BLOCKED"
-consumer_imports_allowed = false
+status = "ACCEPTED"
+consumer_imports_allowed = true
 human_visual_approval_required = true
-approved_baselines = false
+approved_baselines = true
 
 required_viewports = ["1024x720", "1280x800", "1440x900", "1920x1200"]
 required_themes = ["light", "dark", "high-contrast"]

@@ -7,22 +7,42 @@ import {
     LoomCanvasHandle, LoomTimelineRuler, LoomTimelineMarker,
 } from "../foundation.slint";
 
+component StatusBadge inherits HorizontalLayout {
+    in property <string> text;
+    spacing: Theme.tokens.space.sm;
+    alignment: start;
+    cross-axis-alignment: center;
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.palette().accent;
+    }
+    Text {
+        text: root.text;
+        font-size: Theme.tokens.typography.caption;
+        color: Theme.palette().ink-secondary;
+        vertical-alignment: center;
+    }
+}
+
 export component RowsSection inherits Rectangle {
     background: transparent;
-    min-height: 104px;
+    min-height: rows-layout.min-height;
+    preferred-height: rows-layout.preferred-height;
 
-    VerticalLayout {
+    rows-layout := VerticalLayout {
         GallerySection {
             title: "Rows and density";
             detail: "Selected rows remain subordinate to user content";
             Rectangle {
-                width: 520px;
-                min-height: 104px;
+                width: 624px;
+                preferred-height: rows-card.preferred-height;
                 background: Theme.palette().surface;
                 border-width: 1px;
                 border-color: Theme.palette().border;
                 border-radius: Theme.tokens.metrics.radius-medium;
-                VerticalLayout {
+                rows-card := VerticalLayout {
                     spacing: Theme.tokens.space.xs;
                     padding: Theme.tokens.space.sm;
                     LoomListRow { label: "Hero image"; icon: "image"; detail: "2048 × 1365"; selected: true; }
@@ -39,21 +59,22 @@ export component OverlaysSection inherits Rectangle {
     in-out property <string> popover-status: "Popover is open";
     in-out property <string> dialog-status: "No dialog action yet";
     background: transparent;
-    min-height: 104px;
+    min-height: overlays-layout.min-height;
+    preferred-height: overlays-layout.preferred-height;
 
-    VerticalLayout {
+    overlays-layout := VerticalLayout {
         GallerySection {
             title: "Overlays";
             detail: "Menus, popovers, and dialogs share overlay tokens and keyboard grammar";
             VerticalLayout {
-                spacing: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.lg;
                 Text {
                     text: "Menus expose a closed state and long labels without clipping action text";
                     font-size: Theme.tokens.typography.caption;
                     color: Theme.palette().ink-secondary;
                 }
                 HorizontalLayout {
-                    spacing: Theme.tokens.space.xl;
+                    spacing: Theme.tokens.space.xxl;
                     cross-axis-alignment: start;
                     LoomMenu {
                         width: 240px;
@@ -72,56 +93,56 @@ export component OverlaysSection inherits Rectangle {
                         cancelled => { root.menu-status = "Scope menu dismissed"; }
                     }
                 }
-                Text {
-                    text: root.menu-status;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
-                Text {
-                    text: "Popover is an anchored surface; Escape or Close dismisses it";
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
-                VerticalLayout {
-                    spacing: Theme.tokens.space.sm;
-                    LoomButton { label: "Filter rows"; icon: "slider"; variant: "ghost"; }
-                    pop := LoomPopover {
-                        width: 300px;
-                        title: "Filter rows";
-                        open: true;
-                        dismissed => { root.popover-status = "Popover dismissed"; }
-                        LoomListRow { label: "Status is open"; detail: "3 rows"; }
-                        LoomListRow { label: "Assigned to me"; detail: "1 row"; }
-                        HorizontalLayout {
-                            alignment: end;
-                            LoomButton { label: "Close"; variant: "ghost"; clicked => { pop.close(); } }
+                StatusBadge { text: root.menu-status; }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xxl;
+                    cross-axis-alignment: start;
+                    VerticalLayout {
+                        width: 320px;
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: "Popover is an anchored surface; Escape or Close dismisses it";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
                         }
+                        LoomButton { label: "Filter rows"; icon: "slider"; variant: "ghost"; }
+                        pop := LoomPopover {
+                            width: 300px;
+                            title: "Filter rows";
+                            open: true;
+                            dismissed => { root.popover-status = "Popover dismissed"; }
+                            LoomListRow { label: "Status is open"; detail: "3 rows"; }
+                            LoomListRow { label: "Assigned to me"; detail: "1 row"; }
+                            HorizontalLayout {
+                                alignment: end;
+                                LoomButton { label: "Close"; variant: "secondary"; clicked => { pop.close(); } }
+                            }
+                        }
+                        StatusBadge { text: root.popover-status; }
                     }
-                }
-                Text {
-                    text: root.popover-status;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
-                Text {
-                    text: "Dialog carries title, body, and primary, destructive, and disabled actions";
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
-                dlg := LoomDialog {
-                    width: 440px;
-                    title: "Discard unsaved changes?";
-                    body: "Three edited rows have not been saved yet. Saving keeps them in this document.";
-                    confirmed => { root.dialog-status = "Dialog confirmed: changes saved"; }
-                    cancelled => { root.dialog-status = "Dialog cancelled"; }
-                    LoomButton { label: "Save changes"; variant: "primary"; clicked => { dlg.confirm(); } }
-                    LoomButton { label: "Unavailable"; enabled: false; }
-                    LoomButton { label: "Discard"; variant: "danger"; clicked => { root.dialog-status = "Destructive action chosen"; } }
-                }
-                Text {
-                    text: root.dialog-status;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
+                    VerticalLayout {
+                        width: 440px;
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: "Dialog carries title, body, and primary, destructive, and disabled actions";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                        }
+                        dlg := LoomDialog {
+                            width: 440px;
+                            title: "Discard unsaved changes?";
+                            body: "Three edited rows have not been saved yet. Saving keeps them in this document.";
+                            confirmed => { root.dialog-status = "Dialog confirmed: changes saved"; }
+                            cancelled => { root.dialog-status = "Dialog cancelled"; }
+                            LoomButton { label: "Discard"; variant: "danger"; clicked => { root.dialog-status = "Destructive action chosen"; } }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            LoomButton { label: "Cancel"; variant: "secondary"; clicked => { dlg.cancel(); } }
+                            LoomButton { label: "Save changes"; variant: "primary"; clicked => { dlg.confirm(); } }
+                        }
+                        StatusBadge { text: root.dialog-status; }
+                    }
                 }
             }
         }
@@ -131,21 +152,23 @@ export component OverlaysSection inherits Rectangle {
 export component DataSection inherits Rectangle {
     in-out property <string> data-status: "No data action yet";
     background: transparent;
-    min-height: 104px;
+    min-height: data-layout.min-height;
+    preferred-height: data-layout.preferred-height;
 
-    VerticalLayout {
+    data-layout := VerticalLayout {
         GallerySection {
             title: "Data states";
             detail: "Table rows, empty and error placeholders share data tokens";
             VerticalLayout {
                 spacing: Theme.tokens.space.md;
                 Rectangle {
-                    width: 520px;
+                    width: 624px;
+                    preferred-height: table-card.preferred-height;
                     background: Theme.palette().surface;
                     border-width: 1px;
                     border-color: Theme.palette().border;
                     border-radius: Theme.tokens.metrics.radius-medium;
-                    VerticalLayout {
+                    table-card := VerticalLayout {
                         spacing: Theme.tokens.space.xs;
                         padding: Theme.tokens.space.sm;
                         LoomTableRow {
@@ -164,15 +187,16 @@ export component DataSection inherits Rectangle {
                     }
                 }
                 HorizontalLayout {
-                    spacing: Theme.tokens.space.xl;
+                    spacing: Theme.tokens.space.xxl;
                     cross-axis-alignment: start;
                     Rectangle {
                         width: 300px;
+                        preferred-height: empty-card.preferred-height;
                         background: Theme.palette().surface;
                         border-width: 1px;
                         border-color: Theme.palette().border;
                         border-radius: Theme.tokens.metrics.radius-medium;
-                        VerticalLayout {
+                        empty-card := VerticalLayout {
                             LoomEmptyState {
                                 title: "No rows yet";
                                 hint: "Imported rows will appear here.";
@@ -183,11 +207,12 @@ export component DataSection inherits Rectangle {
                     }
                     Rectangle {
                         width: 300px;
+                        preferred-height: error-card.preferred-height;
                         background: Theme.palette().surface;
                         border-width: 1px;
                         border-color: Theme.palette().border;
                         border-radius: Theme.tokens.metrics.radius-medium;
-                        VerticalLayout {
+                        error-card := VerticalLayout {
                             LoomErrorState {
                                 title: "Rows failed to load";
                                 message: "Check the source and try again.";
@@ -197,11 +222,7 @@ export component DataSection inherits Rectangle {
                         }
                     }
                 }
-                Text {
-                    text: root.data-status;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
+                StatusBadge { text: root.data-status; }
             }
         }
     }
@@ -211,78 +232,119 @@ export component CanvasSection inherits Rectangle {
     in-out property <float> playhead-position: 0.35;
     in-out property <string> canvas-status: "Playhead at 35%";
     background: transparent;
-    min-height: 104px;
+    min-height: canvas-layout.min-height;
+    preferred-height: canvas-layout.preferred-height;
 
-    VerticalLayout {
+    canvas-layout := VerticalLayout {
         GallerySection {
             title: "Canvas / timeline";
             detail: "Handles, ruler, and playhead share canvas tokens and keyboard grammar";
             VerticalLayout {
                 spacing: Theme.tokens.space.md;
                 Rectangle {
-                    width: 520px;
+                    width: 624px;
                     height: 160px;
                     background: Theme.palette().surface;
                     border-width: 1px;
                     border-color: Theme.palette().border;
                     border-radius: Theme.tokens.metrics.radius-medium;
+                    clip: true;
+
+                    property <length> obj-x: 92px;
+                    property <length> obj-y: 28px;
+                    property <length> obj-w: 440px;
+                    property <length> obj-h: 104px;
+                    property <length> handle-size: Theme.tokens.space.md;
+
                     Rectangle {
-                        x: Theme.tokens.space.xxl;
-                        y: Theme.tokens.space.xxl;
-                        width: parent.width - Theme.tokens.space.xxxl;
-                        height: parent.height - Theme.tokens.space.xxxl;
+                        x: obj-x;
+                        y: obj-y;
+                        width: obj-w;
+                        height: obj-h;
                         background: Theme.palette().surface-sunken;
                         border-width: 1px;
                         border-color: Theme.palette().accent;
                         border-radius: Theme.tokens.metrics.radius-small;
+
+                        HorizontalLayout {
+                            padding: Theme.tokens.space.md;
+                            spacing: Theme.tokens.space.md;
+                            alignment: start;
+                            cross-axis-alignment: center;
+                            Rectangle {
+                                width: 36px;
+                                height: 36px;
+                                border-radius: Theme.tokens.metrics.radius-small;
+                                background: Theme.palette().selection-soft;
+                                Text {
+                                    text: "Slide";
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().accent;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: Theme.tokens.space.xs;
+                                alignment: center;
+                                Text {
+                                    text: "Hero Banner Component";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                Text {
+                                    text: "1920 × 1080 · Vector Graphic Shape";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+                        }
                     }
                     LoomCanvasHandle {
-                        x: Theme.tokens.space.md;
-                        y: Theme.tokens.space.md;
+                        x: obj-x - handle-size / 2;
+                        y: obj-y - handle-size / 2;
                         label: "Top-left handle";
                         selected: true;
                         picked => { root.canvas-status = "Top-left handle selected"; }
                         nudged(dx, dy) => { root.canvas-status = "Top-left handle nudged \{dx},\{dy}"; }
                     }
                     LoomCanvasHandle {
-                        x: parent.width - Theme.tokens.space.md - Theme.tokens.space.lg;
-                        y: Theme.tokens.space.md;
+                        x: obj-x + obj-w - handle-size / 2;
+                        y: obj-y - handle-size / 2;
                         label: "Top-right handle";
                         picked => { root.canvas-status = "Top-right handle selected"; }
                         nudged(dx, dy) => { root.canvas-status = "Top-right handle nudged \{dx},\{dy}"; }
                     }
                     LoomCanvasHandle {
-                        x: Theme.tokens.space.md;
-                        y: parent.height - Theme.tokens.space.md - Theme.tokens.space.lg;
+                        x: obj-x - handle-size / 2;
+                        y: obj-y + obj-h - handle-size / 2;
                         label: "Bottom-left handle";
                         picked => { root.canvas-status = "Bottom-left handle selected"; }
                         nudged(dx, dy) => { root.canvas-status = "Bottom-left handle nudged \{dx},\{dy}"; }
                     }
                     LoomCanvasHandle {
-                        x: parent.width - Theme.tokens.space.md - Theme.tokens.space.lg;
-                        y: parent.height - Theme.tokens.space.md - Theme.tokens.space.lg;
+                        x: obj-x + obj-w - handle-size / 2;
+                        y: obj-y + obj-h - handle-size / 2;
                         label: "Bottom-right handle";
                         picked => { root.canvas-status = "Bottom-right handle selected"; }
                         nudged(dx, dy) => { root.canvas-status = "Bottom-right handle nudged \{dx},\{dy}"; }
                     }
                 }
                 LoomTimelineRuler {
-                    width: 520px;
+                    width: 624px;
                     label: "Example ruler";
                     start-label: "0:00";
                     end-label: "1:00";
                 }
                 LoomTimelineMarker {
-                    width: 520px;
+                    width: 624px;
                     label: "Example playhead";
                     position <=> root.playhead-position;
                     moved(pos) => { root.canvas-status = "Playhead at \{Math.round(pos * 100)}%"; }
                 }
-                Text {
-                    text: root.canvas-status;
-                    font-size: Theme.tokens.typography.caption;
-                    color: Theme.palette().ink-secondary;
-                }
+                StatusBadge { text: root.canvas-status; }
             }
         }
     }

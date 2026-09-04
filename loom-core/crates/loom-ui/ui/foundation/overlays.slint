@@ -20,9 +20,11 @@ export component LoomMenu inherits Rectangle {
     callback cancelled();
 
     min-width: 200px;
-    border-radius: Theme.tokens.metrics.radius-medium;
+    min-height: menu-layout.min-height;
+    preferred-height: menu-layout.preferred-height;
+    border-radius: Theme.tokens.metrics.radius-large;
     border-width: menu-focus.has-focus ? 2px : 1px;
-    border-color: menu-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    border-color: menu-focus.has-focus ? Theme.palette().focus : Theme.palette().border;
     background: Theme.palette().overlay;
     drop-shadow-blur: 16px;
     drop-shadow-offset-x: 0px;
@@ -36,7 +38,7 @@ export component LoomMenu inherits Rectangle {
         }
     }
 
-    VerticalLayout {
+    menu-layout := VerticalLayout {
         spacing: 0px;
 
         Rectangle {
@@ -97,7 +99,9 @@ export component LoomMenu inherits Rectangle {
         }
 
         if root.open : VerticalLayout {
-            spacing: 0px;
+            spacing: 1px;
+            padding-left: Theme.tokens.space.xs;
+            padding-right: Theme.tokens.space.xs;
             padding-top: Theme.tokens.space.xs;
             padding-bottom: Theme.tokens.space.xs;
             if root.items.length == 0 : Text {
@@ -107,15 +111,28 @@ export component LoomMenu inherits Rectangle {
                 horizontal-alignment: center;
             }
             for item[idx] in root.items : Rectangle {
-                height: Theme.tokens.metrics.panel-header-height;
+                height: Theme.tokens.metrics.control-height;
+                border-radius: Theme.tokens.metrics.radius-small;
                 background: idx == root.current ? Theme.palette().selection-soft
                     : item-touch.has-hover ? Theme.palette().surface-raised
                     : transparent;
-                if !Theme.rtl : HorizontalLayout {
+                HorizontalLayout {
                     spacing: Theme.tokens.space.md;
                     padding-left: Theme.tokens.space.md;
                     padding-right: Theme.tokens.space.md;
                     cross-axis-alignment: center;
+
+                    if !Theme.rtl : Rectangle {
+                        width: Theme.tokens.metrics.icon-small;
+                        height: Theme.tokens.metrics.icon-small;
+                        background: transparent;
+                        if idx == root.current : Icon {
+                            size: Theme.tokens.metrics.icon-small;
+                            icon: "check";
+                            tint: Theme.palette().accent;
+                        }
+                    }
+
                     Text {
                         text: item;
                         font-size: Theme.tokens.typography.body;
@@ -125,30 +142,16 @@ export component LoomMenu inherits Rectangle {
                         horizontal-stretch: 1;
                         overflow: elide;
                     }
-                    if idx == root.current : Icon {
-                        size: Theme.tokens.metrics.icon-small;
-                        icon: "check";
-                        tint: Theme.palette().accent;
-                    }
-                }
-                if Theme.rtl : HorizontalLayout {
-                    spacing: Theme.tokens.space.md;
-                    padding-left: Theme.tokens.space.md;
-                    padding-right: Theme.tokens.space.md;
-                    cross-axis-alignment: center;
-                    if idx == root.current : Icon {
-                        size: Theme.tokens.metrics.icon-small;
-                        icon: "check";
-                        tint: Theme.palette().accent;
-                    }
-                    Text {
-                        text: item;
-                        font-size: Theme.tokens.typography.body;
-                        font-weight: idx == root.current ? 600 : 500;
-                        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        overflow: elide;
+
+                    if Theme.rtl : Rectangle {
+                        width: Theme.tokens.metrics.icon-small;
+                        height: Theme.tokens.metrics.icon-small;
+                        background: transparent;
+                        if idx == root.current : Icon {
+                            size: Theme.tokens.metrics.icon-small;
+                            icon: "check";
+                            tint: Theme.palette().accent;
+                        }
                     }
                 }
                 item-touch := TouchArea {
@@ -199,22 +202,23 @@ export component LoomMenu inherits Rectangle {
                 return reject;
             }
             if (event.text == Key.UpArrow) {
-                if (root.open && root.items.length > 0) {
+                if (!root.open) {
+                    root.open = true;
+                    return accept;
+                }
+                if (root.items.length > 0) {
                     root.current = max(0, root.current - 1);
                     return accept;
                 }
                 return reject;
             }
             if (event.text == Key.Return || event.text == Key.Space) {
-                if (root.open) {
-                    if (root.items.length == 0) {
-                        return reject;
-                    }
-                    root.open = false;
-                    root.selected(root.current);
+                if (!root.open) {
+                    root.open = true;
                     return accept;
                 }
-                root.open = true;
+                root.open = false;
+                root.selected(root.current);
                 return accept;
             }
             return reject;
@@ -235,9 +239,11 @@ export component LoomPopover inherits Rectangle {
 
     visible: root.open;
     min-width: 240px;
-    border-radius: Theme.tokens.metrics.radius-medium;
+    min-height: root.open ? pop-layout.min-height : 0px;
+    preferred-height: root.open ? pop-layout.preferred-height : 0px;
+    border-radius: Theme.tokens.metrics.radius-large;
     border-width: pop-focus.has-focus ? 2px : 1px;
-    border-color: pop-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    border-color: pop-focus.has-focus ? Theme.palette().focus : Theme.palette().border;
     background: Theme.palette().overlay;
     drop-shadow-blur: 20px;
     drop-shadow-offset-x: 0px;
@@ -246,7 +252,7 @@ export component LoomPopover inherits Rectangle {
     accessible-role: groupbox;
     accessible-label: root.title != "" ? root.title : root.label;
 
-    VerticalLayout {
+    pop-layout := VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: Theme.tokens.space.lg;
         if root.title != "" : Text {
@@ -292,9 +298,11 @@ export component LoomDialog inherits Rectangle {
     }
 
     min-width: 320px;
-    border-radius: Theme.tokens.metrics.radius-medium;
+    min-height: dlg-layout.min-height;
+    preferred-height: dlg-layout.preferred-height;
+    border-radius: Theme.tokens.metrics.radius-large;
     border-width: dlg-focus.has-focus ? 2px : 1px;
-    border-color: dlg-focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    border-color: dlg-focus.has-focus ? Theme.palette().focus : Theme.palette().border;
     background: Theme.palette().overlay;
     drop-shadow-blur: 28px;
     drop-shadow-offset-x: 0px;
@@ -304,7 +312,7 @@ export component LoomDialog inherits Rectangle {
     accessible-label: root.label;
     accessible-description: root.body;
 
-    VerticalLayout {
+    dlg-layout := VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: Theme.tokens.space.xl;
         Text {
