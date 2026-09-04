@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use loom_desktop::{CommandAction, DesktopError, NativeMenuBar};
 use loom_sheets_core::{
-    compute_pivot, evaluate, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
+    compute_pivot, evaluate, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
     PivotAggregation, Sheet, SheetModel,
 };
 use slint::{ComponentHandle, SharedString, VecModel};
 
 use crate::{
-    apply_sheet, cell_value, commit_formula_edit, select_cell, selection_from_app, sync_menu_state,
-    GuiState, SheetsApp,
+    apply_sheet, cell_value, clear_selection, commit_formula_edit, select_cell, selection_from_app,
+    set_selection_alignment, sync_menu_state, GuiState, SheetsApp,
 };
 
 /// Synchronize the sheet tab labels and active selection with the Slint UI.
@@ -104,10 +104,34 @@ pub(crate) fn register_sheet_actions(
                     let cur = state.current.borrow().clone();
                     let active_idx = *state.active_sheet_index.borrow();
                     state.sheets.borrow_mut()[active_idx] = cur;
+
+                    // Preserve current sheet's undo/redo history
+                    let cur_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
+                    let cur_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
+                    if active_idx >= state.sheet_histories.borrow().len() {
+                        state
+                            .sheet_histories
+                            .borrow_mut()
+                            .resize_with(active_idx + 1, || (Vec::new(), Vec::new()));
+                    }
+                    state.sheet_histories.borrow_mut()[active_idx] = (cur_undo, cur_redo);
+
+                    // Switch sheet
                     *state.active_sheet_index.borrow_mut() = idx;
                     *state.current.borrow_mut() = state.sheets.borrow()[idx].clone();
-                    state.undo_stack.borrow_mut().clear();
-                    state.redo_stack.borrow_mut().clear();
+
+                    // Restore target sheet's undo/redo history
+                    if idx >= state.sheet_histories.borrow().len() {
+                        state
+                            .sheet_histories
+                            .borrow_mut()
+                            .resize_with(idx + 1, || (Vec::new(), Vec::new()));
+                    }
+                    let (target_undo, target_redo) =
+                        state.sheet_histories.borrow_mut()[idx].clone();
+                    *state.undo_stack.borrow_mut() = target_undo;
+                    *state.redo_stack.borrow_mut() = target_redo;
+
                     apply_sheet(&app, &state.current.borrow());
                     sync_sheet_tabs(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
@@ -129,13 +153,29 @@ pub(crate) fn register_sheet_actions(
                 let cur = state.current.borrow().clone();
                 let active_idx = *state.active_sheet_index.borrow();
                 state.sheets.borrow_mut()[active_idx] = cur;
+
+                // Preserve current sheet's undo/redo history
+                let cur_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
+                let cur_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
+                if active_idx >= state.sheet_histories.borrow().len() {
+                    state
+                        .sheet_histories
+                        .borrow_mut()
+                        .resize_with(active_idx + 1, || (Vec::new(), Vec::new()));
+                }
+                state.sheet_histories.borrow_mut()[active_idx] = (cur_undo, cur_redo);
+
                 let count = state.sheets.borrow().len() + 1;
                 let new_sheet = Sheet::new(&format!("Sheet {count}"));
                 state.sheets.borrow_mut().push(new_sheet.clone());
+                state
+                    .sheet_histories
+                    .borrow_mut()
+                    .push((Vec::new(), Vec::new()));
                 *state.active_sheet_index.borrow_mut() = count - 1;
                 *state.current.borrow_mut() = new_sheet;
-                state.undo_stack.borrow_mut().clear();
-                state.redo_stack.borrow_mut().clear();
+                *state.undo_stack.borrow_mut() = Vec::new();
+                *state.redo_stack.borrow_mut() = Vec::new();
                 apply_sheet(&app, &state.current.borrow());
                 sync_sheet_tabs(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
@@ -470,6 +510,66 @@ pub(crate) fn register_sheet_actions(
             }
         });
     }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_clear_selected_cells(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                let changed = clear_selection(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                );
+                if changed {
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Cleared {}", sel.label())));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_set_cell_alignment(move |align_idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let align = match align_idx {
+                    1 => CellAlignment::Center,
+                    2 => CellAlignment::Right,
+                    _ => CellAlignment::Left,
+                };
+                let sel = selection_from_app(&app);
+                let changed = set_selection_alignment(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                    align,
+                );
+                if changed {
+                    app.set_cell_alignment(align_idx);
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    let name = match align {
+                        CellAlignment::Center => "Center",
+                        CellAlignment::Right => "Right",
+                        _ => "Left",
+                    };
+                    app.set_status_left(SharedString::from(format!(
+                        "Aligned {} to {}",
+                        sel.label(),
+                        name
+                    )));
+                }
+            }
+        });
+    }
 }
 
 /// Dispatch canonical command IDs through the same Slint callbacks used by
@@ -481,6 +581,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "file.save" | "sheets.save" => app.invoke_save_sheet(),
         "file.save_as" | "sheets.save-as" => app.invoke_save_as_sheet(),
         "file.export_csv" | "sheets.export-csv" => app.invoke_export_csv(),
+        "file.export_xlsx" | "sheets.export-xlsx" => app.invoke_export_xlsx(),
         "edit.undo" | "sheets.undo" => app.invoke_undo(),
         "edit.redo" | "sheets.redo" => app.invoke_redo(),
         "app.palette" => app.invoke_open_palette(),
@@ -528,6 +629,7 @@ mod tests {
             FileFilter::new("Workbook", ["loomtable"]).unwrap(),
             FileFilter::new("CSV", ["csv"]).unwrap(),
             FileFilter::new("CSV", ["csv"]).unwrap(),
+            FileFilter::new("Excel", ["xlsx"]).unwrap(),
         ))
     }
 
@@ -752,5 +854,161 @@ mod tests {
         assert_eq!(norm[0].len(), 2);
         assert!((norm[0][0] - 0.0).abs() < 1e-5);
         assert!((norm[0][1] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_clear_selection_and_undo() {
+        let state = make_test_state();
+        let a1 = CellRef::parse("A1").unwrap();
+        let a2 = CellRef::parse("A2").unwrap();
+        assert_eq!(state.current.borrow().raw(a1), Some("Item"));
+        assert_eq!(state.current.borrow().raw(a2), Some("Rent"));
+
+        let range = CellRange::new(a1, a2);
+        let changed = clear_selection(
+            &mut state.current.borrow_mut(),
+            &mut state.undo_stack.borrow_mut(),
+            &mut state.redo_stack.borrow_mut(),
+            range,
+        );
+        assert!(changed);
+        assert_eq!(state.current.borrow().raw(a1), None);
+        assert_eq!(state.current.borrow().raw(a2), None);
+
+        // Undo restores both cells
+        let tx = state.undo_stack.borrow_mut().pop().expect("undo tx");
+        tx.revert(&mut state.current.borrow_mut());
+        assert_eq!(state.current.borrow().raw(a1), Some("Item"));
+        assert_eq!(state.current.borrow().raw(a2), Some("Rent"));
+
+        // Redo clears both cells again
+        tx.apply(&mut state.current.borrow_mut());
+        assert_eq!(state.current.borrow().raw(a1), None);
+        assert_eq!(state.current.borrow().raw(a2), None);
+    }
+
+    #[test]
+    fn test_set_selection_alignment_and_undo() {
+        let state = make_test_state();
+        let a1 = CellRef::parse("A1").unwrap();
+        let a2 = CellRef::parse("A2").unwrap();
+        assert_eq!(
+            state.current.borrow().cell_alignment(a1),
+            CellAlignment::General
+        );
+        assert_eq!(
+            state.current.borrow().cell_alignment(a2),
+            CellAlignment::General
+        );
+
+        let range = CellRange::new(a1, a2);
+        let changed = set_selection_alignment(
+            &mut state.current.borrow_mut(),
+            &mut state.undo_stack.borrow_mut(),
+            &mut state.redo_stack.borrow_mut(),
+            range,
+            CellAlignment::Center,
+        );
+        assert!(changed);
+        assert_eq!(
+            state.current.borrow().cell_alignment(a1),
+            CellAlignment::Center
+        );
+        assert_eq!(
+            state.current.borrow().cell_alignment(a2),
+            CellAlignment::Center
+        );
+
+        // Undo restores previous alignment
+        let tx = state.undo_stack.borrow_mut().pop().expect("undo tx");
+        tx.revert(&mut state.current.borrow_mut());
+        assert_eq!(
+            state.current.borrow().cell_alignment(a1),
+            CellAlignment::General
+        );
+        assert_eq!(
+            state.current.borrow().cell_alignment(a2),
+            CellAlignment::General
+        );
+
+        // Redo restores Center alignment
+        tx.apply(&mut state.current.borrow_mut());
+        assert_eq!(
+            state.current.borrow().cell_alignment(a1),
+            CellAlignment::Center
+        );
+        assert_eq!(
+            state.current.borrow().cell_alignment(a2),
+            CellAlignment::Center
+        );
+    }
+
+    #[test]
+    fn test_per_sheet_undo_stacks_preserved_across_tab_switches() {
+        let state = make_test_state();
+        let a1 = CellRef::parse("A1").unwrap();
+
+        // Edit on Sheet 1 (Budget)
+        commit_formula_edit(
+            &mut state.current.borrow_mut(),
+            &mut state.undo_stack.borrow_mut(),
+            &mut state.redo_stack.borrow_mut(),
+            a1,
+            "Budget Header",
+        );
+        assert_eq!(state.undo_stack.borrow().len(), 1);
+
+        // Save Sheet 1 history and add Sheet 2
+        let cur_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
+        let cur_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
+        state.sheet_histories.borrow_mut()[0] = (cur_undo, cur_redo);
+
+        let s2 = Sheet::new("Sheet 2");
+        state.sheets.borrow_mut().push(s2.clone());
+        state
+            .sheet_histories
+            .borrow_mut()
+            .push((Vec::new(), Vec::new()));
+        *state.active_sheet_index.borrow_mut() = 1;
+        *state.current.borrow_mut() = s2;
+        assert!(state.undo_stack.borrow().is_empty());
+
+        // Edit on Sheet 2
+        commit_formula_edit(
+            &mut state.current.borrow_mut(),
+            &mut state.undo_stack.borrow_mut(),
+            &mut state.redo_stack.borrow_mut(),
+            a1,
+            "Sheet 2 Header",
+        );
+        assert_eq!(state.undo_stack.borrow().len(), 1);
+
+        // Save Sheet 2 history and switch back to Sheet 1
+        let s2_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
+        let s2_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
+        state.sheet_histories.borrow_mut()[1] = (s2_undo, s2_redo);
+
+        *state.active_sheet_index.borrow_mut() = 0;
+        let s1_sheet = state.sheets.borrow()[0].clone();
+        *state.current.borrow_mut() = s1_sheet;
+        let (s1_undo, s1_redo) = state.sheet_histories.borrow()[0].clone();
+        *state.undo_stack.borrow_mut() = s1_undo;
+        *state.redo_stack.borrow_mut() = s1_redo;
+
+        // Sheet 1 undo stack is preserved and functional!
+        assert_eq!(state.undo_stack.borrow().len(), 1);
+        let tx = state.undo_stack.borrow_mut().pop().unwrap();
+        tx.revert(&mut state.current.borrow_mut());
+        assert_eq!(state.current.borrow().raw(a1), Some("Item"));
+    }
+
+    #[test]
+    fn test_export_xlsx_from_sheet_grid() {
+        let state = make_test_state();
+        let grid = crate::sheet_to_grid(&state.current.borrow());
+        assert!(!grid.is_empty());
+        let bytes = loom_sheets_core::export_xlsx_from_grid(&grid).expect("export xlsx");
+        // Check zip header signature PK\x03\x04
+        assert!(bytes.starts_with(b"PK\x03\x04"));
     }
 }

@@ -301,6 +301,7 @@ export component SheetTable inherits Rectangle {
     in property <[string]> column-headers: [];
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
+    in property <[int]> cell-alignments: [];
     in property <int> view-row-origin: 0;
     in property <int> view-col-origin: 0;
     in property <int> selected-row: 0;
@@ -462,6 +463,11 @@ export component SheetTable inherits Rectangle {
                                 font-size: Theme.tokens.typography.body;
                                 font-weight: is-header-row ? 600 : 400;
                                 color: Theme.palette().paper-ink;
+                                horizontal-alignment: (r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 1
+                                    ? TextHorizontalAlignment.center
+                                    : ((r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 2
+                                        ? TextHorizontalAlignment.right
+                                        : TextHorizontalAlignment.left);
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
@@ -535,8 +541,10 @@ export component SheetGridSurface inherits Rectangle {
     in property <[length]> grid-row-heights: [];
     in-out property <length> grid-scroll-x: 0px;
     in-out property <length> grid-scroll-y: 0px;
+    in property <[int]> cell-alignments: [];
     callback cell-clicked(int, int);
     callback fill-selection;
+    callback clear-selected;
     callback grid-scrolled;
     callback grid-viewport-changed(length, length);
     callback navigate-selection(int, int);
@@ -584,7 +592,11 @@ export component SheetGridSurface inherits Rectangle {
                 else { root.navigate-selection(1, 0); }
                 return accept;
             }
-            if (event.text == Key.Backspace || event.text == Key.Delete || event.text == Key.Insert
+            if (event.text == Key.Backspace || event.text == Key.Delete) {
+                root.clear-selected();
+                return accept;
+            }
+            if (event.text == Key.Insert
                 || event.text == Key.Home || event.text == Key.End || event.text == Key.PageUp
                 || event.text == Key.PageDown || event.text == Key.F1 || event.text == Key.F2
                 || event.text == Key.F3 || event.text == Key.F4 || event.text == Key.F5
@@ -625,6 +637,7 @@ export component SheetGridSurface inherits Rectangle {
         column-headers: root.column-headers;
         row-headers: root.row-headers;
         cells: root.cells;
+        cell-alignments: root.cell-alignments;
         view-row-origin: root.view-row-origin;
         view-col-origin: root.view-col-origin;
         selected-row: root.selected-row;

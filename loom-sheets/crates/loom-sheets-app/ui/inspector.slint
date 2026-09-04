@@ -32,12 +32,14 @@ export component SheetInspector inherits LoomPanel {
     in property <bool> inspector-show-table: true;
     in property <bool> inspector-show-cell: true;
     in property <int> cell-format: 0;
+    in property <int> cell-alignment: 0;
     callback inspector-search-edited(string);
     callback inspector-context-changed(int);
     callback rename-sheet(string);
     callback add-table-row;
     callback add-table-col;
     callback set-cell-format(int);
+    callback set-cell-alignment(int);
 
     title: root.selection-range + " selection";
     width: 280px;
@@ -129,6 +131,25 @@ export component SheetInspector inherits LoomPanel {
                             label: "%";
                             variant: root.cell-format == 2 ? "primary" : "ghost";
                             clicked => { root.set-cell-format(2); }
+                        }
+                    }
+                    LoomSectionHeader { title: "Alignment"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "Left";
+                            variant: root.cell-alignment == 0 ? "primary" : "ghost";
+                            clicked => { root.set-cell-alignment(0); }
+                        }
+                        LoomButton {
+                            label: "Center";
+                            variant: root.cell-alignment == 1 ? "primary" : "ghost";
+                            clicked => { root.set-cell-alignment(1); }
+                        }
+                        LoomButton {
+                            label: "Right";
+                            variant: root.cell-alignment == 2 ? "primary" : "ghost";
+                            clicked => { root.set-cell-alignment(2); }
                         }
                     }
                     SheetPropertyRow {

@@ -20,8 +20,9 @@ use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 #[cfg(test)]
 use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, from_csv, sheet_from_json, sheet_to_json, to_csv, CellRange, CellRef, GridSelection,
-    RangeEdit, Sheet, SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, export_xlsx_from_grid, from_csv, sheet_from_json, sheet_to_json, to_csv,
+    CellAlignment, CellRange, CellRef, GridSelection, RangeEdit, Sheet, SheetDimensions,
+    SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
@@ -235,6 +236,7 @@ struct ProjectedSheetGrid {
     column_headers: Vec<String>,
     row_headers: Vec<String>,
     cells: Vec<String>,
+    cell_alignments: Vec<i32>,
 }
 
 fn project_sheet_grid_with_values(
@@ -261,6 +263,8 @@ fn project_sheet_grid_with_values(
         .map(|row| (row + 1).to_string())
         .collect();
     let mut cells = Vec::with_capacity((viewport.visible_rows * viewport.visible_cols) as usize);
+    let mut cell_alignments =
+        Vec::with_capacity((viewport.visible_rows * viewport.visible_cols) as usize);
     for local_row in 0..viewport.visible_rows {
         for local_col in 0..viewport.visible_cols {
             let Some(row) = viewport.row_at(local_row) else {
@@ -269,7 +273,14 @@ fn project_sheet_grid_with_values(
             let Some(col) = viewport.column_at(local_col) else {
                 continue;
             };
+            let cell = CellRef { row, col };
+            let align_code = match sheet.cell_alignment(cell) {
+                CellAlignment::General | CellAlignment::Left => 0,
+                CellAlignment::Center => 1,
+                CellAlignment::Right => 2,
+            };
             cells.push(cell_value(sheet, values, row, col));
+            cell_alignments.push(align_code);
         }
     }
 
@@ -279,6 +290,7 @@ fn project_sheet_grid_with_values(
         column_headers,
         row_headers,
         cells,
+        cell_alignments,
     }
 }
 
@@ -672,6 +684,7 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
             .map(SharedString::from)
             .collect::<Vec<_>>(),
     )));
+    app.set_cell_alignments(ModelRc::new(VecModel::from(grid.cell_alignments)));
     app.set_grid_col_width(geometry.default_col_width);
     app.set_grid_row_height(GRID_ROW_HEIGHT);
     app.set_grid_col_offset(geometry.col_offset);
@@ -819,6 +832,12 @@ pub(crate) fn update_selection_range(
     app.set_selection_end_col(range.end.col as i32);
     app.set_selection_range(range.to_a1().into());
     app.set_selection_count((range.cells().len() as i32).max(1));
+    let align_code = match sheet.cell_alignment(selected) {
+        CellAlignment::General | CellAlignment::Left => 0,
+        CellAlignment::Center => 1,
+        CellAlignment::Right => 2,
+    };
+    app.set_cell_alignment(align_code);
     let display = cell_value(sheet, vals, selected.row, selected.col);
     let formula_text = sheet.raw(selected).unwrap_or("");
     let value_text = if display.is_empty() {
@@ -864,11 +883,68 @@ pub(crate) fn update_selection_range(
     }
 }
 
+/// A typed undo/redo transaction in Loom Sheets supporting single cell edits,
+/// range fills, range clearing, and cell text alignment changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SheetTransaction {
+    Range(RangeEdit),
+    Batch(Vec<RangeEdit>),
+    Alignment {
+        range: CellRange,
+        before: Vec<(CellRef, CellAlignment)>,
+        after: CellAlignment,
+    },
+}
+
+impl SheetTransaction {
+    pub(crate) fn apply(&self, sheet: &mut Sheet) {
+        match self {
+            SheetTransaction::Range(edit) => edit.apply(sheet),
+            SheetTransaction::Batch(edits) => {
+                for edit in edits {
+                    edit.apply(sheet);
+                }
+            }
+            SheetTransaction::Alignment { range, after, .. } => {
+                sheet.set_range_alignment(range.start, range.end, *after);
+            }
+        }
+    }
+
+    pub(crate) fn revert(&self, sheet: &mut Sheet) {
+        match self {
+            SheetTransaction::Range(edit) => edit.revert(sheet),
+            SheetTransaction::Batch(edits) => {
+                for edit in edits.iter().rev() {
+                    edit.revert(sheet);
+                }
+            }
+            SheetTransaction::Alignment { before, .. } => {
+                for (cell, align) in before {
+                    sheet.set_cell_alignment(*cell, *align);
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn commit_transaction(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    tx: SheetTransaction,
+) -> bool {
+    tx.apply(sheet);
+    undo_stack.push(tx);
+    redo_stack.clear();
+    true
+}
+
 /// Apply one committed formula-bar edit and record one undo transaction.
 pub(crate) fn commit_formula_edit(
     sheet: &mut Sheet,
-    undo_stack: &mut Vec<RangeEdit>,
-    redo_stack: &mut Vec<RangeEdit>,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
     selected: CellRef,
     draft: &str,
 ) -> bool {
@@ -876,26 +952,72 @@ pub(crate) fn commit_formula_edit(
     if edit.is_noop() {
         return false;
     }
-    edit.apply(sheet);
-    undo_stack.push(edit);
-    redo_stack.clear();
-    true
+    commit_transaction(sheet, undo_stack, redo_stack, SheetTransaction::Range(edit))
 }
 
 /// Apply a sparse range edit as one undoable transaction.
-fn commit_range_edit(
+pub(crate) fn commit_range_edit(
     sheet: &mut Sheet,
-    undo_stack: &mut Vec<RangeEdit>,
-    redo_stack: &mut Vec<RangeEdit>,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
     edit: RangeEdit,
 ) -> bool {
     if edit.is_empty() || edit.is_noop() {
         return false;
     }
-    edit.apply(sheet);
-    undo_stack.push(edit);
-    redo_stack.clear();
-    true
+    commit_transaction(sheet, undo_stack, redo_stack, SheetTransaction::Range(edit))
+}
+
+/// Clear selected cells or range with full undo/redo history.
+pub(crate) fn clear_selection(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+) -> bool {
+    let mut edits = Vec::new();
+    for cell in range.cells() {
+        if sheet.raw(cell).is_some() {
+            edits.push(RangeEdit::replace(sheet, cell, None));
+        }
+    }
+    if edits.is_empty() {
+        return false;
+    }
+    let tx = if edits.len() == 1 {
+        SheetTransaction::Range(edits.into_iter().next().unwrap())
+    } else {
+        SheetTransaction::Batch(edits)
+    };
+    commit_transaction(sheet, undo_stack, redo_stack, tx)
+}
+
+/// Apply text alignment across selected cells with full undo/redo history.
+pub(crate) fn set_selection_alignment(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    range: CellRange,
+    alignment: CellAlignment,
+) -> bool {
+    let mut before = Vec::new();
+    let mut any_change = false;
+    for cell in range.cells() {
+        let prev = sheet.cell_alignment(cell);
+        if prev != alignment {
+            any_change = true;
+        }
+        before.push((cell, prev));
+    }
+    if !any_change {
+        return false;
+    }
+    let tx = SheetTransaction::Alignment {
+        range,
+        before,
+        after: alignment,
+    };
+    commit_transaction(sheet, undo_stack, redo_stack, tx)
 }
 
 /// The Sheets fill handle repeats a selected block into the next block below
@@ -903,8 +1025,8 @@ fn commit_range_edit(
 /// in the UI rather than pretending to perform an operation.
 pub(crate) fn fill_selection_down(
     sheet: &mut Sheet,
-    undo_stack: &mut Vec<RangeEdit>,
-    redo_stack: &mut Vec<RangeEdit>,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
     selection: GridSelection,
 ) -> bool {
     let source = selection.range();
@@ -1115,12 +1237,14 @@ pub(crate) struct GuiState {
     pub(crate) sheets: RefCell<Vec<Sheet>>,
     pub(crate) active_sheet_index: RefCell<usize>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
-    pub(crate) undo_stack: RefCell<Vec<RangeEdit>>,
-    pub(crate) redo_stack: RefCell<Vec<RangeEdit>>,
+    pub(crate) undo_stack: RefCell<Vec<SheetTransaction>>,
+    pub(crate) redo_stack: RefCell<Vec<SheetTransaction>>,
+    pub(crate) sheet_histories: RefCell<Vec<(Vec<SheetTransaction>, Vec<SheetTransaction>)>>,
     pub(crate) dialogs: Rc<dyn FileDialogService>,
     pub(crate) workbook_filter: FileFilter,
     pub(crate) import_filter: FileFilter,
     pub(crate) csv_filter: FileFilter,
+    pub(crate) xlsx_filter: FileFilter,
 }
 
 impl GuiState {
@@ -1131,6 +1255,7 @@ impl GuiState {
         workbook_filter: FileFilter,
         import_filter: FileFilter,
         csv_filter: FileFilter,
+        xlsx_filter: FileFilter,
     ) -> Self {
         Self {
             current: RefCell::new(sheet.clone()),
@@ -1139,10 +1264,12 @@ impl GuiState {
             save_path: RefCell::new(path),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
+            sheet_histories: RefCell::new(vec![(Vec::new(), Vec::new())]),
             dialogs,
             workbook_filter,
             import_filter,
             csv_filter,
+            xlsx_filter,
         }
     }
 }
@@ -1186,6 +1313,36 @@ fn export_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
+pub(crate) fn sheet_to_grid(sheet: &Sheet) -> Vec<Vec<String>> {
+    let vals = evaluate(sheet);
+    let mut max_row = 0u32;
+    let mut max_col = 0u32;
+    for r in sheet.cells.keys() {
+        max_row = max_row.max(r.row);
+        max_col = max_col.max(r.col);
+    }
+    let mut grid = Vec::new();
+    for row in 0..=max_row {
+        let mut row_vec = Vec::new();
+        for col in 0..=max_col {
+            let cr = CellRef { row, col };
+            let v = vals.get(&cr).cloned().unwrap_or(Value::Empty);
+            row_vec.push(v.display());
+        }
+        grid.push(row_vec);
+    }
+    grid
+}
+
+fn export_xlsx_request(state: &GuiState) -> SaveFileRequest {
+    SaveFileRequest {
+        title: "Export Excel Spreadsheet".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: Some(format!("{}.xlsx", state.current.borrow().name)),
+        filters: vec![state.xlsx_filter.clone()],
+    }
+}
+
 fn is_native_workbook(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -1199,6 +1356,7 @@ fn replace_opened_sheet(app: &SheetsApp, state: &GuiState, path: PathBuf, sheet:
     *state.save_path.borrow_mut() = is_native_workbook(&path).then_some(path);
     state.undo_stack.borrow_mut().clear();
     state.redo_stack.borrow_mut().clear();
+    *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
     apply_sheet(app, &state.current.borrow());
     sync_sheet_tabs(app, state);
 }
@@ -1260,6 +1418,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let import_filter =
         FileFilter::new("Comma-separated values", ["csv"]).map_err(|error| error.to_string())?;
     let csv_filter = import_filter.clone();
+    let xlsx_filter =
+        FileFilter::new("Excel Spreadsheet", ["xlsx"]).map_err(|error| error.to_string())?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
     let state = Rc::new(GuiState::new(
         initial_sheet,
@@ -1268,6 +1428,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         workbook_filter,
         import_filter,
         csv_filter,
+        xlsx_filter,
     ));
     // One menu adapter owns the application sink for its entire lifetime so
     // accepted native actions and toolbar/palette callbacks share a route.
@@ -1458,6 +1619,37 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                             ))),
                             Err(error) => app.set_status_left(SharedString::from(format!(
                                 "Export failed: {error}"
+                            ))),
+                        }
+                    }
+                    Ok(None) => app.set_status_left("Export cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Export dialog failed: {error}"
+                    ))),
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_export_xlsx(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match state.dialogs.save_file(&export_xlsx_request(&state)) {
+                    Ok(Some(path)) => {
+                        let grid = sheet_to_grid(&state.current.borrow());
+                        match export_xlsx_from_grid(&grid) {
+                            Ok(bytes) => match loom_storage::atomic_write(&path, &bytes) {
+                                Ok(()) => app.set_status_left(SharedString::from(format!(
+                                    "Exported {}",
+                                    path.display()
+                                ))),
+                                Err(error) => app.set_status_left(SharedString::from(format!(
+                                    "Export failed: {error}"
+                                ))),
+                            },
+                            Err(error) => app.set_status_left(SharedString::from(format!(
+                                "Excel generation failed: {error}"
                             ))),
                         }
                     }
@@ -1707,11 +1899,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     let mut menu_bar = build_standard_menu_bar(
         "Loom Sheets",
-        vec![MenuItem::action_with_shortcut(
-            "file.export_csv",
-            "Export to CSV...",
-            MenuShortcut::primary("E"),
-        )],
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_csv",
+                "Export to CSV...",
+                MenuShortcut::primary("E"),
+            ),
+            MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
+        ],
         vec![],
         vec![MenuItem::check("view.inspector", "Format Inspector", false)],
         vec![Menu::new(
@@ -1732,6 +1927,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         "file.save",
         "file.save_as",
         "file.export_csv",
+        "file.export_xlsx",
         "edit.undo",
         "edit.redo",
         "app.palette",
@@ -1818,6 +2014,7 @@ mod tests {
             FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
             FileFilter::new("CSV", ["csv"]).expect("filter"),
             FileFilter::new("CSV", ["csv"]).expect("filter"),
+            FileFilter::new("Excel", ["xlsx"]).expect("filter"),
         );
         let request = open_request(&state);
         assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
@@ -1898,11 +2095,11 @@ mod tests {
         let selected = CellRef::parse("A1").unwrap();
         sheet.set_str("A1", "old");
         let mut undo = Vec::new();
-        let mut redo = vec![RangeEdit::replace(
+        let mut redo = vec![SheetTransaction::Range(RangeEdit::replace(
             &sheet,
             selected,
             Some("redo".to_string()),
-        )];
+        ))];
 
         assert!(commit_formula_edit(
             &mut sheet, &mut undo, &mut redo, selected, "new",
@@ -2457,10 +2654,10 @@ mod tests {
         app.set_can_redo(true);
         wire_palette(&app);
         rebuild_palette(&app, "");
-        assert_eq!(app.get_palette_commands().row_count(), 7);
+        assert_eq!(app.get_palette_commands().row_count(), 8);
         assert_eq!(
             app.get_palette_commands()
-                .row_data(6)
+                .row_data(7)
                 .expect("rendered Redo row")
                 .id
                 .as_str(),
@@ -2468,7 +2665,7 @@ mod tests {
         );
 
         app.set_can_undo(false);
-        app.invoke_palette_invoked(6);
+        app.invoke_palette_invoked(7);
 
         assert_eq!(redo_calls.get(), 1);
         assert!(!app.get_palette_open());
@@ -2479,7 +2676,10 @@ mod tests {
         set_platform();
         let mut menu = build_standard_menu_bar(
             "Loom Sheets",
-            vec![MenuItem::action("file.export_csv", "Export to CSV...")],
+            vec![
+                MenuItem::action("file.export_csv", "Export to CSV..."),
+                MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
+            ],
             vec![],
             vec![MenuItem::check("view.inspector", "Format Inspector", false)],
             vec![Menu::new(
@@ -2496,6 +2696,7 @@ mod tests {
             "file.save",
             "file.save_as",
             "file.export_csv",
+            "file.export_xlsx",
             "edit.undo",
             "edit.redo",
             "app.palette",
@@ -2531,6 +2732,7 @@ mod tests {
             FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
             FileFilter::new("CSV", ["csv"]).expect("filter"),
             FileFilter::new("CSV", ["csv"]).expect("filter"),
+            FileFilter::new("Excel", ["xlsx"]).expect("filter"),
         );
         let menu = NativeMenuBar::new();
         let bar = build_standard_menu_bar(
