@@ -6,11 +6,11 @@ import { Theme } from "theme.slint";
 
 component SheetPropertyRow inherits HorizontalLayout {
     in property <string> label: "";
-    spacing: Theme.tokens.space.md;
+    spacing: Theme.tokens.space.sm;
     cross-axis-alignment: center;
     Text {
         text: root.label;
-        width: 80px;
+        width: 70px;
         font-size: Theme.tokens.typography.caption;
         color: Theme.palette().ink-secondary;
         overflow: elide;
@@ -37,12 +37,16 @@ export component SheetInspector inherits LoomPanel {
     callback inspector-context-changed(int);
     callback rename-sheet(string);
     callback add-table-row;
+    callback delete-table-row;
     callback add-table-col;
+    callback delete-table-col;
+    callback adjust-row-height(int);
+    callback adjust-col-width(int);
     callback set-cell-format(int);
     callback set-cell-alignment(int);
 
     title: root.selection-range + " selection";
-    width: 280px;
+    width: 320px;
 
     VerticalLayout {
         spacing: Theme.tokens.space.md;
@@ -87,6 +91,7 @@ export component SheetInspector inherits LoomPanel {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; horizontal-stretch: 1; }
                             LoomIconButton { icon: "plus"; tooltip: "Add row"; clicked => { root.add-table-row(); } }
+                            LoomIconButton { icon: "minus"; tooltip: "Delete row"; clicked => { root.delete-table-row(); } }
                         }
                     }
                     SheetPropertyRow {
@@ -95,6 +100,7 @@ export component SheetInspector inherits LoomPanel {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; horizontal-stretch: 1; }
                             LoomIconButton { icon: "plus"; tooltip: "Add column"; clicked => { root.add-table-col(); } }
+                            LoomIconButton { icon: "minus"; tooltip: "Delete column"; clicked => { root.delete-table-col(); } }
                         }
                     }
                 }
@@ -154,11 +160,21 @@ export component SheetInspector inherits LoomPanel {
                     }
                     SheetPropertyRow {
                         label: "Row height";
-                        LoomTextField { label: "Selected row height"; value: root.selected-row-height; enabled: false; }
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Selected row height"; value: root.selected-row-height; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "minus"; tooltip: "Decrease row height"; clicked => { root.adjust-row-height(-4); } }
+                            LoomIconButton { icon: "plus"; tooltip: "Increase row height"; clicked => { root.adjust-row-height(4); } }
+                        }
                     }
                     SheetPropertyRow {
                         label: "Column width";
-                        LoomTextField { label: "Selected column width"; value: root.selected-col-width; enabled: false; }
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Selected column width"; value: root.selected-col-width; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "minus"; tooltip: "Decrease column width"; clicked => { root.adjust-col-width(-10); } }
+                            LoomIconButton { icon: "plus"; tooltip: "Increase column width"; clicked => { root.adjust-col-width(10); } }
+                        }
                     }
                 }
 

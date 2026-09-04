@@ -221,24 +221,16 @@ pub(crate) fn register_sheet_actions(
         app.on_organize(move || {
             if let Some(app) = app_ref.upgrade() {
                 let sel = selection_from_app(&app);
-                let cur = state.current.borrow().clone();
-                let dims = cur.dimensions();
-                if dims.rows > 1 {
-                    let range = CellRange::new(
-                        CellRef { row: 1, col: 0 },
-                        CellRef {
-                            row: dims.rows.saturating_sub(1),
-                            col: dims.cols.saturating_sub(1),
-                        },
-                    );
-                    let mut model = SheetModel::new(cur);
-                    let rel_col = sel.anchor.col;
-                    if model.sort_rows(range, rel_col, true).is_ok() {
-                        *state.current.borrow_mut() = model.sheet;
-                        apply_sheet(&app, &state.current.borrow());
-                        sync_menu_state(&menu_service, &app, &state);
-                        app.set_status_left("Sorted table rows ascending".into());
-                    }
+                if sort_table(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.anchor.col,
+                    true,
+                ) {
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left("Sorted table rows ascending".into());
                 }
             }
         });
@@ -666,6 +658,260 @@ pub(crate) fn register_sheet_actions(
             }
         });
     }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_delete_row(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let cell_str = app.get_selected_cell();
+                if let Some(cell) = CellRef::parse(cell_str.as_str()) {
+                    let before = state.current.borrow().clone();
+                    if let Some(new_sheet) = delete_row(&before, cell.row) {
+                        commit_transaction(
+                            &mut state.current.borrow_mut(),
+                            &mut state.undo_stack.borrow_mut(),
+                            &mut state.redo_stack.borrow_mut(),
+                            SheetTransaction::Snapshot {
+                                before: Box::new(before),
+                                after: Box::new(new_sheet),
+                            },
+                        );
+                        let dims = state.current.borrow().dimensions();
+                        let target_row = cell.row.min(dims.rows.saturating_sub(1));
+                        select_cell(
+                            &app,
+                            &state.current.borrow(),
+                            target_row as i32,
+                            cell.col as i32,
+                        );
+                        apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Deleted row {}",
+                            cell.row + 1
+                        )));
+                    } else {
+                        app.set_status_left("Cannot delete the only row in table".into());
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_delete_col(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let cell_str = app.get_selected_cell();
+                if let Some(cell) = CellRef::parse(cell_str.as_str()) {
+                    let before = state.current.borrow().clone();
+                    if let Some(new_sheet) = delete_col(&before, cell.col) {
+                        let col_letter = cell.to_a1().trim_end_matches('1').to_string();
+                        commit_transaction(
+                            &mut state.current.borrow_mut(),
+                            &mut state.undo_stack.borrow_mut(),
+                            &mut state.redo_stack.borrow_mut(),
+                            SheetTransaction::Snapshot {
+                                before: Box::new(before),
+                                after: Box::new(new_sheet),
+                            },
+                        );
+                        let dims = state.current.borrow().dimensions();
+                        let target_col = cell.col.min(dims.cols.saturating_sub(1));
+                        select_cell(
+                            &app,
+                            &state.current.borrow(),
+                            cell.row as i32,
+                            target_col as i32,
+                        );
+                        apply_sheet(&app, &state.current.borrow());
+                        sync_menu_state(&menu_service, &app, &state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Deleted column {col_letter}"
+                        )));
+                    } else {
+                        app.set_status_left("Cannot delete the only column in table".into());
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_delete_sheet(move || {
+            if let Some(app) = app_ref.upgrade() {
+                delete_active_sheet(&app, &state, &menu_service);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_sort_ascending(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if sort_table(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.anchor.col,
+                    true,
+                ) {
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left("Sorted rows ascending".into());
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_sort_descending(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if sort_table(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.anchor.col,
+                    false,
+                ) {
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left("Sorted rows descending".into());
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_freeze_panes(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let before = state.current.borrow().clone();
+                let mut after = before.clone();
+                after.freeze_panes(1, 0);
+                commit_transaction(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    SheetTransaction::Snapshot {
+                        before: Box::new(before),
+                        after: Box::new(after),
+                    },
+                );
+                apply_sheet(&app, &state.current.borrow());
+                sync_menu_state(&menu_service, &app, &state);
+                app.set_status_left("Frozen header row".into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_unfreeze_panes(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let before = state.current.borrow().clone();
+                let mut after = before.clone();
+                after.unfreeze_panes();
+                commit_transaction(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    SheetTransaction::Snapshot {
+                        before: Box::new(before),
+                        after: Box::new(after),
+                    },
+                );
+                apply_sheet(&app, &state.current.borrow());
+                sync_menu_state(&menu_service, &app, &state);
+                app.set_status_left("Unfrozen panes".into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_adjust_row_height(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let cell_str = app.get_selected_cell();
+                if let Some(cell) = CellRef::parse(cell_str.as_str()) {
+                    let cur_h = state.current.borrow().row_height(cell.row);
+                    let new_h = (cur_h + delta as f32).clamp(16.0, 160.0);
+                    let before = state.current.borrow().clone();
+                    let mut after = before.clone();
+                    after.set_row_height(cell.row, new_h);
+                    commit_transaction(
+                        &mut state.current.borrow_mut(),
+                        &mut state.undo_stack.borrow_mut(),
+                        &mut state.redo_stack.borrow_mut(),
+                        SheetTransaction::Snapshot {
+                            before: Box::new(before),
+                            after: Box::new(after),
+                        },
+                    );
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!(
+                        "Row {} height: {:.0} px",
+                        cell.row + 1,
+                        new_h
+                    )));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_adjust_col_width(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let cell_str = app.get_selected_cell();
+                if let Some(cell) = CellRef::parse(cell_str.as_str()) {
+                    let cur_w = state.current.borrow().col_width(cell.col);
+                    let new_w = (cur_w + delta as f32).clamp(32.0, 400.0);
+                    let before = state.current.borrow().clone();
+                    let mut after = before.clone();
+                    after.set_col_width(cell.col, new_w);
+                    commit_transaction(
+                        &mut state.current.borrow_mut(),
+                        &mut state.undo_stack.borrow_mut(),
+                        &mut state.redo_stack.borrow_mut(),
+                        SheetTransaction::Snapshot {
+                            before: Box::new(before),
+                            after: Box::new(after),
+                        },
+                    );
+                    apply_sheet(&app, &state.current.borrow());
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!(
+                        "Column width: {:.0} px",
+                        new_w
+                    )));
+                }
+            }
+        });
+    }
 }
 
 /// Copy values from a worksheet selection into a 2D matrix of raw strings.
@@ -747,6 +993,171 @@ pub(crate) fn select_all_range(sheet: &Sheet) -> GridSelection {
     GridSelection::new(start, end)
 }
 
+/// Delete a row and shift following rows upwards.
+pub(crate) fn delete_row(sheet: &Sheet, target_row: u32) -> Option<Sheet> {
+    let dims = sheet.dimensions();
+    if dims.rows <= 1 {
+        return None;
+    }
+    let mut new_sheet = Sheet::new(&sheet.name);
+    new_sheet.freeze_rows = sheet.freeze_rows.min(dims.rows.saturating_sub(2));
+    new_sheet.freeze_cols = sheet.freeze_cols;
+    for (&col, &w) in &sheet.col_widths {
+        new_sheet.set_col_width(col, w);
+    }
+    for (&r, &h) in &sheet.row_heights {
+        if r < target_row {
+            new_sheet.set_row_height(r, h);
+        } else if r > target_row {
+            new_sheet.set_row_height(r - 1, h);
+        }
+    }
+    for (cell, c) in &sheet.cells {
+        if cell.row < target_row {
+            new_sheet.cells.insert(*cell, c.clone());
+        } else if cell.row > target_row {
+            new_sheet.cells.insert(
+                CellRef {
+                    row: cell.row - 1,
+                    col: cell.col,
+                },
+                c.clone(),
+            );
+        }
+    }
+    for (cell, align) in &sheet.alignments {
+        if cell.row < target_row {
+            new_sheet.alignments.insert(*cell, *align);
+        } else if cell.row > target_row {
+            new_sheet.alignments.insert(
+                CellRef {
+                    row: cell.row - 1,
+                    col: cell.col,
+                },
+                *align,
+            );
+        }
+    }
+    Some(new_sheet)
+}
+
+/// Delete a column and shift following columns leftwards.
+pub(crate) fn delete_col(sheet: &Sheet, target_col: u32) -> Option<Sheet> {
+    let dims = sheet.dimensions();
+    if dims.cols <= 1 {
+        return None;
+    }
+    let mut new_sheet = Sheet::new(&sheet.name);
+    new_sheet.freeze_rows = sheet.freeze_rows;
+    new_sheet.freeze_cols = sheet.freeze_cols.min(dims.cols.saturating_sub(2));
+    for (&r, &h) in &sheet.row_heights {
+        new_sheet.set_row_height(r, h);
+    }
+    for (&c, &w) in &sheet.col_widths {
+        if c < target_col {
+            new_sheet.set_col_width(c, w);
+        } else if c > target_col {
+            new_sheet.set_col_width(c - 1, w);
+        }
+    }
+    for (cell, c) in &sheet.cells {
+        if cell.col < target_col {
+            new_sheet.cells.insert(*cell, c.clone());
+        } else if cell.col > target_col {
+            new_sheet.cells.insert(
+                CellRef {
+                    row: cell.row,
+                    col: cell.col - 1,
+                },
+                c.clone(),
+            );
+        }
+    }
+    for (cell, align) in &sheet.alignments {
+        if cell.col < target_col {
+            new_sheet.alignments.insert(*cell, *align);
+        } else if cell.col > target_col {
+            new_sheet.alignments.insert(
+                CellRef {
+                    row: cell.row,
+                    col: cell.col - 1,
+                },
+                *align,
+            );
+        }
+    }
+    Some(new_sheet)
+}
+
+/// Sort table rows preserving header row 0 with undo transaction recording.
+pub(crate) fn sort_table(
+    sheet: &mut Sheet,
+    undo_stack: &mut Vec<SheetTransaction>,
+    redo_stack: &mut Vec<SheetTransaction>,
+    col_idx: u32,
+    ascending: bool,
+) -> bool {
+    let dims = sheet.dimensions();
+    if dims.rows <= 1 {
+        return false;
+    }
+    let range = CellRange::new(
+        CellRef { row: 1, col: 0 },
+        CellRef {
+            row: dims.rows.saturating_sub(1),
+            col: dims.cols.saturating_sub(1),
+        },
+    );
+    let before = sheet.clone();
+    let mut model = SheetModel::new(sheet.clone());
+    let clamped_col = col_idx.min(dims.cols.saturating_sub(1));
+    if model.sort_rows(range, clamped_col, ascending).is_ok() {
+        let after = model.sheet;
+        commit_transaction(
+            sheet,
+            undo_stack,
+            redo_stack,
+            SheetTransaction::Snapshot {
+                before: Box::new(before),
+                after: Box::new(after),
+            },
+        );
+        true
+    } else {
+        false
+    }
+}
+
+/// Delete active worksheet in multi-sheet workbook.
+pub(crate) fn delete_active_sheet(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+) -> bool {
+    let count = state.sheets.borrow().len();
+    if count <= 1 {
+        app.set_status_left("Cannot delete the only worksheet".into());
+        return false;
+    }
+    let active_idx = *state.active_sheet_index.borrow();
+    state.sheets.borrow_mut().remove(active_idx);
+    let new_idx = active_idx.min(state.sheets.borrow().len() - 1);
+    *state.active_sheet_index.borrow_mut() = new_idx;
+    let next_sheet = state.sheets.borrow()[new_idx].clone();
+    *state.current.borrow_mut() = next_sheet;
+    if active_idx < state.sheet_histories.borrow().len() {
+        state.sheet_histories.borrow_mut().remove(active_idx);
+    }
+    sync_sheet_tabs(app, state);
+    apply_sheet(app, &state.current.borrow());
+    sync_menu_state(menu_service, app, state);
+    app.set_status_left(SharedString::from(format!(
+        "Deleted sheet. Active: {}",
+        state.current.borrow().name
+    )));
+    true
+}
+
 /// Dispatch canonical command IDs through the same Slint callbacks used by
 /// Sheets toolbar and palette controls.
 pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
@@ -769,7 +1180,14 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "app.palette" => app.invoke_open_palette(),
         "view.inspector" => app.invoke_toggle_inspector(),
         "table.add_row" => app.invoke_add_row(),
+        "table.delete_row" => app.invoke_delete_row(),
         "table.add_col" | "sheets.add-col" => app.invoke_add_table_col(),
+        "table.delete_col" => app.invoke_delete_col(),
+        "table.sort_asc" | "sheets.sort-asc" => app.invoke_sort_ascending(),
+        "table.sort_desc" | "sheets.sort-desc" => app.invoke_sort_descending(),
+        "table.freeze_header" | "sheets.freeze-header" => app.invoke_freeze_panes(),
+        "table.unfreeze_panes" | "sheets.unfreeze-panes" => app.invoke_unfreeze_panes(),
+        "sheets.delete_sheet" => app.invoke_delete_sheet(),
         "sheets.organize" => app.invoke_organize(),
         _ => return false,
     }
@@ -798,502 +1216,5 @@ pub(crate) fn schedule_menu_action(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::starter_workbook;
-    use loom_desktop::{FileFilter, ScriptedFileDialogs};
-
-    fn make_test_state() -> Rc<GuiState> {
-        let dialogs = Rc::new(ScriptedFileDialogs::new([], []));
-        Rc::new(GuiState::new(
-            starter_workbook(),
-            None,
-            dialogs,
-            FileFilter::new("Workbook", ["loomtable"]).unwrap(),
-            FileFilter::new("CSV", ["csv"]).unwrap(),
-            FileFilter::new("CSV", ["csv"]).unwrap(),
-            FileFilter::new("Excel", ["xlsx"]).unwrap(),
-        ))
-    }
-
-    #[test]
-    fn test_multi_sheet_state_creation_and_switching() {
-        let state = make_test_state();
-        assert_eq!(state.sheets.borrow().len(), 1);
-        assert_eq!(*state.active_sheet_index.borrow(), 0);
-        assert_eq!(state.current.borrow().name, "Budget");
-
-        // Add a second sheet
-        let mut s2 = Sheet::new("Expenses");
-        s2.set_str("A1", "Groceries");
-        s2.set_str("B1", "250");
-        state.sheets.borrow_mut().push(s2.clone());
-        assert_eq!(state.sheets.borrow().len(), 2);
-
-        // Switch to sheet 1
-        let cur = state.current.borrow().clone();
-        let active = *state.active_sheet_index.borrow();
-        state.sheets.borrow_mut()[active] = cur;
-        *state.active_sheet_index.borrow_mut() = 1;
-        *state.current.borrow_mut() = s2;
-
-        assert_eq!(*state.active_sheet_index.borrow(), 1);
-        assert_eq!(state.current.borrow().name, "Expenses");
-        assert_eq!(
-            state.current.borrow().raw(CellRef::parse("A1").unwrap()),
-            Some("Groceries")
-        );
-
-        // Switch back to sheet 0
-        let cur = state.current.borrow().clone();
-        let active = *state.active_sheet_index.borrow();
-        state.sheets.borrow_mut()[active] = cur;
-        *state.active_sheet_index.borrow_mut() = 0;
-        *state.current.borrow_mut() = state.sheets.borrow()[0].clone();
-
-        assert_eq!(*state.active_sheet_index.borrow(), 0);
-        assert_eq!(state.current.borrow().name, "Budget");
-    }
-
-    #[test]
-    fn test_add_row_and_undo() {
-        let state = make_test_state();
-        let initial_rows = state.current.borrow().dimensions().rows;
-        let cell = CellRef {
-            row: initial_rows,
-            col: 0,
-        };
-
-        let committed = commit_formula_edit(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            cell,
-            "New Item",
-        );
-        assert!(committed);
-        assert_eq!(state.current.borrow().raw(cell), Some("New Item"));
-        assert!(state.current.borrow().dimensions().rows > initial_rows);
-
-        // Undo
-        let edit = state.undo_stack.borrow_mut().pop().expect("undo edit");
-        edit.revert(&mut state.current.borrow_mut());
-        assert_eq!(state.current.borrow().raw(cell), None);
-    }
-
-    #[test]
-    fn test_organize_sorts_rows() {
-        let mut sheet = Sheet::new("SortTest");
-        sheet.set_str("A1", "Item");
-        sheet.set_str("A2", "Zebra");
-        sheet.set_str("A3", "Apple");
-        sheet.set_str("A4", "Mango");
-
-        let range = CellRange::parse("A2:A4").unwrap();
-        let mut model = SheetModel::new(sheet);
-        assert!(model.sort_rows(range, 0, true).is_ok());
-
-        assert_eq!(
-            model.sheet.raw(CellRef::parse("A2").unwrap()),
-            Some("Apple")
-        );
-        assert_eq!(
-            model.sheet.raw(CellRef::parse("A3").unwrap()),
-            Some("Mango")
-        );
-        assert_eq!(
-            model.sheet.raw(CellRef::parse("A4").unwrap()),
-            Some("Zebra")
-        );
-    }
-
-    #[test]
-    fn test_pivot_table_aggregation() {
-        let keys = vec!["Fruit".to_string(), "Veg".to_string(), "Fruit".to_string()];
-        let values = vec![10.0, 5.0, 15.0];
-        let pivot = compute_pivot(&keys, &values, PivotAggregation::Sum).expect("pivot table");
-
-        assert_eq!(pivot.len(), 2);
-        assert_eq!(pivot[0].0, "Fruit");
-        assert_eq!(pivot[0].1, 25.0);
-        assert_eq!(pivot[1].0, "Veg");
-        assert_eq!(pivot[1].1, 5.0);
-    }
-
-    #[test]
-    fn test_chart_spec_validation() {
-        let spec = ChartSpec {
-            kind: ChartKind::Bar,
-            title: "Revenue Chart".into(),
-            series: vec![ChartSeries {
-                name: "Revenue".into(),
-                categories: vec!["Q1".into(), "Q2".into()],
-                values: vec![1000.0, 1500.0],
-            }],
-        };
-        assert!(spec.validate().is_ok());
-    }
-
-    #[test]
-    fn test_sheet_renaming() {
-        let state = make_test_state();
-        assert_eq!(state.current.borrow().name, "Budget");
-        state.current.borrow_mut().name = "Financial Plan".to_string();
-        let active_idx = *state.active_sheet_index.borrow();
-        state.sheets.borrow_mut()[active_idx].name = "Financial Plan".to_string();
-        assert_eq!(state.current.borrow().name, "Financial Plan");
-        assert_eq!(state.sheets.borrow()[0].name, "Financial Plan");
-    }
-
-    #[test]
-    fn test_add_table_col_and_undo() {
-        let state = make_test_state();
-        let initial_cols = state.current.borrow().dimensions().cols;
-        let cell = CellRef {
-            row: 0,
-            col: initial_cols,
-        };
-        let col_letter = cell.to_a1().trim_end_matches('1').to_string();
-        let committed = commit_formula_edit(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            cell,
-            &col_letter,
-        );
-        assert!(committed);
-        assert_eq!(state.current.borrow().raw(cell), Some(col_letter.as_str()));
-        assert!(state.current.borrow().dimensions().cols > initial_cols);
-
-        // Undo
-        let edit = state.undo_stack.borrow_mut().pop().expect("undo edit");
-        edit.revert(&mut state.current.borrow_mut());
-        assert_eq!(state.current.borrow().raw(cell), None);
-    }
-
-    #[test]
-    fn test_cell_format_and_undo() {
-        let state = make_test_state();
-        let cell = CellRef { row: 1, col: 1 };
-        state.current.borrow_mut().set_str("B2", "1250");
-
-        // Format as Currency: $1250.00
-        let current_raw = state.current.borrow().raw(cell).unwrap().to_string();
-        let num = current_raw.parse::<f64>().unwrap();
-        let formatted = format!("${num:.2}");
-        let committed = commit_formula_edit(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            cell,
-            &formatted,
-        );
-        assert!(committed);
-        assert_eq!(state.current.borrow().raw(cell), Some("$1250.00"));
-
-        // Undo format
-        let edit = state.undo_stack.borrow_mut().pop().expect("undo edit");
-        edit.revert(&mut state.current.borrow_mut());
-        assert_eq!(state.current.borrow().raw(cell), Some("1250"));
-    }
-
-    #[test]
-    fn test_chart_spec_normalization_pipeline() {
-        let mut sheet = Sheet::new("Sales");
-        sheet.set_str("A1", "Region");
-        sheet.set_str("B1", "Revenue");
-        sheet.set_str("A2", "North");
-        sheet.set_str("B2", "$100.00");
-        sheet.set_str("A3", "South");
-        sheet.set_str("B3", "$300.00");
-
-        let vals = evaluate(&sheet);
-        let dims = sheet.dimensions();
-        let mut categories = Vec::new();
-        let mut values = Vec::new();
-        for r in 1..dims.rows {
-            let cat = cell_value(&sheet, &vals, r, 0);
-            let val_str = cell_value(&sheet, &vals, r, 1);
-            let clean = val_str.trim().trim_start_matches('$').trim_end_matches('%');
-            if let Ok(num) = clean.parse::<f64>() {
-                categories.push(cat);
-                values.push(num);
-            }
-        }
-        assert_eq!(categories, vec!["North", "South"]);
-        assert_eq!(values, vec![100.0, 300.0]);
-
-        let spec = ChartSpec {
-            kind: ChartKind::Bar,
-            title: format!("{} Chart", sheet.name),
-            series: vec![ChartSeries {
-                name: "Series 1".into(),
-                categories: categories.clone(),
-                values: values.clone(),
-            }],
-        };
-        let norm = spec.normalized_points().expect("normalized points");
-        assert_eq!(norm.len(), 1);
-        assert_eq!(norm[0].len(), 2);
-        assert!((norm[0][0] - 0.0).abs() < 1e-5);
-        assert!((norm[0][1] - 1.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn test_clear_selection_and_undo() {
-        let state = make_test_state();
-        let a1 = CellRef::parse("A1").unwrap();
-        let a2 = CellRef::parse("A2").unwrap();
-        assert_eq!(state.current.borrow().raw(a1), Some("Item"));
-        assert_eq!(state.current.borrow().raw(a2), Some("Rent"));
-
-        let range = CellRange::new(a1, a2);
-        let changed = clear_selection(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            range,
-        );
-        assert!(changed);
-        assert_eq!(state.current.borrow().raw(a1), None);
-        assert_eq!(state.current.borrow().raw(a2), None);
-
-        // Undo restores both cells
-        let tx = state.undo_stack.borrow_mut().pop().expect("undo tx");
-        tx.revert(&mut state.current.borrow_mut());
-        assert_eq!(state.current.borrow().raw(a1), Some("Item"));
-        assert_eq!(state.current.borrow().raw(a2), Some("Rent"));
-
-        // Redo clears both cells again
-        tx.apply(&mut state.current.borrow_mut());
-        assert_eq!(state.current.borrow().raw(a1), None);
-        assert_eq!(state.current.borrow().raw(a2), None);
-    }
-
-    #[test]
-    fn test_set_selection_alignment_and_undo() {
-        let state = make_test_state();
-        let a1 = CellRef::parse("A1").unwrap();
-        let a2 = CellRef::parse("A2").unwrap();
-        assert_eq!(
-            state.current.borrow().cell_alignment(a1),
-            CellAlignment::General
-        );
-        assert_eq!(
-            state.current.borrow().cell_alignment(a2),
-            CellAlignment::General
-        );
-
-        let range = CellRange::new(a1, a2);
-        let changed = set_selection_alignment(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            range,
-            CellAlignment::Center,
-        );
-        assert!(changed);
-        assert_eq!(
-            state.current.borrow().cell_alignment(a1),
-            CellAlignment::Center
-        );
-        assert_eq!(
-            state.current.borrow().cell_alignment(a2),
-            CellAlignment::Center
-        );
-
-        // Undo restores previous alignment
-        let tx = state.undo_stack.borrow_mut().pop().expect("undo tx");
-        tx.revert(&mut state.current.borrow_mut());
-        assert_eq!(
-            state.current.borrow().cell_alignment(a1),
-            CellAlignment::General
-        );
-        assert_eq!(
-            state.current.borrow().cell_alignment(a2),
-            CellAlignment::General
-        );
-
-        // Redo restores Center alignment
-        tx.apply(&mut state.current.borrow_mut());
-        assert_eq!(
-            state.current.borrow().cell_alignment(a1),
-            CellAlignment::Center
-        );
-        assert_eq!(
-            state.current.borrow().cell_alignment(a2),
-            CellAlignment::Center
-        );
-    }
-
-    #[test]
-    fn test_per_sheet_undo_stacks_preserved_across_tab_switches() {
-        let state = make_test_state();
-        let a1 = CellRef::parse("A1").unwrap();
-
-        // Edit on Sheet 1 (Budget)
-        commit_formula_edit(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            a1,
-            "Budget Header",
-        );
-        assert_eq!(state.undo_stack.borrow().len(), 1);
-
-        // Save Sheet 1 history and add Sheet 2
-        let cur_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
-        let cur_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
-        state.sheet_histories.borrow_mut()[0] = (cur_undo, cur_redo);
-
-        let s2 = Sheet::new("Sheet 2");
-        state.sheets.borrow_mut().push(s2.clone());
-        state
-            .sheet_histories
-            .borrow_mut()
-            .push((Vec::new(), Vec::new()));
-        *state.active_sheet_index.borrow_mut() = 1;
-        *state.current.borrow_mut() = s2;
-        assert!(state.undo_stack.borrow().is_empty());
-
-        // Edit on Sheet 2
-        commit_formula_edit(
-            &mut state.current.borrow_mut(),
-            &mut state.undo_stack.borrow_mut(),
-            &mut state.redo_stack.borrow_mut(),
-            a1,
-            "Sheet 2 Header",
-        );
-        assert_eq!(state.undo_stack.borrow().len(), 1);
-
-        // Save Sheet 2 history and switch back to Sheet 1
-        let s2_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
-        let s2_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
-        state.sheet_histories.borrow_mut()[1] = (s2_undo, s2_redo);
-
-        *state.active_sheet_index.borrow_mut() = 0;
-        let s1_sheet = state.sheets.borrow()[0].clone();
-        *state.current.borrow_mut() = s1_sheet;
-        let (s1_undo, s1_redo) = state.sheet_histories.borrow()[0].clone();
-        *state.undo_stack.borrow_mut() = s1_undo;
-        *state.redo_stack.borrow_mut() = s1_redo;
-
-        // Sheet 1 undo stack is preserved and functional!
-        assert_eq!(state.undo_stack.borrow().len(), 1);
-        let tx = state.undo_stack.borrow_mut().pop().unwrap();
-        tx.revert(&mut state.current.borrow_mut());
-        assert_eq!(state.current.borrow().raw(a1), Some("Item"));
-    }
-
-    #[test]
-    fn test_export_xlsx_from_sheet_grid() {
-        let state = make_test_state();
-        let grid = crate::sheet_to_grid(&state.current.borrow());
-        assert!(!grid.is_empty());
-        let bytes = loom_sheets_core::export_xlsx_from_grid(&grid).expect("export xlsx");
-        // Check zip header signature PK\x03\x04
-        assert!(bytes.starts_with(b"PK\x03\x04"));
-    }
-
-    #[test]
-    fn test_copy_selection() {
-        let state = make_test_state();
-        let sheet = state.current.borrow();
-        let sel = GridSelection::new(CellRef { row: 0, col: 0 }, CellRef { row: 1, col: 1 });
-        let data = copy_selection(&sheet, sel);
-        assert_eq!(data.len(), 2);
-        assert_eq!(data[0].len(), 2);
-        assert_eq!(data[0][0], "Item");
-        assert_eq!(data[0][1], "Amount");
-        assert_eq!(data[1][0], "Rent");
-        assert_eq!(data[1][1], "1200");
-    }
-
-    #[test]
-    fn test_paste_single_into_range_with_undo() {
-        let state = make_test_state();
-        let mut sheet = state.current.borrow_mut();
-        let mut undo = state.undo_stack.borrow_mut();
-        let mut redo = state.redo_stack.borrow_mut();
-
-        let target_sel =
-            GridSelection::new(CellRef { row: 10, col: 0 }, CellRef { row: 11, col: 1 });
-        let data = vec![vec!["$99.00".to_string()]];
-        let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
-        assert_eq!(pasted, 4);
-        assert_eq!(sheet.raw(CellRef { row: 10, col: 0 }), Some("$99.00"));
-        assert_eq!(sheet.raw(CellRef { row: 11, col: 1 }), Some("$99.00"));
-        assert_eq!(undo.len(), 1);
-
-        // Revert undo
-        undo.pop().unwrap().revert(&mut sheet);
-        assert_eq!(sheet.raw(CellRef { row: 10, col: 0 }), None);
-        assert_eq!(sheet.raw(CellRef { row: 11, col: 1 }), None);
-    }
-
-    #[test]
-    fn test_paste_matrix_with_undo_redo() {
-        let state = make_test_state();
-        let mut sheet = state.current.borrow_mut();
-        let mut undo = state.undo_stack.borrow_mut();
-        let mut redo = state.redo_stack.borrow_mut();
-
-        let target_sel = GridSelection::new(CellRef { row: 5, col: 5 }, CellRef { row: 5, col: 5 });
-        let data = vec![
-            vec!["Alpha".to_string(), "Beta".to_string()],
-            vec!["Gamma".to_string(), "Delta".to_string()],
-        ];
-        let pasted = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &data);
-        assert_eq!(pasted, 4);
-        assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
-        assert_eq!(sheet.raw(CellRef { row: 5, col: 6 }), Some("Beta"));
-        assert_eq!(sheet.raw(CellRef { row: 6, col: 5 }), Some("Gamma"));
-        assert_eq!(sheet.raw(CellRef { row: 6, col: 6 }), Some("Delta"));
-
-        // Revert
-        let tx = undo.pop().unwrap();
-        tx.revert(&mut sheet);
-        assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), None);
-        assert_eq!(sheet.raw(CellRef { row: 5, col: 6 }), None);
-
-        // Re-apply
-        tx.apply(&mut sheet);
-        assert_eq!(sheet.raw(CellRef { row: 5, col: 5 }), Some("Alpha"));
-        assert_eq!(sheet.raw(CellRef { row: 6, col: 6 }), Some("Delta"));
-    }
-
-    #[test]
-    fn test_cut_selection_with_undo_redo() {
-        let state = make_test_state();
-        let mut sheet = state.current.borrow_mut();
-        let mut undo = state.undo_stack.borrow_mut();
-        let mut redo = state.redo_stack.borrow_mut();
-
-        let sel = GridSelection::new(CellRef { row: 1, col: 0 }, CellRef { row: 1, col: 1 });
-        let data = copy_selection(&sheet, sel);
-        assert_eq!(data[0][0], "Rent");
-        assert_eq!(data[0][1], "1200");
-
-        let cleared = clear_selection(&mut sheet, &mut undo, &mut redo, sel.range());
-        assert!(cleared);
-        assert_eq!(sheet.raw(CellRef { row: 1, col: 0 }), None);
-        assert_eq!(sheet.raw(CellRef { row: 1, col: 1 }), None);
-        assert_eq!(undo.len(), 1);
-
-        // Undo restore
-        undo.pop().unwrap().revert(&mut sheet);
-        assert_eq!(sheet.raw(CellRef { row: 1, col: 0 }), Some("Rent"));
-        assert_eq!(sheet.raw(CellRef { row: 1, col: 1 }), Some("1200"));
-    }
-
-    #[test]
-    fn test_select_all_range() {
-        let state = make_test_state();
-        let sheet = state.current.borrow();
-        let sel = select_all_range(&sheet);
-        assert_eq!(sel.anchor, CellRef { row: 0, col: 0 });
-        let dims = sheet.dimensions();
-        assert_eq!(sel.focus.row, dims.rows - 1);
-        assert_eq!(sel.focus.col, dims.cols - 1);
-    }
-}
+#[path = "actions_tests.rs"]
+mod tests;

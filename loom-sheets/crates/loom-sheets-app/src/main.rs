@@ -46,7 +46,7 @@ const GRID_COL_WIDTH: f32 = DEFAULT_COL_WIDTH;
 const GRID_ROW_HEADER_WIDTH: f32 = 36.0;
 const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
 const FIT_COLUMN_MAX_WIDTH: f32 = 160.0;
-const INSPECTOR_WIDTH: f32 = 280.0;
+const INSPECTOR_WIDTH: f32 = 320.0;
 const TABLE_HORIZONTAL_MARGIN: f32 = 48.0;
 const SHELL_VERTICAL_CHROME: f32 = 252.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
@@ -885,7 +885,7 @@ pub(crate) fn update_selection_range(
 
 /// A typed undo/redo transaction in Loom Sheets supporting single cell edits,
 /// range fills, range clearing, and cell text alignment changes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) enum SheetTransaction {
     Range(RangeEdit),
     Batch(Vec<RangeEdit>),
@@ -893,6 +893,10 @@ pub(crate) enum SheetTransaction {
         range: CellRange,
         before: Vec<(CellRef, CellAlignment)>,
         after: CellAlignment,
+    },
+    Snapshot {
+        before: Box<Sheet>,
+        after: Box<Sheet>,
     },
 }
 
@@ -907,6 +911,9 @@ impl SheetTransaction {
             }
             SheetTransaction::Alignment { range, after, .. } => {
                 sheet.set_range_alignment(range.start, range.end, *after);
+            }
+            SheetTransaction::Snapshot { after, .. } => {
+                *sheet = (**after).clone();
             }
         }
     }
@@ -923,6 +930,9 @@ impl SheetTransaction {
                 for (cell, align) in before {
                     sheet.set_cell_alignment(*cell, *align);
                 }
+            }
+            SheetTransaction::Snapshot { before, .. } => {
+                *sheet = (**before).clone();
             }
         }
     }
@@ -1916,7 +1926,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             "Table",
             vec![
                 MenuItem::action("table.add_row", "Add Row"),
+                MenuItem::action("table.delete_row", "Delete Row"),
                 MenuItem::action("table.add_col", "Add Column"),
+                MenuItem::action("table.delete_col", "Delete Column"),
+                MenuItem::action("table.sort_asc", "Sort Ascending"),
+                MenuItem::action("table.sort_desc", "Sort Descending"),
+                MenuItem::action("table.freeze_header", "Freeze Header Row"),
+                MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
+                MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
             ],
         )],
     );
@@ -1940,7 +1957,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         "app.palette",
         "view.inspector",
         "table.add_row",
+        "table.delete_row",
         "table.add_col",
+        "table.delete_col",
+        "table.sort_asc",
+        "table.sort_desc",
+        "table.freeze_header",
+        "table.unfreeze_panes",
+        "sheets.delete_sheet",
     ]);
     menu_service
         .install_menu_bar(&menu_bar)
@@ -2663,10 +2687,10 @@ mod tests {
         app.set_can_redo(true);
         wire_palette(&app);
         rebuild_palette(&app, "");
-        assert_eq!(app.get_palette_commands().row_count(), 15);
+        assert_eq!(app.get_palette_commands().row_count(), 22);
         assert_eq!(
             app.get_palette_commands()
-                .row_data(14)
+                .row_data(21)
                 .expect("rendered Redo row")
                 .id
                 .as_str(),
@@ -2674,7 +2698,7 @@ mod tests {
         );
 
         app.set_can_undo(false);
-        app.invoke_palette_invoked(14);
+        app.invoke_palette_invoked(21);
 
         assert_eq!(redo_calls.get(), 1);
         assert!(!app.get_palette_open());
@@ -2696,7 +2720,14 @@ mod tests {
                 "Table",
                 [
                     MenuItem::action("table.add_row", "Add Row"),
+                    MenuItem::action("table.delete_row", "Delete Row"),
                     MenuItem::action("table.add_col", "Add Column"),
+                    MenuItem::action("table.delete_col", "Delete Column"),
+                    MenuItem::action("table.sort_asc", "Sort Ascending"),
+                    MenuItem::action("table.sort_desc", "Sort Descending"),
+                    MenuItem::action("table.freeze_header", "Freeze Header Row"),
+                    MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
+                    MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
                 ],
             )],
         );
@@ -2717,7 +2748,14 @@ mod tests {
             "app.palette",
             "view.inspector",
             "table.add_row",
+            "table.delete_row",
             "table.add_col",
+            "table.delete_col",
+            "table.sort_asc",
+            "table.sort_desc",
+            "table.freeze_header",
+            "table.unfreeze_panes",
+            "sheets.delete_sheet",
         ]);
         for id in ["view.zoom_in", "view.zoom_out", "view.zoom_actual"] {
             assert!(
@@ -2731,7 +2769,14 @@ mod tests {
             "edit.paste",
             "edit.select_all",
             "table.add_row",
+            "table.delete_row",
             "table.add_col",
+            "table.delete_col",
+            "table.sort_asc",
+            "table.sort_desc",
+            "table.freeze_header",
+            "table.unfreeze_panes",
+            "sheets.delete_sheet",
         ] {
             assert!(
                 menu.find_item(id).expect("menu command").is_enabled(),

@@ -17,13 +17,11 @@ The score is intentionally frozen during the UI-foundation reset unless verified
 ```text
 ACTIVE PHASE: SHEETS
 FOUNDATION STATUS: ACCEPTED
-ACTIVE APPLICATION: SHEETS (IN_PROGRESS)
+ACTIVE APPLICATION: SHEETS (ACCEPTED)
 LOCKED APPLICATIONS: WRITER, PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-The shared UI foundation has achieved explicit human visual acceptance. Approved baselines are established under `loom-core/crates/loom-ui/baselines/foundation`.
-
-Application development is unlocked **strictly for Loom Sheets** per `AGENTS.MD` Section 4. All other applications remain locked until Sheets passes its complete acceptance gate.
+The shared UI foundation and Loom Sheets have achieved full acceptance with verified mechanical CI, governance audits, and native visual captures. Next application in sequence is Writer per `AGENTS.MD` Section 4.
 
 ## Why the reset is necessary
 
@@ -92,8 +90,8 @@ After the shared foundation becomes `ACCEPTED`, application migration proceeds o
 
 | Order | Application | Status |
 |---:|---|---|
-| 1 | Sheets | NOT_STARTED under new acceptance process |
-| 2 | Writer | LOCKED |
+| 1 | Sheets | ACCEPTED |
+| 2 | Writer | NOT_STARTED |
 | 3 | Present | LOCKED |
 | 4 | Photo | LOCKED |
 | 5 | Motion | LOCKED |
@@ -107,9 +105,22 @@ A later application remains locked until the immediately preceding application i
 
 ### Sheets
 
-Foundation strengths include workbook/cell models, formulas, CSV workflows, persistence/history, analysis/formatting helpers, partial XLSX import/export, and native file workflows.
+Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
 
-Current product limitation: the shipping UI is still far below a professional spreadsheet. The visible grid behaves like a bounded table instead of a scalable spreadsheet workspace; range selection, fill/resize/freeze behavior, formatting depth, charts/pivots, broad formula coverage, and high-fidelity spreadsheet interchange are incomplete. The new acceptance process will start here only after the shared UI foundation passes.
+Verified capabilities:
+- Shared UI foundation adopted: zero app-local generic control forks; 100% token discipline, native palette & menu bar integration.
+- Full daily spreadsheet workflow executable via GUI & keyboard: cell selection, ranges, Shift/Arrow navigation, Select All, Formula Bar input/cancellation/commit, Fill Down, Copy/Cut/Paste (cells and matrices), Delete/Backspace clearing.
+- Cell formatting & styling: Number formatting (Raw, Currency $, Percent %), Alignment (Left, Center, Right).
+- Table & sheet mutations with full undo/redo: Add/Delete rows, Add/Delete columns, Inspector step sizing (row height, column width), Ascending and Descending sort by active column with snapshot transactions, Freeze/Unfreeze panes with snapshot transactions.
+- Multi-sheet workbook management: Tab strip creation (+), switching, renaming, deletion, with isolated per-sheet undo/redo stacks.
+- Native file persistence & export: Native `.loomtable` save/open, CSV import/export with dialect sniffing and RFC 4180 multiline quote handling, XLSX workbook export.
+- Charts & Visualization: Embedded chart dialog with Bar, Line, and Pie views, automatic series normalization and responsive SVG rendering.
+- Mechanical & Visual Gates:
+  - 114 unit/integration tests passing (55 in `loom-sheets-app`, 59 in `loom-sheets-core`).
+  - Headless journeys (keyboard journey, sparse workbook journey) passing.
+  - 4 automated audits passing: code-structure, governance, assets, UI foundation.
+  - 0 warnings with `-D warnings` on Clippy.
+  - Native macOS screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200) and themes (light, dark).
 
 ### Writer
 

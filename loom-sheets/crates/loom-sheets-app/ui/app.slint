@@ -144,6 +144,15 @@ export component SheetsApp inherits Window {
     callback pivot-table;
     callback rename-sheet(string);
     callback add-table-col;
+    callback delete-row;
+    callback delete-col;
+    callback delete-sheet;
+    callback sort-ascending;
+    callback sort-descending;
+    callback freeze-panes;
+    callback unfreeze-panes;
+    callback adjust-row-height(int);
+    callback adjust-col-width(int);
     callback set-cell-format(int);
     callback set-cell-alignment(int);
     callback clear-selected-cells;
@@ -402,7 +411,11 @@ export component SheetsApp inherits Window {
                     inspector-context-changed(index) => { root.inspector-context-changed(index); }
                     rename-sheet(name) => { root.rename-sheet(name); }
                     add-table-row => { root.add-row(); }
+                    delete-table-row => { root.delete-row(); }
                     add-table-col => { root.add-table-col(); }
+                    delete-table-col => { root.delete-col(); }
+                    adjust-row-height(delta) => { root.adjust-row-height(delta); }
+                    adjust-col-width(delta) => { root.adjust-col-width(delta); }
                     set-cell-format(fmt) => { root.set-cell-format(fmt); }
                     set-cell-alignment(align) => { root.set-cell-alignment(align); }
                 }
@@ -489,7 +502,11 @@ export component SheetsApp inherits Window {
                     inspector-context-changed(index) => { root.inspector-context-changed(index); }
                     rename-sheet(name) => { root.rename-sheet(name); }
                     add-table-row => { root.add-row(); }
+                    delete-table-row => { root.delete-row(); }
                     add-table-col => { root.add-table-col(); }
+                    delete-table-col => { root.delete-col(); }
+                    adjust-row-height(delta) => { root.adjust-row-height(delta); }
+                    adjust-col-width(delta) => { root.adjust-col-width(delta); }
                     set-cell-format(fmt) => { root.set-cell-format(fmt); }
                     set-cell-alignment(align) => { root.set-cell-alignment(align); }
                 }
