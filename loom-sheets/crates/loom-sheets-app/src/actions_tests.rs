@@ -4,8 +4,9 @@ use std::rc::Rc;
 
 use loom_desktop::{FileFilter, ScriptedFileDialogs};
 use loom_sheets_core::{
-    export_xlsx_from_grid, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
-    PivotAggregation, Sheet, SheetModel,
+    evaluate, export_xlsx_from_grid, from_csv, shift_formula_references, to_csv, CalcError,
+    CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec, PivotAggregation, Sheet,
+    SheetModel, Value,
 };
 
 use super::*;
@@ -585,4 +586,316 @@ fn test_freeze_and_unfreeze_panes_with_undo() {
 
     tx.revert(&mut sheet);
     assert_eq!(sheet.freeze_rows, 0);
+}
+
+#[test]
+fn test_deep_audit_formulae_and_calculation_engine() {
+    let mut sheet = Sheet::new("AuditFormulae");
+    sheet.set_str("A1", "10");
+    sheet.set_str("A2", "20");
+    sheet.set_str("A3", "30");
+
+    // Arithmetic
+    sheet.set_str("B1", "=A1 + A2 * 2");
+    // Aggregate functions
+    sheet.set_str("B2", "=SUM(A1:A3)");
+    sheet.set_str("B3", "=AVERAGE(A1:A3)");
+    sheet.set_str("B4", "=MIN(A1:A3)");
+    sheet.set_str("B5", "=MAX(A1:A3)");
+
+    // Division by zero error
+    sheet.set_str("C1", "=A1 / 0");
+
+    // Logical & conditional
+    sheet.set_str("D1", "=IF(A1 > 5, 100, 200)");
+
+    let results = evaluate(&sheet);
+
+    assert_eq!(
+        results.get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(50.0))
+    );
+    assert_eq!(
+        results.get(&CellRef::parse("B2").unwrap()),
+        Some(&Value::Number(60.0))
+    );
+    assert_eq!(
+        results.get(&CellRef::parse("B3").unwrap()),
+        Some(&Value::Number(20.0))
+    );
+    assert_eq!(
+        results.get(&CellRef::parse("B4").unwrap()),
+        Some(&Value::Number(10.0))
+    );
+    assert_eq!(
+        results.get(&CellRef::parse("B5").unwrap()),
+        Some(&Value::Number(30.0))
+    );
+
+    // Error check
+    assert_eq!(
+        results.get(&CellRef::parse("C1").unwrap()),
+        Some(&Value::Error(CalcError::DivZero))
+    );
+
+    // Conditional check
+    assert_eq!(
+        results.get(&CellRef::parse("D1").unwrap()),
+        Some(&Value::Number(100.0))
+    );
+
+    // Formula reference shifting
+    let shifted = shift_formula_references("=A1+B1", 1, 2);
+    assert_eq!(shifted, "=B3+C3");
+}
+
+#[test]
+fn test_deep_audit_charts_and_visualization_pipeline() {
+    let spec = ChartSpec {
+        kind: ChartKind::Bar,
+        title: "Revenue".into(),
+        series: vec![ChartSeries {
+            name: "S1".into(),
+            categories: vec!["A".into(), "B".into(), "C".into()],
+            values: vec![100.0, 200.0, 300.0],
+        }],
+    };
+    assert!(spec.validate().is_ok());
+    let norm = spec.normalized_points().expect("normalized points");
+    assert_eq!(norm, vec![vec![0.0, 0.5, 1.0]]);
+
+    let line_spec = ChartSpec {
+        kind: ChartKind::Line,
+        title: "Trends".into(),
+        series: vec![ChartSeries {
+            name: "S1".into(),
+            categories: vec!["A".into(), "B".into(), "C".into()],
+            values: vec![10.0, 50.0, 90.0],
+        }],
+    };
+    assert!(line_spec.validate().is_ok());
+    assert_eq!(
+        line_spec.normalized_points().unwrap(),
+        vec![vec![0.0, 0.5, 1.0]]
+    );
+
+    let pie_spec = ChartSpec {
+        kind: ChartKind::Pie,
+        title: "Shares".into(),
+        series: vec![ChartSeries {
+            name: "S1".into(),
+            categories: vec!["A".into(), "B".into()],
+            values: vec![25.0, 75.0],
+        }],
+    };
+    assert!(pie_spec.validate().is_ok());
+}
+
+#[test]
+fn test_deep_audit_multi_sheet_and_undo_isolation() {
+    let state = make_test_state();
+
+    // Add Sheet 2 and Sheet 3
+    let mut s2 = Sheet::new("Expenses");
+    s2.set_str("A1", "Rent");
+    state.sheets.borrow_mut().push(s2);
+    state
+        .sheet_histories
+        .borrow_mut()
+        .push((Vec::new(), Vec::new()));
+
+    let mut s3 = Sheet::new("Summary");
+    s3.set_str("A1", "Net");
+    state.sheets.borrow_mut().push(s3);
+    state
+        .sheet_histories
+        .borrow_mut()
+        .push((Vec::new(), Vec::new()));
+
+    assert_eq!(state.sheets.borrow().len(), 3);
+
+    // Switch to Sheet 2 (index 1)
+    let cur = state.current.borrow().clone();
+    state.sheets.borrow_mut()[0] = cur;
+    state.sheet_histories.borrow_mut()[0] = (
+        state.undo_stack.borrow().clone(),
+        state.redo_stack.borrow().clone(),
+    );
+    *state.active_sheet_index.borrow_mut() = 1;
+    *state.current.borrow_mut() = state.sheets.borrow()[1].clone();
+    state.undo_stack.borrow_mut().clear();
+    state.redo_stack.borrow_mut().clear();
+
+    // Mutate cell on Sheet 2 with undo recording
+    let committed = commit_formula_edit(
+        &mut state.current.borrow_mut(),
+        &mut state.undo_stack.borrow_mut(),
+        &mut state.redo_stack.borrow_mut(),
+        CellRef::parse("A1").unwrap(),
+        "Utilities",
+    );
+    assert!(committed);
+
+    assert_eq!(
+        state.current.borrow().raw(CellRef::parse("A1").unwrap()),
+        Some("Utilities")
+    );
+    assert_eq!(state.undo_stack.borrow().len(), 1);
+
+    // Undo on Sheet 2
+    let tx = state.undo_stack.borrow_mut().pop().unwrap();
+    tx.revert(&mut state.current.borrow_mut());
+    assert_eq!(
+        state.current.borrow().raw(CellRef::parse("A1").unwrap()),
+        Some("Rent")
+    );
+
+    // Verify Sheet 1 was unaffected
+    assert_eq!(
+        state.sheets.borrow()[0].raw(CellRef::parse("A1").unwrap()),
+        Some("Item")
+    );
+
+    // Rename active sheet
+    state.current.borrow_mut().name = "Operating Expenses".to_string();
+    assert_eq!(state.current.borrow().name, "Operating Expenses");
+
+    // Remove active sheet from state
+    let active = *state.active_sheet_index.borrow();
+    state.sheets.borrow_mut().remove(active);
+    state.sheet_histories.borrow_mut().remove(active);
+    let next_idx = active.min(state.sheets.borrow().len().saturating_sub(1));
+    *state.active_sheet_index.borrow_mut() = next_idx;
+    *state.current.borrow_mut() = state.sheets.borrow()[next_idx].clone();
+
+    assert_eq!(state.sheets.borrow().len(), 2);
+    assert_eq!(*state.active_sheet_index.borrow(), 1);
+    assert_eq!(state.current.borrow().name, "Summary");
+}
+
+#[test]
+fn test_deep_audit_structural_mutations_and_sizing() {
+    let state = make_test_state();
+
+    // Initial starter sheet has 6 rows and 3 columns
+    let initial_dims = state.current.borrow().dimensions();
+    assert_eq!(initial_dims.rows, 6);
+    assert_eq!(initial_dims.cols, 3);
+
+    // Delete row 2
+    let before = state.current.borrow().clone();
+    let maybe_sheet = delete_row(&before, 2);
+    assert!(maybe_sheet.is_some());
+    let after = maybe_sheet.unwrap();
+    assert_eq!(after.dimensions().rows, 5);
+
+    let tx = SheetTransaction::Snapshot {
+        before: Box::new(before),
+        after: Box::new(after),
+    };
+    tx.apply(&mut state.current.borrow_mut());
+    assert_eq!(state.current.borrow().dimensions().rows, 5);
+
+    // Undo row deletion
+    tx.revert(&mut state.current.borrow_mut());
+    assert_eq!(state.current.borrow().dimensions().rows, 6);
+
+    // Sizing adjustments
+    state.current.borrow_mut().set_row_height(1, 32.0);
+    assert_eq!(state.current.borrow().row_height(1), 32.0);
+
+    state.current.borrow_mut().set_col_width(0, 120.0);
+    assert_eq!(state.current.borrow().col_width(0), 120.0);
+}
+
+#[test]
+fn test_deep_audit_clipboard_and_range_operations() {
+    let mut sheet = Sheet::new("ClipboardAudit");
+    sheet.set_str("A1", "Alpha");
+    sheet.set_str("B1", "Beta");
+    sheet.set_str("A2", "Gamma");
+    sheet.set_str("B2", "Delta");
+
+    // Copy 2x2 matrix
+    let sel = GridSelection::new(CellRef::parse("A1").unwrap(), CellRef::parse("B2").unwrap());
+    let matrix = copy_selection(&sheet, sel);
+    assert_eq!(
+        matrix,
+        vec![
+            vec!["Alpha".to_string(), "Beta".to_string()],
+            vec!["Gamma".to_string(), "Delta".to_string()]
+        ]
+    );
+
+    // Paste at offset C1
+    let mut undo = Vec::new();
+    let mut redo = Vec::new();
+    let target_sel =
+        GridSelection::new(CellRef::parse("C1").unwrap(), CellRef::parse("C1").unwrap());
+    let pasted_count = paste_selection(&mut sheet, &mut undo, &mut redo, target_sel, &matrix);
+    assert_eq!(pasted_count, 4);
+    assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), Some("Alpha"));
+    assert_eq!(sheet.raw(CellRef::parse("D1").unwrap()), Some("Beta"));
+    assert_eq!(sheet.raw(CellRef::parse("C2").unwrap()), Some("Gamma"));
+    assert_eq!(sheet.raw(CellRef::parse("D2").unwrap()), Some("Delta"));
+
+    // Undo paste
+    undo.pop().unwrap().revert(&mut sheet);
+    assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), None);
+
+    // Alignment test
+    let align_changed = set_selection_alignment(
+        &mut sheet,
+        &mut undo,
+        &mut redo,
+        sel.range(),
+        CellAlignment::Right,
+    );
+    assert!(align_changed);
+    assert_eq!(
+        sheet.cell_alignment(CellRef::parse("A1").unwrap()),
+        CellAlignment::Right
+    );
+
+    // Undo alignment
+    undo.pop().unwrap().revert(&mut sheet);
+    assert_eq!(
+        sheet.cell_alignment(CellRef::parse("A1").unwrap()),
+        CellAlignment::General
+    );
+}
+
+#[test]
+fn test_deep_audit_data_interop_csv_and_xlsx() {
+    let mut sheet = Sheet::new("InteropAudit");
+    sheet.set_str("A1", "First Name");
+    sheet.set_str("B1", "Notes, with comma");
+    sheet.set_str("A2", "Jane");
+    sheet.set_str("B2", "Multi\nLine");
+
+    // CSV roundtrip
+    let csv = to_csv(&sheet);
+    let reloaded = from_csv("InteropAudit", &csv);
+    assert_eq!(
+        reloaded.raw(CellRef::parse("A1").unwrap()),
+        Some("First Name")
+    );
+    assert_eq!(
+        reloaded.raw(CellRef::parse("B1").unwrap()),
+        Some("Notes, with comma")
+    );
+    assert_eq!(
+        reloaded.raw(CellRef::parse("B2").unwrap()),
+        Some("Multi\nLine")
+    );
+
+    // XLSX export
+    let grid = vec![
+        vec!["ID".to_string(), "Metric".to_string()],
+        vec!["1".to_string(), "99.5".to_string()],
+    ];
+    let xlsx_bytes = export_xlsx_from_grid(&grid).expect("generate xlsx");
+    assert!(!xlsx_bytes.is_empty());
+    // Verify valid ZIP magic number
+    assert_eq!(&xlsx_bytes[0..4], b"PK\x03\x04");
 }
