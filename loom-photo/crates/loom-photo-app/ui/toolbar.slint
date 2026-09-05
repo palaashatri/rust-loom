@@ -1,0 +1,101 @@
+import {
+    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
+    LoomIconButton, LoomOverflowButton,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component PhotoActionToolbar inherits LoomToolbar {
+    in property <bool> rtl: Theme.rtl;
+    in property <int> active-tool: 0;
+    in property <bool> pan-mode: false;
+    in-out property <float> zoom-value: 72.0;
+    in property <bool> inspector-visible: true;
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+
+    callback select-tool(string);
+    callback add-layer;
+    callback add-adjustment;
+    callback import-image;
+    callback export-png;
+    callback toggle-inspector;
+    callback overflow-requested;
+
+    // Tools Group: Selection, Brush, Wand, Pan
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "cursor";
+            tooltip: "Selection Tool";
+            selected: root.active-tool == 0 && !root.pan-mode;
+            clicked => { root.select-tool("select"); }
+        }
+        LoomIconButton {
+            icon: "brush";
+            tooltip: "Brush Tool";
+            selected: root.active-tool == 1 && !root.pan-mode;
+            clicked => { root.select-tool("brush"); }
+        }
+        LoomIconButton {
+            icon: "wand";
+            tooltip: "Magic Wand Tool";
+            selected: root.active-tool == 2 && !root.pan-mode;
+            clicked => { root.select-tool("wand"); }
+        }
+        LoomIconButton {
+            icon: "hand";
+            tooltip: "Pan Tool";
+            selected: root.pan-mode;
+            clicked => { root.select-tool("pan"); }
+        }
+    }
+
+    LoomToolbarDivider { }
+
+    // Actions Group: Add Layer, Adjustment, Import
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "plus";
+            tooltip: "Add Pixel Layer";
+            clicked => { root.add-layer(); }
+        }
+        if !root.overflow : LoomIconButton {
+            icon: "slider";
+            tooltip: "Add Adjustment Layer";
+            clicked => { root.add-adjustment(); }
+        }
+        if !root.overflow : LoomIconButton {
+            icon: "import";
+            tooltip: "Import Image";
+            clicked => { root.import-image(); }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    // View & Inspector Group (Format inspector and Zoom always accessible)
+    LoomToolbarGroup {
+        if !root.overflow : LoomIconButton {
+            icon: "export";
+            tooltip: "Export PNG";
+            clicked => { root.export-png(); }
+        }
+        LoomIconButton {
+            icon: "zoom-in";
+            tooltip: "Zoom (" + Math.round(root.zoom-value) + "%)";
+            clicked => {
+                root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25;
+            }
+        }
+        LoomIconButton {
+            icon: "format";
+            tooltip: "Toggle Format Inspector";
+            selected: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        if root.overflow : LoomOverflowButton {
+            tooltip: "More Actions";
+            clicked => { root.overflow-requested(); }
+        }
+    }
+}
+

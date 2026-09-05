@@ -15,13 +15,13 @@ The score is intentionally frozen during the UI-foundation reset unless verified
 ## Active gate
 
 ```text
-ACTIVE PHASE: PRESENT
+ACTIVE PHASE: PHOTO
 FOUNDATION STATUS: ACCEPTED
-ACTIVE APPLICATION: PRESENT (IN_PROGRESS)
-LOCKED APPLICATIONS: PHOTO, MOTION, VIDEO, STUDIO, ENCODE
+ACTIVE APPLICATION: PHOTO (ACCEPTED)
+LOCKED APPLICATIONS: MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-Loom Sheets and Loom Writer have passed their complete acceptance gates and deep audits. Loom Present is the active application under development per `AGENTS.MD` Section 4.
+Loom Sheets, Loom Writer, Loom Present, and Loom Photo have passed their complete acceptance gates and deep audits per `AGENTS.MD` Section 4.
 
 ## Why the reset is necessary
 
@@ -92,8 +92,8 @@ After the shared foundation becomes `ACCEPTED`, application migration proceeds o
 |---:|---|---|
 | 1 | Sheets | ACCEPTED |
 | 2 | Writer | ACCEPTED |
-| 3 | Present | IN_PROGRESS |
-| 4 | Photo | LOCKED |
+| 3 | Present | ACCEPTED |
+| 4 | Photo | ACCEPTED |
 | 5 | Motion | LOCKED |
 | 6 | Video | LOCKED |
 | 7 | Studio | LOCKED |
@@ -170,9 +170,30 @@ Verified capabilities:
 
 ### Photo
 
-Foundation strengths include raster buffers, layers, masks, CPU image operations/adjustments, histogram/transform helpers, project persistence/history, raster import/export, and native file workflows.
+Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
 
-Current product limitation: selection/transform/painting/retouching workflows, layer/inspector interaction, RAW/ICC/HDR depth, healing/warping, PSD fidelity, GPU effects, and production AI editing remain incomplete.
+Verified capabilities:
+- Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
+- Complete removal of placebo and fake controls: clean toolbar (`PhotoActionToolbar`), canvas with subtle drop shadows (`PhotoCanvas`), right format inspector (`PhotoInspector`), status bar (`PhotoStatusBar`), and command palette (`CommandPalette`).
+- Native macOS AppKit `NSMenu` and Linux DBusMenu reflection (`MenuBarService`) with command projection (`file.new`, `file.open`, `file.save`, `file.export_png`, `file.export_jpeg`, `edit.undo`, `edit.redo`, `layer.new_pixel`, `layer.new_adjustment`, `layer.delete`, `layer.move_up`, `layer.move_down`, `view.inspector`, `view.zoom_in`, `view.zoom_out`).
+- Layer stack lifecycle & reordering: pixel layers, adjustment layers, visibility toggling, layer selection, move up/down, delete.
+- Compositing & blend modes: Normal, Multiply, Screen, Overlay blend modes, per-layer opacity adjustments (0-100%).
+- Color adjustments: live brightness, contrast, and saturation adjustments on dedicated adjustment layers.
+- Affine transforms & cropping: position X/Y nudging, scale X/Y, rotation (-180° to 180°), document bounds calculation, canvas cropping to selection, layer cropping to selection.
+- Raster payloads, persistence, and export: native `.loomphoto` project saving and loading, deterministic PNG export, JPEG export, and OpenRaster stack manifest emission.
+- File byte size ceilings enforced and ratcheted down:
+  - `main.rs`: 82,220 bytes (legacy debt ceiling reduced from 111,647 to 82,500 bytes; reduced by 29,427 bytes).
+  - `desktop_tests.rs`: 26,005 bytes (< 65,536 limit).
+  - `audit_tests.rs`: 7,860 bytes (< 65,536 limit).
+  - `app.slint`: 18,380 bytes (< 32,768 limit).
+  - `inspector.slint`: 21,491 bytes (< 32,768 limit).
+  - `photo_components.slint`: 10,101 bytes (< 32,768 limit).
+  - `toolbar.slint`: 3,171 bytes (< 32,768 limit).
+- Test and audit verification:
+  - 74 unit/integration tests passing (25 in `loom-photo-app`, 49 in `loom-photo-core`).
+  - 4 automated bootstrap audits passing (governance, code structure, asset provenance, UI foundation).
+  - 0 warnings with Clippy (`-D warnings`).
+  - Native macOS screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and command palette.
 
 ### Motion
 

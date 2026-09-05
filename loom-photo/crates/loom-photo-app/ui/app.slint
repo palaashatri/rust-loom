@@ -1,2 +1,387 @@
-export { PhotoApp } from "product_workspace_v4.slint";
+import { CommandPalette, CommandPaletteItem } from "components.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import { PhotoActionToolbar } from "toolbar.slint";
+import { PhotoInspector } from "inspector.slint";
+import { PhotoCanvas, PhotoStatusBar, PhotoToolbarOverflow } from "photo_components.slint";
+
 export { Theme, ResponsivePolicy } from "theme.slint";
+
+export component PhotoApp inherits Window {
+    title: "Loom Photo";
+    min-width: 1024px;
+    min-height: 720px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.palette().canvas;
+
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
+
+    in property <bool> inspector-available: true;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> overflow-toolbar: false;
+    in-out property <bool> show-inspector: true;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    in-out property <bool> toolbar-overflow-open: false;
+
+    callback window-resized(length);
+    changed width => {
+        root.window-resized(root.width);
+        if (!ResponsivePolicy.priority-2-overflow(root.width)) {
+            root.toolbar-overflow-open = false;
+        }
+    }
+
+    in property <string> project-name: "Untitled Photo";
+    in property <string> dimensions-text: "0 × 0";
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Local";
+    in property <[string]> layer-labels: [];
+    in property <[bool]> layer-visibilities: [];
+    in property <int> active-layer-index: 0;
+    in property <bool> can-move-up: false;
+    in property <bool> can-move-down: false;
+    in property <string> active-blend-mode: "Normal";
+    in property <float> active-layer-opacity: 100.0;
+    in property <image> preview-image;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <bool> has-preview: false;
+    in property <float> document-width: 1.0;
+    in property <float> document-height: 1.0;
+    in property <string> active-layer-id: "";
+    in property <string> active-layer-kind: "Pixel";
+    in property <bool> active-layer-transform-enabled: true;
+    in property <bool> active-layer-crop-enabled: true;
+    in property <string> active-layer-bounds: "—";
+    in-out property <float> active-layer-x: 0.0;
+    in-out property <float> active-layer-y: 0.0;
+    in-out property <float> active-layer-scale-x: 100.0;
+    in-out property <float> active-layer-scale-y: 100.0;
+    in-out property <float> active-layer-rotation: 0.0;
+    in property <float> selected-layer-bounds-x: 0.0;
+    in property <float> selected-layer-bounds-y: 0.0;
+    in property <float> selected-layer-bounds-width: 1.0;
+    in property <float> selected-layer-bounds-height: 1.0;
+    in property <bool> has-selected-layer-bounds: false;
+    in property <string> selection-geometry: "None";
+    in property <string> crop-geometry: "None";
+    in property <string> active-layer-crop-geometry: "None";
+    in property <bool> has-selection: false;
+    in property <bool> has-crop: false;
+    in property <bool> has-active-layer-crop: false;
+
+    in-out property <int> active-tool: 0;
+    in-out property <bool> pan-mode: false;
+    in-out property <int> inspector-tab: 0;
+    in-out property <length> inspector-scroll-y: 0px;
+    changed inspector-tab => { root.inspector-scroll-y = 0px; }
+
+    in-out property <float> brightness-value: 0.0;
+    in-out property <float> contrast-value: 0.0;
+    in-out property <float> saturation-value: 0.0;
+    in property <bool> brightness-enabled: false;
+    in property <bool> contrast-enabled: false;
+    in property <bool> saturation-enabled: false;
+    in-out property <float> zoom-value: 72.0;
+
+    in-out property <length> viewport-pan-x: 0px;
+    in-out property <length> viewport-pan-y: 0px;
+    property <bool> show-grid: true;
+
+    callback new-project;
+    callback open-project;
+    callback save-project;
+    callback save-as-project;
+    callback undo;
+    callback redo;
+    callback add-layer;
+    callback add-adjustment;
+    callback remove-layer;
+    callback move-layer(int);
+    callback select-layer(int);
+    callback toggle-layer-visibility(int);
+    callback opacity-changed(float);
+    callback blend-mode-changed(string);
+    callback select-tool(string);
+    callback brightness-changed(float);
+    callback contrast-changed(float);
+    callback saturation-changed(float);
+    callback layer-transform-changed(float, float, float, float, float);
+    callback select-layer-bounds;
+    callback crop-to-selection;
+    callback crop-active-layer-to-selection;
+    callback clear-selection;
+    callback clear-crop;
+    callback clear-active-layer-crop;
+    callback import-image;
+    callback export-png;
+    callback export-jpeg;
+    callback toggle-inspector;
+
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
+                root.open-palette();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+
+            // Top Action Toolbar
+            PhotoActionToolbar {
+                active-tool: root.active-tool;
+                pan-mode: root.pan-mode;
+                zoom-value <=> root.zoom-value;
+                inspector-visible: root.show-inspector;
+                labeled: root.labeled-toolbar;
+                overflow: root.overflow-toolbar;
+                select-tool(tool) => {
+                    if (tool == "pan") {
+                        root.pan-mode = !root.pan-mode;
+                    } else {
+                        root.pan-mode = false;
+                        root.select-tool(tool);
+                    }
+                }
+                add-layer => { root.add-layer(); }
+                add-adjustment => { root.add-adjustment(); }
+                import-image => { root.import-image(); }
+                export-png => { root.export-png(); }
+                toggle-inspector => {
+                    root.show-inspector = !root.show-inspector;
+                    root.toggle-inspector();
+                }
+                overflow-requested => {
+                    root.toolbar-overflow-open = !root.toolbar-overflow-open;
+                }
+            }
+
+            // Main Editor Workspace: Canvas + Inspector
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                spacing: 0px;
+                padding: 0px;
+
+                if root.rtl && root.inspector-visible : PhotoInspector {
+                    inspector-tab <=> root.inspector-tab;
+                    scroll-y <=> root.inspector-scroll-y;
+                    layer-labels: root.layer-labels;
+                    layer-visibilities: root.layer-visibilities;
+                    active-layer-index: root.active-layer-index;
+                    can-move-up: root.can-move-up;
+                    can-move-down: root.can-move-down;
+                    active-blend-mode: root.active-blend-mode;
+                    active-layer-opacity: root.active-layer-opacity;
+                    brightness-value: root.brightness-value;
+                    contrast-value: root.contrast-value;
+                    saturation-value: root.saturation-value;
+                    brightness-enabled: root.brightness-enabled;
+                    contrast-enabled: root.contrast-enabled;
+                    saturation-enabled: root.saturation-enabled;
+                    has-preview: root.has-preview;
+                    active-layer-id: root.active-layer-id;
+                    active-layer-kind: root.active-layer-kind;
+                    active-layer-transform-enabled: root.active-layer-transform-enabled;
+                    active-layer-crop-enabled: root.active-layer-crop-enabled;
+                    active-layer-bounds: root.active-layer-bounds;
+                    active-layer-x <=> root.active-layer-x;
+                    active-layer-y <=> root.active-layer-y;
+                    active-layer-scale-x <=> root.active-layer-scale-x;
+                    active-layer-scale-y <=> root.active-layer-scale-y;
+                    active-layer-rotation <=> root.active-layer-rotation;
+                    selection-geometry: root.selection-geometry;
+                    crop-geometry: root.crop-geometry;
+                    active-layer-crop-geometry: root.active-layer-crop-geometry;
+                    has-selection: root.has-selection;
+                    has-crop: root.has-crop;
+                    has-active-layer-crop: root.has-active-layer-crop;
+                    has-selected-layer-bounds: root.has-selected-layer-bounds;
+                    select-layer(idx) => { root.select-layer(idx); }
+                    toggle-layer-visibility(idx) => { root.toggle-layer-visibility(idx); }
+                    add-layer => { root.add-layer(); }
+                    add-adjustment => { root.add-adjustment(); }
+                    move-layer(dir) => { root.move-layer(dir); }
+                    remove-layer => { root.remove-layer(); }
+                    blend-mode-changed(mode) => { root.blend-mode-changed(mode); }
+                    opacity-changed(op) => { root.opacity-changed(op); }
+                    brightness-changed(val) => { root.brightness-changed(val); }
+                    contrast-changed(val) => { root.contrast-changed(val); }
+                    saturation-changed(val) => { root.saturation-changed(val); }
+                    layer-transform-changed(x, y, sx, sy, rot) => { root.layer-transform-changed(x, y, sx, sy, rot); }
+                    select-layer-bounds => { root.select-layer-bounds(); }
+                    crop-to-selection => { root.crop-to-selection(); }
+                    crop-active-layer-to-selection => { root.crop-active-layer-to-selection(); }
+                    clear-selection => { root.clear-selection(); }
+                    clear-crop => { root.clear-crop(); }
+                    clear-active-layer-crop => { root.clear-active-layer-crop(); }
+                    import-image => { root.import-image(); }
+                    export-png => { root.export-png(); }
+                    export-jpeg => { root.export-jpeg(); }
+                }
+
+                PhotoCanvas {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    has-preview: root.has-preview;
+                    preview-image: root.preview-image;
+                    document-width: root.document-width;
+                    document-height: root.document-height;
+                    selected-layer-bounds-x: root.selected-layer-bounds-x;
+                    selected-layer-bounds-y: root.selected-layer-bounds-y;
+                    selected-layer-bounds-width: root.selected-layer-bounds-width;
+                    selected-layer-bounds-height: root.selected-layer-bounds-height;
+                    has-selected-layer-bounds: root.has-selected-layer-bounds;
+                    show-grid: root.show-grid;
+                    active-tool: root.active-tool;
+                    pan-mode <=> root.pan-mode;
+                    zoom-value <=> root.zoom-value;
+                    viewport-pan-x <=> root.viewport-pan-x;
+                    viewport-pan-y <=> root.viewport-pan-y;
+                    import-image => { root.import-image(); }
+                }
+
+                if !root.rtl && root.inspector-visible : PhotoInspector {
+                    inspector-tab <=> root.inspector-tab;
+                    scroll-y <=> root.inspector-scroll-y;
+                    layer-labels: root.layer-labels;
+                    layer-visibilities: root.layer-visibilities;
+                    active-layer-index: root.active-layer-index;
+                    can-move-up: root.can-move-up;
+                    can-move-down: root.can-move-down;
+                    active-blend-mode: root.active-blend-mode;
+                    active-layer-opacity: root.active-layer-opacity;
+                    brightness-value: root.brightness-value;
+                    contrast-value: root.contrast-value;
+                    saturation-value: root.saturation-value;
+                    brightness-enabled: root.brightness-enabled;
+                    contrast-enabled: root.contrast-enabled;
+                    saturation-enabled: root.saturation-enabled;
+                    has-preview: root.has-preview;
+                    active-layer-id: root.active-layer-id;
+                    active-layer-kind: root.active-layer-kind;
+                    active-layer-transform-enabled: root.active-layer-transform-enabled;
+                    active-layer-crop-enabled: root.active-layer-crop-enabled;
+                    active-layer-bounds: root.active-layer-bounds;
+                    active-layer-x <=> root.active-layer-x;
+                    active-layer-y <=> root.active-layer-y;
+                    active-layer-scale-x <=> root.active-layer-scale-x;
+                    active-layer-scale-y <=> root.active-layer-scale-y;
+                    active-layer-rotation <=> root.active-layer-rotation;
+                    selection-geometry: root.selection-geometry;
+                    crop-geometry: root.crop-geometry;
+                    active-layer-crop-geometry: root.active-layer-crop-geometry;
+                    has-selection: root.has-selection;
+                    has-crop: root.has-crop;
+                    has-active-layer-crop: root.has-active-layer-crop;
+                    has-selected-layer-bounds: root.has-selected-layer-bounds;
+                    select-layer(idx) => { root.select-layer(idx); }
+                    toggle-layer-visibility(idx) => { root.toggle-layer-visibility(idx); }
+                    add-layer => { root.add-layer(); }
+                    add-adjustment => { root.add-adjustment(); }
+                    move-layer(dir) => { root.move-layer(dir); }
+                    remove-layer => { root.remove-layer(); }
+                    blend-mode-changed(mode) => { root.blend-mode-changed(mode); }
+                    opacity-changed(op) => { root.opacity-changed(op); }
+                    brightness-changed(val) => { root.brightness-changed(val); }
+                    contrast-changed(val) => { root.contrast-changed(val); }
+                    saturation-changed(val) => { root.saturation-changed(val); }
+                    layer-transform-changed(x, y, sx, sy, rot) => { root.layer-transform-changed(x, y, sx, sy, rot); }
+                    select-layer-bounds => { root.select-layer-bounds(); }
+                    crop-to-selection => { root.crop-to-selection(); }
+                    crop-active-layer-to-selection => { root.crop-active-layer-to-selection(); }
+                    clear-selection => { root.clear-selection(); }
+                    clear-crop => { root.clear-crop(); }
+                    clear-active-layer-crop => { root.clear-active-layer-crop(); }
+                    import-image => { root.import-image(); }
+                    export-png => { root.export-png(); }
+                    export-jpeg => { root.export-jpeg(); }
+                }
+            }
+
+            // Bottom Status Bar
+            PhotoStatusBar {
+                project-name: root.project-name;
+                dimensions: root.dimensions-text;
+                status-left: root.status-left;
+                status-right: root.status-right;
+            }
+        }
+    }
+
+    // Overflow Menu Overlay
+    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        TouchArea { clicked => { root.toolbar-overflow-open = false; } }
+        VerticalLayout {
+            padding-top: Theme.tokens.metrics.toolbar-height + Theme.tokens.space.sm;
+            padding-left: Theme.tokens.space.lg;
+            padding-right: Theme.tokens.space.lg;
+            cross-axis-alignment: end;
+            PhotoToolbarOverflow {
+                inspector-visible: root.show-inspector;
+                zoom-value: root.zoom-value;
+                toggle-inspector => {
+                    root.show-inspector = !root.show-inspector;
+                    root.toolbar-overflow-open = false;
+                    root.toggle-inspector();
+                }
+                export-png => { root.toolbar-overflow-open = false; root.export-png(); }
+                export-jpeg => { root.toolbar-overflow-open = false; root.export-jpeg(); }
+                add-layer => { root.toolbar-overflow-open = false; root.add-layer(); }
+                add-adjustment => { root.toolbar-overflow-open = false; root.add-adjustment(); }
+                import-image => { root.toolbar-overflow-open = false; root.import-image(); }
+                zoom-changed(z) => { root.zoom-value = z; }
+            }
+        }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => { root.palette-invoked(idx); }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => { root.palette-move(delta); }
+        key-text(text) => { root.palette-key-text(text); }
+        backspace => { root.palette-backspace(); }
+        close-requested => {
+            root.palette-open = false;
+            root.palette-close();
+        }
+    }
+}

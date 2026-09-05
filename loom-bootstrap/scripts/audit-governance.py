@@ -74,6 +74,24 @@ else:
         for locked_app in ("photo", "motion", "video", "studio", "encode"):
             if workflow.get("application_status", {}).get(locked_app) != "LOCKED":
                 fail(f"application {locked_app} must remain LOCKED during present phase")
+    elif phase == "photo":
+        if foundation_status != "ACCEPTED":
+            fail("photo phase requires accepted foundation")
+        if workflow.get("application_development_locked") is not False:
+            fail("application development should be unlocked for photo")
+        if workflow.get("consumer_imports_allowed") is not True:
+            fail("consumer imports should be allowed for photo")
+        if workflow.get("application_status", {}).get("sheets") != "ACCEPTED":
+            fail("sheets status must be ACCEPTED in photo phase")
+        if workflow.get("application_status", {}).get("writer") != "ACCEPTED":
+            fail("writer status must be ACCEPTED in photo phase")
+        if workflow.get("application_status", {}).get("present") != "ACCEPTED":
+            fail("present status must be ACCEPTED in photo phase")
+        if workflow.get("application_status", {}).get("photo") not in ("IN_PROGRESS", "ACCEPTED"):
+            fail("photo status must be IN_PROGRESS or ACCEPTED in photo phase")
+        for locked_app in ("motion", "video", "studio", "encode"):
+            if workflow.get("application_status", {}).get(locked_app) != "LOCKED":
+                fail(f"application {locked_app} must remain LOCKED during photo phase")
     else:
         fail(f"unrecognized active phase: {phase}")
 
@@ -141,6 +159,13 @@ elif phase == "present":
         "ACTIVE APPLICATION: PRESENT",
         "Current complete-suite readiness remains approximately **29/100**",
     )
+elif phase == "photo":
+    truth_phrases = (
+        "ACTIVE PHASE: PHOTO",
+        "FOUNDATION STATUS: ACCEPTED",
+        "ACTIVE APPLICATION: PHOTO",
+        "Current complete-suite readiness remains approximately **29/100**",
+    )
 else:
     truth_phrases = ()
 
@@ -149,7 +174,7 @@ for phrase in truth_phrases:
         fail(f"TRUTH.md missing required active-state statement: {phrase}")
 
 for app in APPS:
-    if app in ("sheets", "writer", "present") and phase in ("sheets", "writer", "present"):
+    if app in ("sheets", "writer", "present", "photo") and phase in ("sheets", "writer", "present", "photo"):
         continue
     ui_root = ROOT / f"loom-{app}" / "crates" / f"loom-{app}-app" / "ui"
     if not ui_root.exists():
