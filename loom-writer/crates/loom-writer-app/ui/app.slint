@@ -114,6 +114,7 @@ export component WriterApp inherits Window {
     callback select-orientation(int);
     callback select-margins(int);
     callback select-list-style(int);
+    callback insert-table;
     callback add-comment(string);
     callback set-comment-resolved(string, bool);
     callback delete-comment(string);
@@ -276,6 +277,7 @@ export component WriterApp inherits Window {
                 undo => { root.undo(); }
                 redo => { root.redo(); }
                 toggle-bold => { root.toggle-bold(); }
+                insert-table => { root.insert-table(); }
                 toggle-italic => { root.toggle-italic(); }
                 toggle-underline => { root.toggle-underline(); }
                 toggle-strikethrough => { root.toggle-strikethrough(); }

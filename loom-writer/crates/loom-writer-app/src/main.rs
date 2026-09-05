@@ -66,6 +66,7 @@ struct Args {
     template_chooser: bool,
     inspector: bool,
     comment: Option<String>,
+    table: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -90,6 +91,7 @@ where
         template_chooser: false,
         inspector: false,
         comment: None,
+        table: false,
     };
     let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
@@ -139,6 +141,7 @@ where
                 let body = it.next().ok_or("--comment needs a body")?;
                 args.comment = Some(body);
             }
+            "--table" => args.table = true,
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
             }
@@ -324,6 +327,7 @@ enum PaletteAction {
     ToggleUnderline,
     SetHeading(i32),
     SetAlignment(i32),
+    InsertTable,
 }
 
 /// Dispatch one canonical command identifier through the callbacks shared by
@@ -342,6 +346,7 @@ fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "edit.undo" | "writer.undo" => app.invoke_undo(),
         "edit.redo" | "writer.redo" => app.invoke_redo(),
         "app.palette" => app.invoke_open_palette(),
+        "insert.table" | "writer.table.insert" => app.invoke_insert_table(),
         "view.inspector" => app.invoke_toggle_inspector(),
         "format.bold" | "writer.style.bold-all" => app.invoke_toggle_bold(),
         "format.italic" | "writer.style.italic-all" => app.invoke_toggle_italic(),
@@ -388,6 +393,7 @@ fn dispatch_palette_action(app: &WriterApp, action: PaletteAction) -> bool {
             app.invoke_select_alignment(index);
             true
         }
+        PaletteAction::InsertTable => dispatch_command(app, "writer.table.insert"),
         PaletteAction::NewDoc => dispatch_command(app, "writer.new"),
         PaletteAction::OpenDoc => dispatch_command(app, "writer.open"),
         PaletteAction::SaveDoc => dispatch_command(app, "writer.save"),
@@ -864,6 +870,12 @@ fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
             id: "writer.style.underline-all",
             label: "Document Style: Underline",
             shortcut: "Ctrl+U",
+        },
+        PaletteCommand {
+            action: PaletteAction::InsertTable,
+            id: "writer.table.insert",
+            label: "Insert Table",
+            shortcut: "",
         },
         PaletteCommand {
             action: PaletteAction::SetHeading(1),
@@ -2796,6 +2808,32 @@ fn wire_writer_shared_callbacks(
         });
     }
 
+    // Tables are markdown-native blocks: the block text is the source of
+    // truth, so insertion is a real document edit (undoable, persisted,
+    // exported verbatim to Markdown).
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_insert_table(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            let caret = next.selection().anchor;
+            match next.insert_table_block(
+                caret,
+                loom_writer_core::INSERT_ROWS,
+                loom_writer_core::INSERT_COLUMNS,
+            ) {
+                Ok(_) => {
+                    apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                    app.set_status_right(SharedString::from("Table inserted — edit cells as text"));
+                }
+                Err(error) => {
+                    app.set_status_right(SharedString::from(format!("Table failed: {error}")));
+                }
+            }
+        });
+    }
+
     // Comments are anchored document data: adding, resolving, and deleting
     // participate in undo history and persist in the .loomdoc package.
     {
@@ -2990,6 +3028,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         if let Some(block) = document.blocks.first().cloned() {
             let len = block.text.len_bytes();
             let _ = document.add_comment_thread(block.id, 0, len, body);
+            *state.current.borrow_mut() = document;
+        }
+    }
+    if args.table {
+        let mut document = state.current.borrow().clone();
+        if document
+            .insert_table_block(
+                usize::MAX,
+                loom_writer_core::INSERT_ROWS,
+                loom_writer_core::INSERT_COLUMNS,
+            )
+            .is_ok()
+        {
             *state.current.borrow_mut() = document;
         }
     }
@@ -3792,6 +3843,27 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     screenshots.push(capture_writer_journey_step(
         &app, args, out_dir, "comments",
     )?);
+
+    // Tables are markdown-native blocks: inserting one must create a real
+    // table block, project its rows, and survive the package round-trip.
+    app.invoke_insert_table();
+    {
+        let current = state.current.borrow();
+        let Some(table_block) = current
+            .blocks
+            .iter()
+            .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+        else {
+            return Err("journey table block was not inserted".into());
+        };
+        let table = current
+            .table_from_block(table_block.id)
+            .ok_or("journey table markdown did not parse")?;
+        if table.rows.len() != loom_writer_core::INSERT_ROWS {
+            return Err("journey table row count mismatch".into());
+        }
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "table")?);
 
     // Page setup is a real document edit: switching to landscape Letter must
     // relayout the projection, update the pushed page geometry, and survive

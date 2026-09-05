@@ -1482,3 +1482,40 @@ fn comment_on_caret_anchors_whole_block_and_rejects_empty_body() {
     assert_eq!(current.comments[0].start, 0);
     assert_eq!(current.comments[0].end, current.blocks[0].text.len_bytes());
 }
+
+#[test]
+fn insert_table_is_undoable_and_persists() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("First"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    app.invoke_insert_table();
+    {
+        let current = state.current.borrow();
+        assert_eq!(current.blocks.len(), 2);
+        assert_eq!(current.blocks[1].kind, loom_writer_core::TABLE_BLOCK_KIND);
+    }
+    // Undo removes the table block.
+    app.invoke_undo();
+    assert_eq!(state.current.borrow().blocks.len(), 1);
+
+    // Re-insert and verify the package round-trip preserves the table.
+    app.invoke_insert_table();
+    let bytes = loom_writer_core::save_document(&state.current.borrow()).expect("save");
+    let reopened = loom_writer_core::load_document(&bytes).expect("load");
+    assert!(reopened
+        .blocks
+        .iter()
+        .any(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND));
+    let table = reopened
+        .table_from_block(
+            reopened
+                .blocks
+                .iter()
+                .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+                .expect("table block")
+                .id,
+        )
+        .expect("table parses");
+    assert_eq!(table.rows.len(), loom_writer_core::INSERT_ROWS);
+}

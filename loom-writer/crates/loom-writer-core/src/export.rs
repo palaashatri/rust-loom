@@ -108,8 +108,19 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             Some(prefix) => format!("{prefix}{}", b.text.as_str()),
             None => b.text.as_str().to_string(),
         };
-        pdf.draw_text(page, x, y, &text, &style);
-        y -= line_step;
+        // Table blocks carry multi-line markdown; draw one row per line.
+        let lines: Vec<&str> = if b.kind == crate::TABLE_BLOCK_KIND {
+            text.lines().collect()
+        } else {
+            vec![text.as_str()]
+        };
+        for line in lines {
+            pdf.draw_text(page, x, y, line, &style);
+            y -= line_step;
+            if y < page_style.margin_bottom_pt {
+                break;
+            }
+        }
         if y < page_style.margin_bottom_pt {
             break;
         }

@@ -31,6 +31,7 @@ export component WriterActionToolbar inherits LoomToolbar {
     callback toggle-underline;
     callback toggle-strikethrough;
     callback select-alignment(int);
+    callback insert-table;
 
     function next-page-zoom() -> float {
         return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
@@ -64,6 +65,18 @@ export component WriterActionToolbar inherits LoomToolbar {
 
     // Center Insert Group (matching Apple Pages Insert tools)
     LoomToolbarDivider { }
+
+    LoomToolbarDivider { }
+
+    // Table insertion (real document edit: markdown-native table block)
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "table";
+            label: root.wide ? "Table" : "";
+            variant: "ghost";
+            clicked => { root.insert-table(); }
+        }
+    }
 
     // Fast Formatting Group
     LoomToolbarGroup {
@@ -169,6 +182,7 @@ export component WriterToolbarBody inherits HorizontalLayout {
     callback toggle-underline;
     callback toggle-strikethrough;
     callback select-alignment(int);
+    callback insert-table;
 
     spacing: Theme.tokens.space.xs;
 

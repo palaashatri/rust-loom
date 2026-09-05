@@ -16,9 +16,11 @@ use unicode_segmentation::UnicodeSegmentation;
 mod comments;
 mod export;
 mod page_setup;
+mod tables;
 
 pub use export::{export_document_as_docx, export_pdf};
 pub use page_setup::PageSetup;
+pub use tables::{parse_table_markdown, INSERT_COLUMNS, INSERT_ROWS, TABLE_BLOCK_KIND};
 
 /// Stable document id.
 pub type DocId = String;
@@ -576,6 +578,10 @@ impl WriterDocument {
                 "list-bulleted" => {
                     numbered_index = 0;
                     out.push_str(&format!("- {}\n", b.text.as_str()));
+                }
+                "table" => {
+                    numbered_index = 0;
+                    out.push_str(&format!("{}\n", b.text.as_str()));
                 }
                 "list-numbered" => {
                     numbered_index += 1;
@@ -4003,6 +4009,15 @@ fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
     let mut last_break = None;
     let mut graphemes = 0usize;
     for (index, grapheme) in text.grapheme_indices(true) {
+        if grapheme == "\n" {
+            // Hard line breaks close the current rendered line immediately
+            // (table blocks carry multi-line markdown).
+            ranges.push((line_start, index + 1));
+            line_start = index + 1;
+            graphemes = 0;
+            last_break = None;
+            continue;
+        }
         graphemes += 1;
         if grapheme.chars().any(char::is_whitespace) {
             last_break = Some(index + grapheme.len());
