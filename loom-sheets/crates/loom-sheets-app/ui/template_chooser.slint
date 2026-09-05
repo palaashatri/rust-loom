@@ -1,7 +1,313 @@
-import { TemplateCard } from "toolkit.slint";
 import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
+
+component BlankPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle { height: 16px; background: #e5e7eb; }
+    for idx in 4 : Rectangle {
+        height: 16px;
+        background: #ffffff;
+        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #f3f4f6; }
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 32px; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e5e7eb; }
+        }
+    }
+}
+
+component BlankBlackPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle { height: 16px; background: #27272a; }
+    for idx in 4 : Rectangle {
+        height: 16px;
+        background: #18181b;
+        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #27272a; }
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 32px; border-width: 0.5px; border-color: #3f3f46; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #3f3f46; }
+        }
+    }
+}
+
+component TableChartPreview inherits VerticalLayout {
+    spacing: 2px;
+    padding: 4px;
+    HorizontalLayout {
+        height: 44px;
+        spacing: 6px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 14px; height: 18px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 14px; height: 32px; border-radius: 2px; background: #06b6d4; }
+        Rectangle { width: 14px; height: 24px; border-radius: 2px; background: #10b981; }
+        Rectangle { width: 14px; height: 40px; border-radius: 2px; background: #f59e0b; }
+        Rectangle { width: 14px; height: 28px; border-radius: 2px; background: #8b5cf6; }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #f1f5f9; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+component PivotPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle { height: 14px; background: #2563eb; }
+    for idx in 4 : Rectangle {
+        height: 16px;
+        background: Math.mod(idx, 2) == 1 ? #f1f5f9 : #ffffff;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 48px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
+        }
+    }
+}
+
+component ChartingPreview inherits HorizontalLayout {
+    padding: 4px;
+    spacing: 6px;
+    HorizontalLayout {
+        width: 60px;
+        spacing: 4px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 12px; height: 22px; border-radius: 2px; background: #ef4444; }
+        Rectangle { width: 12px; height: 38px; border-radius: 2px; background: #eab308; }
+        Rectangle { width: 12px; height: 50px; border-radius: 2px; background: #10b981; }
+    }
+    VerticalLayout {
+        spacing: 4px;
+        alignment: center;
+        Rectangle { width: 56px; height: 10px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 40px; height: 10px; border-radius: 2px; background: #06b6d4; }
+        Rectangle { width: 48px; height: 10px; border-radius: 2px; background: #8b5cf6; }
+    }
+}
+
+component BudgetPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 38px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            border-width: 6px;
+            border-color: #10b981;
+            background: transparent;
+        }
+        VerticalLayout {
+            spacing: 3px;
+            Rectangle { width: 50px; height: 6px; border-radius: 3px; background: #3b82f6; }
+            Rectangle { width: 36px; height: 6px; border-radius: 3px; background: #f59e0b; }
+            Rectangle { width: 44px; height: 6px; border-radius: 3px; background: #10b981; }
+        }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #dcfce7; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+component MonthlyBudgetPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 38px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            border-width: 6px;
+            border-color: #06b6d4;
+            background: transparent;
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            cross-axis-alignment: end;
+            Rectangle { width: 8px; height: 20px; border-radius: 2px; background: #3b82f6; }
+            Rectangle { width: 8px; height: 28px; border-radius: 2px; background: #10b981; }
+            Rectangle { width: 8px; height: 16px; border-radius: 2px; background: #3b82f6; }
+            Rectangle { width: 8px; height: 24px; border-radius: 2px; background: #10b981; }
+        }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #e0f2fe; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+component MonthlyGoalPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 48px;
+        spacing: 8px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 18px; height: 24px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 18px; height: 44px; border-radius: 2px; background: #10b981; }
+        Rectangle { width: 18px; height: 32px; border-radius: 2px; background: #94a3b8; }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #f1f5f9; }
+        Rectangle { height: 12px; background: #ffffff; }
+    }
+}
+
+component PortfolioPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 4px;
+    Rectangle { height: 14px; border-radius: 2px; background: #dcfce7; }
+    HorizontalLayout {
+        height: 10px;
+        spacing: 2px;
+        Rectangle { width: 55px; border-radius: 2px; background: #10b981; }
+        Rectangle { width: 35px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #f59e0b; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 14px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 14px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 14px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+    }
+}
+
+component NetWorthPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 4px;
+    HorizontalLayout {
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; height: 28px; border-radius: 2px; background: #dcfce7; }
+        Rectangle { horizontal-stretch: 1; height: 28px; border-radius: 2px; background: #fee2e2; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 14px; background: #f1f5f9; }
+        Rectangle { height: 14px; background: #ffffff; }
+        Rectangle { height: 14px; background: #f8fafc; }
+    }
+}
+
+component InvoicePreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    HorizontalLayout {
+        alignment: end;
+        Rectangle { width: 44px; height: 10px; border-radius: 2px; background: #0284c7; }
+    }
+    for idx in 3 : Rectangle {
+        height: 14px;
+        background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 40px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { width: 28px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        Rectangle { width: 50px; height: 12px; border-radius: 2px; background: #e0f2fe; }
+    }
+}
+
+component SheetsTemplateCard inherits Rectangle {
+    in property <string> title: "";
+    in property <bool> selected: false;
+    in property <length> preview-width: 144px;
+    in property <length> preview-height: 96px;
+    in property <color> preview-background: #ffffff;
+    callback clicked;
+
+    width: 156px;
+    height: 136px;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
+
+    VerticalLayout {
+        spacing: 6px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        // Preview frame
+        Rectangle {
+            width: root.preview-width;
+            height: root.preview-height;
+            border-radius: Theme.tokens.metrics.radius-small;
+            background: root.preview-background;
+            border-width: root.selected ? 2.5px : 1px;
+            border-color: root.selected ? Theme.palette().success : Theme.palette().border;
+            clip: true;
+            drop-shadow-blur: root.selected ? 6px : 3px;
+            drop-shadow-offset-y: 1.5px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            @children
+        }
+
+        // Selection pill badge or regular label
+        if root.selected : Rectangle {
+            height: 18px;
+            border-radius: 9px;
+            background: Theme.palette().success;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                alignment: center;
+                cross-axis-alignment: center;
+                Text {
+                    text: root.title;
+                    font-size: Theme.tokens.typography.micro;
+                    font-weight: 600;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if !root.selected : Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+            overflow: elide;
+            max-width: root.width - 8px;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
 
 export component TemplateChooserModal inherits Rectangle {
     in-out property <int> template-selected: 0;
@@ -9,21 +315,20 @@ export component TemplateChooserModal inherits Rectangle {
     callback cancel-template;
     callback create-template(int);
 
-    function template-visible(template-index: int) -> bool {
-        return root.template-category == 0
-            || (root.template-category == 1 && template-index == 0)
-            || (root.template-category == 2 && template-index == 1)
-            || (root.template-category == 3 && template-index >= 2);
-    }
-
     function choose-template-category(category-index: int) {
         root.template-category = category-index;
         if (category-index == 1) {
             root.template-selected = 0;
         } else if (category-index == 2) {
-            root.template-selected = 1;
+            root.template-selected = 0;
         } else if (category-index == 3) {
+            root.template-selected = 7;
+        } else if (category-index == 4) {
+            root.template-selected = 1;
+        } else if (category-index == 5) {
             root.template-selected = 2;
+        } else if (category-index == 6) {
+            root.template-selected = 6;
         }
     }
 
@@ -31,10 +336,11 @@ export component TemplateChooserModal inherits Rectangle {
     y: 0px;
     background: Theme.palette().scrim;
 
+    // Numbers modal container
     Rectangle {
-        width: min(1160px, max(1px, root.width - 48px));
+        width: min(1120px, max(760px, root.width - 48px));
         x: (root.width - self.width) / 2;
-        height: min(760px, max(480px, root.height - 48px));
+        height: min(720px, max(460px, root.height - 48px));
         y: (root.height - self.height) / 2;
         border-radius: Theme.tokens.metrics.radius-large;
         border-width: 1px;
@@ -53,36 +359,28 @@ export component TemplateChooserModal inherits Rectangle {
                 spacing: 0px;
                 vertical-stretch: 1;
 
-                // Sidebar
+                // Left Category Sidebar
                 Rectangle {
-                    width: 220px;
+                    width: 200px;
                     background: Theme.palette().panel;
 
                     VerticalLayout {
-                        spacing: Theme.tokens.space.sm;
+                        spacing: Theme.tokens.space.xs;
                         padding-top: Theme.tokens.space.xl;
-                        padding-bottom: Theme.tokens.space.xl;
-                        padding-left: Theme.tokens.space.lg;
-                        padding-right: Theme.tokens.space.lg;
-
-                        HorizontalLayout {
-                            padding-left: Theme.tokens.space.md;
-                            padding-bottom: Theme.tokens.space.sm;
-                            Text {
-                                text: "TEMPLATES";
-                                font-size: 10px;
-                                font-weight: 700;
-                                color: Theme.palette().ink-secondary;
-                            }
-                        }
+                        padding-bottom: Theme.tokens.space.md;
+                        padding-left: Theme.tokens.space.md;
+                        padding-right: Theme.tokens.space.md;
 
                         for cat[i] in [
                             { name: "All Templates", icon: "grid" },
+                            { name: "Recents", icon: "clock" },
                             { name: "Basic", icon: "table" },
                             { name: "Personal Finance", icon: "chart" },
-                            { name: "Business", icon: "folder" }
+                            { name: "Personal", icon: "folder" },
+                            { name: "Business", icon: "package" },
+                            { name: "Education", icon: "document" },
                         ] : Rectangle {
-                            height: 32px;
+                            height: 30px;
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.template-category == i ? Theme.palette().surface-raised : transparent;
                             HorizontalLayout {
@@ -90,13 +388,18 @@ export component TemplateChooserModal inherits Rectangle {
                                 padding-left: Theme.tokens.space.md;
                                 padding-right: Theme.tokens.space.md;
                                 cross-axis-alignment: center;
-                                Icon { size: 16px; icon: cat.icon; tint: root.template-category == i ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Icon {
+                                    size: 15px;
+                                    icon: cat.icon;
+                                    tint: Theme.palette().success;
+                                }
                                 Text {
                                     text: cat.name;
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.tokens.typography.caption;
                                     font-weight: root.template-category == i ? 600 : 400;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
+                                    overflow: elide;
                                 }
                             }
                             TouchArea { clicked => { root.choose-template-category(i); } }
@@ -105,187 +408,278 @@ export component TemplateChooserModal inherits Rectangle {
                         Rectangle { vertical-stretch: 1; background: transparent; }
 
                         HorizontalLayout {
-                            spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
+                            spacing: Theme.tokens.space.sm;
+                            padding-left: Theme.tokens.space.md;
+                            padding-bottom: Theme.tokens.space.sm;
+                            cross-axis-alignment: center;
                             Text {
                                 text: "English (US)";
-                                font-size: Theme.tokens.typography.caption;
+                                font-size: Theme.tokens.typography.micro;
                                 color: Theme.palette().ink-secondary;
                                 vertical-alignment: center;
                             }
-                            Icon { size: 12px; icon: "chevron-down"; tint: Theme.palette().ink-secondary; }
+                            Icon {
+                                size: 10px;
+                                icon: "chevron-down";
+                                tint: Theme.palette().ink-secondary;
+                            }
                         }
                     }
 
-                    Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().border; }
+                    Rectangle {
+                        x: parent.width - 1px;
+                        y: 0px;
+                        width: 1px;
+                        height: parent.height;
+                        background: Theme.palette().border;
+                    }
                 }
 
-                // Content Area
+                // Right Content Area
                 VerticalLayout {
                     horizontal-stretch: 1;
-                    padding-top: Theme.tokens.space.xxl;
-                    padding-bottom: Theme.tokens.space.xl;
+                    padding-top: Theme.tokens.space.xl;
+                    padding-bottom: Theme.tokens.space.md;
                     padding-left: Theme.tokens.space.xxl;
-                    padding-right: Theme.tokens.space.xxl;
-                    spacing: Theme.tokens.space.xl;
+                    padding-right: Theme.tokens.space.xl;
+                    spacing: Theme.tokens.space.lg;
 
                     Text {
                         text: "Choose a Template";
-                        font-size: 24px;
+                        font-size: Theme.tokens.typography.display;
                         font-weight: 700;
                         color: Theme.palette().ink;
                     }
 
-                    VerticalLayout {
-                        spacing: Theme.tokens.space.xl;
+                    Flickable {
+                        vertical-stretch: 1;
+                        viewport-height: sections.preferred-height;
 
-                        HorizontalLayout {
+                        sections := VerticalLayout {
                             spacing: Theme.tokens.space.xl;
+                            padding-bottom: Theme.tokens.space.md;
 
-                            if root.template-visible(0) : TemplateCard {
-                                title: "Blank";
-                                selected: root.template-selected == 0;
-                                preview-width: 160px;
-                                preview-height: 115px;
-                                width: 180px;
-                                height: 185px;
-                                show-selected-badge: true;
-                                clicked => { root.template-selected = 0; }
-                                VerticalLayout {
-                                    spacing: 0px;
-                                    Rectangle {
-                                        height: 20px;
-                                        background: Theme.palette().surface-sunken;
-                                        HorizontalLayout {
-                                            spacing: 1px;
-                                            Rectangle { width: 40px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
-                                    }
-                                    for idx in 5 : Rectangle {
-                                        height: 19px;
-                                        background: Theme.palette().paper;
-                                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.palette().paper-line; }
-                                        HorizontalLayout {
-                                            spacing: 1px;
-                                            Rectangle { width: 40px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
+                            // Recents Section
+                            if root.template-category == 0 || root.template-category == 1 : VerticalLayout {
+                                spacing: Theme.tokens.space.md;
+                                Text {
+                                    text: "Recents";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    SheetsTemplateCard {
+                                        title: "Blank";
+                                        selected: root.template-selected == 0;
+                                        clicked => { root.template-selected = 0; }
+                                        BlankPreview {}
                                     }
                                 }
                             }
 
-                            if root.template-visible(1) : TemplateCard {
-                                title: "Monthly Budget";
-                                selected: root.template-selected == 1;
-                                preview-width: 160px;
-                                preview-height: 115px;
-                                width: 180px;
-                                height: 185px;
-                                show-selected-badge: true;
-                                clicked => { root.template-selected = 1; }
-                                VerticalLayout {
-                                    spacing: 0px;
-                                    Rectangle {
-                                        height: 20px;
-                                        background: Theme.palette().accent;
-                                        HorizontalLayout {
-                                            spacing: 1px;
-                                            Rectangle { width: 40px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
+                            // Basic Section
+                            if root.template-category == 0 || root.template-category == 2 : VerticalLayout {
+                                spacing: Theme.tokens.space.md;
+                                Text {
+                                    text: "Basic";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    SheetsTemplateCard {
+                                        title: "Blank";
+                                        selected: root.template-selected == 0;
+                                        clicked => { root.template-selected = 0; }
+                                        BlankPreview {}
                                     }
-                                    for idx in 5 : Rectangle {
-                                        height: 19px;
-                                        background: Math.mod(idx, 2) == 1 ? Theme.palette().surface-sunken : Theme.palette().paper;
-                                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.palette().paper-line; }
-                                        HorizontalLayout {
-                                            spacing: 1px;
-                                            Rectangle { width: 40px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
+                                    SheetsTemplateCard {
+                                        title: "Blank Black";
+                                        selected: root.template-selected == 3;
+                                        preview-background: #18181b;
+                                        clicked => { root.template-selected = 3; }
+                                        BlankBlackPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Table and Chart";
+                                        selected: root.template-selected == 4;
+                                        clicked => { root.template-selected = 4; }
+                                        TableChartPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Pivot Table Basics";
+                                        selected: root.template-selected == 5;
+                                        clicked => { root.template-selected = 5; }
+                                        PivotPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Charting Basics";
+                                        selected: root.template-selected == 6;
+                                        clicked => { root.template-selected = 6; }
+                                        ChartingPreview {}
                                     }
                                 }
                             }
-                        }
 
-                        HorizontalLayout {
-                            spacing: Theme.tokens.space.xl;
-
-                            if root.template-visible(2) : TemplateCard {
-                                title: "Invoice & Expenses";
-                                selected: root.template-selected == 2;
-                                preview-width: 160px;
-                                preview-height: 115px;
-                                width: 180px;
-                                height: 185px;
-                                show-selected-badge: true;
-                                clicked => { root.template-selected = 2; }
-                                VerticalLayout {
-                                    spacing: 0px;
-                                    Rectangle {
-                                        height: 20px;
-                                        background: Theme.palette().content-cool;
-                                        HorizontalLayout {
-                                            spacing: 1px;
-                                            Rectangle { width: 40px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().border; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
+                            // Personal Finance Section
+                            if root.template-category == 0 || root.template-category == 3 : VerticalLayout {
+                                spacing: Theme.tokens.space.md;
+                                Text {
+                                    text: "Personal Finance";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    SheetsTemplateCard {
+                                        title: "Budget";
+                                        selected: root.template-selected == 7;
+                                        clicked => { root.template-selected = 7; }
+                                        BudgetPreview {}
                                     }
-                                    for idx in 5 : Rectangle {
-                                        height: 19px;
-                                        background: Math.mod(idx, 2) == 1 ? Theme.palette().surface-sunken : Theme.palette().paper;
-                                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.palette().paper-line; }
-                                        HorizontalLayout {
-                                            spacing: 1px;
-                                            Rectangle { width: 40px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { width: 50px; }
-                                            Rectangle { width: 1px; background: Theme.palette().paper-line; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                        }
+                                    SheetsTemplateCard {
+                                        title: "Monthly Budget";
+                                        selected: root.template-selected == 1;
+                                        clicked => { root.template-selected = 1; }
+                                        MonthlyBudgetPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Monthly Goal";
+                                        selected: root.template-selected == 8;
+                                        clicked => { root.template-selected = 8; }
+                                        MonthlyGoalPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Portfolio";
+                                        selected: root.template-selected == 9;
+                                        clicked => { root.template-selected = 9; }
+                                        PortfolioPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Net Worth";
+                                        selected: root.template-selected == 10;
+                                        clicked => { root.template-selected = 10; }
+                                        NetWorthPreview {}
+                                    }
+                                }
+                            }
+
+                            // Personal Section (category 4)
+                            if root.template-category == 4 : VerticalLayout {
+                                spacing: Theme.tokens.space.md;
+                                Text {
+                                    text: "Personal";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    SheetsTemplateCard {
+                                        title: "Monthly Budget";
+                                        selected: root.template-selected == 1;
+                                        clicked => { root.template-selected = 1; }
+                                        MonthlyBudgetPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Monthly Goal";
+                                        selected: root.template-selected == 8;
+                                        clicked => { root.template-selected = 8; }
+                                        MonthlyGoalPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Net Worth";
+                                        selected: root.template-selected == 10;
+                                        clicked => { root.template-selected = 10; }
+                                        NetWorthPreview {}
+                                    }
+                                }
+                            }
+
+                            // Business Section (category 5)
+                            if root.template-category == 5 : VerticalLayout {
+                                spacing: Theme.tokens.space.md;
+                                Text {
+                                    text: "Business";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    SheetsTemplateCard {
+                                        title: "Invoice & Expenses";
+                                        selected: root.template-selected == 2;
+                                        clicked => { root.template-selected = 2; }
+                                        InvoicePreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Table and Chart";
+                                        selected: root.template-selected == 4;
+                                        clicked => { root.template-selected = 4; }
+                                        TableChartPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Pivot Table Basics";
+                                        selected: root.template-selected == 5;
+                                        clicked => { root.template-selected = 5; }
+                                        PivotPreview {}
+                                    }
+                                }
+                            }
+
+                            // Education Section (category 6)
+                            if root.template-category == 6 : VerticalLayout {
+                                spacing: Theme.tokens.space.md;
+                                Text {
+                                    text: "Education";
+                                    font-size: Theme.tokens.typography.title;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    SheetsTemplateCard {
+                                        title: "Charting Basics";
+                                        selected: root.template-selected == 6;
+                                        clicked => { root.template-selected = 6; }
+                                        ChartingPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Monthly Goal";
+                                        selected: root.template-selected == 8;
+                                        clicked => { root.template-selected = 8; }
+                                        MonthlyGoalPreview {}
+                                    }
+                                    SheetsTemplateCard {
+                                        title: "Table and Chart";
+                                        selected: root.template-selected == 4;
+                                        clicked => { root.template-selected = 4; }
+                                        TableChartPreview {}
                                     }
                                 }
                             }
                         }
                     }
-
-                    Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
 
-            // Footer Bar
+            // Bottom Footer Action Bar
             Rectangle {
-                height: 56px;
+                height: 52px;
                 background: Theme.palette().chrome;
 
-                Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
 
                 HorizontalLayout {
                     spacing: Theme.tokens.space.lg;
@@ -308,7 +702,7 @@ export component TemplateChooserModal inherits Rectangle {
                     }
 
                     LoomButton {
-                        label: "Create Spreadsheet";
+                        label: "Create";
                         variant: "primary";
                         clicked => { root.create-template(root.template-selected); }
                     }
@@ -317,3 +711,5 @@ export component TemplateChooserModal inherits Rectangle {
         }
     }
 }
+
+

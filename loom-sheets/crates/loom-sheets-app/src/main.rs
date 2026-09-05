@@ -1884,6 +1884,46 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         }
                         s
                     }
+                    4 => {
+                        let mut s = Sheet::new("Table and Chart");
+                        for (c, v) in [
+                            ("A1", "Quarter"),
+                            ("B1", "Revenue"),
+                            ("C1", "Expenses"),
+                            ("A2", "Q1"),
+                            ("B2", "15000"),
+                            ("C2", "9200"),
+                            ("A3", "Q2"),
+                            ("B3", "18500"),
+                            ("C3", "11000"),
+                            ("A4", "Total"),
+                            ("B4", "=SUM(B2:B3)"),
+                            ("C4", "=SUM(C2:C3)"),
+                        ] {
+                            s.set_str(c, v);
+                        }
+                        s
+                    }
+                    7 => {
+                        let mut s = Sheet::new("Budget");
+                        for (c, v) in [
+                            ("A1", "Category"),
+                            ("B1", "Budget"),
+                            ("C1", "Spent"),
+                            ("A2", "Housing"),
+                            ("B2", "1500"),
+                            ("C2", "1500"),
+                            ("A3", "Food"),
+                            ("B3", "600"),
+                            ("C3", "520"),
+                            ("A4", "Total"),
+                            ("B4", "=SUM(B2:B3)"),
+                            ("C4", "=SUM(C2:C3)"),
+                        ] {
+                            s.set_str(c, v);
+                        }
+                        s
+                    }
                     _ => blank_sheet(),
                 };
                 *state.current.borrow_mut() = sheet.clone();
@@ -1984,6 +2024,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if args.chart {
         app.set_chart_visible(true);
         sync_chart_to_app(&app, &state.current.borrow());
+    }
+    if args.template_chooser {
+        app.set_template_chooser_open(true);
     }
     app.show().map_err(|e| e.to_string())?;
     // A visible selection is not enough to receive keyboard input. Focus the
