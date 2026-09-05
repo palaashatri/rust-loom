@@ -59,8 +59,21 @@ export component WriterApp inherits Window {
     in-out property <bool> is-bold: false;
     in-out property <bool> is-italic: false;
     in-out property <bool> is-underline: false;
+    in-out property <bool> is-strikethrough: false;
     in-out property <int> heading-level: 0;
+    in-out property <int> font-family-index: 0;
+    in-out property <int> font-size-pt: 11;
     in-out property <int> text-alignment: 0;
+    in-out property <int> line-spacing-index: 1;
+    in-out property <int> list-style-index: 0;
+    in-out property <int> column-count: 1;
+    in-out property <int> margin-preset: 0;
+    in-out property <bool> drop-cap-enabled: false;
+    in-out property <int> page-orientation: 0;
+    in-out property <int> paper-size: 0;
+    in property <int> word-count: 0;
+    in property <int> char-count: 0;
+    in property <int> reading-time-mins: 1;
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -84,8 +97,27 @@ export component WriterApp inherits Window {
     callback toggle-bold;
     callback toggle-italic;
     callback toggle-underline;
+    callback toggle-strikethrough;
     callback select-heading(int);
+    callback select-font-family(int);
+    callback increase-font-size;
+    callback decrease-font-size;
     callback select-alignment(int);
+    callback indent-text;
+    callback outdent-text;
+    callback select-line-spacing(int);
+    callback select-list-style(int);
+    callback select-columns(int);
+    callback select-margins(int);
+    callback toggle-drop-cap;
+    callback select-orientation(int);
+    callback select-paper-size(int);
+    callback insert-table;
+    callback insert-shape;
+    callback insert-text-box;
+    callback insert-comment;
+    callback add-page;
+    callback toggle-sidebar;
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -229,6 +261,8 @@ export component WriterApp inherits Window {
                 is-bold: root.is-bold;
                 is-italic: root.is-italic;
                 is-underline: root.is-underline;
+                is-strikethrough: root.is-strikethrough;
+                text-alignment: root.text-alignment;
                 toggle-inspector => { root.toggle-inspector(); }
                 export-pdf => { root.export-pdf(); }
                 page-zoom-changed(val) => { root.page-zoom = val; }
@@ -245,6 +279,14 @@ export component WriterApp inherits Window {
                 toggle-bold => { root.toggle-bold(); }
                 toggle-italic => { root.toggle-italic(); }
                 toggle-underline => { root.toggle-underline(); }
+                toggle-strikethrough => { root.toggle-strikethrough(); }
+                select-alignment(val) => { root.select-alignment(val); }
+                insert-table => { root.insert-table(); }
+                insert-shape => { root.insert-shape(); }
+                insert-text-box => { root.insert-text-box(); }
+                insert-comment => { root.insert-comment(); }
+                add-page => { root.add-page(); }
+                toggle-sidebar => { root.toggle-sidebar(); }
             }
 
             HorizontalLayout {
@@ -264,6 +306,9 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
+                    page-orientation: root.page-orientation;
+                    paper-size: root.paper-size;
+                    margin-preset: root.margin-preset;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
@@ -276,19 +321,46 @@ export component WriterApp inherits Window {
                 }
 
                 if root.inspector-visible : WriterInspector {
-                    preferred-width: 280px;
+                    preferred-width: 290px;
                     inspector-tab <=> root.inspector-tab;
                     is-bold <=> root.is-bold;
                     is-italic <=> root.is-italic;
                     is-underline <=> root.is-underline;
+                    is-strikethrough <=> root.is-strikethrough;
                     heading-level <=> root.heading-level;
+                    font-family-index <=> root.font-family-index;
+                    font-size-pt <=> root.font-size-pt;
                     text-alignment <=> root.text-alignment;
+                    line-spacing-index <=> root.line-spacing-index;
+                    list-style-index <=> root.list-style-index;
+                    column-count <=> root.column-count;
+                    margin-preset <=> root.margin-preset;
+                    drop-cap-enabled <=> root.drop-cap-enabled;
+                    page-orientation <=> root.page-orientation;
+                    paper-size <=> root.paper-size;
                     status-left: root.status-left;
+                    word-count: root.word-count;
+                    char-count: root.char-count;
+                    page-count: root.page-count;
+                    reading-time-mins: root.reading-time-mins;
                     toggle-bold => { root.toggle-bold(); }
                     toggle-italic => { root.toggle-italic(); }
                     toggle-underline => { root.toggle-underline(); }
+                    toggle-strikethrough => { root.toggle-strikethrough(); }
                     select-heading(idx) => { root.select-heading(idx); }
+                    select-font-family(idx) => { root.select-font-family(idx); }
+                    increase-font-size => { root.increase-font-size(); }
+                    decrease-font-size => { root.decrease-font-size(); }
                     select-alignment(idx) => { root.select-alignment(idx); }
+                    indent-text => { root.indent-text(); }
+                    outdent-text => { root.outdent-text(); }
+                    select-line-spacing(idx) => { root.select-line-spacing(idx); }
+                    select-list-style(idx) => { root.select-list-style(idx); }
+                    select-columns(cols) => { root.select-columns(cols); }
+                    select-margins(idx) => { root.select-margins(idx); }
+                    toggle-drop-cap => { root.toggle-drop-cap(); }
+                    select-orientation(idx) => { root.select-orientation(idx); }
+                    select-paper-size(idx) => { root.select-paper-size(idx); }
                 }
 
                 if root.rtl : WriterPageCanvas {
@@ -304,6 +376,9 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
+                    page-orientation: root.page-orientation;
+                    paper-size: root.paper-size;
+                    margin-preset: root.margin-preset;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }

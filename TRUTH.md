@@ -15,13 +15,13 @@ The score is intentionally frozen during the UI-foundation reset unless verified
 ## Active gate
 
 ```text
-ACTIVE PHASE: PHOTO
+ACTIVE PHASE: WRITER
 FOUNDATION STATUS: ACCEPTED
-ACTIVE APPLICATION: PHOTO (ACCEPTED)
-LOCKED APPLICATIONS: MOTION, VIDEO, STUDIO, ENCODE
+ACTIVE APPLICATION: WRITER (IN_PROGRESS)
+LOCKED APPLICATIONS: PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-Loom Sheets, Loom Writer, Loom Present, and Loom Photo have passed their complete acceptance gates and deep audits per `AGENTS.MD` Section 4.
+Loom Sheets is certified ACCEPTED. Loom Writer is currently the active application undergoing deep functional, interaction, and visual redesign to align with professional desktop standards (e.g. Apple Pages). Present, Photo, Motion, Video, Studio, and Encode remain strictly LOCKED per AGENTS.MD Section 4 until Writer passes its complete acceptance gate.
 
 ## Why the reset is necessary
 
@@ -91,9 +91,9 @@ After the shared foundation becomes `ACCEPTED`, application migration proceeds o
 | Order | Application | Status |
 |---:|---|---|
 | 1 | Sheets | ACCEPTED |
-| 2 | Writer | ACCEPTED |
-| 3 | Present | ACCEPTED |
-| 4 | Photo | ACCEPTED |
+| 2 | Writer | IN_PROGRESS |
+| 3 | Present | LOCKED |
+| 4 | Photo | LOCKED |
 | 5 | Motion | LOCKED |
 | 6 | Video | LOCKED |
 | 7 | Studio | LOCKED |
@@ -124,7 +124,7 @@ Verified capabilities:
 
 ### Writer
 
-Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
+Status: `IN_PROGRESS` (Visual and Functional Quality Audit in Progress; Present, Photo, Motion locked back per user directive)
 
 Verified capabilities:
 - Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.

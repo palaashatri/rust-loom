@@ -92,6 +92,26 @@ else:
         for locked_app in ("motion", "video", "studio", "encode"):
             if workflow.get("application_status", {}).get(locked_app) != "LOCKED":
                 fail(f"application {locked_app} must remain LOCKED during photo phase")
+    elif phase == "motion":
+        if foundation_status != "ACCEPTED":
+            fail("motion phase requires accepted foundation")
+        if workflow.get("application_development_locked") is not False:
+            fail("application development should be unlocked for motion")
+        if workflow.get("consumer_imports_allowed") is not True:
+            fail("consumer imports should be allowed for motion")
+        if workflow.get("application_status", {}).get("sheets") != "ACCEPTED":
+            fail("sheets status must be ACCEPTED in motion phase")
+        if workflow.get("application_status", {}).get("writer") != "ACCEPTED":
+            fail("writer status must be ACCEPTED in motion phase")
+        if workflow.get("application_status", {}).get("present") != "ACCEPTED":
+            fail("present status must be ACCEPTED in motion phase")
+        if workflow.get("application_status", {}).get("photo") != "ACCEPTED":
+            fail("photo status must be ACCEPTED in motion phase")
+        if workflow.get("application_status", {}).get("motion") not in ("IN_PROGRESS", "ACCEPTED"):
+            fail("motion status must be IN_PROGRESS or ACCEPTED in motion phase")
+        for locked_app in ("video", "studio", "encode"):
+            if workflow.get("application_status", {}).get(locked_app) != "LOCKED":
+                fail(f"application {locked_app} must remain LOCKED during motion phase")
     else:
         fail(f"unrecognized active phase: {phase}")
 
@@ -166,6 +186,13 @@ elif phase == "photo":
         "ACTIVE APPLICATION: PHOTO",
         "Current complete-suite readiness remains approximately **29/100**",
     )
+elif phase == "motion":
+    truth_phrases = (
+        "ACTIVE PHASE: MOTION",
+        "FOUNDATION STATUS: ACCEPTED",
+        "ACTIVE APPLICATION: MOTION",
+        "Current complete-suite readiness remains approximately **29/100**",
+    )
 else:
     truth_phrases = ()
 
@@ -174,7 +201,7 @@ for phrase in truth_phrases:
         fail(f"TRUTH.md missing required active-state statement: {phrase}")
 
 for app in APPS:
-    if app in ("sheets", "writer", "present", "photo") and phase in ("sheets", "writer", "present", "photo"):
+    if app in ("sheets", "writer", "present", "photo", "motion") and phase in ("sheets", "writer", "present", "photo", "motion"):
         continue
     ui_root = ROOT / f"loom-{app}" / "crates" / f"loom-{app}-app" / "ui"
     if not ui_root.exists():

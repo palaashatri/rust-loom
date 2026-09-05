@@ -15,8 +15,12 @@ pub struct DocumentFormattingState {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    pub strikethrough: bool,
     pub heading_level: i32,
+    pub font_family_index: i32,
+    pub font_size_pt: i32,
     pub alignment: i32,
+    pub line_spacing_index: i32,
 }
 
 /// UTF-8 byte offsets in Writer's canonical `editor_text()` representation.
@@ -271,6 +275,75 @@ pub fn set_selection_alignment(
     }
 }
 
+#[allow(dead_code)]
+pub fn set_selection_strikethrough(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    enabled: bool,
+) {
+    mutate_selection_character_styles(document, selection, |style| {
+        style.strikethrough = enabled;
+    });
+}
+
+#[allow(dead_code)]
+pub fn set_selection_font_family(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    family_index: i32,
+) {
+    let family = match family_index {
+        1 => "Serif",
+        2 => "Monospace",
+        _ => "Sans",
+    };
+    mutate_selection_character_styles(document, selection, |style| {
+        style.font_family = family.to_string();
+    });
+}
+
+#[allow(dead_code)]
+pub fn set_selection_font_size(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    size_pt: f32,
+) {
+    let clamped_size = size_pt.clamp(6.0, 72.0);
+    mutate_selection_character_styles(document, selection, |style| {
+        style.font_size = clamped_size;
+    });
+}
+
+#[allow(dead_code)]
+pub fn set_selection_line_spacing(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    spacing_index: i32,
+) {
+    let spacing = match spacing_index {
+        0 => 1.0,
+        2 => 1.5,
+        3 => 2.0,
+        _ => 1.15,
+    };
+    for block_index in selected_block_indices(document, selection) {
+        document.blocks[block_index].style.line_spacing = spacing;
+    }
+}
+
+#[allow(dead_code)]
+pub fn indent_selection(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    increase: bool,
+) {
+    let delta = if increase { 18.0 } else { -18.0 };
+    for block_index in selected_block_indices(document, selection) {
+        let current = document.blocks[block_index].style.left_indent;
+        document.blocks[block_index].style.left_indent = (current + delta).clamp(0.0, 144.0);
+    }
+}
+
 // -------------------------------------------------------------------------
 // Explicit legacy document-wide operations retained for package migration and
 // older headless callers. The live application does not expose these paths.
@@ -459,8 +532,12 @@ pub fn formatting_state(document: &WriterDocument) -> DocumentFormattingState {
         bold: all_non_empty_blocks_match(document, |style| style.weight == FontWeight::Bold),
         italic: all_non_empty_blocks_match(document, |style| style.italic),
         underline: all_non_empty_blocks_match(document, |style| style.underline),
+        strikethrough: all_non_empty_blocks_match(document, |style| style.strikethrough),
         heading_level: uniform_heading_level(document),
+        font_family_index: 0,
+        font_size_pt: 11,
         alignment: uniform_alignment(document),
+        line_spacing_index: 1,
     }
 }
 
@@ -522,12 +599,61 @@ pub fn formatting_state_for_selection(
         })
         .unwrap_or(0);
 
+    let font_size_pt = if spans.is_empty() {
+        caret_style(document, selection.clone())
+            .map(|s| s.font_size as i32)
+            .unwrap_or(11)
+    } else {
+        let (first_block, first_start, _) = spans[0];
+        (style_at(&document.blocks[first_block], first_start).font_size as i32).max(6)
+    };
+
+    let font_family_index = if spans.is_empty() {
+        match caret_style(document, selection.clone())
+            .map(|s| s.font_family.to_lowercase())
+            .as_deref()
+        {
+            Some(f) if f.contains("serif") => 1,
+            Some(f) if f.contains("mono") => 2,
+            _ => 0,
+        }
+    } else {
+        let (first_block, first_start, _) = spans[0];
+        let f = style_at(&document.blocks[first_block], first_start)
+            .font_family
+            .to_lowercase();
+        if f.contains("serif") {
+            1
+        } else if f.contains("mono") {
+            2
+        } else {
+            0
+        }
+    };
+
+    let line_spacing_index = selected_blocks
+        .first()
+        .map(|index| {
+            let mult = (document.blocks[*index].style.line_spacing * 100.0).round() as i32;
+            match mult {
+                100 => 0,
+                150 => 2,
+                200 => 3,
+                _ => 1,
+            }
+        })
+        .unwrap_or(1);
+
     DocumentFormattingState {
         bold: style_matches(&|style| style.weight == FontWeight::Bold),
         italic: style_matches(&|style| style.italic),
         underline: style_matches(&|style| style.underline),
+        strikethrough: style_matches(&|style| style.strikethrough),
         heading_level,
+        font_family_index,
+        font_size_pt: if font_size_pt <= 0 { 11 } else { font_size_pt },
         alignment,
+        line_spacing_index,
     }
 }
 

@@ -15,8 +15,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use document_formatting::{
-    formatting_state_for_selection, set_selection_alignment, set_selection_bold,
-    set_selection_heading, set_selection_italic, set_selection_underline, DocumentSelection,
+    formatting_state_for_selection, indent_selection, set_selection_alignment, set_selection_bold,
+    set_selection_font_family, set_selection_font_size, set_selection_heading,
+    set_selection_italic, set_selection_line_spacing, set_selection_strikethrough,
+    set_selection_underline, DocumentSelection,
 };
 use loom_command::{
     CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSpec,
@@ -1290,8 +1292,16 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_is_bold(formatting.bold);
     app.set_is_italic(formatting.italic);
     app.set_is_underline(formatting.underline);
+    app.set_is_strikethrough(formatting.strikethrough);
+    app.set_font_family_index(formatting.font_family_index);
+    app.set_font_size_pt(formatting.font_size_pt);
+    app.set_line_spacing_index(formatting.line_spacing_index);
     app.set_heading_level(heading_level);
     app.set_text_alignment(text_alignment);
+    app.set_word_count(word_count.min(i32::MAX as usize) as i32);
+    app.set_char_count(char_count.min(i32::MAX as usize) as i32);
+    // ~200 wpm average reading speed
+    app.set_reading_time_mins(((word_count + 199) / 200).max(1).min(i32::MAX as usize) as i32);
     app.set_status_left(SharedString::from(format!(
         "{} words · {} chars · {} blocks",
         word_count, char_count, block_count
@@ -2908,6 +2918,263 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         });
     }
 
+    // ── Strikethrough ──────────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_toggle_strikethrough(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let enabled = app.get_is_strikethrough();
+            let selection = selection_from_app(&app);
+            if selection.is_collapsed() {
+                app.set_status_right("Select text to apply strikethrough".into());
+                return;
+            }
+            let mut next = state.current.borrow().clone();
+            set_selection_strikethrough(
+                &mut next,
+                DocumentSelection::range(selection.anchor, selection.focus),
+                !enabled,
+            );
+            next.set_selection(selection);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            let msg = if enabled { "Strikethrough removed" } else { "Strikethrough applied" };
+            app.set_status_right(SharedString::from(msg));
+            app.set_selection_announcement(SharedString::from(msg));
+        });
+    }
+
+    // ── Font family ────────────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_select_font_family(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            set_selection_font_family(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                index,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        });
+    }
+
+    // ── Font size ──────────────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_increase_font_size(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let current_size = app.get_font_size_pt();
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            set_selection_font_size(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                (current_size + 1).min(144) as f32,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_decrease_font_size(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let current_size = app.get_font_size_pt();
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            set_selection_font_size(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                (current_size - 1).max(6) as f32,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        });
+    }
+
+    // ── Indent / outdent ──────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_indent_text(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            indent_selection(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                true,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_outdent_text(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            indent_selection(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                false,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        });
+    }
+
+    // ── Line spacing ──────────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        let state = state.clone();
+        app.on_select_line_spacing(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            set_selection_line_spacing(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                index,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+        });
+    }
+
+    // ── List style (stub — domain support pending) ────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_select_list_style(move |_index| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("List styles: coming in a future update"));
+            }
+        });
+    }
+
+    // ── Columns (stub) ────────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_select_columns(move |count| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from(format!("Columns set to {count}")));
+            }
+        });
+    }
+
+    // ── Margins (stub) ────────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_select_margins(move |preset| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_margin_preset(preset);
+                let label = match preset {
+                    0 => "Narrow",
+                    2 => "Wide",
+                    _ => "Normal",
+                };
+                app.set_status_right(SharedString::from(format!("Margins: {label}")));
+            }
+        });
+    }
+
+    // ── Drop cap (stub) ───────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_drop_cap(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current = app.get_drop_cap_enabled();
+                app.set_drop_cap_enabled(!current);
+                let msg = if !current { "Drop cap enabled" } else { "Drop cap disabled" };
+                app.set_status_right(SharedString::from(msg));
+            }
+        });
+    }
+
+    // ── Page orientation (stub) ───────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_select_orientation(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_page_orientation(index);
+                let label = if index == 0 { "Portrait" } else { "Landscape" };
+                app.set_status_right(SharedString::from(format!("Orientation: {label}")));
+            }
+        });
+    }
+
+    // ── Paper size (stub) ─────────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_select_paper_size(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_paper_size(index);
+                let label = if index == 0 { "US Letter" } else { "A4" };
+                app.set_status_right(SharedString::from(format!("Paper size: {label}")));
+            }
+        });
+    }
+
+    // ── Insert actions (stubs) ────────────────────────────────────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_insert_table(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("Insert table: coming in a future update"));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_insert_shape(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("Insert shape: coming in a future update"));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_insert_text_box(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("Insert text box: coming in a future update"));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_insert_comment(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("Insert comment: coming in a future update"));
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_add_page(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("Add page: coming in a future update"));
+            }
+        });
+    }
+
+    // ── Sidebar toggle (stub — sidebar not yet implemented) ───────────────
+    {
+        let app_ref = app.as_weak();
+        app.on_toggle_sidebar(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_status_right(SharedString::from("Sidebar: coming in a future update"));
+            }
+        });
+    }
+
     let mut menu_bar = build_standard_menu_bar(
         "Loom Writer",
         vec![MenuItem::action_with_shortcut(
@@ -3056,6 +3323,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // sharing explicitly).
 
     apply_state(&app, &state);
+    if args.template_chooser {
+        app.set_template_chooser_open(true);
+    }
+    if args.inspector {
+        app.set_show_inspector(true);
+    }
+    if args.palette {
+        app.set_palette_query(SharedString::from("ex"));
+        let registry = state.registry.lock().unwrap();
+        rebuild_palette_with_registry(&app, &registry, "ex");
+        app.set_palette_selected(1);
+        app.set_palette_open(true);
+    }
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     app.show().map_err(|e| e.to_string())?;
     slint::run_event_loop().map_err(|e| e.to_string())?;

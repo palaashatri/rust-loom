@@ -193,6 +193,9 @@ export component WriterPageCanvas inherits Rectangle {
     in-out property <length> page-scroll-y: 0px;
     in property <int> page-count: 1;
     in property <length> page-stack-height: 842px;
+    in property <int> page-orientation: 0;
+    in property <int> paper-size: 0;
+    in property <int> margin-preset: 0;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
     callback pointer-pressed(length, length, bool);
@@ -219,13 +222,18 @@ export component WriterPageCanvas inherits Rectangle {
         flicked => { root.page-scroll-changed(self.viewport-x, self.viewport-y); }
 
         page := Rectangle {
-            private property <length> page-padding: 72px * root.page-zoom;
+            private property <length> base-width: root.paper-size == 1 ? 595px : 612px;
+            private property <length> base-height: root.paper-size == 1 ? 842px : 792px;
+            private property <length> raw-width: root.page-orientation == 1 ? self.base-height : self.base-width;
+            private property <length> raw-height: root.page-orientation == 1 ? self.base-width : self.base-height;
+            private property <length> page-padding: (root.margin-preset == 1 ? 36px : (root.margin-preset == 2 ? 108px : 72px)) * root.page-zoom;
+
             x: max(24px, (page-scroll.width - self.width) / 2);
             y: 24px;
-            width: 595px * root.page-zoom;
+            width: self.raw-width * root.page-zoom;
             height: root.page-count > 1
                 ? (root.page-stack-height + 160px) * root.page-zoom
-                : 842px * root.page-zoom;
+                : self.raw-height * root.page-zoom;
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -240,22 +248,7 @@ export component WriterPageCanvas inherits Rectangle {
                 padding-bottom: page.page-padding;
                 padding-left: page.page-padding;
                 padding-right: page.page-padding;
-                spacing: Theme.tokens.space.lg;
-
-                Text {
-                    text: root.doc-title;
-                    font-size: Theme.tokens.typography.heading * root.page-zoom;
-                    font-weight: 700;
-                    color: Theme.palette().paper-ink;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
-                }
-                Text {
-                    text: "Local-first document";
-                    font-size: Theme.tokens.typography.body * root.page-zoom;
-                    color: Theme.palette().paper-muted;
-                }
-                Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
+                spacing: 0px;
 
                 document-editor := WriterDocumentEditor {
                     text <=> root.doc-content;
