@@ -1305,6 +1305,15 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     wire_palette(&app);
     refresh(&app, &state);
+    if args.theme_chooser {
+        app.set_theme_chooser_open(true);
+    }
+    if args.palette {
+        app.set_palette_query(SharedString::from("ex"));
+        rebuild_palette(&app, "ex");
+        app.set_palette_selected(1);
+        app.set_palette_open(true);
+    }
     app.show().map_err(|error| error.to_string())?;
     slint::run_event_loop().map_err(|error| error.to_string())
 }
