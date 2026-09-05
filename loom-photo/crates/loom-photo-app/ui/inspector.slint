@@ -1,0 +1,508 @@
+import {
+    LoomPanel, LoomSectionHeader, LoomSegmentedControl,
+    LoomButton, LoomIconButton, LoomToolbarSpacer,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component PhotoRangeSlider inherits Rectangle {
+    in property <string> label: "Value";
+    in-out property <float> value: 0.0;
+    in property <float> minimum: 0.0;
+    in property <float> maximum: 100.0;
+    in property <bool> enabled: true;
+    callback changed(float);
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 120px;
+    background: transparent;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) {
+                root.value = max(root.minimum, root.value - (root.maximum - root.minimum) / 20.0);
+                root.changed(root.value);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.UpArrow) {
+                root.value = min(root.maximum, root.value + (root.maximum - root.minimum) / 20.0);
+                root.changed(root.value);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: (parent.height - 4px) / 2;
+        width: root.width;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.palette().surface-sunken;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+
+        Rectangle {
+            width: root.maximum > root.minimum
+                ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * parent.width, 0px, parent.width)
+                : 0px;
+            height: parent.height;
+            border-radius: 2px;
+            background: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+        }
+    }
+
+    Rectangle {
+        x: root.maximum > root.minimum
+            ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * (root.width - 16px), 0px, root.width - 16px)
+            : 0px;
+        y: (parent.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Theme.palette().surface-raised;
+        border-width: focus.has-focus ? 2px : 1px;
+        border-color: focus.has-focus ? Theme.palette().focus : Theme.palette().accent;
+        drop-shadow-blur: 2px;
+        drop-shadow-offset-y: 1px;
+        drop-shadow-color: Theme.palette().shadow;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        moved => {
+            if (self.pressed) {
+                focus.focus();
+                root.value = root.minimum + max(0.0, min(1.0, self.mouse-x / root.width)) * (root.maximum - root.minimum);
+                root.changed(root.value);
+            }
+        }
+        clicked => {
+            focus.focus();
+            root.value = root.minimum + max(0.0, min(1.0, self.mouse-x / root.width)) * (root.maximum - root.minimum);
+            root.changed(root.value);
+        }
+    }
+}
+
+component PhotoPropertyRow inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> enabled: true;
+    in-out property <float> value: 0.0;
+    in property <float> minimum: 0.0;
+    in property <float> maximum: 100.0;
+    in property <string> unit: "";
+    callback changed(float);
+
+    height: 48px;
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        HorizontalLayout {
+            height: 18px;
+            Text {
+                text: root.label;
+                font-size: Theme.tokens.typography.caption;
+                color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: Math.round(root.value) + root.unit;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 600;
+                color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+                vertical-alignment: center;
+                min-width: 48px;
+                horizontal-alignment: right;
+            }
+        }
+        PhotoRangeSlider {
+            label: root.label;
+            minimum: root.minimum;
+            maximum: root.maximum;
+            enabled: root.enabled;
+            value <=> root.value;
+            changed(v) => { root.changed(v); }
+        }
+    }
+}
+
+component PhotoLayerRow inherits Rectangle {
+    in property <string> label: "Layer";
+    in property <bool> selected: false;
+    in property <bool> layer-visible: true;
+    callback selected-layer;
+    callback toggle-visibility;
+
+    height: 38px;
+    border-radius: Theme.tokens.metrics.radius-small;
+    background: root.selected ? Theme.palette().selection-soft : row-touch.has-hover ? Theme.palette().surface-raised : transparent;
+
+    row-touch := TouchArea { clicked => { root.selected-layer(); } }
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.xs;
+        padding-right: Theme.tokens.space.sm;
+        cross-axis-alignment: center;
+
+        LoomIconButton {
+            icon: root.layer-visible ? "eye" : "eye-off";
+            tooltip: "Toggle layer visibility";
+            clicked => { root.toggle-visibility(); }
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 400;
+            color: Theme.palette().ink;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.selected-layer(); }
+}
+
+export component PhotoInspector inherits LoomPanel {
+    in-out property <int> inspector-tab: 0;
+    in-out property <length> scroll-y: 0px;
+    in property <[string]> layer-labels: [];
+    in property <[bool]> layer-visibilities: [];
+    in property <int> active-layer-index: 0;
+    in property <bool> can-move-up: false;
+    in property <bool> can-move-down: false;
+    in property <string> active-blend-mode: "Normal";
+    in property <float> active-layer-opacity: 100.0;
+    in property <float> brightness-value: 0.0;
+    in property <float> contrast-value: 0.0;
+    in property <float> saturation-value: 0.0;
+    in property <bool> brightness-enabled: false;
+    in property <bool> contrast-enabled: false;
+    in property <bool> saturation-enabled: false;
+    in property <bool> has-preview: false;
+    in property <string> active-layer-id: "";
+    in property <string> active-layer-kind: "Pixel";
+    in property <bool> active-layer-transform-enabled: true;
+    in property <bool> active-layer-crop-enabled: true;
+    in property <string> active-layer-bounds: "—";
+    in-out property <float> active-layer-x: 0.0;
+    in-out property <float> active-layer-y: 0.0;
+    in-out property <float> active-layer-scale-x: 100.0;
+    in-out property <float> active-layer-scale-y: 100.0;
+    in-out property <float> active-layer-rotation: 0.0;
+    in property <string> selection-geometry: "None";
+    in property <string> crop-geometry: "None";
+    in property <string> active-layer-crop-geometry: "None";
+    in property <bool> has-selection: false;
+    in property <bool> has-crop: false;
+    in property <bool> has-active-layer-crop: false;
+    in property <bool> has-selected-layer-bounds: false;
+
+    callback select-layer(int);
+    callback toggle-layer-visibility(int);
+    callback add-layer;
+    callback add-adjustment;
+    callback move-layer(int);
+    callback remove-layer;
+    callback blend-mode-changed(string);
+    callback opacity-changed(float);
+    callback brightness-changed(float);
+    callback contrast-changed(float);
+    callback saturation-changed(float);
+    callback layer-transform-changed(float, float, float, float, float);
+    callback select-layer-bounds;
+    callback crop-to-selection;
+    callback crop-active-layer-to-selection;
+    callback clear-selection;
+    callback clear-crop;
+    callback clear-active-layer-crop;
+    callback import-image;
+    callback export-png;
+    callback export-jpeg;
+
+    width: 300px;
+    title: "Inspector";
+
+    // Left border separating inspector from canvas
+    Rectangle {
+        x: Theme.rtl ? parent.width - 1px : 0px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.palette().border;
+    }
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+
+        LoomSegmentedControl {
+            items: ["Adjust", "Layers", "Export"];
+            current <=> root.inspector-tab;
+            selected(idx) => { root.inspector-tab = idx; }
+        }
+
+        Flickable {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-y <=> root.scroll-y;
+            viewport-height: max(self.height, inspector-content.preferred-height);
+
+            inspector-content := VerticalLayout {
+                width: parent.viewport-width;
+                spacing: Theme.tokens.space.md;
+
+                if root.inspector-tab == 0 : VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSectionHeader { title: "Selected Layer"; }
+                    Text {
+                        text: root.active-layer-id == "" ? "No layer selected" : root.active-layer-id + " · " + root.active-layer-kind;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                        overflow: elide;
+                    }
+                    if !root.active-layer-transform-enabled : Text {
+                        text: "Transforms apply to pixel layers only.";
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-disabled;
+                        wrap: word-wrap;
+                    }
+                    PhotoPropertyRow {
+                        label: "Position X";
+                        unit: " px";
+                        minimum: -100;
+                        maximum: 100;
+                        enabled: root.active-layer-transform-enabled;
+                        value <=> root.active-layer-x;
+                        changed(v) => { root.layer-transform-changed(v, root.active-layer-y, root.active-layer-scale-x, root.active-layer-scale-y, root.active-layer-rotation); }
+                    }
+                    PhotoPropertyRow {
+                        label: "Position Y";
+                        unit: " px";
+                        minimum: -100;
+                        maximum: 100;
+                        enabled: root.active-layer-transform-enabled;
+                        value <=> root.active-layer-y;
+                        changed(v) => { root.layer-transform-changed(root.active-layer-x, v, root.active-layer-scale-x, root.active-layer-scale-y, root.active-layer-rotation); }
+                    }
+                    PhotoPropertyRow {
+                        label: "Scale X";
+                        unit: "%";
+                        minimum: 25;
+                        maximum: 200;
+                        enabled: root.active-layer-transform-enabled;
+                        value <=> root.active-layer-scale-x;
+                        changed(v) => { root.layer-transform-changed(root.active-layer-x, root.active-layer-y, v, root.active-layer-scale-y, root.active-layer-rotation); }
+                    }
+                    PhotoPropertyRow {
+                        label: "Scale Y";
+                        unit: "%";
+                        minimum: 25;
+                        maximum: 200;
+                        enabled: root.active-layer-transform-enabled;
+                        value <=> root.active-layer-scale-y;
+                        changed(v) => { root.layer-transform-changed(root.active-layer-x, root.active-layer-y, root.active-layer-scale-x, v, root.active-layer-rotation); }
+                    }
+                    PhotoPropertyRow {
+                        label: "Rotation";
+                        unit: "°";
+                        minimum: -180;
+                        maximum: 180;
+                        enabled: root.active-layer-transform-enabled;
+                        value <=> root.active-layer-rotation;
+                        changed(v) => { root.layer-transform-changed(root.active-layer-x, root.active-layer-y, root.active-layer-scale-x, root.active-layer-scale-y, v); }
+                    }
+                    HorizontalLayout {
+                        Text { text: "Bounds: "; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                        Text { text: root.active-layer-bounds; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; overflow: elide; }
+                    }
+
+                    LoomSectionHeader { title: "Selection & Crop"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        LoomButton {
+                            label: "Select Bounds";
+                            enabled: root.has-selected-layer-bounds;
+                            clicked => { root.select-layer-bounds(); }
+                        }
+                        LoomButton {
+                            label: "Clear";
+                            enabled: root.has-selection;
+                            clicked => { root.clear-selection(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        LoomButton {
+                            label: "Crop Canvas";
+                            variant: "primary";
+                            enabled: root.has-selection;
+                            clicked => { root.crop-to-selection(); }
+                        }
+                        LoomButton {
+                            label: "Clear Crop";
+                            enabled: root.has-crop;
+                            clicked => { root.clear-crop(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        LoomButton {
+                            label: "Crop Layer";
+                            enabled: root.has-selection && root.active-layer-crop-enabled;
+                            clicked => { root.crop-active-layer-to-selection(); }
+                        }
+                        LoomButton {
+                            label: "Clear Layer Crop";
+                            enabled: root.has-active-layer-crop;
+                            clicked => { root.clear-active-layer-crop(); }
+                        }
+                    }
+
+                    LoomSectionHeader { title: "Color Adjustments"; }
+                    Text {
+                        text: "Select a matching adjustment layer to edit its value.";
+                        visible: !root.brightness-enabled && !root.contrast-enabled && !root.saturation-enabled;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-disabled;
+                        wrap: word-wrap;
+                    }
+                    PhotoPropertyRow {
+                        label: "Brightness";
+                        unit: "%";
+                        minimum: -100;
+                        maximum: 100;
+                        enabled: root.brightness-enabled;
+                        value: root.brightness-value;
+                        changed(v) => { root.brightness-changed(v); }
+                    }
+                    PhotoPropertyRow {
+                        label: "Contrast";
+                        unit: "%";
+                        minimum: -100;
+                        maximum: 100;
+                        enabled: root.contrast-enabled;
+                        value: root.contrast-value;
+                        changed(v) => { root.contrast-changed(v); }
+                    }
+                    PhotoPropertyRow {
+                        label: "Saturation";
+                        unit: "%";
+                        minimum: -100;
+                        maximum: 100;
+                        enabled: root.saturation-enabled;
+                        value: root.saturation-value;
+                        changed(v) => { root.saturation-changed(v); }
+                    }
+                }
+
+                if root.inspector-tab == 1 : VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSectionHeader { title: "Layers"; }
+                    for label[index] in root.layer-labels : PhotoLayerRow {
+                        label: label;
+                        selected: index == root.active-layer-index;
+                        visible: index < root.layer-visibilities.length;
+                        layer-visible: root.layer-visibilities[index];
+                        selected-layer => { root.select-layer(index); }
+                        toggle-visibility => { root.toggle-layer-visibility(index); }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomIconButton {
+                            icon: "plus";
+                            tooltip: "Add Pixel Layer";
+                            clicked => { root.add-layer(); }
+                        }
+                        LoomIconButton {
+                            icon: "wand";
+                            tooltip: "Add Adjustment Layer";
+                            clicked => { root.add-adjustment(); }
+                        }
+                        LoomIconButton {
+                            icon: "chevron-left";
+                            tooltip: "Move Layer Down";
+                            enabled: root.can-move-down;
+                            clicked => { root.move-layer(-1); }
+                        }
+                        LoomIconButton {
+                            icon: "chevron-right";
+                            tooltip: "Move Layer Up";
+                            enabled: root.can-move-up;
+                            clicked => { root.move-layer(1); }
+                        }
+                        LoomToolbarSpacer { }
+                        LoomIconButton {
+                            icon: "trash";
+                            tooltip: "Delete Layer";
+                            enabled: root.layer-labels.length > 1;
+                            clicked => { root.remove-layer(); }
+                        }
+                    }
+
+                    LoomSectionHeader { title: "Compositing"; }
+                    LoomSegmentedControl {
+                        items: ["Normal", "Multiply", "Screen", "Overlay"];
+                        current: root.active-blend-mode == "Multiply" ? 1
+                            : root.active-blend-mode == "Screen" ? 2
+                            : root.active-blend-mode == "Overlay" ? 3 : 0;
+                        selected(idx) => {
+                            root.blend-mode-changed(idx == 1 ? "Multiply" : idx == 2 ? "Screen" : idx == 3 ? "Overlay" : "Normal");
+                        }
+                    }
+                    PhotoPropertyRow {
+                        label: "Opacity";
+                        unit: "%";
+                        minimum: 0;
+                        maximum: 100;
+                        value: root.active-layer-opacity;
+                        changed(v) => { root.opacity-changed(v); }
+                    }
+                }
+
+                if root.inspector-tab == 2 : VerticalLayout {
+                    spacing: Theme.tokens.space.lg;
+                    LoomSectionHeader { title: "Import"; }
+                    Text {
+                        text: "Import a PNG or JPEG locally. Imported images remain separate from project files.";
+                        wrap: word-wrap;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    LoomButton {
+                        icon: "import";
+                        label: "Import Image...";
+                        clicked => { root.import-image(); }
+                    }
+
+                    LoomSectionHeader { title: "Export"; }
+                    LoomButton {
+                        icon: "export";
+                        label: "Export PNG...";
+                        variant: "primary";
+                        enabled: root.has-preview;
+                        clicked => { root.export-png(); }
+                    }
+                    LoomButton {
+                        icon: "export";
+                        label: "Export JPEG...";
+                        enabled: root.has-preview;
+                        clicked => { root.export-jpeg(); }
+                    }
+                }
+            }
+        }
+    }
+}

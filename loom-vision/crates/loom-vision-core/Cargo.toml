@@ -1,0 +1,19 @@
+[package]
+name = "loom-vision-core"
+description = "Local-first computer-vision provider framework for the Loom suite"
+keywords = ["computer-vision", "loom", "provider", "vision"]
+categories = ["computer-vision", "multimedia"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+rqrr.workspace = true
+
+[dev-dependencies]
+qrcode.workspace = true
+tempfile.workspace = true

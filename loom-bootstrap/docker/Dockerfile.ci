@@ -1,0 +1,42 @@
+# Loom CI image: minimal toolchain to build and test the suite headlessly.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    RUSTFLAGS="" \
+    CARGO_TERM_COLOR=never
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        curl \
+        ca-certificates \
+        libasound2-dev \
+        libfontconfig1-dev \
+        libx11-dev \
+        libxkbcommon-dev \
+        libwayland-dev \
+        libgl1-mesa-dev \
+        libglu1-mesa-dev \
+        fonts-noto-core \
+        xvfb \
+        x11-utils \
+        x11-apps \
+        imagemagick \
+        python3-pil \
+        zip \
+        unzip \
+        coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust stable toolchain (minimal profile: rustc, cargo, rust-std).
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
+
+ENV PATH="/root/.cargo/bin:${PATH}" \
+    CARGO_HOME="/root/.cargo"
+
+RUN rustup component add rustfmt clippy
+
+WORKDIR /workspace/loom-bootstrap

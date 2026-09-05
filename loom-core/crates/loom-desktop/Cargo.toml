@@ -1,0 +1,14 @@
+[package]
+name = "loom-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Native desktop service contracts and adapters for Loom applications"
+
+[dependencies]
+rfd = "0.17.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = "0.19.3"
+objc2 = "0.6.4"

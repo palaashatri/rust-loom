@@ -1,0 +1,240 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+export { Theme } from "../theme.slint";
+import {
+    LoomButton, LoomIconButton, LoomTextField, LoomSearchField,
+    LoomToggle, LoomSegmentedControl, LoomProgressBar,
+    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
+    LoomOverflowButton, LoomPanel, LoomSectionHeader, LoomTabStrip,
+    LoomListRow, LoomStatusBar, LoomStatusText,
+    LoomMenu, LoomPopover, LoomDialog,
+    LoomTableRow, LoomEmptyState, LoomErrorState,
+    LoomCanvasHandle, LoomTimelineRuler, LoomTimelineMarker,
+} from "../foundation.slint";
+import {
+    GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+} from "sections-a.slint";
+import {
+    RowsSection, OverlaysSection, DataSection, CanvasSection,
+} from "sections-b.slint";
+export {
+    GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
+    ButtonsSectionWindow, FieldsSectionWindow, ChoiceSectionWindow, NavigationSectionWindow,
+} from "sections-a.slint";
+export {
+    RowsSection, OverlaysSection, DataSection, CanvasSection,
+    RowsSectionWindow, OverlaysSectionWindow, DataSectionWindow, CanvasSectionWindow,
+} from "sections-b.slint";
+
+export component FoundationGallery inherits Window {
+    title: "Loom UI Foundation Gallery";
+    min-width: 1024px;
+    min-height: 720px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.palette().canvas;
+
+    in-out property <int> selected-category: 0;
+    in-out property <string> sample-value: "Quarterly plan";
+    in-out property <string> search-value: "";
+    in-out property <bool> autosave: true;
+    in-out property <int> alignment: 0;
+    in-out property <int> current-tab: 0;
+    in-out property <string> menu-status: "No menu choice yet";
+    in-out property <string> popover-status: "Popover is open";
+    in-out property <string> dialog-status: "No dialog action yet";
+    in-out property <string> data-status: "No data action yet";
+    in-out property <float> playhead-position: 0.35;
+    in-out property <string> canvas-status: "Playhead at 35%";
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.palette().canvas;
+
+        VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+
+        LoomToolbar {
+            LoomToolbarGroup {
+                LoomButton { label: "New"; icon: "new"; variant: "ghost"; }
+                LoomButton { label: "Open"; icon: "open"; variant: "ghost"; }
+                LoomButton { label: "Save"; icon: "save"; variant: "ghost"; }
+            }
+            LoomToolbarDivider { }
+            LoomToolbarGroup {
+                LoomIconButton { icon: "undo"; label: "Undo"; tooltip: "Undo last change"; }
+                LoomIconButton { icon: "redo"; label: "Redo"; tooltip: "Redo last change"; enabled: false; }
+            }
+            LoomToolbarSpacer { }
+            LoomSearchField { min-width: 200px; max-width: 280px; value <=> root.search-value; placeholder: "Search components"; }
+            LoomToolbarSpacer { }
+            LoomToolbarGroup {
+                LoomSegmentedControl {
+                    width: 270px;
+                    items: ["Light", "Dark", "High contrast"];
+                    current: Theme.active-theme == "dark" ? 1 : Theme.active-theme == "high-contrast" ? 2 : 0;
+                    selected(idx) => {
+                        Theme.active-theme = idx == 1 ? "dark" : idx == 2 ? "high-contrast" : "light";
+                    }
+                }
+            }
+            LoomOverflowButton { }
+        }
+
+        content-row := HorizontalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+            min-height: 600px;
+            preferred-height: 700px;
+
+            LoomPanel {
+                width: 220px;
+                title: "Foundation";
+                detail: "vNext";
+                VerticalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    padding-top: Theme.tokens.space.md;
+                    LoomListRow {
+                        label: "All Components";
+                        icon: "view";
+                        selected: root.selected-category == 0;
+                        activated => { root.selected-category = 0; }
+                    }
+                    LoomListRow {
+                        label: "Controls";
+                        icon: "slider";
+                        selected: root.selected-category == 1;
+                        activated => { root.selected-category = 1; }
+                    }
+                    LoomListRow {
+                        label: "Chrome & Nav";
+                        icon: "table";
+                        selected: root.selected-category == 2;
+                        activated => { root.selected-category = 2; }
+                    }
+                    LoomListRow {
+                        label: "States & Overlays";
+                        icon: "check";
+                        selected: root.selected-category == 3;
+                        activated => { root.selected-category = 3; }
+                    }
+                    LoomListRow {
+                        label: "Canvas & Timeline";
+                        icon: "play";
+                        selected: root.selected-category == 4;
+                        activated => { root.selected-category = 4; }
+                    }
+                }
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            scroll-view := ScrollView {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                viewport-width: self.width;
+                viewport-height: max(self.height, gallery-layout.preferred-height);
+
+                content := Rectangle {
+                    width: parent.viewport-width;
+                    min-height: parent.height;
+                    preferred-height: gallery-layout.preferred-height;
+                    background: Theme.palette().canvas;
+                    gallery-layout := VerticalLayout {
+                        alignment: start;
+                        spacing: Theme.tokens.space.xxl;
+                        padding-left: Theme.tokens.space.xxl;
+                        padding-right: Theme.tokens.space.xxl;
+                        padding-top: Theme.tokens.space.xxl;
+                        padding-bottom: Theme.tokens.space.xxxl;
+
+                        if root.selected-category == 0 : VerticalLayout {
+                            spacing: Theme.tokens.space.xxl;
+                            ButtonsSection { }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            FieldsSection {
+                                sample-value <=> root.sample-value;
+                                search-value <=> root.search-value;
+                            }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            ChoiceSection {
+                                alignment <=> root.alignment;
+                                autosave <=> root.autosave;
+                            }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            NavigationSection { current-tab <=> root.current-tab; }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            RowsSection { }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            OverlaysSection {
+                                menu-status <=> root.menu-status;
+                                popover-status <=> root.popover-status;
+                                dialog-status <=> root.dialog-status;
+                            }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            DataSection { data-status <=> root.data-status; }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            CanvasSection {
+                                playhead-position <=> root.playhead-position;
+                                canvas-status <=> root.canvas-status;
+                            }
+                        }
+
+                        if root.selected-category == 1 : VerticalLayout {
+                            spacing: Theme.tokens.space.xxl;
+                            ButtonsSection { }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            FieldsSection {
+                                sample-value <=> root.sample-value;
+                                search-value <=> root.search-value;
+                            }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            ChoiceSection {
+                                alignment <=> root.alignment;
+                                autosave <=> root.autosave;
+                            }
+                        }
+
+                        if root.selected-category == 2 : VerticalLayout {
+                            spacing: Theme.tokens.space.xxl;
+                            NavigationSection { current-tab <=> root.current-tab; }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            RowsSection { }
+                        }
+
+                        if root.selected-category == 3 : VerticalLayout {
+                            spacing: Theme.tokens.space.xxl;
+                            OverlaysSection {
+                                menu-status <=> root.menu-status;
+                                popover-status <=> root.popover-status;
+                                dialog-status <=> root.dialog-status;
+                            }
+                            Rectangle { height: 1px; background: Theme.palette().border; }
+                            DataSection { data-status <=> root.data-status; }
+                        }
+
+                        if root.selected-category == 4 : VerticalLayout {
+                            spacing: Theme.tokens.space.xxl;
+                            CanvasSection {
+                                playhead-position <=> root.playhead-position;
+                                canvas-status <=> root.canvas-status;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        LoomStatusBar {
+            LoomStatusText { text: "Foundation gate: blocked"; strong: true; }
+            LoomStatusText { text: "No approved visual baseline"; }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            LoomStatusText { text: Theme.active-theme + " · 100%"; }
+        }
+    }
+}
+}

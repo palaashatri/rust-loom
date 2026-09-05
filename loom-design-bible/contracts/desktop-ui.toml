@@ -1,0 +1,655 @@
+# Loom Desktop UI Contract — normative, machine-readable specification
+#
+# This file is the geometry/interaction authority for shared Loom UI.
+# It deliberately contains values a non-visual coding agent can obey and CI can
+# validate. Human-approved screenshots remain evidence, never the source of
+# geometry truth. Application code may not silently redefine these values.
+
+format-version = "1.0.0"
+
+[meta]
+name = "loom-desktop-ui-contract"
+owner = "loom-ui"
+platform-model = "desktop-pointer-keyboard"
+reference-principles = [
+  "content-first",
+  "clear-hierarchy",
+  "direct-manipulation",
+  "progressive-disclosure",
+  "predictable-placement",
+  "accessible-by-default",
+  "no-decorative-chrome"
+]
+
+# ---------------------------------------------------------------------------
+# Validation viewport matrix. All sizes are logical pixels.
+# ---------------------------------------------------------------------------
+[validation]
+reference-viewport = [1280, 800]
+required-viewports = [[1024, 720], [1280, 800], [1440, 900], [1920, 1200]]
+required-text-scales = [1.0, 1.25, 1.5]
+accessibility-text-scale = 2.0
+required-directions = ["ltr", "rtl"]
+required-themes = ["light", "dark", "high-contrast"]
+max-unintentional-overlap-px = 0
+max-control-label-clipping-px = 0
+# Regular horizontal action labels must remain intact; icon-over-label
+# captions use the dedicated labeled-toolbar-item elision rule below.
+max-action-label-truncation = 0
+max-toolbar-lines = 1
+max-toolbar-groups = 3
+baseline-diff-mean = 0.012
+baseline-diff-pixel-ratio = 0.035
+
+# One owner for responsive toolbar decisions. The probes are intentionally
+# adjacent to each boundary so a host cannot accidentally treat a transition
+# as a fuzzy range or move it to an app-local magic number.
+[responsive]
+priority-1-icon-only-below = 1180
+priority-2-overflow-below = 1320
+transition-probes = [1179, 1180, 1279, 1280, 1319, 1320]
+text-scale-probes = [1.0, 1.5]
+direction-probes = ["ltr", "rtl"]
+
+# Geometry is validated independently of screenshot hashes. The audit builds
+# a deterministic shell manifest for each responsive probe and rejects
+# overlap, clipping, wrapped toolbars, and starvation of the primary surface.
+[geometry-manifest]
+version = "1.0.0"
+primary-surface-min-width = 480
+primary-surface-min-height = 320
+title-height = 40
+context-toolbar-height = 40
+labeled-toolbar-min-height = 48
+labeled-toolbar-max-height = 52
+status-height = 28
+max-overlap-px = 0
+max-clipping-px = 0
+max-toolbar-lines = 1
+
+# ---------------------------------------------------------------------------
+# Spacing and dimensions.
+# ---------------------------------------------------------------------------
+[grid]
+spacing = [2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+hairline = 1
+
+[type]
+ui = 13
+caption = 11
+small = 12
+body = 14
+title = 13
+section = 13
+subtitle = 16
+heading = 20
+large-heading = 24
+weight-regular = 400
+weight-medium = 500
+weight-semibold = 600
+weight-bold = 700
+line-height-ui = 18
+line-height-caption = 15
+line-height-body = 20
+line-height-title = 18
+numeric-figures = "tabular"
+
+[controls]
+standard-height = 28
+compact-height = 24
+prominent-height = 32
+minimum-pointer-target = 28
+minimum-exception-target = 20
+icon-standard = 16
+icon-small = 14
+icon-large = 20
+button-horizontal-padding = 10
+field-horizontal-padding = 8
+control-gap = 6
+label-gap = 6
+focus-ring = 2
+focus-offset = 2
+border = 1
+radius = 6
+small-radius = 4
+popover-radius = 10
+
+[chrome]
+title-height = 40
+toolbar-height = 40
+context-toolbar-height = 40
+labeled-toolbar-min-height = 48
+labeled-toolbar-max-height = 52
+status-height = 28
+panel-header-height = 32
+sheet-tab-height = 30
+formula-bar-height = 32
+left-tool-rail-width = 40
+separator = 1
+
+[panels]
+sidebar-default = 240
+sidebar-min = 200
+sidebar-max = 360
+inspector-default = 280
+inspector-min = 240
+inspector-max = 360
+panel-padding = 12
+section-gap = 16
+property-row-min-height = 28
+property-label-width-min = 84
+property-label-width-max = 112
+resize-hit-target = 6
+
+[canvas]
+minimum-visible-width = 480
+minimum-visible-height = 320
+fit-margin = 24
+object-handle-visible = 8
+object-handle-hit-target = 20
+selection-outline = 1
+snap-distance = 6
+guide-width = 1
+
+[timeline]
+minimum-height = 220
+track-header-width = 180
+ruler-height = 24
+track-height-default = 44
+track-height-compact = 32
+playhead-width = 1
+clip-radius = 4
+trim-handle-visible = 4
+trim-handle-hit-target = 12
+
+[motion]
+hover-ms = 0
+press-ms = 0
+micro-ms = 120
+standard-ms = 180
+panel-ms = 220
+maximum-routine-ms = 250
+reduced-motion-ms = 0
+
+# ---------------------------------------------------------------------------
+# Semantic palette. These values are intentionally neutral so content carries
+# visual weight; the warm accent is Loom identity, not general decoration.
+# Every state must consume a semantic role, never an application-local color.
+# ---------------------------------------------------------------------------
+[palette.light]
+canvas = "#F4F4F6"
+canvas-alt = "#EAEAEF"
+surface = "#FFFFFF"
+surface-raised = "#FFFFFF"
+surface-sunken = "#EDEDF2"
+chrome = "#FFFFFF"
+panel = "#F9F9FA"
+overlay = "#FFFFFFF8"
+ink = "#18181B"
+ink-secondary = "#64646E"
+ink-disabled = "#5F5F68"
+accent = "#D95324"
+accent-hover = "#E66333"
+accent-pressed = "#B84016"
+accent-ink = "#FFFFFF"
+success = "#16A34A"
+warning = "#D97706"
+danger = "#DC2626"
+info = "#0284C7"
+border = "#E2E2E8"
+border-strong = "#C8C8D2"
+focus = "#D95324"
+selection = "#D95324"
+selection-soft = "#FBECE5"
+danger-surface = "#FEE2E2"
+shadow = "#00000014"
+scrim = "#0000004D"
+grid-major = "#C8C8D2"
+grid-minor = "#E2E2E8"
+paper = "#FFFFFF"
+paper-ink = "#18181B"
+paper-muted = "#71717A"
+paper-line = "#E4E4E7"
+media-stage = "#0A0A0C"
+content-accent = "#D95324"
+content-accent-soft = "#FBECE5"
+content-cool = "#0284C7"
+content-cool-soft = "#E0F2FE"
+meter-good = "#16A34A"
+meter-warn = "#D97706"
+
+[palette.dark]
+canvas = "#121214"
+canvas-alt = "#0E0E10"
+surface = "#1A1A1E"
+surface-raised = "#24242A"
+surface-sunken = "#141416"
+chrome = "#1A1A1E"
+panel = "#161619"
+overlay = "#24242AF2"
+ink = "#F4F4F6"
+ink-secondary = "#9898A0"
+ink-disabled = "#8C8C94"
+accent = "#E06338"
+accent-hover = "#ED754A"
+accent-pressed = "#CA5329"
+accent-ink = "#FFFFFF"
+success = "#22C55E"
+warning = "#F59E0B"
+danger = "#EF4444"
+info = "#38BDF8"
+border = "#2A2A30"
+border-strong = "#3C3C46"
+focus = "#E06338"
+selection = "#E06338"
+selection-soft = "#341E17"
+danger-surface = "#361919"
+shadow = "#00000099"
+scrim = "#000000B3"
+grid-major = "#34343C"
+grid-minor = "#222228"
+paper = "#FFFFFF"
+paper-ink = "#1A1A1E"
+paper-muted = "#71717A"
+paper-line = "#E4E4E7"
+media-stage = "#0A0A0C"
+content-accent = "#E06338"
+content-accent-soft = "#341E17"
+content-cool = "#38BDF8"
+content-cool-soft = "#122B38"
+meter-good = "#22C55E"
+meter-warn = "#F59E0B"
+
+[palette.high-contrast]
+canvas = "#000000"
+canvas-alt = "#000000"
+surface = "#000000"
+surface-raised = "#161616"
+surface-sunken = "#000000"
+chrome = "#000000"
+panel = "#000000"
+overlay = "#000000F2"
+ink = "#FFFFFF"
+ink-secondary = "#FFFFFF"
+ink-disabled = "#C8C8C8"
+accent = "#FFD84D"
+accent-hover = "#FFE681"
+accent-pressed = "#E7BD25"
+accent-ink = "#000000"
+success = "#80FF80"
+warning = "#FFBD52"
+danger = "#FF7164"
+info = "#80CCFF"
+border = "#FFFFFF"
+border-strong = "#FFFFFF"
+focus = "#FFD84D"
+selection = "#FFD84D"
+selection-soft = "#3A3200"
+danger-surface = "#3D0D09"
+shadow = "#000000"
+scrim = "#000000CC"
+grid-major = "#FFFFFF"
+grid-minor = "#777777"
+paper = "#FFFFFF"
+paper-ink = "#000000"
+paper-muted = "#222222"
+paper-line = "#000000"
+media-stage = "#000000"
+content-accent = "#FFD84D"
+content-accent-soft = "#FFFFFF"
+content-cool = "#003CFF"
+content-cool-soft = "#FFFFFF"
+meter-good = "#00FF66"
+meter-warn = "#FFD84D"
+
+# ---------------------------------------------------------------------------
+# Component contracts. Apps compose these roles; they do not restyle them.
+# ---------------------------------------------------------------------------
+[component.button]
+height = 28
+min-width = 28
+radius = 6
+icon = 16
+label-size = 13
+label-weight = 500
+padding-x = 10
+never-truncate-label = true
+
+[component.icon-button]
+width = 28
+height = 28
+icon = 16
+radius = 6
+tooltip-required = true
+
+# Icon-over-label toolbar controls use a taller slot so the icon and 10px
+# caption have independent breathing room. Their labels may elide when the
+# item reaches its intrinsic minimum; the regular horizontal action contract
+# below still requires labels to remain fully visible.
+[component.labeled-toolbar-item]
+min-height = 48
+max-height = 52
+icon = 18
+label-size = 10
+padding-y = 4
+allow-label-elision = true
+
+[component.title-chrome]
+height = 40
+title-is-user-content = true
+app-name-is-secondary = true
+
+[component.icon-only-toolbar-item]
+width = 28
+height = 28
+icon = 16
+tooltip-required = true
+
+[component.icon-over-label-toolbar-item]
+min-height = 48
+max-height = 52
+icon = 18
+label-size = 10
+padding-y = 4
+allow-label-elision = true
+
+[component.sheet-tab-strip]
+height = 30
+tab-min-width = 72
+label-size = 11
+
+[component.formula-bar]
+height = 32
+reference-min-width = 72
+input-padding-x = 8
+
+[component.field]
+height = 28
+radius = 6
+label-size = 13
+padding-x = 8
+
+[component.segmented]
+height = 28
+radius = 6
+max-segments = 6
+label-size = 13
+
+[component.text-field]
+height = 28
+radius = 6
+label-size = 13
+padding-x = 8
+
+[component.list-row]
+dense-height = 28
+default-height = 32
+radius = 4
+label-size = 13
+
+[component.inspector-section]
+header-height = 32
+body-padding = 12
+label-size = 13
+label-weight = 600
+
+[component.menu]
+row-height = 28
+icon = 16
+radius = 10
+label-size = 13
+shortcut-size = 11
+
+[component.tooltip]
+label-size = 11
+radius = 4
+delay-ms = 400
+
+# ---------------------------------------------------------------------------
+# Primitive ownership. The toolkit is the sole geometry/state implementation
+# for shared chrome. `components.slint` keeps source compatibility through the
+# wrapper/re-export maps below; it must not grow a second implementation.
+# ---------------------------------------------------------------------------
+[primitive-ownership]
+canonical-module = "loom-core/crates/loom-ui/ui/toolkit.slint"
+icon-module = "loom-core/crates/loom-ui/ui/icons.slint"
+compatibility-module = "loom-core/crates/loom-ui/ui/components.slint"
+toolbar = "Toolbar"
+toolbar-group = "ToolbarGroup"
+toolbar-button = "ToolbarButton"
+toolbar-icon-button = "IconOnlyToolbarItem"
+toolbar-overflow-button = "Overflow"
+panel-header = "PanelHeader"
+sidebar = "SidebarSurface"
+inspector = "InspectorSurface"
+status = "StatusBar"
+icon = "Icon"
+title-chrome = "TitleChrome"
+icon-only-toolbar-item = "IconOnlyToolbarItem"
+icon-over-label-toolbar-item = "IconOverLabelToolbarItem"
+sheet-tab-strip = "SheetTabStrip"
+formula-bar = "FormulaBar"
+inspector-section = "InspectorSection"
+property-row = "PropertyRow"
+field = "Field"
+segmented-control = "SegmentedControl"
+status-bar = "StatusBar"
+overflow = "Overflow"
+
+[primitive-ownership.legacy-wrappers]
+ToolButton = "ToolbarButton"
+IconButton = "IconOnlyToolbarItem"
+WorkspaceToolbar = "Toolbar"
+PaneTabs = "TabStrip"
+Slider = "RangeSlider"
+Switch = "Toggle"
+
+[primitive-ownership.legacy-reexports]
+DirectionalLayout = "DirectionalLayout"
+Toolbar = "Toolbar"
+ToolbarGroup = "ToolbarGroup"
+ToolbarSpacer = "ToolbarSpacer"
+ToolbarButton = "ToolbarButton"
+ToolbarIconButton = "ToolbarIconButton"
+AppleToolbarItem = "AppleToolbarItem"
+ToolbarOverflowButton = "ToolbarOverflowButton"
+OverflowMenuButton = "OverflowMenuButton"
+PanelHeader = "PanelHeader"
+SidebarSurface = "SidebarSurface"
+InspectorSurface = "InspectorSurface"
+SearchField = "SearchField"
+SegmentedControl = "SegmentedControl"
+Toggle = "Toggle"
+RangeSlider = "RangeSlider"
+TabStrip = "TabStrip"
+ToolkitStatusBar = "ToolkitStatusBar"
+TitleChrome = "TitleChrome"
+IconOnlyToolbarItem = "IconOnlyToolbarItem"
+IconOverLabelToolbarItem = "IconOverLabelToolbarItem"
+SheetTabStrip = "SheetTabStrip"
+FormulaBar = "FormulaBar"
+InspectorSection = "InspectorSection"
+PropertyRow = "PropertyRow"
+Field = "Field"
+StatusBar = "StatusBar"
+Overflow = "Overflow"
+ContextToolbar = "ContextToolbar"
+LabeledToolbar = "LabeledToolbar"
+
+# Compatibility declarations are intentionally one-way: each old spelling
+# inherits the canonical owner in toolkit.slint and may not contain geometry or
+# state of its own.
+[primitive-ownership.compatibility-inherits]
+DocumentChrome = "TitleChrome"
+ToolbarIconButton = "IconOnlyToolbarItem"
+AppleToolbarItem = "IconOverLabelToolbarItem"
+ToolbarOverflowButton = "Overflow"
+OverflowMenuButton = "Overflow"
+ToolkitStatusBar = "StatusBar"
+TextField = "Field"
+TabStrip = "SheetTabStrip"
+
+# Compact mode must preserve the primary canvas/grid/timeline width. P1
+# actions become icon-only and P2 actions move to the one canonical overflow
+# command before any primary workspace minimum is violated.
+[overflow-policy]
+canonical-button = "Overflow"
+compatibility-button = "OverflowMenuButton"
+icon = "more"
+accessible-role = "button"
+accessible-description = "Opens the toolbar overflow menu"
+keyboard-activation = ["Space", "Enter"]
+priority-1-mode = "icon-only"
+priority-2-mode = "overflow"
+priority-1-breakpoint = 1180
+priority-2-breakpoint = 1320
+primary-workspace-min-width = 480
+preserve-primary-workspace = true
+
+# ---------------------------------------------------------------------------
+# Toolbar policy. Priority 0 survives all supported widths; priority 1 may
+# become icon-only; priority 2 moves to overflow. Compact icon-only controls
+# keep the [component.icon-button] geometry. Icon-over-label controls use the
+# [component.labeled-toolbar-item] slot and may elide their caption at the
+# intrinsic minimum; regular horizontal action labels remain fully visible.
+# ---------------------------------------------------------------------------
+[toolbar]
+max-groups = 3
+group-gap = 12
+item-gap = 4
+padding-x = 8
+priority-1-icon-only-below = 1180
+priority-2-overflow-below = 1320
+never-scroll = true
+never-wrap = true
+# Applies to regular horizontal action labels; labeled toolbar captions use
+# component.labeled-toolbar-item.allow-label-elision instead.
+never-truncate-actions = true
+allow-labeled-item-elision = true
+all-items-have-menu-command = true
+show-app-name = false
+show-neutral-local-state = false
+
+# ---------------------------------------------------------------------------
+# Text truncation policy. The action/control defaults apply to regular
+# horizontal controls; the labeled toolbar item is the explicit caption
+# exception documented above.
+# ---------------------------------------------------------------------------
+[truncation]
+allow-user-content = true
+allow-document-title = true
+allow-file-name = true
+allow-track-name = true
+allow-layer-name = true
+allow-action-label = false
+allow-control-label = false
+allow-labeled-toolbar-label = true
+allow-section-title = false
+allow-status-severity = false
+tooltip-required-when-ellipsized = true
+
+# ---------------------------------------------------------------------------
+# Shell contracts per application. `primary-share-min` means the central work
+# surface receives at least this fraction of available width after mandatory
+# chrome at the reference viewport.
+# ---------------------------------------------------------------------------
+[app.writer]
+min-window = [900, 680]
+primary-share-min = 0.68
+left-sidebar-default = 0
+right-inspector-default = 0
+persistent-chrome = ["title", "context-toolbar", "status"]
+forbidden-persistent-overlays = ["mode-chip", "local-state-pill"]
+
+[app.sheets]
+min-window = [900, 680]
+primary-share-min = 0.78
+left-sidebar-default = 0
+right-inspector-default = 0
+persistent-chrome = ["title", "formula-bar", "sheet-tabs", "status"]
+grid-must-fill-viewport = true
+
+[app.present]
+min-window = [1024, 720]
+primary-share-min = 0.50
+left-sidebar-default = 220
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "status"]
+
+[app.photo]
+min-window = [1024, 720]
+primary-share-min = 0.52
+left-sidebar-default = 240
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "status"]
+
+[app.motion]
+min-window = [1100, 720]
+primary-share-min = 0.46
+left-sidebar-default = 240
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "timeline", "status"]
+
+[app.video]
+min-window = [1100, 720]
+primary-share-min = 0.46
+left-sidebar-default = 240
+right-inspector-default = 280
+persistent-chrome = ["title", "context-toolbar", "timeline", "status"]
+
+[app.studio]
+min-window = [1100, 720]
+primary-share-min = 0.60
+left-sidebar-default = 180
+right-inspector-default = 0
+persistent-chrome = ["title", "transport", "timeline", "status"]
+
+[app.encode]
+min-window = [960, 680]
+primary-share-min = 0.55
+left-sidebar-default = 280
+right-inspector-default = 300
+persistent-chrome = ["title", "queue-toolbar", "status"]
+
+# ---------------------------------------------------------------------------
+# Forbidden visual/interaction patterns. The source audit treats these as
+# release failures once an app is migrated to the toolkit contract.
+# ---------------------------------------------------------------------------
+[forbidden]
+app-local-hardcoded-colors = true
+app-local-control-radii = true
+app-local-control-heights = true
+app-local-toolbar-shells = true
+persistent-canvas-status-overlays = true
+# Standard horizontal button/control labels may not ellipsize. The
+# icon-over-label toolbar caption is governed by its dedicated component
+# contract and is intentionally exempt.
+button-label-ellipsis = true
+control-label-ellipsis = true
+labeled-toolbar-label-ellipsis = false
+nested-panel-scrollbars = true
+scrolling-toolbar = true
+wrapped-toolbar = true
+rounded-card-for-every-section = true
+app-logo-tile-in-document-chrome = true
+neutral-status-pill-in-titlebar = true
+fake-page-shadow-rectangle = true
+emoji-as-icon = true
+color-only-state = true
+
+# ---------------------------------------------------------------------------
+# Acceptance rule: a component or shell is not 'done' until every required
+# state exists, can be driven by keyboard, and has a deterministic approved
+# capture. Approval is external metadata, not 'whatever image is current'.
+# ---------------------------------------------------------------------------
+[acceptance]
+interactive-states = ["default", "hover", "pressed", "keyboard-focus", "disabled"]
+selection-states = ["unselected", "selected"]
+error-states = ["valid", "invalid"]
+require-keyboard-path = true
+require-accessible-name = true
+require-approved-baseline = true
+require-zero-known-layout-defects = true
+require-realistic-content-fixture = true
+require-empty-state-fixture = true
+require-error-state-fixture = true

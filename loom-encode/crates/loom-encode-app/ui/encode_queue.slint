@@ -1,0 +1,68 @@
+import { SidebarSurface } from "components.slint";
+import { EncodeJobCard } from "encode_job_card.slint";
+import { ToolbarIconButton } from "toolkit.slint";
+import { Theme } from "theme.slint";
+
+/// Queue rail for Encode.  Job cards are a reusable component and the rail
+/// itself only owns selection and progress presentation.
+export component EncodeQueue inherits SidebarSurface {
+    in property <bool> compact-layout: false;
+    in property <[string]> job-labels: [];
+    in property <[string]> job-details: [];
+    in property <[string]> job-statuses: [];
+    in property <[float]> job-progresses: [];
+    in property <[int]> job-tones: [];
+    in property <[bool]> job-running: [];
+    in property <int> active-job-index: 0;
+    in property <float> batch-progress: 0.0;
+
+    callback select-job(int);
+    callback move-job(int, int);
+
+    title: "Delivery Queue";
+    detail: Math.round(root.batch-progress) + "% complete";
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding: Theme.tokens.space.sm;
+        for label[index] in root.job-labels : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            EncodeJobCard {
+                horizontal-stretch: 1;
+                job-label: label;
+                job-detail: root.job-details[index];
+                job-status: root.job-statuses[index];
+                progress: root.job-progresses[index];
+                tone: root.job-tones[index];
+                running: root.job-running[index];
+                compact-layout: root.compact-layout;
+                selected: index == root.active-job-index;
+                clicked => { root.select-job(index); }
+            }
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                // Keep the icon buttons wide enough for their focus ring and
+                // accessible hit target; 28px clipped the chevrons at the
+                // reference queue width.
+                min-width: 48px;
+                preferred-width: 48px;
+                max-width: 56px;
+                ToolbarIconButton {
+                    icon: "chevron-up";
+                    label: "Move job up";
+                    horizontal-stretch: 1;
+                    enabled: !root.compact-layout && !root.job-running[index] && index > 0;
+                    clicked => { root.move-job(index, index - 1); }
+                }
+                ToolbarIconButton {
+                    icon: "chevron-down";
+                    label: "Move job down";
+                    horizontal-stretch: 1;
+                    enabled: !root.compact-layout && !root.job-running[index] && index + 1 < root.job-labels.length;
+                    clicked => { root.move-job(index, index + 1); }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

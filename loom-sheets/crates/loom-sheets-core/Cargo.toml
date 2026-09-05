@@ -1,0 +1,14 @@
+[package]
+name = "loom-sheets-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom Sheets formula engine and workbook model (headless, testable)"
+
+[dependencies]
+loom-package = { workspace = true }
+loom-command = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]

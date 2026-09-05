@@ -1,0 +1,470 @@
+import { CommandPalette, CommandPaletteItem } from "components.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import {
+    PresentSlideStrip, PresentSlideCanvas, PresentNotesEditor,
+    PresentStatusBar, PresentToolbarOverflow
+} from "present_components.slint";
+import { PresentActionToolbar } from "toolbar.slint";
+import { PresentInspector } from "inspector.slint";
+import { PresentThemeChooser } from "theme_chooser.slint";
+
+export { Theme, ResponsivePolicy } from "theme.slint";
+
+export component PresentApp inherits Window {
+    title: "Loom Present";
+    min-width: 1024px;
+    min-height: 720px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.palette().canvas;
+
+    in property <bool> show-inspector: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> labeled-export: false;
+    in property <bool> overflow-toolbar: false;
+    in property <bool> rtl: false;
+    in-out property <bool> toolbar-overflow-open: false;
+    callback window-resized(length);
+    changed rtl => {
+        Theme.rtl = root.rtl;
+    }
+    changed width => {
+        root.window-resized(root.width);
+        if (!ResponsivePolicy.priority-2-overflow(root.width)) {
+            root.close-toolbar-overflow();
+        }
+    }
+
+    in property <string> deck-title: "Untitled Deck";
+    in property <string> slide-title: "Slide Title";
+    in property <string> slide-body: "";
+    in property <string> slide-count-text: "1 slide";
+    in property <[string]> slide-titles: [];
+    in property <int> active-slide-index: 0;
+    in property <[string]> element-labels: [];
+    in property <int> active-element-index: 0;
+    in property <string> active-element-label: "No element selected";
+    in property <string> active-element-content: "";
+    in property <[string]> element-contents: [];
+    in property <[float]> element-xs: [];
+    in property <[float]> element-ys: [];
+    in property <[float]> element-widths: [];
+    in property <[float]> element-heights: [];
+    in property <[float]> element-rotations: [];
+    in property <[int]> element-types: [];
+    in property <[bool]> element-selected: [];
+    in property <int> selection-count: 0;
+    in property <[float]> snap-guides-x: [];
+    in property <[float]> snap-guides-y: [];
+    in property <float> marquee-x: 0;
+    in property <float> marquee-y: 0;
+    in property <float> marquee-width: 0;
+    in property <float> marquee-height: 0;
+    in property <bool> marquee-visible: false;
+    in property <float> element-x: 100;
+    in property <float> element-y: 100;
+    in property <float> element-width: 400;
+    in property <float> element-height: 100;
+    in property <string> element-x-text: "100";
+    in property <string> element-y-text: "100";
+    in property <string> element-width-text: "400";
+    in property <string> element-height-text: "100";
+    in property <string> element-rotation-text: "0°";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Offline";
+
+    in-out property <string> slide-notes: "";
+    in-out property <bool> show-notes-drawer: false;
+    in-out property <bool> is-preview-mode: false;
+    in-out property <int> active-template-index: 1;
+    in-out property <int> inspector-tab: 0;
+    in-out property <int> transition-index: 0;
+    in-out property <float> zoom-value: 78;
+
+    in-out property <bool> theme-chooser-open: false;
+    in-out property <int> theme-selected: 0;
+    in-out property <int> theme-category: 0;
+    in-out property <bool> aspect-ratio-wide: true;
+
+    callback new-deck;
+    callback open-deck;
+    callback save-deck;
+    callback save-as-deck;
+    callback export-pdf;
+    callback export-pptx;
+    callback undo;
+    callback redo;
+    callback add-slide;
+    callback delete-slide;
+    callback duplicate-slide;
+    callback prev-slide;
+    callback next-slide;
+    callback select-slide(int);
+    callback add-text;
+    callback add-shape;
+    callback select-element(int);
+    callback transform-element(string, float, float, float, float);
+    callback set-element-rotation(string, float);
+    callback update-element-content(string);
+    callback apply-template(int);
+    callback set-transition(int);
+    callback create-theme(int);
+    callback cancel-theme;
+    callback choose-theme-category(int);
+    callback toggle-inspector;
+    callback toggle-preview-mode;
+    public function close-toolbar-overflow() {
+        root.toolbar-overflow-open = false;
+    }
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+    callback notes-edited(string);
+    callback canvas-pressed(float, float, bool);
+    callback canvas-moved(float, float);
+    callback canvas-released(float, float);
+    callback canvas-cancelled;
+    callback canvas-key-pressed(string, bool, bool) -> EventResult;
+    callback element-pressed(int, bool);
+    callback element-moved(int, float, float);
+    callback element-released(int);
+    callback element-cancelled(int);
+    callback handle-pressed(int, string, bool);
+    callback handle-moved(int, string, float, float);
+    callback handle-released(int, string);
+    callback handle-cancelled(int, string);
+
+    in-out property <bool> palette-open: false;
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-close;
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+
+    function close-overflow-menu() {
+        root.toolbar-overflow-open = false;
+        app-focus.focus();
+    }
+
+    overflow-menu-focus := FocusScope {
+        enabled: root.toolbar-overflow-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-overflow-menu();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    theme-chooser-focus := FocusScope {
+        enabled: root.theme-chooser-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel-theme();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.create-theme(root.theme-selected);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    changed theme-chooser-open => {
+        if (root.theme-chooser-open) {
+            theme-chooser-focus.focus();
+        } else {
+            app-focus.focus();
+        }
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-deck();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-deck();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-deck(); } else { root.save-deck(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+
+            if !root.is-preview-mode : PresentActionToolbar {
+                rtl: root.rtl;
+                overflow: root.overflow-toolbar;
+                inspector-visible: root.show-inspector;
+                notes-visible: root.show-notes-drawer;
+                is-preview-mode: root.is-preview-mode;
+                can-undo: root.can-undo;
+                can-redo: root.can-redo;
+                undo => { root.undo(); }
+                redo => { root.redo(); }
+                toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
+                open-theme-chooser => {
+                    root.theme-selected = 0;
+                    root.theme-category = 0;
+                    root.theme-chooser-open = true;
+                }
+                add-slide => { root.add-slide(); }
+                add-text => { root.add-text(); }
+                add-shape => { root.add-shape(); }
+                toggle-preview => { root.toggle-preview-mode(); }
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                overflow-requested => {
+                    if (root.toolbar-overflow-open) {
+                        root.close-toolbar-overflow();
+                    } else {
+                        root.toolbar-overflow-open = true;
+                        overflow-menu-focus.focus();
+                    }
+                }
+            }
+
+            // Main Slide Canvas Area
+            HorizontalLayout {
+                spacing: 0px;
+                vertical-stretch: 1;
+
+                if root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
+                    inspector-tab <=> root.inspector-tab;
+                    active-template-index <=> root.active-template-index;
+                    transition-index <=> root.transition-index;
+                    slide-count-text: root.slide-count-text;
+                    aspect-ratio-wide: root.aspect-ratio-wide;
+                    active-element-label: root.active-element-label;
+                    active-element-content: root.active-element-content;
+                    active-element-index: root.active-element-index;
+                    element-count: root.element-labels.length;
+                    selection-count: root.selection-count;
+                    element-x-text: root.element-x-text;
+                    element-y-text: root.element-y-text;
+                    element-width-text: root.element-width-text;
+                    element-height-text: root.element-height-text;
+                    element-rotation-text: root.element-rotation-text;
+                    apply-template(idx) => { root.apply-template(idx); }
+                    update-element-content(value) => { root.update-element-content(value); }
+                    set-transition(idx) => { root.set-transition(idx); }
+                }
+
+                if root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                    titles: root.slide-titles;
+                    active-index: root.active-slide-index;
+                    select-slide(idx) => { root.select-slide(idx); }
+                    add-slide => { root.add-slide(); }
+                    delete-slide => { root.delete-slide(); }
+                }
+
+                // Center Canvas & Notes
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 0px;
+
+                    PresentSlideCanvas {
+                        editing-enabled: !root.is-preview-mode;
+                        aspect-ratio-wide: root.aspect-ratio-wide;
+                        element-labels: root.element-labels;
+                        element-contents: root.element-contents;
+                        element-xs: root.element-xs;
+                        element-ys: root.element-ys;
+                        element-widths: root.element-widths;
+                        element-heights: root.element-heights;
+                        element-rotations: root.element-rotations;
+                        element-types: root.element-types;
+                        element-selected: root.element-selected;
+                        selection-count: root.selection-count;
+                        snap-guides-x: root.snap-guides-x;
+                        snap-guides-y: root.snap-guides-y;
+                        marquee-x: root.marquee-x;
+                        marquee-y: root.marquee-y;
+                        marquee-width: root.marquee-width;
+                        marquee-height: root.marquee-height;
+                        marquee-visible: root.marquee-visible;
+                        active-element-index: root.active-element-index;
+                        select-element(idx) => { root.select-element(idx); }
+                        canvas-pressed(x, y, shift) => { root.canvas-pressed(x, y, shift); }
+                        canvas-moved(x, y) => { root.canvas-moved(x, y); }
+                        canvas-released(x, y) => { root.canvas-released(x, y); }
+                        canvas-cancelled => { root.canvas-cancelled(); }
+                        canvas-key-pressed(k, shift, modified) => { return root.canvas-key-pressed(k, shift, modified); }
+                        element-pressed(idx, shift) => { root.element-pressed(idx, shift); }
+                        element-moved(idx, dx, dy) => { root.element-moved(idx, dx, dy); }
+                        element-released(idx) => { root.element-released(idx); }
+                        element-cancelled(idx) => { root.element-cancelled(idx); }
+                        handle-pressed(idx, kind, shift) => { root.handle-pressed(idx, kind, shift); }
+                        handle-moved(idx, kind, dx, dy) => { root.handle-moved(idx, kind, dx, dy); }
+                        handle-released(idx, kind) => { root.handle-released(idx, kind); }
+                        handle-cancelled(idx, kind) => { root.handle-cancelled(idx, kind); }
+                    }
+
+                    // Speaker Notes Collapsible Drawer
+                    if root.show-notes-drawer && !root.is-preview-mode : Rectangle {
+                        height: 110px;
+                        background: Theme.palette().chrome;
+
+                        Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
+
+                        VerticalLayout {
+                            padding-top: 8px; padding-bottom: 8px; padding-left: 16px; padding-right: 16px;
+                            spacing: 4px;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: "Speaker Notes";
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                    horizontal-stretch: 1;
+                                }
+                                TouchArea {
+                                    width: 24px;
+                                    height: 24px;
+                                    clicked => { root.show-notes-drawer = false; }
+                                    Text {
+                                        text: "✕";
+                                        font-size: Theme.tokens.typography.caption;
+                                        color: Theme.palette().ink-secondary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            PresentNotesEditor {
+                                text <=> root.slide-notes;
+                                placeholder-text: "Add presenter notes for this slide...";
+                                edited(t) => { root.notes-edited(t); }
+                            }
+                        }
+                    }
+                }
+
+                if !root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                    titles: root.slide-titles;
+                    active-index: root.active-slide-index;
+                    select-slide(idx) => { root.select-slide(idx); }
+                    add-slide => { root.add-slide(); }
+                    delete-slide => { root.delete-slide(); }
+                }
+
+                if !root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
+                    inspector-tab <=> root.inspector-tab;
+                    active-template-index <=> root.active-template-index;
+                    transition-index <=> root.transition-index;
+                    slide-count-text: root.slide-count-text;
+                    aspect-ratio-wide: root.aspect-ratio-wide;
+                    active-element-label: root.active-element-label;
+                    active-element-content: root.active-element-content;
+                    active-element-index: root.active-element-index;
+                    element-count: root.element-labels.length;
+                    selection-count: root.selection-count;
+                    element-x-text: root.element-x-text;
+                    element-y-text: root.element-y-text;
+                    element-width-text: root.element-width-text;
+                    element-height-text: root.element-height-text;
+                    element-rotation-text: root.element-rotation-text;
+                    apply-template(idx) => { root.apply-template(idx); }
+                    update-element-content(value) => { root.update-element-content(value); }
+                    set-transition(idx) => { root.set-transition(idx); }
+                }
+            }
+
+            // Standard Status Bar
+            PresentStatusBar {
+                leading-text: root.status-left;
+                trailing-text: root.status-right;
+            }
+        }
+    }
+
+    // Compact toolbar overflow menu
+    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        TouchArea { clicked => { root.close-toolbar-overflow(); } }
+        VerticalLayout {
+            padding-top: Theme.tokens.metrics.context-toolbar-height + Theme.tokens.space.sm;
+            padding-left: Theme.tokens.space.lg;
+            padding-right: Theme.tokens.space.lg;
+            cross-axis-alignment: end;
+            PresentToolbarOverflow {
+                inspector-visible: root.show-inspector;
+                toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
+                open-theme-chooser => { root.theme-selected = 0; root.theme-category = 0; root.theme-chooser-open = true; }
+                add-slide => { root.add-slide(); }
+                add-text => { root.add-text(); }
+                add-shape => { root.add-shape(); }
+                toggle-preview => { root.toggle-preview-mode(); }
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                close-requested => { root.close-toolbar-overflow(); }
+            }
+        }
+    }
+
+    if root.theme-chooser-open : PresentThemeChooser {
+        open <=> root.theme-chooser-open;
+        theme-selected <=> root.theme-selected;
+        theme-category <=> root.theme-category;
+        aspect-ratio-wide <=> root.aspect-ratio-wide;
+        choose-theme-category(cat) => { root.choose-theme-category(cat); }
+        cancel-theme => { root.cancel-theme(); }
+        create-theme(idx) => { root.create-theme(idx); }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => { root.palette-invoked(idx); }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => { root.palette-move(delta); }
+        key-text(text) => { root.palette-key-text(text); }
+        backspace => { root.palette-backspace(); }
+        close-requested => {
+            root.palette-open = false;
+            root.palette-close();
+        }
+    }
+}

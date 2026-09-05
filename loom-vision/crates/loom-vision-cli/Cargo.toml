@@ -1,0 +1,18 @@
+[package]
+name = "loom-vision-cli"
+description = "Command-line interface for the Loom Vision framework"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "loom-vision"
+path = "src/main.rs"
+
+[dependencies]
+loom-vision-core = { path = "../loom-vision-core", version = "0.1.0" }
+image.workspace = true
+
+[dev-dependencies]
+qrcode.workspace = true

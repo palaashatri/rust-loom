@@ -1,0 +1,261 @@
+// Loom Motion - Composition Stage / Canvas
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+export component MotionStage inherits Rectangle {
+    in property <string> comp-name: "Untitled Composition";
+    in property <[string]> layer-labels: [];
+    in property <[string]> layer-types: [];
+    in property <[float]> layer-pos-x: [];
+    in property <[float]> layer-pos-y: [];
+    in property <[float]> layer-scale: [];
+    in property <[float]> layer-rotation: [];
+    in property <[float]> layer-opacity: [];
+    in property <[bool]> layer-visible: [];
+    in property <int> active-layer-index: 0;
+    in-out property <float> pos-x: 960.0;
+    in-out property <float> pos-y: 540.0;
+    in-out property <float> scale-val: 100.0;
+    in-out property <float> rotation-val: 0.0;
+    in-out property <float> opacity-val: 100.0;
+    in property <bool> show-guides: true;
+    in property <bool> show-safe-area: true;
+    in property <bool> compact-layout: false;
+    in property <bool> is-playing: false;
+
+    callback transform-changed(string, float);
+    callback transform-begin;
+    callback transform-end;
+
+    vertical-stretch: 1;
+    horizontal-stretch: 1;
+    background: Theme.palette().media-stage;
+
+    stage-container := Rectangle {
+        width: min(parent.width - 32px, 860px);
+        height: min(parent.height - 32px, 484px);
+        border-radius: Theme.tokens.metrics.radius-large;
+        background: Theme.palette().paper-ink;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: Theme.palette().shadow;
+        clip: true;
+
+        stage := Rectangle {
+            x: 16px;
+            y: 16px;
+            width: parent.width - 32px;
+            height: parent.height - 32px;
+            background: Theme.palette().canvas-alt;
+            border-width: 1px;
+            border-color: Theme.palette().grid-major;
+            clip: true;
+
+            // Composition Guides (Rule of Thirds)
+            if root.show-guides : Rectangle { x: parent.width / 2; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { y: parent.height / 2; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { y: parent.height / 3; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+            if root.show-guides : Rectangle { y: parent.height * 2 / 3; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+            // Action & Title Safe Areas
+            if root.show-safe-area : Rectangle {
+                x: parent.width * 0.05; y: parent.height * 0.05;
+                width: parent.width * 0.90; height: parent.height * 0.90;
+                border-width: 1px; border-color: Theme.palette().border-strong;
+                background: transparent;
+            }
+            if root.show-safe-area : Rectangle {
+                x: parent.width * 0.10; y: parent.height * 0.10;
+                width: parent.width * 0.80; height: parent.height * 0.80;
+                border-width: 1px; border-color: Theme.palette().grid-minor;
+                background: transparent;
+            }
+
+            // Non-active Layers
+            for layer_x[idx] in root.layer-pos-x : Rectangle {
+                visible: root.layer-visible.length > idx && root.layer-visible[idx] && idx != root.active-layer-index;
+                property <string> layer-type: root.layer-types.length > idx ? root.layer-types[idx] : "";
+                property <float> layer-y: root.layer-pos-y.length > idx ? root.layer-pos-y[idx] : 0.0;
+                property <float> layer-scale-val: root.layer-scale.length > idx ? root.layer-scale[idx] : 1.0;
+                property <float> layer-rot-val: root.layer-rotation.length > idx ? root.layer-rotation[idx] : 0.0;
+                property <float> layer-op-val: root.layer-opacity.length > idx ? root.layer-opacity[idx] : 1.0;
+
+                x: clamp(layer_x / 1920.0 * parent.width - self.width / 2, 0px, parent.width - self.width);
+                y: clamp(self.layer-y / 1080.0 * parent.height - self.height / 2, 0px, parent.height - self.height);
+                width: clamp(parent.width * 0.26 * self.layer-scale-val, 64px, parent.width * 0.56);
+                height: clamp(parent.height * 0.18 * self.layer-scale-val, 44px, parent.height * 0.42);
+                background: transparent;
+                opacity: self.layer-op-val;
+                transform-origin: { x: self.width / 2, y: self.height / 2 };
+                transform-rotation: self.layer-rot-val * 1deg;
+
+                if self.layer-type == "Text" : Text {
+                    width: parent.width - 16px;
+                    x: 8px;
+                    y: parent.height / 2 - 10px;
+                    text: root.layer-labels.length > idx ? root.layer-labels[idx] : "Text layer";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body-large;
+                    font-weight: 650;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
+                if self.layer-type == "VectorShape" : Rectangle {
+                    x: parent.width * 0.08;
+                    y: parent.height * 0.12;
+                    width: parent.width * 0.84;
+                    height: parent.height * 0.76;
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().accent;
+                    background: Theme.palette().content-accent-soft;
+                }
+                if self.layer-type != "Text" && self.layer-type != "VectorShape" : Rectangle {
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().border-strong;
+                    background: Theme.palette().surface-raised;
+                    Text {
+                        width: parent.width - 16px;
+                        x: 8px;
+                        y: parent.height / 2 - 8px;
+                        text: root.layer-labels.length > idx ? root.layer-labels[idx] : "Motion layer";
+                        color: Theme.palette().ink-secondary;
+                        font-size: Theme.tokens.typography.caption;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            // Active Layer (Transform & Selection Handles)
+            selected-object := Rectangle {
+                property <string> selected-layer-type: root.layer-types.length > root.active-layer-index ? root.layer-types[root.active-layer-index] : "";
+                visible: root.layer-labels.length == 0 || (root.layer-visible.length > root.active-layer-index && root.layer-visible[root.active-layer-index]);
+                x: clamp(root.pos-x / 1920.0 * parent.width - self.width / 2, 0px, parent.width - self.width);
+                y: clamp(root.pos-y / 1080.0 * parent.height - self.height / 2, 0px, parent.height - self.height);
+                width: clamp(parent.width * 0.46 * root.scale-val / 100.0, 88px, parent.width * 0.78);
+                height: clamp(parent.height * 0.28 * root.scale-val / 100.0, 58px, parent.height * 0.64);
+                border-radius: Theme.tokens.metrics.radius-large;
+                border-width: root.layer-labels.length > 0 ? 2px : 1px;
+                border-color: drag.has-hover || transform-focus.has-focus ? Theme.palette().focus : root.layer-labels.length > 0 ? Theme.palette().accent : Theme.palette().border-strong;
+                background: self.selected-layer-type == "Text" || self.selected-layer-type == "VectorShape" ? transparent : Theme.palette().content-accent-soft;
+                opacity: root.opacity-val / 100.0;
+                animate x, y, width, height { duration: drag.pressed || root.is-playing || Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+                animate border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
+
+                if self.selected-layer-type == "Text" : Text {
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    x: 12px;
+                    y: 0px;
+                    text: root.layer-labels.length > root.active-layer-index ? root.layer-labels[root.active-layer-index] : "Text layer";
+                    color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body-large;
+                    font-weight: 650;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if self.selected-layer-type == "VectorShape" : Rectangle {
+                    x: parent.width * 0.08;
+                    y: parent.height * 0.12;
+                    width: parent.width * 0.84;
+                    height: parent.height * 0.76;
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().accent;
+                    background: Theme.palette().content-accent-soft;
+                }
+
+                if self.selected-layer-type != "Text" && self.selected-layer-type != "VectorShape" : Rectangle {
+                    border-radius: Theme.tokens.metrics.radius-large;
+                    border-width: 1px;
+                    border-color: Theme.palette().border-strong;
+                    background: Theme.palette().surface-raised;
+                    Text {
+                        width: parent.width - 16px;
+                        x: 8px;
+                        y: parent.height / 2 - 8px;
+                        text: root.layer-labels.length > root.active-layer-index ? root.layer-labels[root.active-layer-index] : "Add a layer to begin";
+                        color: Theme.palette().ink-secondary;
+                        font-size: Theme.tokens.typography.caption;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                // Selection Corner Handles
+                if root.layer-labels.length > 0 : Rectangle { x: -5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                if root.layer-labels.length > 0 : Rectangle { x: parent.width - 5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                if root.layer-labels.length > 0 : Rectangle { x: -5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+                if root.layer-labels.length > 0 : Rectangle { x: parent.width - 5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 2px; border-color: Theme.palette().accent; }
+
+                transform-focus := FocusScope {
+                    enabled: root.layer-labels.length > 0;
+                    key-pressed(event) => {
+                        if (event.text == Key.LeftArrow) { root.pos-x = max(0.0, root.pos-x - 1.0); root.transform-changed("pos-x", root.pos-x); return accept; }
+                        if (event.text == Key.RightArrow) { root.pos-x = min(1920.0, root.pos-x + 1.0); root.transform-changed("pos-x", root.pos-x); return accept; }
+                        if (event.text == Key.UpArrow) { root.pos-y = max(0.0, root.pos-y - 1.0); root.transform-changed("pos-y", root.pos-y); return accept; }
+                        if (event.text == Key.DownArrow) { root.pos-y = min(1080.0, root.pos-y + 1.0); root.transform-changed("pos-y", root.pos-y); return accept; }
+                        return reject;
+                    }
+                }
+
+                drag := TouchArea {
+                    enabled: root.layer-labels.length > 0;
+                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                    property <float> start-pos-x: 0.0;
+                    property <float> start-pos-y: 0.0;
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                            self.start-pos-x = root.pos-x;
+                            self.start-pos-y = root.pos-y;
+                            transform-focus.focus();
+                            root.transform-begin();
+                        }
+                        if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                            root.transform-end();
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.pos-x = clamp(self.start-pos-x + (self.mouse-x - self.pressed-x) / stage.width * 1920.0, 0.0, 1920.0);
+                            root.pos-y = clamp(self.start-pos-y + (self.mouse-y - self.pressed-y) / stage.height * 1080.0, 0.0, 1080.0);
+                            root.transform-changed("pos-x", root.pos-x);
+                            root.transform-changed("pos-y", root.pos-y);
+                        }
+                    }
+                }
+            }
+
+            // Crosshair Guidelines on Drag
+            if drag.pressed : Rectangle { x: selected-object.x + selected-object.width / 2; width: 1px; height: parent.height; background: Theme.palette().focus; }
+            if drag.pressed : Rectangle { y: selected-object.y + selected-object.height / 2; width: parent.width; height: 1px; background: Theme.palette().focus; }
+
+            // Drag indicator pill
+            if drag.pressed : Rectangle {
+                x: Theme.tokens.space.lg;
+                y: Theme.tokens.space.lg;
+                height: 26px;
+                min-width: 178px;
+                max-width: parent.width - Theme.tokens.space.xxl;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: Theme.palette().overlay;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    Icon { icon: "cursor"; size: 13px; tint: Theme.palette().accent; }
+                    Text { text: "Direct transform · release to commit"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; overflow: elide; }
+                }
+            }
+        }
+    }
+}

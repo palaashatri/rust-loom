@@ -1,0 +1,24 @@
+[package]
+name = "loom-sheets-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom Sheets desktop application"
+
+[[bin]]
+name = "loom-sheets"
+path = "src/main.rs"
+
+[dependencies]
+loom-sheets-core = { path = "../loom-sheets-core" }
+loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
+loom-package = { workspace = true }
+loom-storage = { path = "../../../loom-core/crates/loom-storage" }
+loom-ui = { path = "../../../loom-core/crates/loom-ui" }
+loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
+slint = "1.17.1"
+
+[build-dependencies]
+slint-build = "1.17.1"

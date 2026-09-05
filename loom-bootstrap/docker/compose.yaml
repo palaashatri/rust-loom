@@ -1,0 +1,47 @@
+# Loom bootstrap compose: build/test/visual-QA/offline services.
+# The parent of this repository (the loom suite root) is mounted at /workspace.
+name: loom-bootstrap
+
+x-base: &base
+  environment:
+    CARGO_TERM_COLOR: never
+    CI: "true"
+  volumes:
+    - ../..:/workspace
+  working_dir: /workspace/loom-bootstrap
+
+services:
+  ci:
+    <<: *base
+    image: loom-bootstrap-ci
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ci
+    command: bash -lc "scripts/fmt-all.sh && scripts/clippy-all.sh && scripts/test-all.sh && scripts/build-all.sh"
+
+  dev:
+    <<: *base
+    image: loom-bootstrap-dev
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    stdin_open: true
+    tty: true
+    command: bash
+
+  visual:
+    <<: *base
+    image: loom-bootstrap-visual
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.visual
+    command: bash -lc "xvfb-run -a -s '-screen 0 1280x800x24' bash scripts/visual-qa-all.sh"
+
+  offline:
+    <<: *base
+    image: loom-bootstrap-ci
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ci
+    network_mode: none
+    command: bash -lc "scripts/offline-test.sh --mode-a"

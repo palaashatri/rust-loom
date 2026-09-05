@@ -1,0 +1,403 @@
+import { Theme } from "../theme.slint";
+import { GallerySection } from "sections-a.slint";
+import {
+    LoomButton, LoomListRow,
+    LoomMenu, LoomPopover, LoomDialog,
+    LoomTableRow, LoomEmptyState, LoomErrorState,
+    LoomCanvasHandle, LoomTimelineRuler, LoomTimelineMarker,
+} from "../foundation.slint";
+
+component StatusBadge inherits HorizontalLayout {
+    in property <string> text;
+    spacing: Theme.tokens.space.sm;
+    alignment: start;
+    cross-axis-alignment: center;
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.palette().accent;
+    }
+    Text {
+        text: root.text;
+        font-size: Theme.tokens.typography.caption;
+        color: Theme.palette().ink-secondary;
+        vertical-alignment: center;
+    }
+}
+
+export component RowsSection inherits Rectangle {
+    background: transparent;
+    min-height: rows-layout.min-height;
+    preferred-height: rows-layout.preferred-height;
+
+    rows-layout := VerticalLayout {
+        GallerySection {
+            title: "Rows and density";
+            detail: "Selected rows remain subordinate to user content";
+            Rectangle {
+                width: 624px;
+                preferred-height: rows-card.preferred-height;
+                background: Theme.palette().surface;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                rows-card := VerticalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    padding: Theme.tokens.space.sm;
+                    LoomListRow { label: "Hero image"; icon: "image"; detail: "2048 × 1365"; selected: true; }
+                    LoomListRow { label: "Headline"; icon: "text"; detail: "Text layer"; }
+                    LoomListRow { label: "Archived option with a deliberately long name"; icon: "layers"; detail: "Hidden"; enabled: false; }
+                }
+            }
+        }
+    }
+}
+
+export component OverlaysSection inherits Rectangle {
+    in-out property <string> menu-status: "No menu choice yet";
+    in-out property <string> popover-status: "Popover is open";
+    in-out property <string> dialog-status: "No dialog action yet";
+    background: transparent;
+    min-height: overlays-layout.min-height;
+    preferred-height: overlays-layout.preferred-height;
+
+    overlays-layout := VerticalLayout {
+        GallerySection {
+            title: "Overlays";
+            detail: "Menus, popovers, and dialogs share overlay tokens and keyboard grammar";
+            VerticalLayout {
+                spacing: Theme.tokens.space.lg;
+                Text {
+                    text: "Menus expose a closed state and long labels without clipping action text";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xxl;
+                    cross-axis-alignment: start;
+                    LoomMenu {
+                        width: 240px;
+                        label: "Sort by";
+                        items: ["Name", "Date modified", "Size"];
+                        selected(idx) => { root.menu-status = "Sort choice: \{idx}"; }
+                        cancelled => { root.menu-status = "Sort menu dismissed"; }
+                    }
+                    LoomMenu {
+                        width: 360px;
+                        label: "Export scope";
+                        items: ["Current page", "Selected pages with annotations", "Entire document including change history"];
+                        current: 1;
+                        open: true;
+                        selected(idx) => { root.menu-status = "Scope choice: \{idx}"; }
+                        cancelled => { root.menu-status = "Scope menu dismissed"; }
+                    }
+                }
+                StatusBadge { text: root.menu-status; }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xxl;
+                    cross-axis-alignment: start;
+                    VerticalLayout {
+                        width: 320px;
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: "Popover is an anchored surface; Escape or Close dismisses it";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                        }
+                        LoomButton { label: "Filter rows"; icon: "slider"; variant: "ghost"; }
+                        pop := LoomPopover {
+                            width: 300px;
+                            title: "Filter rows";
+                            open: true;
+                            dismissed => { root.popover-status = "Popover dismissed"; }
+                            LoomListRow { label: "Status is open"; detail: "3 rows"; }
+                            LoomListRow { label: "Assigned to me"; detail: "1 row"; }
+                            HorizontalLayout {
+                                alignment: end;
+                                LoomButton { label: "Close"; variant: "secondary"; clicked => { pop.close(); } }
+                            }
+                        }
+                        StatusBadge { text: root.popover-status; }
+                    }
+                    VerticalLayout {
+                        width: 440px;
+                        spacing: Theme.tokens.space.sm;
+                        Text {
+                            text: "Dialog carries title, body, and primary, destructive, and disabled actions";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                        }
+                        dlg := LoomDialog {
+                            width: 440px;
+                            title: "Discard unsaved changes?";
+                            body: "Three edited rows have not been saved yet. Saving keeps them in this document.";
+                            confirmed => { root.dialog-status = "Dialog confirmed: changes saved"; }
+                            cancelled => { root.dialog-status = "Dialog cancelled"; }
+                            LoomButton { label: "Discard"; variant: "danger"; clicked => { root.dialog-status = "Destructive action chosen"; } }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                            LoomButton { label: "Cancel"; variant: "secondary"; clicked => { dlg.cancel(); } }
+                            LoomButton { label: "Save changes"; variant: "primary"; clicked => { dlg.confirm(); } }
+                        }
+                        StatusBadge { text: root.dialog-status; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component DataSection inherits Rectangle {
+    in-out property <string> data-status: "No data action yet";
+    background: transparent;
+    min-height: data-layout.min-height;
+    preferred-height: data-layout.preferred-height;
+
+    data-layout := VerticalLayout {
+        GallerySection {
+            title: "Data states";
+            detail: "Table rows, empty and error placeholders share data tokens";
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                Rectangle {
+                    width: 624px;
+                    preferred-height: table-card.preferred-height;
+                    background: Theme.palette().surface;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    table-card := VerticalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        padding: Theme.tokens.space.sm;
+                        LoomTableRow {
+                            label: "Quarterly report";
+                            detail: "Sheet";
+                            status: "Synced";
+                            selected: true;
+                            activated => { root.data-status = "Row activated: Quarterly report"; }
+                        }
+                        LoomTableRow {
+                            label: "Archived budget with a deliberately long name that must elide instead of clipping";
+                            detail: "Hidden";
+                            status: "Offline";
+                            enabled: false;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xxl;
+                    cross-axis-alignment: start;
+                    Rectangle {
+                        width: 300px;
+                        preferred-height: empty-card.preferred-height;
+                        background: Theme.palette().surface;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        empty-card := VerticalLayout {
+                            LoomEmptyState {
+                                title: "No rows yet";
+                                hint: "Imported rows will appear here.";
+                                action-label: "Import rows";
+                                requested => { root.data-status = "Empty-state action requested"; }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        width: 300px;
+                        preferred-height: error-card.preferred-height;
+                        background: Theme.palette().surface;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        error-card := VerticalLayout {
+                            LoomErrorState {
+                                title: "Rows failed to load";
+                                message: "Check the source and try again.";
+                                retry-label: "Retry";
+                                retried => { root.data-status = "Retry requested"; }
+                            }
+                        }
+                    }
+                }
+                StatusBadge { text: root.data-status; }
+            }
+        }
+    }
+}
+
+export component CanvasSection inherits Rectangle {
+    in-out property <float> playhead-position: 0.35;
+    in-out property <string> canvas-status: "Playhead at 35%";
+    background: transparent;
+    min-height: canvas-layout.min-height;
+    preferred-height: canvas-layout.preferred-height;
+
+    canvas-layout := VerticalLayout {
+        GallerySection {
+            title: "Canvas / timeline";
+            detail: "Handles, ruler, and playhead share canvas tokens and keyboard grammar";
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                Rectangle {
+                    width: 624px;
+                    height: 160px;
+                    background: Theme.palette().surface;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    clip: true;
+
+                    property <length> obj-x: 92px;
+                    property <length> obj-y: 28px;
+                    property <length> obj-w: 440px;
+                    property <length> obj-h: 104px;
+                    property <length> handle-size: Theme.tokens.space.md;
+
+                    Rectangle {
+                        x: obj-x;
+                        y: obj-y;
+                        width: obj-w;
+                        height: obj-h;
+                        background: Theme.palette().surface-sunken;
+                        border-width: 1px;
+                        border-color: Theme.palette().accent;
+                        border-radius: Theme.tokens.metrics.radius-small;
+
+                        HorizontalLayout {
+                            padding: Theme.tokens.space.md;
+                            spacing: Theme.tokens.space.md;
+                            alignment: start;
+                            cross-axis-alignment: center;
+                            Rectangle {
+                                width: 36px;
+                                height: 36px;
+                                border-radius: Theme.tokens.metrics.radius-small;
+                                background: Theme.palette().selection-soft;
+                                Text {
+                                    text: "Slide";
+                                    font-size: Theme.tokens.typography.caption;
+                                    font-weight: 600;
+                                    color: Theme.palette().accent;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: Theme.tokens.space.xs;
+                                alignment: center;
+                                Text {
+                                    text: "Hero Banner Component";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: 600;
+                                    color: Theme.palette().ink;
+                                }
+                                Text {
+                                    text: "1920 × 1080 · Vector Graphic Shape";
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                }
+                            }
+                        }
+                    }
+                    LoomCanvasHandle {
+                        x: obj-x - handle-size / 2;
+                        y: obj-y - handle-size / 2;
+                        label: "Top-left handle";
+                        selected: true;
+                        picked => { root.canvas-status = "Top-left handle selected"; }
+                        nudged(dx, dy) => { root.canvas-status = "Top-left handle nudged \{dx},\{dy}"; }
+                    }
+                    LoomCanvasHandle {
+                        x: obj-x + obj-w - handle-size / 2;
+                        y: obj-y - handle-size / 2;
+                        label: "Top-right handle";
+                        picked => { root.canvas-status = "Top-right handle selected"; }
+                        nudged(dx, dy) => { root.canvas-status = "Top-right handle nudged \{dx},\{dy}"; }
+                    }
+                    LoomCanvasHandle {
+                        x: obj-x - handle-size / 2;
+                        y: obj-y + obj-h - handle-size / 2;
+                        label: "Bottom-left handle";
+                        picked => { root.canvas-status = "Bottom-left handle selected"; }
+                        nudged(dx, dy) => { root.canvas-status = "Bottom-left handle nudged \{dx},\{dy}"; }
+                    }
+                    LoomCanvasHandle {
+                        x: obj-x + obj-w - handle-size / 2;
+                        y: obj-y + obj-h - handle-size / 2;
+                        label: "Bottom-right handle";
+                        picked => { root.canvas-status = "Bottom-right handle selected"; }
+                        nudged(dx, dy) => { root.canvas-status = "Bottom-right handle nudged \{dx},\{dy}"; }
+                    }
+                }
+                LoomTimelineRuler {
+                    width: 624px;
+                    label: "Example ruler";
+                    start-label: "0:00";
+                    end-label: "1:00";
+                }
+                LoomTimelineMarker {
+                    width: 624px;
+                    label: "Example playhead";
+                    position <=> root.playhead-position;
+                    moved(pos) => { root.canvas-status = "Playhead at \{Math.round(pos * 100)}%"; }
+                }
+                StatusBadge { text: root.canvas-status; }
+            }
+        }
+    }
+}
+
+export component RowsSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        RowsSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component OverlaysSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        OverlaysSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component DataSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        DataSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component CanvasSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        CanvasSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "loom-photo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loom-document.workspace = true
+loom-package.workspace = true
+loom-color.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+image.workspace = true

@@ -1,0 +1,133 @@
+// Loom Motion - Action Toolbar
+import {
+    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
+    LoomIconButton, LoomOverflowButton
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component MotionActionToolbar inherits LoomToolbar {
+    in property <bool> rtl: Theme.rtl;
+    in property <bool> compact-layout: false;
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+    in-out property <bool> show-guides: true;
+    in-out property <bool> show-safe-area: true;
+    in property <bool> is-playing: false;
+    in property <bool> is-looping: false;
+    in-out property <float> zoom-value: 68.0;
+    in property <string> timecode-display: "00:00:00:00";
+    in property <bool> inspector-visible: true;
+
+    callback add-layer;
+    callback play-pause;
+    callback step-back;
+    callback step-forward;
+    callback toggle-loop;
+    callback export-frame;
+    callback toggle-inspector;
+    callback overflow-requested;
+
+    // Tool & Composition Affordances Group
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "cursor";
+            tooltip: "Transform Tool";
+            selected: true;
+        }
+        LoomIconButton {
+            icon: "plus";
+            tooltip: "Add Motion Layer";
+            clicked => { root.add-layer(); }
+        }
+        LoomIconButton {
+            icon: "grid";
+            tooltip: "Toggle Composition Guides";
+            selected: root.show-guides;
+            clicked => { root.show-guides = !root.show-guides; }
+        }
+        LoomIconButton {
+            icon: "eye";
+            tooltip: "Toggle Action Safe Area";
+            selected: root.show-safe-area;
+            clicked => { root.show-safe-area = !root.show-safe-area; }
+        }
+    }
+
+    LoomToolbarDivider { }
+
+    // Transport Controls Group
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "chevron-left";
+            tooltip: "Step Backward (Left Arrow)";
+            clicked => { root.step-back(); }
+        }
+        LoomIconButton {
+            icon: root.is-playing ? "pause" : "play";
+            tooltip: root.is-playing ? "Pause Playback (Space)" : "Play Composition (Space)";
+            selected: root.is-playing;
+            clicked => { root.play-pause(); }
+        }
+        LoomIconButton {
+            icon: "chevron-right";
+            tooltip: "Step Forward (Right Arrow)";
+            clicked => { root.step-forward(); }
+        }
+        LoomIconButton {
+            icon: "redo";
+            tooltip: "Toggle Looped Playback";
+            selected: root.is-looping;
+            clicked => { root.toggle-loop(); }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    // Timecode Chip
+    Rectangle {
+        height: 26px;
+        min-width: 90px;
+        border-radius: Theme.tokens.metrics.radius-small;
+        background: Theme.palette().surface-sunken;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        HorizontalLayout {
+            alignment: center;
+            padding-left: Theme.tokens.space.sm;
+            padding-right: Theme.tokens.space.sm;
+            Text {
+                text: root.timecode-display;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 600;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    // Actions & Zoom Group
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "export";
+            tooltip: "Export SVG Frame (Cmd+E)";
+            clicked => { root.export-frame(); }
+        }
+        LoomIconButton {
+            icon: "zoom-in";
+            tooltip: "Zoom: " + Math.round(root.zoom-value) + "%";
+            clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; }
+        }
+        LoomIconButton {
+            icon: "settings";
+            tooltip: "Toggle Inspector Panel";
+            selected: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        if root.overflow : LoomOverflowButton {
+            tooltip: "More Motion Commands";
+            clicked => { root.overflow-requested(); }
+        }
+    }
+}

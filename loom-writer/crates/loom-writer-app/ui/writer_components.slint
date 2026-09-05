@@ -1,0 +1,325 @@
+import { LoomStatusBar, LoomStatusText, LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+export { WriterToolbarBody, WriterActionToolbar } from "toolbar.slint";
+export { WriterInspector } from "inspector.slint";
+
+/// A rendered paragraph projected from the Writer document model.
+export struct WriterRenderBlock {
+    content: styled-text,
+    x: length,
+    y: length,
+    width: length,
+    font-size: length,
+    height: length,
+    alignment: int,
+    unsupported: bool,
+    unsupported-label: string,
+}
+
+/// A selection highlight or collapsed caret rectangle projected from the
+/// authoritative Writer page layout.
+export struct WriterSelectionRect {
+    page-index: int,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    caret: bool,
+}
+
+/// Writer's selection-aware text editor.
+component WriterDocumentEditor inherits Rectangle {
+    in-out property <string> text: "";
+    in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
+    in property <float> page-zoom: 1.0;
+    in property <string> placeholder: "Type your text here...";
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.tokens.typography.body;
+    in property <int> selection-anchor: 0;
+    in property <int> selection-focus: 0;
+    in property <string> selection-announcement: "No text selected";
+    callback edited(string, int, int);
+    callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-width: 0px;
+    min-height: 0px;
+    background: transparent;
+    accessible-role: AccessibleRole.text-input;
+    accessible-label: "Document body, " + root.selection-announcement;
+    accessible-enabled: root.enabled;
+    accessible-value <=> root.text;
+    accessible-placeholder-text: root.placeholder;
+    accessible-action-default => { editor.focus(); }
+    forward-focus: editor;
+
+    focus-touch := TouchArea { clicked => { editor.focus(); } }
+
+    if root.text == "" : Text {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text: root.placeholder;
+        font-size: root.font-size;
+        color: Theme.palette().paper-muted;
+        vertical-alignment: top;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+
+    preview := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        clip: true;
+        for selection in root.selection-rects : Rectangle {
+            x: selection.x * root.page-zoom;
+            y: selection.y * root.page-zoom;
+            width: max(1px, selection.width * root.page-zoom);
+            height: max(1px, selection.height * root.page-zoom);
+            background: selection.caret ? transparent : Theme.palette().selection;
+            visible: !selection.caret;
+            accessible-role: none;
+        }
+        for block in root.render-blocks : StyledText {
+            x: block.x * root.page-zoom;
+            y: block.y * root.page-zoom;
+            text: block.content;
+            width: max(1px, block.width * root.page-zoom);
+            height: block.height * root.page-zoom;
+            default-font-size: block.font-size * root.page-zoom;
+            default-color: Theme.palette().paper-ink;
+            horizontal-alignment: block.alignment == 1
+                ? TextHorizontalAlignment.center
+                : block.alignment == 2
+                    ? TextHorizontalAlignment.right
+                    : TextHorizontalAlignment.left;
+            vertical-alignment: top;
+        }
+        for block in root.render-blocks : Text {
+            x: block.x * root.page-zoom;
+            y: block.y * root.page-zoom;
+            width: max(1px, block.width * root.page-zoom);
+            height: max(14px, min(18px, block.height * root.page-zoom));
+            text: block.unsupported ? block.unsupported-label : "";
+            color: Theme.palette().warning;
+            font-size: 10px * root.page-zoom;
+            horizontal-alignment: right;
+            vertical-alignment: top;
+            visible: block.unsupported;
+            accessible-role: none;
+        }
+        for selection in root.selection-rects : Rectangle {
+            x: selection.x * root.page-zoom;
+            y: selection.y * root.page-zoom;
+            width: max(1px, selection.width * root.page-zoom);
+            height: max(1px, selection.height * root.page-zoom);
+            background: Theme.palette().paper-ink;
+            visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
+            accessible-role: none;
+        }
+    }
+
+    editor := TextInput {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        font-size: root.font-size;
+        color: transparent;
+        selection-background-color: transparent;
+        selection-foreground-color: transparent;
+        accessible-role: none;
+        edited => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+            root.edited(editor.text, editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+        }
+        cursor-position-changed(_) => {
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+        }
+        key-pressed(event) => { return root.key-pressed(event); }
+    }
+
+    pointer-surface := TouchArea {
+        enabled: root.enabled;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                editor.focus();
+                root.pointer-pressed(self.mouse-x, self.mouse-y, event.modifiers.shift);
+            } else if (event.kind == PointerEventKind.up) {
+                root.pointer-released(self.mouse-x, self.mouse-y);
+            } else if (event.kind == PointerEventKind.cancel) {
+                root.pointer-cancelled();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.pointer-moved(self.mouse-x, self.mouse-y);
+            }
+        }
+    }
+
+    changed selection-anchor => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
+    changed selection-focus => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
+}
+
+/// The editable paper surface.
+export component WriterPageCanvas inherits Rectangle {
+    in property <string> doc-title: "Untitled Document";
+    in-out property <string> doc-content: "";
+    in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
+    in-out property <int> selection-anchor: 0;
+    in-out property <int> selection-focus: 0;
+    in property <string> selection-announcement: "No text selected";
+    in-out property <float> page-zoom: 1.0;
+    in-out property <length> page-scroll-x: 0px;
+    in-out property <length> page-scroll-y: 0px;
+    in property <int> page-count: 1;
+    in property <length> page-stack-height: 842px;
+    in property <int> page-orientation: 0;
+    in property <int> paper-size: 0;
+    in property <int> margin-preset: 0;
+    callback document-edited(string, int, int);
+    callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
+    callback page-zoom-changed(float);
+    callback page-scroll-changed(length, length);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+
+    background: Theme.palette().canvas;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    page-scroll := Flickable {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        viewport-width: max(parent.width, page.width + 48px);
+        viewport-height: max(parent.height, page.height + 48px);
+        viewport-x <=> root.page-scroll-x;
+        viewport-y <=> root.page-scroll-y;
+        flicked => { root.page-scroll-changed(self.viewport-x, self.viewport-y); }
+
+        page := Rectangle {
+            private property <length> base-width: root.paper-size == 1 ? 595px : 612px;
+            private property <length> base-height: root.paper-size == 1 ? 842px : 792px;
+            private property <length> raw-width: root.page-orientation == 1 ? self.base-height : self.base-width;
+            private property <length> raw-height: root.page-orientation == 1 ? self.base-width : self.base-height;
+            private property <length> page-padding: (root.margin-preset == 1 ? 36px : (root.margin-preset == 2 ? 108px : 72px)) * root.page-zoom;
+
+            x: max(24px, (page-scroll.width - self.width) / 2);
+            y: 24px;
+            width: self.raw-width * root.page-zoom;
+            height: root.page-count > 1
+                ? (root.page-stack-height + 160px) * root.page-zoom
+                : self.raw-height * root.page-zoom;
+            border-radius: Theme.tokens.metrics.radius-small;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().paper;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+            clip: true;
+
+            VerticalLayout {
+                padding-top: page.page-padding;
+                padding-bottom: page.page-padding;
+                padding-left: page.page-padding;
+                padding-right: page.page-padding;
+                spacing: 0px;
+
+                document-editor := WriterDocumentEditor {
+                    text <=> root.doc-content;
+                    render-blocks <=> root.render-blocks;
+                    selection-rects <=> root.selection-rects;
+                    selection-anchor <=> root.selection-anchor;
+                    selection-focus <=> root.selection-focus;
+                    selection-announcement <=> root.selection-announcement;
+                    page-zoom: root.page-zoom;
+                    font-size: 11px * root.page-zoom;
+                    edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                    pointer-released(x, y) => { root.pointer-released(x, y); }
+                    pointer-cancelled => { root.pointer-cancelled(); }
+                    key-pressed(event) => { return root.key-pressed(event); }
+                }
+            }
+        }
+    }
+}
+
+/// App-local status surface using canonical LoomStatusBar.
+export component WriterStatusBar inherits LoomStatusBar {
+    in property <string> leading-text: "";
+    in property <string> trailing-text: "";
+    LoomStatusText {
+        text: root.leading-text;
+        horizontal-stretch: 1;
+    }
+    LoomStatusText {
+        text: root.trailing-text;
+    }
+}
+
+/// Modal overflow surface for compact toolbars.
+export component WriterToolbarOverflow inherits Rectangle {
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback close-requested;
+
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+    min-width: 220px;
+    max-width: 280px;
+    preferred-width: 256px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        padding: Theme.tokens.space.sm;
+        LoomButton {
+            icon: "format";
+            label: "Format";
+            variant: root.inspector-visible ? "primary" : "ghost";
+            selected: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { root.toggle-inspector(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "export";
+            label: "Export PDF";
+            variant: "ghost";
+            clicked => { root.export-pdf(); root.close-requested(); }
+        }
+    }
+}

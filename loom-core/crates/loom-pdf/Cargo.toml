@@ -1,0 +1,9 @@
+[package]
+name = "loom-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Minimal deterministic PDF 1.4 writer for Loom export."
+
+[dependencies]

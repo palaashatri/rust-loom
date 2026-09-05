@@ -1,0 +1,53 @@
+schema_version = 1
+phase = "writer"
+foundation_status = "ACCEPTED"
+application_development_locked = false
+consumer_imports_allowed = true
+next_application = "present"
+
+application_order = [
+  "sheets",
+  "writer",
+  "present",
+  "photo",
+  "motion",
+  "video",
+  "studio",
+  "encode",
+]
+
+allowed_active_prefixes = [
+  ".github/",
+  "AGENTS.MD",
+  "TRUTH.md",
+  "README.md",
+  "loom-bootstrap/",
+  "loom-core/crates/loom-ui/",
+  "loom-core/crates/loom-desktop/",
+  "loom-design-bible/contracts/",
+  "loom-design-bible/tokens/",
+  "loom-sheets/",
+  "loom-writer/",
+]
+
+[foundation_gate]
+mechanical_required = true
+human_visual_approval_required = true
+approved_baseline_required_after_acceptance = true
+status = "ACCEPTED"
+
+[foundation_gate.required_evidence]
+viewports = ["1024x720", "1280x800", "1440x900", "1920x1200"]
+themes = ["light", "dark", "high-contrast"]
+text_scales = [1.0, 1.25, 1.5]
+directions = ["ltr", "rtl"]
+
+[application_status]
+sheets = "ACCEPTED"
+writer = "IN_PROGRESS"
+present = "LOCKED"
+photo = "LOCKED"
+motion = "LOCKED"
+video = "LOCKED"
+studio = "LOCKED"
+encode = "LOCKED"

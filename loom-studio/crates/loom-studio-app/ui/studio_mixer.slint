@@ -1,0 +1,147 @@
+import { DirectionalLayout, ToolbarButton } from "toolkit.slint";
+import { InspectorSurface, Slider, Field, PrimaryButton } from "components.slint";
+import { Theme } from "theme.slint";
+
+/// Selection-aware mixer inspector.  Channel controls and bounce settings are
+/// arranged as independent flow sections so fields remain readable at compact
+/// widths and large text scales.
+export component StudioMixer inherits InspectorSurface {
+    in property <bool> compact-layout: false;
+    in property <int> active-track-index: 0;
+    in property <[string]> track-labels: [];
+    in property <[float]> track-volumes: [];
+    in property <[float]> track-pans: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[bool]> track-arms: [];
+    in property <bool> input-available: false;
+    in property <string> selection-label: "No region selected";
+    in property <string> job-state: "Idle";
+    in property <float> job-progress: 0.0;
+    in property <bool> job-cancellable: false;
+    in-out property <string> export-path: "loom-studio-mix.wav";
+
+    callback volume-changed(int, float);
+    callback pan-changed(int, float);
+    callback mute-toggled(int);
+    callback solo-toggled(int);
+    callback record-arm-toggled(int);
+    callback export-mix(string);
+    callback cancel-job;
+
+    title: "Mixer";
+    detail: root.active-track-index < root.track-labels.length ? root.track-labels[root.active-track-index] : "No track";
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: 0px;
+        alignment: start;
+
+        Text {
+            text: "CHANNEL STRIP";
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+        }
+        Text {
+            text: root.selection-label;
+            color: Theme.palette().ink-secondary;
+            font-size: Theme.tokens.typography.micro;
+            overflow: elide;
+        }
+        if root.active-track-index < root.track-labels.length : VerticalLayout {
+            spacing: Theme.tokens.space.sm;
+            alignment: start;
+            Text {
+                text: "Volume  " + Math.round(root.track-volumes[root.active-track-index] * 10) / 10 + " dB";
+                color: Theme.palette().ink;
+                font-size: Theme.tokens.typography.caption;
+            }
+            Slider {
+                label: "Volume";
+                minimum: -60;
+                maximum: 6;
+                value: root.track-volumes[root.active-track-index];
+                changed(value) => { root.volume-changed(root.active-track-index, value); }
+            }
+            Text {
+                text: "Pan  " + Math.round(root.track-pans[root.active-track-index] * 100) + "%";
+                color: Theme.palette().ink;
+                font-size: Theme.tokens.typography.caption;
+            }
+            Slider {
+                label: "Pan";
+                minimum: -1;
+                maximum: 1;
+                value: root.track-pans[root.active-track-index];
+                changed(value) => { root.pan-changed(root.active-track-index, value); }
+            }
+            DirectionalLayout {
+                spacing: Theme.tokens.space.xs;
+                ToolbarButton {
+                    text: "Mute";
+                    horizontal-stretch: 1;
+                    checked: root.track-mutes[root.active-track-index];
+                    clicked => { root.mute-toggled(root.active-track-index); }
+                }
+                ToolbarButton {
+                    text: "Solo";
+                    horizontal-stretch: 1;
+                    checked: root.track-solos[root.active-track-index];
+                    clicked => { root.solo-toggled(root.active-track-index); }
+                }
+                ToolbarButton {
+                    text: "Arm";
+                    horizontal-stretch: 1;
+                    checked: root.track-arms[root.active-track-index];
+                    enabled: root.input-available;
+                    clicked => { root.record-arm-toggled(root.active-track-index); }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.palette().border; }
+        Text {
+            text: "Bounce destination";
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+        }
+        Field { label: "WAV destination"; value <=> root.export-path; }
+        PrimaryButton {
+            text: root.job-cancellable ? "Cancel " + root.job-state : "Export WAV";
+            horizontal-stretch: 1;
+            clicked => {
+                if (root.job-cancellable) { root.cancel-job(); }
+                else { root.export-mix(root.export-path); }
+            }
+        }
+        if root.job-state != "Idle" : VerticalLayout {
+            spacing: Theme.tokens.space.xs;
+            Text {
+                text: root.job-state + (root.job-progress > 0 ? " " + Math.round(root.job-progress * 100) + "%" : "");
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                overflow: elide;
+            }
+            Rectangle {
+                min-height: 4px;
+                preferred-height: 4px;
+                background: Theme.palette().surface-sunken;
+                Rectangle {
+                    width: clamp(parent.width * root.job-progress, 0px, parent.width);
+                    height: parent.height;
+                    background: Theme.palette().accent;
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        Text {
+            text: "Third-party CLAP/VST3 hosting is not enabled in this build. No plugin is loaded or executed implicitly.";
+            wrap: word-wrap;
+            color: Theme.palette().ink-disabled;
+            font-size: Theme.tokens.typography.caption;
+        }
+    }
+}

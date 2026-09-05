@@ -1,0 +1,726 @@
+import { ToolbarButton } from "toolkit.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+/// Arrangement data is carried as one model row so repeater children retain
+/// their identity while a gesture updates timing.  The id is the only
+/// identity used by pointer and keyboard callbacks; position is presentation
+/// data and may change without retargeting a live gesture.
+export struct ArrangementRegion {
+    id: string,
+    name: string,
+    track-index: int,
+    start-seconds: float,
+    duration-seconds: float,
+    selected: bool,
+}
+
+/// A single timeline row.  The header has bounded intrinsic sizing; the
+/// timeline itself is a three-cell flow (lead-in, region, remainder) rather
+/// than an unbounded stack of absolute children.  Region widths remain tied to
+/// the media duration, while the surrounding layout can safely resize.
+export component StudioTrackRow inherits Rectangle {
+    // Keep the small shared WorkspaceRow interaction contract locally while
+    // giving the timeline stage its own hit-testing surface.  The shared row
+    // component's full-row TouchArea would otherwise sit above the stage and
+    // swallow every region gesture.
+    in property <string> label: "Workspace item";
+    in property <bool> selected: false;
+    in property <bool> emphasized: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    in property <string> track-label: "Track";
+    in property <string> track-kind: "Audio";
+    in property <int> track-index: 0;
+    in property <int> region-count: 0;
+    in property <[ArrangementRegion]> regions: [];
+    in property <float> duration-seconds: 10.0;
+    in property <bool> compact-layout: false;
+    in property <bool> mute: false;
+    in property <bool> solo: false;
+    in property <bool> record-arm: false;
+    in property <bool> input-available: false;
+    in property <int> track-height: 64;
+    in property <float> timeline-zoom: 1.0;
+    in property <float> timeline-scroll-seconds: 0.0;
+    in property <float> playhead-seconds: 0.0;
+    in property <bool> looping: false;
+
+    callback mute-toggled;
+    callback solo-toggled;
+    callback record-arm-toggled;
+    callback select-region(string);
+    callback begin-region-gesture(string, string);
+    callback move-region(string, float);
+    callback trim-region-start(string, float);
+    callback trim-region-end(string, float);
+    callback end-region-gesture;
+    callback cancel-region-gesture;
+    callback split-region(string);
+    callback delete-region(string);
+    callback context-menu-requested(string);
+    callback focus-requested;
+
+    min-height: root.track-height * 1px;
+    preferred-height: root.track-height * 1px;
+    max-height: root.track-height * 1px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus
+        : root.selected ? Theme.palette().accent
+        : root.emphasized ? Theme.palette().border-strong
+        : transparent;
+    background: root.selected ? Theme.palette().selection-soft
+        : header-touch.has-hover && root.enabled ? Theme.palette().surface-raised
+        : transparent;
+    animate background, border-color {
+        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+        easing: cubic-bezier(0.2, 0.9, 0.2, 1.0);
+    }
+    accessible-role: button;
+    accessible-label: root.track-label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            min-width: root.compact-layout ? 156px : 192px;
+            preferred-width: root.compact-layout ? 176px : 220px;
+            max-width: root.compact-layout ? 204px : 260px;
+            background: Theme.palette().surface;
+            // Place the header target beneath its controls so M/S/R buttons
+            // retain their own callbacks while empty header space selects the
+            // track.
+            header-touch := TouchArea {
+                enabled: root.enabled;
+                width: 100%;
+                height: 100%;
+                clicked => {
+                    focus-scope.focus();
+                    root.clicked();
+                }
+            }
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                padding-left: Theme.tokens.space.sm;
+                padding-right: Theme.tokens.space.sm;
+                cross-axis-alignment: center;
+                ToolbarButton {
+                    text: "M";
+                    checked: root.mute;
+                    accessible-label: "Mute " + root.track-label;
+                    clicked => { root.mute-toggled(); }
+                }
+                ToolbarButton {
+                    text: "S";
+                    checked: root.solo;
+                    accessible-label: "Solo " + root.track-label;
+                    clicked => { root.solo-toggled(); }
+                }
+                ToolbarButton {
+                    text: "R";
+                    checked: root.record-arm;
+                    enabled: root.input-available;
+                    accessible-label: "Record arm " + root.track-label;
+                    clicked => { root.record-arm-toggled(); }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: Theme.tokens.space.xs;
+                    Text {
+                        text: root.track-label;
+                        color: Theme.palette().ink;
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 650;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.track-kind + " · " + root.region-count + " regions";
+                        color: Theme.palette().ink-secondary;
+                        font-size: Theme.tokens.typography.micro;
+                        overflow: elide;
+                    }
+                }
+            }
+            if root.selected : Rectangle {
+                x: 0px;
+                y: 8px;
+                width: 3px;
+                height: parent.height - 16px;
+                border-radius: 2px;
+                background: Theme.palette().accent;
+            }
+        }
+
+        stage := Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.palette().media-stage;
+            clip: true;
+            property <length> timeline-width: max(0px, stage.width * root.timeline-zoom);
+            property <length> timeline-offset: clamp(
+                stage.width * root.timeline-zoom * root.timeline-scroll-seconds / Math.max(0.01, root.duration-seconds),
+                0px,
+                max(0px, stage.timeline-width - stage.width)
+            );
+            for region in root.regions : Rectangle {
+                visible: region.track-index == root.track-index;
+                property <length> lead-width: clamp(stage.timeline-width * region.start-seconds / Math.max(0.01, root.duration-seconds), 0px, max(0px, stage.timeline-width - 54px));
+                property <length> region-width: max(0px, min(max(54px, stage.timeline-width * region.duration-seconds / Math.max(0.01, root.duration-seconds)), max(0px, stage.timeline-width - lead-width)));
+                x: lead-width - stage.timeline-offset;
+                width: region-width;
+                y: Theme.tokens.space.sm;
+                height: max(0px, stage.height - Theme.tokens.space.lg);
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: region.selected ? Theme.palette().content-accent : Theme.palette().content-cool;
+                border-width: 1px;
+                border-color: region.selected ? Theme.palette().focus : Theme.palette().content-cool;
+                accessible-role: button;
+                accessible-label: region.name + (region.selected ? " (selected)" : "");
+                accessible-action-default => {
+                    root.select-region(region.id);
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    padding-left: Theme.tokens.space.sm;
+                    padding-right: Theme.tokens.space.sm;
+                    cross-axis-alignment: center;
+                    Icon {
+                        icon: root.track-kind == "MIDI" ? "keyboard" : "waveform";
+                        size: 18px;
+                        tint: Theme.palette().paper;
+                    }
+                    Text {
+                        text: region.name;
+                        horizontal-stretch: 1;
+                        color: Theme.palette().paper;
+                        font-size: Theme.tokens.typography.micro;
+                        font-weight: 650;
+                        overflow: elide;
+                    }
+                }
+                region-touch := TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    property <length> last-drag-x: 0px;
+                    property <string> gesture-region-id: "";
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                            root.focus-requested();
+                            root.select-region(region.id);
+                            root.context-menu-requested(region.id);
+                        } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                            root.focus-requested();
+                            self.gesture-region-id = region.id;
+                            root.select-region(self.gesture-region-id);
+                            root.begin-region-gesture(self.gesture-region-id, "move");
+                            self.last-drag-x = self.mouse-x;
+                        } else if (event.kind == PointerEventKind.cancel) {
+                            root.cancel-region-gesture();
+                            self.last-drag-x = 0px;
+                            self.gesture-region-id = "";
+                        } else if (event.kind == PointerEventKind.up) {
+                            root.end-region-gesture();
+                            self.last-drag-x = 0px;
+                            self.gesture-region-id = "";
+                        }
+                    }
+                    moved => {
+                        if (self.pressed && self.gesture-region-id != "") {
+                            let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
+                            self.last-drag-x = self.mouse-x;
+                            root.move-region(self.gesture-region-id, delta);
+                        }
+                    }
+                    clicked => { root.select-region(region.id); }
+                }
+                trim-in := Rectangle {
+                    x: 0px;
+                    width: 9px;
+                    height: parent.height;
+                    background: region.selected ? Theme.palette().focus : transparent;
+                    opacity: 0.8;
+                    accessible-role: button;
+                    accessible-label: "Trim start of " + region.name;
+                    accessible-action-default => {
+                        root.select-region(region.id);
+                        root.trim-region-start(region.id, 0.1);
+                    }
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        property <length> last-drag-x: 0px;
+                        property <string> gesture-region-id: "";
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                root.focus-requested();
+                                self.gesture-region-id = region.id;
+                                root.select-region(self.gesture-region-id);
+                                root.begin-region-gesture(self.gesture-region-id, "trim-start");
+                                self.last-drag-x = self.mouse-x;
+                            } else if (event.kind == PointerEventKind.cancel) {
+                                root.cancel-region-gesture();
+                                self.gesture-region-id = "";
+                            } else if (event.kind == PointerEventKind.up) {
+                                root.end-region-gesture();
+                                self.gesture-region-id = "";
+                            }
+                        }
+                        moved => {
+                            if (self.pressed && self.gesture-region-id != "") {
+                                let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
+                                self.last-drag-x = self.mouse-x;
+                                root.trim-region-start(self.gesture-region-id, delta);
+                            }
+                        }
+                    }
+                }
+                trim-out := Rectangle {
+                    x: parent.width - 9px;
+                    width: 9px;
+                    height: parent.height;
+                    background: region.selected ? Theme.palette().focus : transparent;
+                    opacity: 0.8;
+                    accessible-role: button;
+                    accessible-label: "Trim end of " + region.name;
+                    accessible-action-default => {
+                        root.select-region(region.id);
+                        root.trim-region-end(region.id, 0.1);
+                    }
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        property <length> last-drag-x: 0px;
+                        property <string> gesture-region-id: "";
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                root.focus-requested();
+                                self.gesture-region-id = region.id;
+                                root.select-region(self.gesture-region-id);
+                                root.begin-region-gesture(self.gesture-region-id, "trim-end");
+                                self.last-drag-x = self.mouse-x;
+                            } else if (event.kind == PointerEventKind.cancel) {
+                                root.cancel-region-gesture();
+                                self.gesture-region-id = "";
+                            } else if (event.kind == PointerEventKind.up) {
+                                root.end-region-gesture();
+                                self.gesture-region-id = "";
+                            }
+                        }
+                        moved => {
+                            if (self.pressed && self.gesture-region-id != "") {
+                                let delta = (self.mouse-x - self.last-drag-x) / max(1px, stage.timeline-width) * root.duration-seconds;
+                                self.last-drag-x = self.mouse-x;
+                                root.trim-region-end(self.gesture-region-id, delta);
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                visible: root.duration-seconds > 0 && root.playhead-seconds >= 0;
+                x: stage.timeline-width * root.playhead-seconds / Math.max(0.01, root.duration-seconds) - stage.timeline-offset;
+                width: root.looping ? 3px : 2px;
+                y: 0px;
+                height: stage.height;
+                background: root.looping ? Theme.palette().warning : Theme.palette().accent;
+                opacity: 0.9;
+                accessible-role: image;
+                accessible-label: root.looping ? "Looping playhead" : "Playhead";
+            }
+        }
+    }
+}
+
+/// Studio's arrangement surface owns only timeline presentation and selection
+/// callbacks; domain state remains in the Rust controller.
+export component StudioArrangement inherits Rectangle {
+    in property <[string]> track-labels: [];
+    in property <[string]> track-kinds: [];
+    in property <[int]> track-region-counts: [];
+    in property <[ArrangementRegion]> regions: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[bool]> track-arms: [];
+    in property <int> active-track-index: 0;
+    in property <float> duration-seconds: 10.0;
+    in property <int> workspace-mode-index: 0;
+    in property <bool> compact-layout: false;
+    in property <bool> input-available: false;
+    in-out property <float> timeline-zoom: 1.0;
+    in-out property <float> timeline-scroll-seconds: 0.0;
+    in property <float> playhead-seconds: 0.0;
+    in property <bool> looping: false;
+    in property <string> selected-region-id: "";
+    in property <int> selected-region-track: -1;
+    in property <string> job-state: "Idle";
+    in property <float> job-progress: 0.0;
+    in property <bool> job-cancellable: false;
+    in property <string> selection-label: "No region selected";
+    in-out property <bool> context-menu-open: false;
+    in-out property <int> context-region-track: -1;
+    in-out property <string> context-region-id: "";
+    changed selected-region-track => {
+        if (root.context-menu-open
+                && (root.selected-region-id != root.context-region-id
+                    || root.selected-region-track != root.context-region-track)) {
+            root.context-menu-open = false;
+            root.context-region-track = -1;
+            root.context-region-id = "";
+            timeline-focus.focus();
+        }
+    }
+    changed selected-region-id => {
+        // A context action is bound to the region that opened it.  Close the
+        // surface as soon as selection moves elsewhere so callbacks can never
+        // mutate a stale region behind the visible selection.
+        if (root.context-menu-open
+                && (root.selected-region-id != root.context-region-id
+                    || root.selected-region-track != root.context-region-track)) {
+            root.context-menu-open = false;
+            root.context-region-track = -1;
+            root.context-region-id = "";
+            timeline-focus.focus();
+        } else if (root.selected-region-id == "") {
+            root.context-menu-open = false;
+            root.context-region-track = -1;
+            root.context-region-id = "";
+        }
+    }
+    callback select-track(int);
+    callback mute-toggled(int);
+    callback solo-toggled(int);
+    callback record-arm-toggled(int);
+    callback select-region(int, string);
+    callback begin-region-gesture(int, string, string);
+    callback move-region(int, string, float);
+    callback trim-region-start(int, string, float);
+    callback trim-region-end(int, string, float);
+    callback end-region-gesture;
+    callback cancel-region-gesture;
+    callback split-region(int, string);
+    callback delete-region(int, string);
+    callback cancel-job;
+
+    background: Theme.palette().canvas;
+
+    timeline-focus := FocusScope {
+        // Keep the scope available before selection so the first pointer down
+        // can focus it before the controller reports the selected region.
+        enabled: true;
+        key-pressed(event) => {
+            if (event.text == Key.Delete) {
+                root.delete-region(root.selected-region-track, root.selected-region-id);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.LeftArrow) {
+                root.trim-region-start(root.selected-region-track, root.selected-region-id, -0.1);
+                return accept;
+            }
+            if (event.modifiers.shift && event.text == Key.RightArrow) {
+                root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1);
+                return accept;
+            }
+            if (event.text == "i" || event.text == "I") {
+                root.trim-region-start(root.selected-region-track, root.selected-region-id, -0.1);
+                return accept;
+            }
+            if (event.text == "o" || event.text == "O") {
+                root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1);
+                return accept;
+            }
+            if (event.text == "s" || event.text == "S") {
+                root.split-region(root.selected-region-track, root.selected-region-id);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.move-region(root.selected-region-track, root.selected-region-id, -0.1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.move-region(root.selected-region-track, root.selected-region-id, 0.1);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    /// Gives keyboard and accessibility journeys a deterministic way to move
+    /// focus to the selected region without mutating document state.
+    public function focus-timeline() {
+        timeline-focus.focus();
+    }
+
+    /// Opens the secondary action surface for the currently selected region.
+    /// The row callback is the normal entry point; this helper keeps headless
+    /// journeys deterministic without bypassing the typed action callbacks.
+    public function open-context-menu() {
+        if (root.selected-region-id != "") {
+            root.context-region-track = root.selected-region-track;
+            root.context-region-id = root.selected-region-id;
+            root.context-menu-open = true;
+            context-menu-focus.focus();
+        }
+    }
+
+    VerticalLayout {
+        padding: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.xs;
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            Text {
+                text: "ARRANGEMENT";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 700;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.duration-seconds > 0 ? Math.round(root.duration-seconds * 10) / 10 + " seconds" : "Empty project";
+                color: Theme.palette().ink-disabled;
+                font-size: Theme.tokens.typography.caption;
+                overflow: elide;
+            }
+            Text {
+                text: root.selection-label;
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                overflow: elide;
+            }
+            ToolbarButton {
+                text: "−";
+                accessible-label: "Zoom out timeline";
+                enabled: root.timeline-zoom > 0.5;
+                clicked => {
+                    root.timeline-zoom = Math.max(0.5, root.timeline-zoom - 0.25);
+                    root.timeline-scroll-seconds = Math.min(root.timeline-scroll-seconds, Math.max(0, root.duration-seconds * (root.timeline-zoom - 1)));
+                }
+            }
+            Text {
+                text: Math.round(root.timeline-zoom * 100) + "%";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                min-width: 38px;
+                horizontal-alignment: center;
+            }
+            ToolbarButton {
+                text: "+";
+                accessible-label: "Zoom in timeline";
+                enabled: root.timeline-zoom < 4.0;
+                clicked => { root.timeline-zoom = Math.min(4.0, root.timeline-zoom + 0.25); }
+            }
+            ToolbarButton {
+                text: "◀";
+                accessible-label: "Scroll timeline left";
+                enabled: root.timeline-scroll-seconds > 0;
+                clicked => { root.timeline-scroll-seconds = Math.max(0, root.timeline-scroll-seconds - 1); }
+            }
+            ToolbarButton {
+                text: "▶";
+                accessible-label: "Scroll timeline right";
+                enabled: root.timeline-scroll-seconds < Math.max(0, root.duration-seconds * (root.timeline-zoom - 1));
+                clicked => { root.timeline-scroll-seconds = Math.min(Math.max(0, root.duration-seconds * (root.timeline-zoom - 1)), root.timeline-scroll-seconds + 1); }
+            }
+            ToolbarButton {
+                text: root.job-state;
+                enabled: root.job-cancellable;
+                clicked => { root.cancel-job(); }
+            }
+        }
+        if root.selected-region-id != "" : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            Text {
+                text: "REGION ACTIONS";
+                color: Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.micro;
+                vertical-alignment: center;
+            }
+            ToolbarButton {
+                text: "←";
+                accessible-label: "Move selected region earlier";
+                clicked => { root.move-region(root.selected-region-track, root.selected-region-id, -0.1); }
+            }
+            ToolbarButton {
+                text: "→";
+                accessible-label: "Move selected region later";
+                clicked => { root.move-region(root.selected-region-track, root.selected-region-id, 0.1); }
+            }
+            ToolbarButton {
+                text: "In";
+                accessible-label: "Trim selected region start earlier";
+                clicked => { root.trim-region-start(root.selected-region-track, root.selected-region-id, -0.1); }
+            }
+            ToolbarButton {
+                text: "Out";
+                accessible-label: "Trim selected region end later";
+                clicked => { root.trim-region-end(root.selected-region-track, root.selected-region-id, 0.1); }
+            }
+            ToolbarButton {
+                text: "Split";
+                accessible-label: "Split selected region";
+                clicked => { root.split-region(root.selected-region-track, root.selected-region-id); }
+            }
+            ToolbarButton {
+                text: "Delete";
+                accessible-label: "Delete selected region";
+                clicked => { root.delete-region(root.selected-region-track, root.selected-region-id); }
+            }
+        }
+        for label[index] in root.track-labels : StudioTrackRow {
+            track-index: index;
+            track-label: label;
+            track-kind: root.track-kinds[index];
+            region-count: root.track-region-counts[index];
+            regions: root.regions;
+            duration-seconds: root.duration-seconds;
+            timeline-zoom: root.timeline-zoom;
+            timeline-scroll-seconds: root.timeline-scroll-seconds;
+            playhead-seconds: root.playhead-seconds;
+            looping: root.looping;
+            compact-layout: root.compact-layout;
+            mute: root.track-mutes[index];
+            solo: root.track-solos[index];
+            record-arm: root.track-arms[index];
+            input-available: root.input-available;
+            track-height: root.workspace-mode-index == 1 ? 78 : 64;
+            selected: index == root.active-track-index;
+            clicked => { root.select-track(index); }
+            mute-toggled => { root.mute-toggled(index); }
+            solo-toggled => { root.solo-toggled(index); }
+            record-arm-toggled => { root.record-arm-toggled(index); }
+            select-region(id) => { root.select-region(index, id); }
+            begin-region-gesture(id, kind) => { root.begin-region-gesture(index, id, kind); }
+            move-region(id, delta) => { root.move-region(index, id, delta); }
+            trim-region-start(id, delta) => { root.trim-region-start(index, id, delta); }
+            trim-region-end(id, delta) => { root.trim-region-end(index, id, delta); }
+            end-region-gesture => { root.end-region-gesture(); }
+            cancel-region-gesture => { root.cancel-region-gesture(); }
+            split-region(id) => { root.split-region(index, id); }
+            delete-region(id) => { root.delete-region(index, id); }
+            context-menu-requested(id) => {
+                root.context-region-track = index;
+                root.context-region-id = id;
+                root.context-menu-open = true;
+                root.select-region(index, id);
+                context-menu-focus.focus();
+            }
+            focus-requested => { timeline-focus.focus(); }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+
+    if root.context-menu-open : Rectangle {
+        x: Theme.tokens.space.md;
+        y: Theme.tokens.space.xl;
+        width: 220px;
+        // Keep the six actions inside a bounded surface.  At the supported
+        // 1024x720 and 1440x900 heights this resolves to the intrinsic menu
+        // height; on a shorter or larger-text surface it remains within the
+        // available viewport instead of painting over the status bar.
+        height: min(320px, max(1px, parent.height - self.y - Theme.tokens.space.md));
+        max-height: max(1px, parent.height - self.y - Theme.tokens.space.md);
+        background: Theme.palette().surface-raised;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        clip: true;
+        accessible-role: button;
+        accessible-label: "Region context actions";
+        context-menu-scroll := Flickable {
+            width: parent.width;
+            height: parent.height;
+            viewport-width: parent.width;
+            // Keep the action list intrinsic and let Flickable expose the
+            // complete list when large text or a short viewport needs it.
+            viewport-height: max(parent.height, context-menu-content.preferred-height);
+            context-menu-content := VerticalLayout {
+                y: 0px;
+                width: parent.width;
+                height: self.preferred-height;
+                padding: Theme.tokens.space.sm;
+                spacing: Theme.tokens.space.xs;
+                alignment: start;
+                Text {
+                    text: "REGION ACTIONS";
+                    color: Theme.palette().ink-secondary;
+                    font-size: Theme.tokens.typography.micro;
+                    font-weight: 700;
+                }
+                ToolbarButton {
+                    text: "Move earlier";
+                    accessible-label: "Move selected region earlier";
+                    clicked => {
+                        root.move-region(root.context-region-track, root.context-region-id, -0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Move later";
+                    accessible-label: "Move selected region later";
+                    clicked => {
+                        root.move-region(root.context-region-track, root.context-region-id, 0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Trim start";
+                    accessible-label: "Trim selected region start earlier";
+                    clicked => {
+                        root.trim-region-start(root.context-region-track, root.context-region-id, -0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Trim end";
+                    accessible-label: "Trim selected region end later";
+                    clicked => {
+                        root.trim-region-end(root.context-region-track, root.context-region-id, 0.1);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Split";
+                    accessible-label: "Split selected region";
+                    clicked => {
+                        root.split-region(root.context-region-track, root.context-region-id);
+                        root.context-menu-open = false;
+                    }
+                }
+                ToolbarButton {
+                    text: "Delete";
+                    accessible-label: "Delete selected region";
+                    clicked => {
+                        root.delete-region(root.context-region-track, root.context-region-id);
+                        root.context-menu-open = false;
+                    }
+                }
+            }
+        }
+    }
+
+    // Keep Escape dismissal available even when the menu was opened by a
+    // secondary pointer action.  Closing returns focus to the timeline scope.
+    context-menu-focus := FocusScope {
+        enabled: root.context-menu-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.context-menu-open = false;
+                root.context-region-track = -1;
+                root.context-region-id = "";
+                timeline-focus.focus();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

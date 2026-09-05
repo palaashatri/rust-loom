@@ -1,0 +1,197 @@
+import {
+    LoomPanel, LoomSectionHeader, LoomSegmentedControl,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+component InspectorPropertyRow inherits Rectangle {
+    in property <string> label: "Property";
+    min-height: Theme.tokens.metrics.control-height;
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink-secondary;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            @children
+        }
+    }
+}
+
+export component PresentInspector inherits LoomPanel {
+    in-out property <int> inspector-tab: 0;
+    in-out property <int> active-template-index: 1;
+    in-out property <int> transition-index: 0;
+    in property <string> slide-count-text: "1 slide";
+    in property <bool> aspect-ratio-wide: true;
+    in property <string> active-element-label: "No element selected";
+    in property <string> active-element-content: "";
+    in property <int> active-element-index: 0;
+    in property <int> element-count: 0;
+    in property <int> selection-count: 0;
+    in property <string> element-x-text: "100";
+    in property <string> element-y-text: "100";
+    in property <string> element-width-text: "400";
+    in property <string> element-height-text: "100";
+    in property <string> element-rotation-text: "0°";
+
+    callback apply-template(int);
+    callback update-element-content(string);
+    callback set-transition(int);
+
+    title: "Format";
+    width: 280px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+        alignment: start;
+
+        LoomSegmentedControl {
+            items: ["Format", "Animate", "Document"];
+            current <=> root.inspector-tab;
+            label: "Inspector Tabs";
+        }
+
+        if root.inspector-tab == 0 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+
+            LoomSectionHeader { title: "Slide Layout"; }
+            LoomSegmentedControl {
+                items: ["Title", "Content", "2 Col", "Image"];
+                current <=> root.active-template-index;
+                label: "Layout Template";
+                selected(idx) => { root.apply-template(idx); }
+            }
+
+            LoomSectionHeader { title: "Selected Element"; }
+            Rectangle {
+                min-height: 48px;
+                border-radius: Theme.tokens.metrics.radius-small;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                background: Theme.palette().selection-soft;
+                VerticalLayout {
+                    padding: Theme.tokens.space.sm;
+                    spacing: Theme.tokens.space.xs;
+                    Text {
+                        text: root.active-element-label;
+                        font-size: Theme.tokens.typography.body;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.selection-count > 0 ? "Element " + (root.active-element-index + 1) + " of " + root.element-count : "No element selected";
+                        font-size: Theme.tokens.typography.micro;
+                        color: Theme.palette().ink-secondary;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            if root.selection-count > 0 : InspectorPropertyRow {
+                label: "Content";
+                Rectangle {
+                    height: Theme.tokens.metrics.control-height;
+                    border-radius: Theme.tokens.metrics.radius-small;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    background: Theme.palette().surface-raised;
+                    clip: true;
+                    HorizontalLayout {
+                        padding-left: Theme.tokens.space.sm;
+                        padding-right: Theme.tokens.space.sm;
+                        TextInput {
+                            text: root.active-element-content;
+                            font-size: Theme.tokens.typography.body;
+                            color: Theme.palette().ink;
+                            vertical-alignment: center;
+                            single-line: true;
+                            edited => { root.update-element-content(self.text); }
+                        }
+                    }
+                }
+            }
+
+            LoomSectionHeader { title: "Geometry"; }
+            InspectorPropertyRow {
+                label: "Position";
+                Text {
+                    text: root.element-x-text + " × " + root.element-y-text;
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            InspectorPropertyRow {
+                label: "Size";
+                Text {
+                    text: root.element-width-text + " × " + root.element-height-text;
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            InspectorPropertyRow {
+                label: "Rotation";
+                Text {
+                    text: root.element-rotation-text;
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+
+        if root.inspector-tab == 1 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            LoomSectionHeader { title: "Slide Transition"; }
+            LoomSegmentedControl {
+                items: ["None", "Dissolve", "Push", "Wipe"];
+                current <=> root.transition-index;
+                label: "Transition Type";
+                selected(idx) => { root.set-transition(idx); }
+            }
+            InspectorPropertyRow {
+                label: "Duration";
+                Text {
+                    text: "1.00 s";
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.inspector-tab == 2 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            LoomSectionHeader { title: "Slide Size"; }
+            LoomSegmentedControl {
+                items: ["16:9 Wide", "4:3 Standard"];
+                current: root.aspect-ratio-wide ? 0 : 1;
+                label: "Slide Aspect Ratio";
+            }
+            LoomSectionHeader { title: "Deck Information"; }
+            InspectorPropertyRow {
+                label: "Slides";
+                Text {
+                    text: root.slide-count-text;
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

@@ -1,0 +1,107 @@
+// Loom Motion - Supporting Components (Layers Panel & Status Bar)
+import {
+    LoomPanel, LoomSectionHeader, LoomButton, LoomIconButton,
+    LoomStatusBar, LoomStatusText, LoomEmptyState
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+export component MotionLayersPanel inherits LoomPanel {
+    in property <[string]> layer-labels: [];
+    in property <int> active-layer-index: 0;
+    in property <length> panel-width: 246px;
+    callback select-layer(int);
+    callback add-layer;
+
+    width: root.panel-width;
+    title: "Layers";
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding: Theme.tokens.space.md;
+
+        LoomSectionHeader {
+            title: "COMPOSITION LAYERS (" + root.layer-labels.length + ")";
+        }
+
+        // Layer List Items
+        for label[idx] in root.layer-labels : Rectangle {
+            height: 44px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            background: idx == root.active-layer-index ? Theme.palette().selection-soft : transparent;
+            border-width: idx == root.active-layer-index ? 1px : 0px;
+            border-color: idx == root.active-layer-index ? Theme.palette().accent : transparent;
+
+            TouchArea {
+                clicked => { root.select-layer(idx); }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: Theme.tokens.metrics.radius-small;
+                    background: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().surface-sunken;
+                    y: (parent.height - 28px) / 2;
+
+                    Icon {
+                        icon: "layers";
+                        size: 14px;
+                        tint: idx == root.active-layer-index ? Theme.palette().paper : Theme.palette().ink-secondary;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: label;
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: idx == root.active-layer-index ? 650 : 400;
+                        color: Theme.palette().ink;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: idx == root.active-layer-index ? "Active layer" : "Motion layer";
+                        font-size: Theme.tokens.typography.micro;
+                        color: idx == root.active-layer-index ? Theme.palette().accent : Theme.palette().ink-disabled;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        if root.layer-labels.length == 0 : LoomEmptyState {
+            icon: "layers";
+            title: "No Layers";
+            hint: "Add a layer to start animating in this composition.";
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+
+        LoomButton {
+            label: "+ Add Layer";
+            variant: "secondary";
+            clicked => { root.add-layer(); }
+        }
+    }
+}
+
+export component MotionStatusBar inherits LoomStatusBar {
+    in property <string> leading: "Ready";
+    in property <string> trailing: "Offline";
+
+    LoomStatusText {
+        text: root.leading;
+    }
+
+    Rectangle { horizontal-stretch: 1; background: transparent; }
+
+    LoomStatusText {
+        text: root.trailing;
+    }
+}

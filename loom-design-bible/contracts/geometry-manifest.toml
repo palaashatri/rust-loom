@@ -1,0 +1,295 @@
+# Generated from the checked-in Slint entry points by
+# audit-product-ui.py --write-geometry-manifest.
+# Do not edit by hand: source hashes make stale geometry evidence fail.
+
+[meta]
+version = "1.0.0"
+generator = "loom-bootstrap/scripts/audit-product-ui.py"
+
+[apps.writer]
+entry = "loom-writer/crates/loom-writer-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-writer/crates/loom-writer-app/ui/app.slint", "loom-writer/crates/loom-writer-app/ui/writer_components.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-writer/crates/loom-writer-app/ui/app.slint" = "3a5e8d01e6c1a9cab72f4a76dcb15c812565d49fbc2fba3fdbd78fd99fad7a29", "loom-writer/crates/loom-writer-app/ui/writer_components.slint" = "73f51f7ef318b14e329a1819d64eea7140df2d4db1f5c13ac5afd32b401e4d38" }
+root-component = "WriterApp"
+title-component = "TitleChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 900.0
+root-min-height = 680.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 280.0
+toolbar-groups = 3
+toolbar-group-declarations = 12
+toolbar-icon-only-items = 3
+toolbar-icon-over-label-items = 13
+toolbar-overflow-items = 0
+labeled-slot-bindings = 12
+directional-layout-count = 1
+source-rectangles = 35
+source-horizontal-layouts = 12
+source-vertical-layouts = 16
+source-grid-layouts = 0
+source-property-rows = 0
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["View", "Page Zoom", "Add Page", "View", "Table", "Chart", "Text", "Shape", "Media", "Comment", "Share", "Format", "Document", "Export", "Format", "Export PDF"]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "eye", "label" = "View", "accessible-label" = "View" }, { "component" = "IconOverLabelToolbarItem", "icon" = "zoom-in", "label" = "Page Zoom", "accessible-label" = "Page zoom unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Add Page", "accessible-label" = "Add Page unavailable" }, { "component" = "IconOnlyToolbarItem", "icon" = "eye", "label" = "View", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "table", "label" = "Table", "accessible-label" = "Insert table unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "chart", "label" = "Chart", "accessible-label" = "Insert chart unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "text", "label" = "Text", "accessible-label" = "Insert text box unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "shape", "label" = "Shape", "accessible-label" = "Insert shape unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "image", "label" = "Media", "accessible-label" = "Insert media unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "comment", "label" = "Comment", "accessible-label" = "Insert comment unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "share", "label" = "Share", "accessible-label" = "Share unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "format", "label" = "Format", "accessible-label" = "Format inspector" }, { "component" = "IconOverLabelToolbarItem", "icon" = "document", "label" = "Document", "accessible-label" = "Document settings unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "Export", "accessible-label" = "Export PDF" }, { "component" = "IconOnlyToolbarItem", "icon" = "format", "label" = "Format", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "export", "label" = "Export PDF", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "WriterInspector", "line" = 289, "preferred-width" = 280.0 }, { "name" = "WriterInspector", "line" = 305, "preferred-width" = 280.0 }, { "name" = "Rectangle", "line" = 368, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 401, "width" = 220.0 }, { "name" = "Rectangle", "line" = 421, "height" = 32.0 }, { "name" = "Rectangle", "line" = 438, "height" = 32.0 }, { "name" = "Rectangle", "line" = 456, "height" = 32.0 }, { "name" = "Rectangle", "line" = 474, "height" = 32.0 }, { "name" = "TemplateCard", "line" = 531, "width" = 160.0, "height" = 230.0 }, { "name" = "Rectangle", "line" = 553, "height" = 1.0 }, { "name" = "TemplateCard", "line" = 556, "width" = 160.0, "height" = 230.0 }, { "name" = "Rectangle", "line" = 570, "height" = 2.0 }, { "name" = "Rectangle", "line" = 571, "height" = 3.0 }, { "name" = "Rectangle", "line" = 572, "height" = 3.0 }, { "name" = "Rectangle", "line" = 573, "height" = 3.0 }, { "name" = "Rectangle", "line" = 574, "height" = 8.0 }, { "name" = "Rectangle", "line" = 576, "height" = 3.0 }, { "name" = "Rectangle", "line" = 577, "height" = 3.0 }, { "name" = "TemplateCard", "line" = 585, "width" = 160.0, "height" = 230.0 }, { "name" = "Rectangle", "line" = 600, "height" = 1.0 }, { "name" = "Rectangle", "line" = 602, "height" = 3.0 }, { "name" = "Rectangle", "line" = 603, "height" = 3.0 }, { "name" = "Rectangle", "line" = 604, "height" = 3.0 }, { "name" = "TemplateCard", "line" = 608, "width" = 160.0, "height" = 230.0 }, { "name" = "Rectangle", "line" = 622, "height" = 2.0 }, { "name" = "Rectangle", "line" = 624, "height" = 3.0 }, { "name" = "Rectangle", "line" = 625, "height" = 3.0 }, { "name" = "Rectangle", "line" = 627, "height" = 3.0 }, { "name" = "Rectangle", "line" = 639, "height" = 56.0 }, { "name" = "Rectangle", "line" = 642, "x" = 0.0 }, { "name" = "CommandPalette", "line" = 674, "x" = 0.0, "y" = 0.0 }, { "name" = "Text", "line" = 958, "x" = 0.0, "y" = 0.0 }, { "name" = "TextInput", "line" = 971, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 1051, "height" = 1.5 }, { "name" = "Rectangle", "line" = 1172, "height" = 68.0 }]
+root-shell = ["TitleChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "CanvasSurface", "InspectorSurface", "InspectorSurface", "CanvasSurface", "StatusBar"]
+source-geometry-signature = "4174802e0e7580374fe7a6e6b9409f6d13a79f67a548c6107e2362adf16fe716"
+
+[apps.sheets]
+entry = "loom-sheets/crates/loom-sheets-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-sheets/crates/loom-sheets-app/ui/app.slint", "loom-sheets/crates/loom-sheets-app/ui/components.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-sheets/crates/loom-sheets-app/ui/app.slint" = "954cdce49348a5cf75364bf7092c6c1bd477acb39cdf22e4fa700693655dd7be", "loom-sheets/crates/loom-sheets-app/ui/components.slint" = "39f79058b6bd49d439ac654024fe2133d005440099f732dc53545a3dff2aa406" }
+root-component = "SheetsApp"
+title-component = "TitleChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "StatusBar"
+root-min-width = 900.0
+root-min-height = 680.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 280.0
+toolbar-groups = 3
+toolbar-group-declarations = 6
+toolbar-icon-only-items = 3
+toolbar-icon-over-label-items = 14
+toolbar-overflow-items = 0
+labeled-slot-bindings = 6
+directional-layout-count = 1
+source-rectangles = 78
+source-horizontal-layouts = 21
+source-vertical-layouts = 14
+source-grid-layouts = 0
+source-property-rows = 8
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["View", "Page Zoom", "Add Category", "View", "Table", "Pivot Table", "Chart", "Text", "Shape", "Media", "Comment", "Share", "Format", "Organize", "Export", "Format", "Export CSV"]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "eye", "label" = "View", "accessible-label" = "View" }, { "component" = "IconOverLabelToolbarItem", "icon" = "zoom-in", "label" = "Page Zoom", "accessible-label" = "Page zoom unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Add Category", "accessible-label" = "Add category unavailable" }, { "component" = "IconOnlyToolbarItem", "icon" = "eye", "label" = "View", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "table", "label" = "Table", "accessible-label" = "Insert table unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "grid", "label" = "Pivot Table", "accessible-label" = "Insert pivot table unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "chart", "label" = "Chart", "accessible-label" = "Insert chart unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "text", "label" = "Text", "accessible-label" = "Insert text box unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "shape", "label" = "Shape", "accessible-label" = "Insert shape unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "image", "label" = "Media", "accessible-label" = "Insert media unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "comment", "label" = "Comment", "accessible-label" = "Insert comment unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "share", "label" = "Share", "accessible-label" = "Share unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "format", "label" = "Format", "accessible-label" = "Format inspector" }, { "component" = "IconOverLabelToolbarItem", "icon" = "organize", "label" = "Organize", "accessible-label" = "Organize unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "Export", "accessible-label" = "Export CSV" }, { "component" = "IconOnlyToolbarItem", "icon" = "format", "label" = "Format", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "export", "label" = "Export CSV", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "Rectangle", "line" = 443, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 453, "width" = 256.0, "height" = 76.0 }, { "name" = "Rectangle", "line" = 482, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 515, "width" = 220.0 }, { "name" = "Rectangle", "line" = 536, "height" = 32.0 }, { "name" = "Rectangle", "line" = 554, "height" = 32.0 }, { "name" = "Rectangle", "line" = 572, "height" = 32.0 }, { "name" = "Rectangle", "line" = 590, "height" = 32.0 }, { "name" = "TemplateCard", "line" = 647, "width" = 180.0, "height" = 185.0 }, { "name" = "Rectangle", "line" = 659, "height" = 20.0 }, { "name" = "Rectangle", "line" = 664, "width" = 40.0 }, { "name" = "Rectangle", "line" = 665, "width" = 1.0 }, { "name" = "Rectangle", "line" = 666, "width" = 50.0 }, { "name" = "Rectangle", "line" = 667, "width" = 1.0 }, { "name" = "Rectangle", "line" = 668, "width" = 50.0 }, { "name" = "Rectangle", "line" = 669, "width" = 1.0 }, { "name" = "Rectangle", "line" = 673, "height" = 19.0 }, { "name" = "Rectangle", "line" = 676, "x" = 0.0 }, { "name" = "Rectangle", "line" = 679, "width" = 40.0 }, { "name" = "Rectangle", "line" = 680, "width" = 1.0 }, { "name" = "Rectangle", "line" = 681, "width" = 50.0 }, { "name" = "Rectangle", "line" = 682, "width" = 1.0 }, { "name" = "Rectangle", "line" = 683, "width" = 50.0 }, { "name" = "Rectangle", "line" = 684, "width" = 1.0 }, { "name" = "TemplateCard", "line" = 690, "width" = 180.0, "height" = 185.0 }, { "name" = "Rectangle", "line" = 702, "height" = 20.0 }, { "name" = "Rectangle", "line" = 707, "width" = 40.0 }, { "name" = "Rectangle", "line" = 708, "width" = 1.0 }, { "name" = "Rectangle", "line" = 709, "width" = 50.0 }, { "name" = "Rectangle", "line" = 710, "width" = 1.0 }, { "name" = "Rectangle", "line" = 711, "width" = 50.0 }, { "name" = "Rectangle", "line" = 712, "width" = 1.0 }, { "name" = "Rectangle", "line" = 716, "height" = 19.0 }, { "name" = "Rectangle", "line" = 719, "x" = 0.0 }, { "name" = "Rectangle", "line" = 722, "width" = 40.0 }, { "name" = "Rectangle", "line" = 723, "width" = 1.0 }, { "name" = "Rectangle", "line" = 724, "width" = 50.0 }, { "name" = "Rectangle", "line" = 725, "width" = 1.0 }, { "name" = "Rectangle", "line" = 726, "width" = 50.0 }, { "name" = "Rectangle", "line" = 727, "width" = 1.0 }, { "name" = "TemplateCard", "line" = 737, "width" = 180.0, "height" = 185.0 }, { "name" = "Rectangle", "line" = 749, "height" = 20.0 }, { "name" = "Rectangle", "line" = 754, "width" = 40.0 }, { "name" = "Rectangle", "line" = 755, "width" = 1.0 }, { "name" = "Rectangle", "line" = 756, "width" = 50.0 }, { "name" = "Rectangle", "line" = 757, "width" = 1.0 }, { "name" = "Rectangle", "line" = 758, "width" = 50.0 }, { "name" = "Rectangle", "line" = 759, "width" = 1.0 }, { "name" = "Rectangle", "line" = 763, "height" = 19.0 }, { "name" = "Rectangle", "line" = 766, "x" = 0.0 }, { "name" = "Rectangle", "line" = 769, "width" = 40.0 }, { "name" = "Rectangle", "line" = 770, "width" = 1.0 }, { "name" = "Rectangle", "line" = 771, "width" = 50.0 }, { "name" = "Rectangle", "line" = 772, "width" = 1.0 }, { "name" = "Rectangle", "line" = 773, "width" = 50.0 }, { "name" = "Rectangle", "line" = 774, "width" = 1.0 }, { "name" = "Rectangle", "line" = 788, "height" = 56.0 }, { "name" = "Rectangle", "line" = 791, "x" = 0.0 }, { "name" = "CommandPalette", "line" = 823, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 876, "width" = 128.0, "height" = 26.0 }, { "name" = "Rectangle", "line" = 910, "x" = 0.0, "height" = 1.0 }, { "name" = "Rectangle", "line" = 1037, "width" = 78.0, "height" = 24.0 }, { "name" = "Text", "line" = 1055, "width" = 20.0 }, { "name" = "Rectangle", "line" = 1104, "x" = 0.0, "height" = 1.0 }, { "name" = "Rectangle", "line" = 1130, "width" = 8.0, "height" = 8.0 }, { "name" = "SheetScrollBar", "line" = 1254, "y" = 0.0 }, { "name" = "SheetScrollBar", "line" = 1264, "x" = 0.0 }, { "name" = "Rectangle", "line" = 1323, "height" = 28.0 }, { "name" = "Rectangle", "line" = 1339, "x" = 0.0 }, { "name" = "Rectangle", "line" = 1367, "width" = 36.0, "min-height" = 26.0, "max-height" = 26.0 }, { "name" = "Rectangle", "line" = 1375, "min-height" = 26.0, "max-height" = 26.0 }, { "name" = "Rectangle", "line" = 1395, "width" = 36.0 }, { "name" = "Text", "line" = 1427, "x" = 8.0 }, { "name" = "SheetTable", "line" = 1534, "x" = 24.0, "y" = 20.0 }]
+root-shell = ["TitleChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "InspectorSurface", "InspectorSurface", "StatusBar"]
+source-geometry-signature = "0f94d04e073356e3592b88d4db0444b400b2cd8fb8fc095f46573c27dfb128b7"
+
+[apps.present]
+entry = "loom-present/crates/loom-present-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-present/crates/loom-present-app/ui/app.slint", "loom-present/crates/loom-present-app/ui/present_components.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-present/crates/loom-present-app/ui/app.slint" = "6d81b874b88b56ce845f12d2d9fabbb3f555751423983c6be1d7ff86dd6f5aeb", "loom-present/crates/loom-present-app/ui/present_components.slint" = "4e6fb87ecced6f6aa660cfe7f30c12e413fd54c003bb58b9f5880b3f8a477cfe" }
+root-component = "PresentApp"
+title-component = "TitleChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 1024.0
+root-min-height = 720.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 220.0
+inspector-width = 280.0
+toolbar-groups = 3
+toolbar-group-declarations = 5
+toolbar-icon-only-items = 6
+toolbar-icon-over-label-items = 13
+toolbar-overflow-items = 0
+labeled-slot-bindings = 5
+directional-layout-count = 1
+source-rectangles = 35
+source-horizontal-layouts = 14
+source-vertical-layouts = 22
+source-grid-layouts = 0
+source-property-rows = 0
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["View", "Theme", "Add Slide", "View speaker notes", "Choose theme", "Add slide", "Table", "Chart", "Text", "Shape", "Media", "Comment", "Play", "Format", "Share", "Export", "Play presentation", "Format inspector", "Export PDF"]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "eye", "label" = "View", "accessible-label" = "View speaker notes" }, { "component" = "IconOverLabelToolbarItem", "icon" = "format", "label" = "Theme", "accessible-label" = "Choose theme" }, { "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Add Slide", "accessible-label" = "Add slide" }, { "component" = "IconOnlyToolbarItem", "icon" = "eye", "label" = "View speaker notes", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "format", "label" = "Choose theme", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "plus", "label" = "Add slide", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "table", "label" = "Table", "accessible-label" = "Insert table unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "chart", "label" = "Chart", "accessible-label" = "Insert chart unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "text", "label" = "Text", "accessible-label" = "Add text" }, { "component" = "IconOverLabelToolbarItem", "icon" = "shape", "label" = "Shape", "accessible-label" = "Add shape" }, { "component" = "IconOverLabelToolbarItem", "icon" = "image", "label" = "Media", "accessible-label" = "Insert media unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "comment", "label" = "Comment", "accessible-label" = "Insert comment unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "play", "label" = "Play", "accessible-label" = "Play presentation" }, { "component" = "IconOverLabelToolbarItem", "icon" = "format", "label" = "Format", "accessible-label" = "Format inspector" }, { "component" = "IconOverLabelToolbarItem", "icon" = "share", "label" = "Share", "accessible-label" = "Share unavailable" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "Export", "accessible-label" = "Export PDF" }, { "component" = "IconOnlyToolbarItem", "icon" = "play", "label" = "Play presentation", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "format", "label" = "Format inspector", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "export", "label" = "Export PDF", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "PresentInspector", "line" = 328, "preferred-width" = 280.0 }, { "name" = "PresentSlideStrip", "line" = 349, "preferred-width" = 220.0 }, { "name" = "Rectangle", "line" = 402, "height" = 110.0 }, { "name" = "Rectangle", "line" = 405, "x" = 0.0 }, { "name" = "PresentSlideStrip", "line" = 438, "preferred-width" = 220.0 }, { "name" = "PresentInspector", "line" = 446, "preferred-width" = 280.0 }, { "name" = "Rectangle", "line" = 504, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 538, "width" = 220.0 }, { "name" = "Rectangle", "line" = 559, "height" = 32.0 }, { "name" = "Rectangle", "line" = 577, "height" = 32.0 }, { "name" = "Rectangle", "line" = 595, "height" = 32.0 }, { "name" = "Rectangle", "line" = 613, "height" = 32.0 }, { "name" = "TemplateCard", "line" = 686, "height" = 170.0 }, { "name" = "Rectangle", "line" = 708, "width" = 40.0 }, { "name" = "TemplateCard", "line" = 717, "height" = 170.0 }, { "name" = "Rectangle", "line" = 739, "width" = 40.0 }, { "name" = "TemplateCard", "line" = 752, "height" = 170.0 }, { "name" = "Rectangle", "line" = 774, "width" = 40.0 }, { "name" = "TemplateCard", "line" = 783, "height" = 170.0 }, { "name" = "Rectangle", "line" = 805, "width" = 40.0 }, { "name" = "Rectangle", "line" = 822, "height" = 56.0 }, { "name" = "Rectangle", "line" = 825, "x" = 0.0 }, { "name" = "CommandPalette", "line" = 857, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 985, "height" = 1.0 }, { "name" = "Rectangle", "line" = 986, "height" = 2.0 }, { "name" = "Rectangle", "line" = 987, "height" = 2.0 }, { "name" = "Rectangle", "line" = 1110, "y" = 0.0, "width" = 1.0 }, { "name" = "Rectangle", "line" = 1119, "x" = 0.0, "height" = 1.0 }, { "name" = "Rectangle", "line" = 1199, "x" = -5.0, "y" = -5.0, "width" = 10.0, "height" = 10.0 }, { "name" = "Rectangle", "line" = 1223, "y" = -5.0, "width" = 10.0, "height" = 10.0 }, { "name" = "Rectangle", "line" = 1246, "x" = -5.0, "width" = 10.0, "height" = 10.0 }, { "name" = "Rectangle", "line" = 1269, "width" = 10.0, "height" = 10.0 }, { "name" = "Rectangle", "line" = 1292, "y" = -30.0, "width" = 10.0, "height" = 10.0 }, { "name" = "Rectangle", "line" = 1419, "min-height" = 40.0 }]
+root-shell = ["TitleChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "InspectorSurface", "SidebarSurface", "CanvasSurface", "SidebarSurface", "InspectorSurface", "StatusBar"]
+source-geometry-signature = "21f9bd1f8c9d33804af51fe0ab51275b34e777b24ad5dcd79fcfc395efa8ae23"
+
+[apps.photo]
+entry = "loom-photo/crates/loom-photo-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-photo/crates/loom-photo-app/ui/app.slint", "loom-photo/crates/loom-photo-app/ui/components.slint", "loom-photo/crates/loom-photo-app/ui/product_workspace_v4.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-photo/crates/loom-photo-app/ui/app.slint" = "c4d5f125b2000c96bfac17455fb3815838355dcdb9947ea682b8a8668f0c464c", "loom-photo/crates/loom-photo-app/ui/components.slint" = "a9adb6e1546a5c93e4af19ddd597bbb3f66af89925a610a8e413ff71a607bde4", "loom-photo/crates/loom-photo-app/ui/product_workspace_v4.slint" = "b966ad1e332b76334908a72d741fb3190dc7eb3b5f38dd81137f94c792e3346c" }
+root-component = "PhotoApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 1024.0
+root-min-height = 720.0
+root-preferred-width = 1280.0
+root-preferred-height = 800.0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 280.0
+toolbar-groups = 3
+toolbar-group-declarations = 6
+toolbar-icon-only-items = 9
+toolbar-icon-over-label-items = 9
+toolbar-overflow-items = 0
+labeled-slot-bindings = 6
+directional-layout-count = 1
+source-rectangles = 8
+source-horizontal-layouts = 6
+source-vertical-layouts = 8
+source-grid-layouts = 0
+source-property-rows = 10
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["Select", "Brush", "Wand", "Select", "Brush", "Wand", "Layer", "Adjustment", "Import", "Layer", "Adjustment", "Import", "Math.round(root.zoom-value) + \"%\"", "Inspector", "Export", "Zoom", "Inspector", "Export PNG"]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "cursor", "label" = "Select", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "brush", "label" = "Brush", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "wand", "label" = "Wand", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "cursor", "label" = "Select", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "brush", "label" = "Brush", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "wand", "label" = "Wand", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Layer", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "slider", "label" = "Adjustment", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "import", "label" = "Import", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "plus", "label" = "Layer", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "slider", "label" = "Adjustment", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "import", "label" = "Import", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "zoom-in", "label" = "Math.round(root.zoom-value) + \"%\"", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "format", "label" = "Inspector", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "Export", "accessible-label" = "" }, { "component" = "ToolbarIconButton", "icon" = "zoom-in", "label" = "Zoom", "accessible-label" = "" }, { "component" = "ToolbarIconButton", "icon" = "format", "label" = "Inspector", "accessible-label" = "" }, { "component" = "ToolbarIconButton", "icon" = "export", "label" = "Export PNG", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "CommandPalette", "line" = 351, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 589, "width" = 8.0, "height" = 8.0 }, { "name" = "HorizontalLayout", "line" = 666, "height" = 20.0 }]
+root-shell = ["DocumentChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "InspectorSurface", "InspectorSurface", "ToolkitStatusBar"]
+source-geometry-signature = "7476e98bb40784cc7aeb59e5646d91a8f17f525122b9f20948cd373a46fc174f"
+
+[apps.motion]
+entry = "loom-motion/crates/loom-motion-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-motion/crates/loom-motion-app/ui/app.slint", "loom-motion/crates/loom-motion-app/ui/components.slint", "loom-motion/crates/loom-motion-app/ui/product_workspace_v2.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-motion/crates/loom-motion-app/ui/app.slint" = "dd9a393bab4ea7f669a594b4058e7e9f203044d290343446e3af3fe22c99a30a", "loom-motion/crates/loom-motion-app/ui/components.slint" = "468a5e6fc2f30e15bd3fd1da16c61d79541dfb823668512ea1b38a615253c475", "loom-motion/crates/loom-motion-app/ui/product_workspace_v2.slint" = "99c2ec59a86212a10b3cd2129ad0eb69f26ca29b23a5df824168e8e5ea05396a" }
+root-component = "MotionApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 920.0
+root-min-height = 720.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 3
+toolbar-group-declarations = 6
+toolbar-icon-only-items = 11
+toolbar-icon-over-label-items = 11
+toolbar-overflow-items = 0
+labeled-slot-bindings = 6
+directional-layout-count = 1
+source-rectangles = 49
+source-horizontal-layouts = 6
+source-vertical-layouts = 14
+source-grid-layouts = 0
+source-property-rows = 0
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["Transform", "Layer", "Guides", "Safe Area", "Transform", "Add layer", "Toggle guides", "Toggle safe area", "Step Back", "root.is-playing ? \"Pause\" : \"Play\"", "Step Fwd", "Loop", "Step back", "root.is-playing ? \"Pause\" : \"Play\"", "Step forward", "Toggle loop", "Curves unavailable", "Export SVG", "Math.round(root.zoom-value) + \"%\"", "Curves unavailable", "Export SVG", "Math.round(root.zoom-value) + \"%\""]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "cursor", "label" = "Transform", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Layer", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "grid", "label" = "Guides", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "eye", "label" = "Safe Area", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "cursor", "label" = "Transform", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "plus", "label" = "Add layer", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "grid", "label" = "Toggle guides", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "eye", "label" = "Toggle safe area", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "chevron-left", "label" = "Step Back", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "root.is-playing ? \"pause\" : \"play\"", "label" = "root.is-playing ? \"Pause\" : \"Play\"", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "chevron-right", "label" = "Step Fwd", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "redo", "label" = "Loop", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "chevron-left", "label" = "Step back", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "root.is-playing ? \"pause\" : \"play\"", "label" = "root.is-playing ? \"Pause\" : \"Play\"", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "chevron-right", "label" = "Step forward", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "redo", "label" = "Toggle loop", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "timeline", "label" = "Curves unavailable", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "Export SVG", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "zoom-in", "label" = "Math.round(root.zoom-value) + \"%\"", "accessible-label" = "" }, { "component" = "ToolbarIconButton", "icon" = "timeline", "label" = "Curves unavailable", "accessible-label" = "" }, { "component" = "ToolbarIconButton", "icon" = "export", "label" = "Export SVG", "accessible-label" = "" }, { "component" = "ToolbarIconButton", "icon" = "zoom-in", "label" = "Math.round(root.zoom-value) + \"%\"", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "Rectangle", "line" = 216, "width" = 1.0 }, { "name" = "Rectangle", "line" = 238, "width" = 1.0 }, { "name" = "Rectangle", "line" = 272, "width" = 1.0 }, { "name" = "CommandPalette", "line" = 331, "x" = 0.0, "y" = 0.0 }, { "name" = "WorkspaceRow", "line" = 466, "height" = 50.0 }, { "name" = "Rectangle", "line" = 475, "width" = 32.0, "height" = 32.0 }, { "name" = "Rectangle", "line" = 542, "x" = 18.0, "y" = 18.0 }, { "name" = "Text", "line" = 583, "x" = 8.0 }, { "name" = "Text", "line" = 609, "x" = 8.0 }, { "name" = "Text", "line" = 642, "x" = 12.0, "y" = 0.0 }, { "name" = "Text", "line" = 672, "x" = 8.0 }, { "name" = "Rectangle", "line" = 683, "x" = -5.0 }, { "name" = "Rectangle", "line" = 686, "x" = -5.0 }, { "name" = "Rectangle", "line" = 722, "height" = 26.0, "min-width" = 178.0 }, { "name" = "Rectangle", "line" = 809, "height" = 36.0 }, { "name" = "Rectangle", "line" = 828, "height" = 1.0 }, { "name" = "Rectangle", "line" = 842, "height" = 1.0 }, { "name" = "Rectangle", "line" = 915, "height" = 24.0 }, { "name" = "Text", "line" = 923, "x" = 12.0 }, { "name" = "Text", "line" = 933, "x" = 2.0 }, { "name" = "Rectangle", "line" = 942, "x" = 0.0 }, { "name" = "TouchArea", "line" = 944, "x" = 0.0, "y" = 0.0 }, { "name" = "WorkspaceRow", "line" = 975, "height" = 44.0 }, { "name" = "Rectangle", "line" = 996, "y" = 6.0 }, { "name" = "Text", "line" = 1008, "x" = 22.0 }, { "name" = "Rectangle", "line" = 1009, "x" = 9.0 }, { "name" = "Rectangle", "line" = 1014, "width" = 8.0, "height" = 8.0 }, { "name" = "TouchArea", "line" = 1022, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 1036, "y" = 0.0 }, { "name" = "Rectangle", "line" = 1040, "y" = 0.0 }]
+root-shell = ["DocumentChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "SidebarSurface", "InspectorSurface", "SidebarSurface", "InspectorSurface", "ToolkitStatusBar"]
+source-geometry-signature = "8cc52feaab90d476616d054c3848b16dd35f21e73ed3f0ed36f2c1b82605e6f9"
+
+[apps.video]
+entry = "loom-video/crates/loom-video-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-video/crates/loom-video-app/ui/app.slint", "loom-video/crates/loom-video-app/ui/components.slint", "loom-video/crates/loom-video-app/ui/product_workspace_v4.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-video/crates/loom-video-app/ui/app.slint" = "c095c5be39d61598d8ecee49f6f6f3cdd1df6413cf8fecde7c96da8c225bcd3a", "loom-video/crates/loom-video-app/ui/components.slint" = "88a82903ffbfeeeea1e8734b41300c3bfcc6d35173f8b8fb8e948cefb9b56c85", "loom-video/crates/loom-video-app/ui/product_workspace_v4.slint" = "cec6b1505e7c640848e9336415f5e19374b8e30028f35b4282d0f013e6bc3f8f" }
+root-component = "VideoApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 920.0
+root-min-height = 700.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 2
+toolbar-group-declarations = 4
+toolbar-icon-only-items = 6
+toolbar-icon-over-label-items = 6
+toolbar-overflow-items = 0
+labeled-slot-bindings = 4
+directional-layout-count = 1
+source-rectangles = 21
+source-horizontal-layouts = 8
+source-vertical-layouts = 13
+source-grid-layouts = 0
+source-property-rows = 0
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["Select", "Blade", "Snap", "Select", "Blade", "Snap", "Import", "Inspector", "root.exporting ? \"Exporting\" : \"Export\"", "Import", "Inspector", "root.exporting ? \"Exporting\" : \"Export\""]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "cursor", "label" = "Select", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "scissors", "label" = "Blade", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "link", "label" = "Snap", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "cursor", "label" = "Select", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "scissors", "label" = "Blade", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "link", "label" = "Snap", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "import", "label" = "Import", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "format", "label" = "Inspector", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "root.exporting ? \"Exporting\" : \"Export\"", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "import", "label" = "Import", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "format", "label" = "Inspector", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "export", "label" = "root.exporting ? \"Exporting\" : \"Export\"", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "Rectangle", "line" = 225, "width" = 1.0 }, { "name" = "Rectangle", "line" = 248, "width" = 1.0 }, { "name" = "Rectangle", "line" = 276, "height" = 1.0 }, { "name" = "Rectangle", "line" = 311, "width" = 1.0 }, { "name" = "Rectangle", "line" = 322, "width" = 1.0 }, { "name" = "CommandPalette", "line" = 352, "x" = 0.0, "y" = 0.0 }, { "name" = "Rectangle", "line" = 564, "height" = 1.0 }, { "name" = "WorkspaceRow", "line" = 565, "height" = 58.0 }, { "name" = "Rectangle", "line" = 571, "width" = 58.0, "height" = 42.0 }, { "name" = "Rectangle", "line" = 597, "min-height" = 70.0 }, { "name" = "Text", "line" = 727, "width" = 88.0 }, { "name" = "Text", "line" = 735, "width" = 132.0 }, { "name" = "Text", "line" = 743, "width" = 190.0 }, { "name" = "Rectangle", "line" = 848, "height" = 34.0 }, { "name" = "Slider", "line" = 868, "width" = 92.0 }, { "name" = "Rectangle", "line" = 889, "height" = 30.0 }, { "name" = "Text", "line" = 898, "x" = 9.0 }, { "name" = "Rectangle", "line" = 961, "width" = 10.0, "height" = 10.0 }, { "name" = "Rectangle", "line" = 975, "height" = 64.0 }, { "name" = "Rectangle", "line" = 1013, "y" = 6.0, "height" = 52.0 }, { "name" = "Rectangle", "line" = 1084, "x" = 0.0, "y" = 0.0, "width" = 9.0 }, { "name" = "Rectangle", "line" = 1123, "y" = 0.0, "width" = 9.0 }, { "name" = "Rectangle", "line" = 1163, "width" = 2.0 }, { "name" = "Rectangle", "line" = 1205, "height" = 1.0 }]
+root-shell = ["DocumentChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "SidebarSurface", "InspectorSurface", "SidebarSurface", "InspectorSurface", "ToolkitStatusBar"]
+source-geometry-signature = "a35c6e43562366225867de76f89934fb46fde59f829b6410d7e9970f380cf358"
+
+[apps.studio]
+entry = "loom-studio/crates/loom-studio-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-studio/crates/loom-studio-app/ui/app.slint", "loom-studio/crates/loom-studio-app/ui/studio_arrangement.slint", "loom-studio/crates/loom-studio-app/ui/studio_library.slint", "loom-studio/crates/loom-studio-app/ui/studio_mixer.slint", "loom-studio/crates/loom-studio-app/ui/studio_transport.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-studio/crates/loom-studio-app/ui/app.slint" = "a5cf4719770efd8057d4688d9fbe77da8ac7981eb66e7acffeffd59c6236a723", "loom-studio/crates/loom-studio-app/ui/studio_arrangement.slint" = "5d10e9320a144627171331b23da17dcbf819b1e032f1916e71712156c2ad7d6b", "loom-studio/crates/loom-studio-app/ui/studio_library.slint" = "18626c809470afb37500f5d9a63181633dd81e73cd51cc8b26cc120f465e27b9", "loom-studio/crates/loom-studio-app/ui/studio_mixer.slint" = "056478594fb6e02f4a5ec5a8a82fa4f3161bfab9c70eda9764ecb316891518e7", "loom-studio/crates/loom-studio-app/ui/studio_transport.slint" = "165419b701135c6173269ff6407218a29a3601e0dc37663826658b92d5662911" }
+root-component = "StudioApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 920.0
+root-min-height = 720.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 2
+toolbar-group-declarations = 4
+toolbar-icon-only-items = 7
+toolbar-icon-over-label-items = 7
+toolbar-overflow-items = 0
+labeled-slot-bindings = 4
+directional-layout-count = 3
+source-rectangles = 18
+source-horizontal-layouts = 6
+source-vertical-layouts = 9
+source-grid-layouts = 0
+source-property-rows = 0
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["root.is-playing ? \"Pause\" : \"Play\"", "Stop", "root.is-recording ? \"Recording\" : \"Record\"", "Loop", "Metronome", "root.is-playing ? \"Pause\" : \"Play\"", "Stop", "root.is-recording ? \"Recording\" : \"Record\"", "Add Track", "Bounce WAV", "Loop", "Metronome", "Add Track", "Bounce WAV"]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "root.is-playing ? \"pause\" : \"play\"", "label" = "root.is-playing ? \"Pause\" : \"Play\"", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "stop", "label" = "Stop", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "record", "label" = "root.is-recording ? \"Recording\" : \"Record\"", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "link", "label" = "Loop", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "clock", "label" = "Metronome", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "root.is-playing ? \"pause\" : \"play\"", "label" = "root.is-playing ? \"Pause\" : \"Play\"", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "stop", "label" = "Stop", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "record", "label" = "root.is-recording ? \"Recording\" : \"Record\"", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Add Track", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "export", "label" = "Bounce WAV", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "link", "label" = "Loop", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "clock", "label" = "Metronome", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "plus", "label" = "Add Track", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "export", "label" = "Bounce WAV", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "Rectangle", "line" = 340, "width" = 1.0 }, { "name" = "Rectangle", "line" = 391, "width" = 1.0 }, { "name" = "CommandPalette", "line" = 441, "x" = 0.0, "y" = 0.0 }, { "name" = "Text", "line" = 500, "min-width" = 48.0, "preferred-width" = 64.0, "max-width" = 76.0 }, { "name" = "Text", "line" = 520, "min-width" = 48.0, "preferred-width" = 64.0, "max-width" = 76.0 }, { "name" = "Rectangle", "line" = 532, "height" = 1.0 }, { "name" = "Rectangle", "line" = 586, "height" = 1.0 }, { "name" = "Rectangle", "line" = 600, "min-height" = 30.0, "preferred-height" = 30.0, "max-height" = 34.0 }, { "name" = "Rectangle", "line" = 654, "height" = 1.0 }, { "name" = "Rectangle", "line" = 841, "x" = 0.0, "y" = 8.0, "width" = 3.0 }, { "name" = "Rectangle", "line" = 1015, "y" = 0.0 }, { "name" = "Text", "line" = 1194, "min-width" = 38.0 }, { "name" = "Rectangle", "line" = 1306, "width" = 220.0 }, { "name" = "Rectangle", "line" = 1514, "height" = 1.0 }, { "name" = "Rectangle", "line" = 1539, "min-height" = 4.0, "preferred-height" = 4.0 }]
+root-shell = ["DocumentChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "InspectorSurface", "SidebarSurface", "InspectorSurface", "SidebarSurface", "ToolkitStatusBar"]
+source-geometry-signature = "13eb55f4351e9cd5539debbcb0af1424f74a92ebbf773d777a0b57ac0bb317b4"
+
+[apps.encode]
+entry = "loom-encode/crates/loom-encode-app/ui/app.slint"
+source-files = ["loom-core/crates/loom-ui/ui/components.slint", "loom-core/crates/loom-ui/ui/icons.slint", "loom-core/crates/loom-ui/ui/theme.slint", "loom-core/crates/loom-ui/ui/toolkit.slint", "loom-encode/crates/loom-encode-app/ui/app.slint", "loom-encode/crates/loom-encode-app/ui/encode_inspector.slint", "loom-encode/crates/loom-encode-app/ui/encode_job_card.slint", "loom-encode/crates/loom-encode-app/ui/encode_progress.slint", "loom-encode/crates/loom-encode-app/ui/encode_queue.slint"]
+source-hashes = { "loom-core/crates/loom-ui/ui/components.slint" = "2da996a94830362c1bd144fdd0a3c64d137ddb14f9ecec7112c759d0b4829f61", "loom-core/crates/loom-ui/ui/icons.slint" = "6e0c059f6e7d36d09a6f985767d1086da4325a6653149c8c35ffb5d26f7cabdb", "loom-core/crates/loom-ui/ui/theme.slint" = "1ad8ed49b2819e0f40818a8ee37ac8e1798c3c071b2fa1b8092c62e59d702d31", "loom-core/crates/loom-ui/ui/toolkit.slint" = "5159ff57f5d629d0266a6b840f2e7afb85c89bbff9eee4d6f37871da0f7eadee", "loom-encode/crates/loom-encode-app/ui/app.slint" = "71ffa2c034ee7c13b2130ec959f47dc050ecf7cb2a4b2bf22be99d7b1c5680b8", "loom-encode/crates/loom-encode-app/ui/encode_inspector.slint" = "5823fa6cc85815775c56148caf2f312eec1280b2cc22aa22fafc5332f836c231", "loom-encode/crates/loom-encode-app/ui/encode_job_card.slint" = "4b6a0945769a7d53708976b012c28df75a51971962ceb195bec9282f0ea2b089", "loom-encode/crates/loom-encode-app/ui/encode_progress.slint" = "76c1cfc26717c2ddfe9ce8297b5303cdfe90d78ff898488436508e8596a45da4", "loom-encode/crates/loom-encode-app/ui/encode_queue.slint" = "a6c8909bc1c469b5ee583a92a76eac3e843e8d5c77afba1213959242d5c1ab75" }
+root-component = "EncodeApp"
+title-component = "DocumentChrome"
+toolbar-component = "LabeledToolbar"
+status-component = "ToolkitStatusBar"
+root-min-width = 900.0
+root-min-height = 680.0
+root-preferred-width = 0
+root-preferred-height = 0
+sidebar-count = 0
+inspector-count = 0
+sidebar-width = 0.0
+inspector-width = 0.0
+toolbar-groups = 2
+toolbar-group-declarations = 4
+toolbar-icon-only-items = 3
+toolbar-icon-over-label-items = 3
+toolbar-overflow-items = 0
+labeled-slot-bindings = 4
+directional-layout-count = 1
+source-rectangles = 17
+source-horizontal-layouts = 9
+source-vertical-layouts = 19
+source-grid-layouts = 0
+source-property-rows = 0
+rtl-binding = true
+rtl-layout-branches = true
+toolbar-labels = ["Add Job", "Remove", "Add Job", "Remove", "root.running ? \"Cancel Queue\" : \"Start Queue\"", "root.running ? \"Cancel Queue\" : \"Start Queue\""]
+toolbar-items = [{ "component" = "IconOverLabelToolbarItem", "icon" = "plus", "label" = "Add Job", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "trash", "label" = "Remove", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "plus", "label" = "Add Job", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "trash", "label" = "Remove", "accessible-label" = "" }, { "component" = "IconOverLabelToolbarItem", "icon" = "root.running ? \"stop\" : \"play\"", "label" = "root.running ? \"Cancel Queue\" : \"Start Queue\"", "accessible-label" = "" }, { "component" = "IconOnlyToolbarItem", "icon" = "root.running ? \"stop\" : \"play\"", "label" = "root.running ? \"Cancel Queue\" : \"Start Queue\"", "accessible-label" = "" }]
+source-geometry-nodes = [{ "name" = "Rectangle", "line" = 277, "width" = 1.0 }, { "name" = "Rectangle", "line" = 289, "width" = 1.0 }, { "name" = "CommandPalette", "line" = 349, "x" = 0.0, "y" = 0.0 }, { "name" = "VerticalLayout", "line" = 424, "min-width" = 48.0, "preferred-width" = 48.0, "max-width" = 56.0 }, { "name" = "Rectangle", "line" = 480, "min-width" = 42.0, "preferred-width" = 46.0, "max-width" = 54.0, "min-height" = 42.0, "preferred-height" = 46.0, "max-height" = 54.0 }, { "name" = "Rectangle", "line" = 528, "min-height" = 4.0, "preferred-height" = 4.0, "max-height" = 4.0 }, { "name" = "Rectangle", "line" = 570, "min-width" = 64.0, "preferred-width" = 86.0, "max-width" = 104.0, "min-height" = 64.0, "preferred-height" = 86.0, "max-height" = 104.0 }, { "name" = "Rectangle", "line" = 607, "height" = 1.0 }, { "name" = "HorizontalLayout", "line" = 609, "min-height" = 28.0 }, { "name" = "Rectangle", "line" = 622, "min-height" = 10.0, "preferred-height" = 10.0, "max-height" = 10.0 }, { "name" = "Rectangle", "line" = 637, "min-height" = 74.0, "preferred-height" = 86.0, "max-height" = 108.0 }, { "name" = "Rectangle", "line" = 749, "height" = 1.0 }]
+root-shell = ["DocumentChrome", "LabeledToolbar", "DirectionalLayout", "ContextToolbar", "DirectionalLayout", "DirectionalLayout", "InspectorSurface", "SidebarSurface", "InspectorSurface", "SidebarSurface", "ToolkitStatusBar"]
+source-geometry-signature = "abe8e1da9685fdb123fbf7baea2c6bb3b82915410476877dd42f45bbde849ee2"

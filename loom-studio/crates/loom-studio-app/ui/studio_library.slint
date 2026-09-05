@@ -1,0 +1,145 @@
+import { SidebarSurface, Slider, SegmentedControl, Field, StatusPill } from "components.slint";
+import { ToolbarButton, IconOnlyToolbarItem } from "toolkit.slint";
+import { Theme } from "theme.slint";
+
+/// Library/device rail for Studio.  All controls stay in a vertical flow so
+/// long device names and 150% text scale grow the rail content instead of
+/// painting over the next section.
+export component StudioLibrary inherits SidebarSurface {
+    in property <bool> compact-layout: false;
+    in property <[string]> track-labels: [];
+    in property <[string]> midi-ports: [];
+    in-out property <int> selected-midi-port: 0;
+    in-out property <string> import-path: "";
+    in property <string> midi-status: "No MIDI input connected";
+    in property <string> output-device: "No output device";
+    in property <string> input-device: "No input device";
+
+    callback import-audio(string);
+    callback connect-midi(int);
+    callback add-track;
+
+    title: "Library";
+    detail: root.track-labels.length + " tracks";
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+
+        Text {
+            text: "Audio file";
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+        }
+        Field {
+            label: "WAV path";
+            placeholder: "Choose a WAV file…";
+            value <=> root.import-path;
+        }
+        ToolbarButton {
+            icon: "import";
+            text: "Import WAV";
+            horizontal-stretch: 1;
+            enabled: root.import-path != "";
+            clicked => { root.import-audio(root.import-path); }
+        }
+
+        Rectangle { height: 1px; background: Theme.palette().border; }
+
+        Text {
+            text: "MIDI input";
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+        }
+        if root.midi-ports.length > 0 && root.midi-ports.length <= 6 : SegmentedControl {
+            items: root.midi-ports;
+            current <=> root.selected-midi-port;
+            horizontal-stretch: 1;
+        }
+        if root.midi-ports.length > 6 : Rectangle {
+            min-height: 30px;
+            preferred-height: 30px;
+            max-height: 34px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface-sunken;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                padding-left: Theme.tokens.space.xs;
+                padding-right: Theme.tokens.space.xs;
+                IconOnlyToolbarItem {
+                    icon: "chevron-left";
+                    label: "Previous MIDI input";
+                    clicked => {
+                        root.selected-midi-port = root.selected-midi-port <= 0
+                            ? root.midi-ports.length - 1
+                            : root.selected-midi-port - 1;
+                    }
+                }
+                Text {
+                    text: root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
+                    horizontal-stretch: 1;
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                IconOnlyToolbarItem {
+                    icon: "chevron-right";
+                    label: "Next MIDI input";
+                    clicked => {
+                        root.selected-midi-port = Math.mod(root.selected-midi-port + 1, root.midi-ports.length);
+                    }
+                }
+            }
+            accessible-role: button;
+            accessible-label: "MIDI input " + root.midi-ports[min(root.selected-midi-port, root.midi-ports.length - 1)];
+        }
+        ToolbarButton {
+            icon: "keyboard";
+            text: "Connect MIDI";
+            horizontal-stretch: 1;
+            enabled: root.midi-ports.length > 0;
+            clicked => { root.connect-midi(root.selected-midi-port); }
+        }
+        StatusPill {
+            text: root.midi-status;
+            tone: root.midi-ports.length > 0 ? 1 : 0;
+            max-content-width: root.compact-layout ? 168px : 232px;
+            available-width: root.compact-layout ? 168px : 232px;
+        }
+
+        Rectangle { height: 1px; background: Theme.palette().border; }
+
+        Text {
+            text: "Audio devices";
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+        }
+        Text {
+            text: root.output-device;
+            wrap: word-wrap;
+            color: Theme.palette().ink;
+            font-size: Theme.tokens.typography.caption;
+        }
+        Text {
+            text: root.input-device;
+            wrap: word-wrap;
+            color: Theme.palette().ink-secondary;
+            font-size: Theme.tokens.typography.caption;
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        ToolbarButton {
+            icon: "plus";
+            text: "Add Track";
+            horizontal-stretch: 1;
+            clicked => { root.add-track(); }
+        }
+    }
+}

@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/loom-studio-core",
+    "crates/loom-studio-cli",
+    "crates/loom-studio-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+loom-document = { path = "../loom-core/crates/loom-document" }
+loom-package = { path = "../loom-core/crates/loom-package" }
+loom-command = { path = "../loom-core/crates/loom-command" }
+loom-ui = { path = "../loom-core/crates/loom-ui" }
+loom-test-support = { path = "../loom-core/crates/loom-test-support" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+cpal = "0.18.1"
+midir = "0.11.0"
+arc-swap = "1.7"
+crossbeam-queue = "0.3"
+hound = "3.5.1"

@@ -1,0 +1,13 @@
+[package]
+name = "loom-present-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loom-present-cli"
+path = "src/main.rs"
+
+[dependencies]
+loom-present-core = { path = "../loom-present-core" }

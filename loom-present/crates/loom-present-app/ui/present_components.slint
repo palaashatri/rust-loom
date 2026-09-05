@@ -1,0 +1,486 @@
+import {
+    LoomButton, LoomIconButton, LoomStatusBar, LoomStatusText,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// Thumbnail item used by the slide strip and kept content-sized so long
+/// localized titles elide inside the preview instead of overlapping neighbors.
+component PresentSlideThumbnail inherits Rectangle {
+    in property <string> title: "Slide";
+    in property <int> index: 0;
+    in property <bool> active: false;
+    callback clicked;
+
+    height: 100px;
+    min-width: 0px;
+    horizontal-stretch: 1;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: root.active ? 2px : 1px;
+    border-color: root.active ? Theme.palette().accent : Theme.palette().border;
+    background: root.active ? Theme.palette().selection-soft : Theme.palette().surface;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding: Theme.tokens.space.sm;
+        Text {
+            text: (root.index + 1) + "";
+            min-width: 12px;
+            font-size: Theme.tokens.typography.micro;
+            font-weight: 700;
+            color: Theme.palette().ink-secondary;
+            vertical-alignment: top;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.tokens.metrics.radius-small;
+            border-width: 1px;
+            border-color: Theme.palette().paper-line;
+            background: Theme.palette().paper;
+            VerticalLayout {
+                padding: Theme.tokens.space.sm;
+                spacing: Theme.tokens.space.xs;
+                alignment: center;
+                Text {
+                    text: root.title;
+                    font-size: Theme.tokens.typography.micro;
+                    font-weight: 700;
+                    color: Theme.palette().paper-ink;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
+                Rectangle { height: 1px; width: 60%; background: Theme.palette().accent; }
+                Rectangle { height: 2px; width: 80%; background: Theme.palette().paper-line; }
+                Rectangle { height: 2px; width: 70%; background: Theme.palette().paper-line; }
+            }
+        }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component PresentSlideStrip inherits Rectangle {
+    in property <[string]> titles: [];
+    in property <int> active-index: 0;
+    callback select-slide(int);
+    callback add-slide;
+    callback delete-slide;
+
+    width: 220px;
+    background: Theme.palette().panel;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-top: Theme.tokens.space.md;
+        padding-bottom: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.sm;
+        padding-right: Theme.tokens.space.sm;
+        alignment: start;
+
+        for title[idx] in root.titles : PresentSlideThumbnail {
+            index: idx;
+            title: title;
+            active: idx == root.active-index;
+            clicked => { root.select-slide(idx); }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            alignment: start;
+            LoomIconButton {
+                icon: "plus";
+                label: "Add Slide";
+                tooltip: "Add a new slide";
+                clicked => { root.add-slide(); }
+            }
+            LoomIconButton {
+                icon: "trash-2";
+                label: "Delete Slide";
+                tooltip: "Delete selected slide";
+                clicked => { root.delete-slide(); }
+            }
+        }
+    }
+}
+
+/// The scene-model canvas keeps element coordinates in slide space.
+export component PresentSlideCanvas inherits Rectangle {
+    in property <bool> aspect-ratio-wide: true;
+    in property <[string]> element-labels: [];
+    in property <[string]> element-contents: [];
+    in property <[float]> element-xs: [];
+    in property <[float]> element-ys: [];
+    in property <[float]> element-widths: [];
+    in property <[float]> element-heights: [];
+    in property <[float]> element-rotations: [];
+    in property <[int]> element-types: [];
+    in property <[bool]> element-selected: [];
+    in property <int> selection-count: 0;
+    in property <bool> editing-enabled: true;
+    in property <[float]> snap-guides-x: [];
+    in property <[float]> snap-guides-y: [];
+    in property <float> marquee-x: 0;
+    in property <float> marquee-y: 0;
+    in property <float> marquee-width: 0;
+    in property <float> marquee-height: 0;
+    in property <bool> marquee-visible: false;
+    in property <int> active-element-index: 0;
+
+    callback select-element(int);
+    callback canvas-pressed(float, float, bool);
+    callback canvas-moved(float, float);
+    callback canvas-released(float, float);
+    callback canvas-cancelled;
+    callback canvas-key-pressed(string, bool, bool) -> EventResult;
+    callback element-pressed(int, bool);
+    callback element-moved(int, float, float);
+    callback element-released(int);
+    callback element-cancelled(int);
+    callback handle-pressed(int, string, bool);
+    callback handle-moved(int, string, float, float);
+    callback handle-released(int, string);
+    callback handle-cancelled(int, string);
+
+    background: Theme.palette().canvas;
+
+    slide-focus := FocusScope {
+        enabled: root.editing-enabled;
+        key-pressed(event) => {
+            return root.canvas-key-pressed(event.text, event.modifiers.shift, event.modifiers.control || event.modifiers.meta);
+        }
+
+        slide := Rectangle {
+            property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
+            x: max(Theme.tokens.space.xxl, (parent.width - self.width) / 2);
+            y: max(Theme.tokens.space.xxl, (parent.height - self.height) / 2);
+            width: min(840px, max(1px, parent.width - Theme.tokens.space.xxl * 2));
+            height: min(parent.height - Theme.tokens.space.xxl * 2, self.width * self.slide-ratio);
+            border-radius: Theme.tokens.metrics.radius-small;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().paper;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: Theme.palette().shadow;
+            clip: true;
+
+            canvas-touch := TouchArea {
+                enabled: root.editing-enabled;
+                width: 100%;
+                height: 100%;
+                pointer-event(event) => {
+                    let domain_x = self.mouse-x * 1000.0 / parent.width;
+                    let domain_y = self.mouse-y * 562.5 / parent.height;
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        slide-focus.focus();
+                        root.canvas-pressed(domain_x, domain_y, event.modifiers.shift);
+                    } else if (event.kind == PointerEventKind.cancel) {
+                        root.canvas-cancelled();
+                    } else if (event.kind == PointerEventKind.up) {
+                        root.canvas-released(domain_x, domain_y);
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        let domain_x = self.mouse-x * 1000.0 / parent.width;
+                        let domain_y = self.mouse-y * 562.5 / parent.height;
+                        root.canvas-moved(domain_x, domain_y);
+                    }
+                }
+            }
+
+            for guide_x in root.snap-guides-x : Rectangle {
+                x: guide_x * parent.width / 1000.0;
+                y: 0px;
+                width: 1px;
+                height: parent.height;
+                background: Theme.palette().focus;
+                opacity: root.editing-enabled ? 0.7 : 0;
+            }
+            for guide_y in root.snap-guides-y : Rectangle {
+                x: 0px;
+                y: guide_y * parent.height / 562.5;
+                width: parent.width;
+                height: 1px;
+                background: Theme.palette().focus;
+                opacity: root.editing-enabled ? 0.7 : 0;
+            }
+            if root.marquee-visible && root.editing-enabled : Rectangle {
+                x: root.marquee-x * parent.width / 1000.0;
+                y: root.marquee-y * parent.height / 562.5;
+                width: root.marquee-width * parent.width / 1000.0;
+                height: root.marquee-height * parent.height / 562.5;
+                border-width: 1px;
+                border-color: Theme.palette().accent;
+                background: Theme.palette().selection-soft;
+                opacity: 0.45;
+            }
+
+            for element_x[idx] in root.element-xs : Rectangle {
+                property <length> render-x: clamp(element_x * parent.width / 1000.0, 0px, max(0px, parent.width - 2px));
+                property <length> render-y: clamp(root.element-ys[idx] * parent.height / 562.5, 0px, max(0px, parent.height - 2px));
+                property <length> render-width: max(1px, min(root.element-widths[idx] * parent.width / 1000.0, max(1px, parent.width - self.render-x - 2px)));
+                property <length> render-height: max(1px, min(root.element-heights[idx] * parent.height / 562.5, max(1px, parent.height - self.render-y - 2px)));
+                x: self.render-x;
+                y: self.render-y;
+                width: self.render-width;
+                height: self.render-height;
+                border-radius: root.element-types[idx] == 4 ? self.width / 2 : Theme.tokens.metrics.radius-small;
+                border-width: root.editing-enabled && root.element-selected.length > idx && root.element-selected[idx] ? 2px : 0px;
+                border-color: Theme.palette().accent;
+                background: root.element-types[idx] == 3 ? Theme.palette().content-accent-soft
+                    : root.element-types[idx] == 4 ? Theme.palette().content-cool-soft
+                    : root.element-types[idx] == 5 ? Theme.palette().content-accent
+                    : transparent;
+                transform-origin: { x: self.width / 2, y: self.height / 2 };
+                transform-rotation: root.element-rotations.length > idx ? root.element-rotations[idx] * 1deg : 0deg;
+                accessible-role: button;
+                accessible-enabled: root.editing-enabled;
+                accessible-label: root.element-selected.length > idx && root.element-selected[idx] ? "Selected " + root.element-labels[idx] : root.element-labels[idx];
+                accessible-action-default => { root.select-element(idx); root.element-pressed(idx, false); slide-focus.focus(); }
+
+                Text {
+                    x: Theme.tokens.space.sm;
+                    y: Theme.tokens.space.xs;
+                    width: max(1px, parent.width - Theme.tokens.space.lg * 2);
+                    height: max(1px, parent.height - Theme.tokens.space.sm * 2);
+                    text: root.element-contents[idx];
+                    font-size: root.element-types[idx] == 0 ? Theme.tokens.typography.display
+                        : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large;
+                    font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
+                    color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
+                        : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
+                        : Theme.palette().paper-ink;
+                    horizontal-alignment: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? center : left;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+
+                element-touch := TouchArea {
+                    enabled: root.editing-enabled;
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                            slide-focus.focus();
+                            root.element-pressed(idx, event.modifiers.shift);
+                        } else if (event.kind == PointerEventKind.cancel) {
+                            root.element-cancelled(idx);
+                        } else if (event.kind == PointerEventKind.up) {
+                            root.element-released(idx);
+                        }
+                    }
+                    moved => {
+                        if self.pressed {
+                            root.element-moved(idx, (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height);
+                        }
+                    }
+                }
+
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                    x: -5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "nw", event.modifiers.shift); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "nw"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "nw"); }
+                        }
+                        moved => { if self.pressed { root.handle-moved(idx, "nw", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
+                    }
+                }
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                    x: parent.width - 5px; y: -5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "ne", event.modifiers.shift); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "ne"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "ne"); }
+                        }
+                        moved => { if self.pressed { root.handle-moved(idx, "ne", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
+                    }
+                }
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                    x: -5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "sw", event.modifiers.shift); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "sw"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "sw"); }
+                        }
+                        moved => { if self.pressed { root.handle-moved(idx, "sw", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
+                    }
+                }
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                    x: parent.width - 5px; y: parent.height - 5px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().paper; border-width: 1px; border-color: Theme.palette().accent;
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "se", event.modifiers.shift); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "se"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "se"); }
+                        }
+                        moved => { if self.pressed { root.handle-moved(idx, "se", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
+                    }
+                }
+                if root.editing-enabled && root.selection-count == 1 && root.element-selected.length > idx && root.element-selected[idx] : Rectangle {
+                    x: parent.width / 2 - 5px; y: -30px; width: 10px; height: 10px; border-radius: 5px; background: Theme.palette().accent;
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { slide-focus.focus(); root.handle-pressed(idx, "rotate", event.modifiers.shift); }
+                            if (event.kind == PointerEventKind.cancel) { root.handle-cancelled(idx, "rotate"); }
+                            if (event.kind == PointerEventKind.up) { root.handle-released(idx, "rotate"); }
+                        }
+                        moved => { if self.pressed { root.handle-moved(idx, "rotate", (self.mouse-x - self.pressed-x) * 1000.0 / slide.width, (self.mouse-y - self.pressed-y) * 562.5 / slide.height); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component PresentNotesEditor inherits Rectangle {
+    in-out property <string> text: "";
+    in property <string> placeholder-text: "";
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.tokens.typography.body;
+    callback edited(string);
+    callback key-pressed(event: KeyEvent) -> EventResult;
+    callback key-released(event: KeyEvent) -> EventResult;
+
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: notes-input.has-focus ? 2px : 1px;
+    border-color: notes-input.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+    background: root.enabled ? Theme.palette().surface-raised : Theme.palette().surface-sunken;
+    clip: true;
+    forward-focus: notes-input;
+
+    if root.text == "" : Text {
+        x: Theme.tokens.space.lg;
+        y: Theme.tokens.space.sm;
+        width: max(1px, root.width - Theme.tokens.space.xl);
+        height: max(1px, root.height - Theme.tokens.space.lg);
+        text: root.placeholder-text;
+        font-size: root.font-size;
+        color: Theme.palette().ink-disabled;
+        vertical-alignment: top;
+        wrap: word-wrap;
+    }
+
+    notes-input := TextInput {
+        x: Theme.tokens.space.lg;
+        y: Theme.tokens.space.sm;
+        width: max(1px, root.width - Theme.tokens.space.xl);
+        height: max(1px, root.height - Theme.tokens.space.lg);
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        font-size: root.font-size;
+        color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+        selection-background-color: Theme.palette().selection;
+        selection-foreground-color: Theme.palette().accent-ink;
+        edited => { root.edited(notes-input.text); }
+        key-pressed(event) => { return root.key-pressed(event); }
+        key-released(event) => { return root.key-released(event); }
+    }
+}
+
+export component PresentStatusBar inherits LoomStatusBar {
+    in property <string> leading-text: "";
+    in property <string> trailing-text: "";
+
+    LoomStatusText {
+        text: root.leading-text;
+    }
+    Rectangle { horizontal-stretch: 1; }
+    LoomStatusText {
+        text: root.trailing-text;
+    }
+}
+
+export component PresentToolbarOverflow inherits Rectangle {
+    in property <bool> inspector-visible: false;
+    callback toggle-notes;
+    callback open-theme-chooser;
+    callback add-slide;
+    callback add-text;
+    callback add-shape;
+    callback toggle-preview;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback close-requested;
+
+    min-width: 220px;
+    max-width: 300px;
+    preferred-width: 256px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.xs;
+        padding: Theme.tokens.space.sm;
+
+        LoomButton {
+            icon: "eye";
+            label: "View speaker notes";
+            variant: "ghost";
+            clicked => { root.toggle-notes(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "format";
+            label: "Choose theme";
+            variant: "ghost";
+            clicked => { root.open-theme-chooser(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "plus";
+            label: "Add slide";
+            variant: "ghost";
+            clicked => { root.add-slide(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "text";
+            label: "Add text";
+            variant: "ghost";
+            clicked => { root.add-text(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "shape";
+            label: "Add shape";
+            variant: "ghost";
+            clicked => { root.add-shape(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "play";
+            label: "Play presentation";
+            variant: "ghost";
+            clicked => { root.toggle-preview(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "format";
+            label: "Format inspector";
+            variant: root.inspector-visible ? "primary" : "ghost";
+            clicked => { root.toggle-inspector(); root.close-requested(); }
+        }
+        LoomButton {
+            icon: "export";
+            label: "Export PDF";
+            variant: "ghost";
+            clicked => { root.export-pdf(); root.close-requested(); }
+        }
+    }
+}

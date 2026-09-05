@@ -1,0 +1,69 @@
+name: Loom active-phase CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, cline-implementation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loom-active-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  governance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Governance and serial workflow lock
+        run: python3 loom-bootstrap/scripts/audit-governance.py
+      - name: Code structure ratchet
+        run: python3 loom-bootstrap/scripts/audit-code-structure.py
+      - name: Commercial asset provenance
+        run: python3 loom-bootstrap/scripts/audit-assets.py
+      - name: UI foundation source contract
+        run: python3 loom-bootstrap/scripts/audit-ui-foundation.py
+
+  ui-foundation:
+    needs: governance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native UI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libfontconfig1-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+      - name: Select Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: loom-core
+          shared-key: loom-ui-foundation
+      - name: Format shared workspace
+        working-directory: loom-core
+        run: cargo fmt --all --check
+      - name: Clippy shared UI
+        working-directory: loom-core
+        run: cargo clippy -p loom-ui --all-targets -- -D warnings
+      - name: Test and render foundation gallery
+        working-directory: loom-core
+        env:
+          LOOM_FOUNDATION_EVIDENCE: ${{ github.workspace }}/loom-bootstrap/.work/foundation-gallery
+        run: cargo test -p loom-ui
+      - name: Upload reviewable foundation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loom-ui-foundation-gallery
+          if-no-files-found: error
+          retention-days: 14
+          path: loom-bootstrap/.work/foundation-gallery/

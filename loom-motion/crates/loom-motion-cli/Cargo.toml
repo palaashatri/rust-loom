@@ -1,0 +1,13 @@
+[package]
+name = "loom-motion-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loom-motion-cli"
+path = "src/main.rs"
+
+[dependencies]
+loom-motion-core = { path = "../loom-motion-core" }

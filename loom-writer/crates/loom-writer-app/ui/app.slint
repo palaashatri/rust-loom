@@ -1,0 +1,454 @@
+import { TemplateChooserModal } from "template_chooser.slint";
+import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import { Icon } from "icons.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import {
+    WriterActionToolbar, WriterToolbarBody, WriterPageCanvas, WriterInspector,
+    WriterStatusBar, WriterToolbarOverflow, WriterRenderBlock, WriterSelectionRect
+} from "writer_components.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
+export { Palette as WidgetPalette } from "std-widgets.slint";
+
+export component WriterApp inherits Window {
+    title: "Loom Writer";
+    min-width: 900px;
+    min-height: 680px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.palette().canvas;
+
+    in property <bool> wide-toolbar: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> labeled-export: false;
+    in property <bool> overflow-toolbar: false;
+    in property <bool> rtl: false;
+    in-out property <bool> toolbar-overflow-open: false;
+    in-out property <bool> show-inspector: false;
+    in property <bool> inspector-available: true;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
+    in-out property <int> inspector-tab: 0;
+    callback window-resized(length);
+    changed rtl => {
+        Theme.rtl = root.rtl;
+    }
+    changed width => {
+        root.window-resized(root.width);
+        if (!ResponsivePolicy.priority-2-overflow(root.width)) {
+            root.close-toolbar-overflow();
+        }
+    }
+
+    in property <string> doc-title: "Untitled Document";
+    in-out property <string> doc-content: "";
+    in property <[WriterRenderBlock]> render-blocks: [];
+    in property <[WriterSelectionRect]> selection-rects: [];
+    in-out property <int> selection-anchor: 0;
+    in-out property <int> selection-focus: 0;
+    in property <string> status-left: "";
+    in property <string> status-right: "";
+    in property <string> selection-announcement: "No text selected";
+    in-out property <float> page-zoom: 1.0;
+    in-out property <length> page-scroll-x: 0px;
+    in-out property <length> page-scroll-y: 0px;
+    in-out property <int> page-count: 1;
+    in-out property <length> page-stack-height: 842px;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+
+    in-out property <bool> is-bold: false;
+    in-out property <bool> is-italic: false;
+    in-out property <bool> is-underline: false;
+    in-out property <bool> is-strikethrough: false;
+    in-out property <int> heading-level: 0;
+    in-out property <int> font-family-index: 0;
+    in-out property <int> font-size-pt: 11;
+    in-out property <int> text-alignment: 0;
+    in-out property <int> line-spacing-index: 1;
+    in-out property <int> list-style-index: 0;
+    in-out property <int> column-count: 1;
+    in-out property <int> margin-preset: 0;
+    in-out property <bool> drop-cap-enabled: false;
+    in-out property <int> page-orientation: 0;
+    in-out property <int> paper-size: 0;
+    in property <int> word-count: 0;
+    in property <int> char-count: 0;
+    in property <int> reading-time-mins: 1;
+
+    in-out property <bool> template-chooser-open: false;
+    in-out property <int> template-selected: 0;
+    in-out property <int> template-category: 0;
+
+    callback new-doc;
+    callback open-doc;
+    callback save-doc;
+    callback save-as-doc;
+    callback export-pdf;
+    callback undo;
+    callback redo;
+    callback document-edited(string, int, int);
+    callback selection-changed(int, int);
+    callback pointer-pressed(length, length, bool);
+    callback pointer-moved(length, length);
+    callback pointer-released(length, length);
+    callback pointer-cancelled;
+    callback page-zoom-changed(float);
+    callback page-scroll-changed(length, length);
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback toggle-strikethrough;
+    callback select-heading(int);
+    callback select-font-family(int);
+    callback increase-font-size;
+    callback decrease-font-size;
+    callback select-alignment(int);
+    callback indent-text;
+    callback outdent-text;
+    callback select-line-spacing(int);
+    callback select-list-style(int);
+    callback select-columns(int);
+    callback select-margins(int);
+    callback toggle-drop-cap;
+    callback select-orientation(int);
+    callback select-paper-size(int);
+    callback insert-table;
+    callback insert-shape;
+    callback insert-text-box;
+    callback insert-comment;
+    callback add-page;
+    callback toggle-sidebar;
+    callback toggle-inspector;
+    callback create-template(int);
+    callback cancel-template;
+
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    changed page-zoom => { root.page-zoom-changed(root.page-zoom); }
+    changed page-scroll-x => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
+    changed page-scroll-y => { root.page-scroll-changed(root.page-scroll-x, root.page-scroll-y); }
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    function compact-label(full-label: string) -> string {
+        return root.wide-toolbar ? full-label : "";
+    }
+
+    public function close-toolbar-overflow() {
+        if (root.toolbar-overflow-open) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
+    }
+
+    changed overflow-toolbar => {
+        if (!root.overflow-toolbar) {
+            root.close-toolbar-overflow();
+        }
+    }
+
+    overflow-menu-focus := FocusScope {
+        enabled: root.toolbar-overflow-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-toolbar-overflow();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    template-chooser-focus := FocusScope {
+        enabled: root.template-chooser-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel-template();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.create-template(root.template-selected);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    changed template-chooser-open => {
+        if (root.template-chooser-open) {
+            template-chooser-focus.focus();
+        } else {
+            app-focus.focus();
+        }
+    }
+
+    changed palette-open => {
+        if (!root.palette-open) {
+            app-focus.focus();
+        }
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-doc();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-doc();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-doc(); } else { root.save-doc(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-pdf();
+                    return accept;
+                }
+                if (event.text == "b" || event.text == "B") {
+                    root.toggle-bold();
+                    return accept;
+                }
+                if (event.text == "i" || event.text == "I") {
+                    root.toggle-italic();
+                    return accept;
+                }
+                if (event.text == "u" || event.text == "U") {
+                    root.toggle-underline();
+                    return accept;
+                }
+                if (event.text == "z" || event.text == "Z") {
+                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+
+            WriterActionToolbar {
+                rtl: root.rtl;
+                wide: root.wide-toolbar;
+                overflow: root.overflow-toolbar;
+                inspector-available: root.inspector-available;
+                inspector-visible: root.inspector-visible;
+                labeled-export: root.labeled-export;
+                page-zoom: root.page-zoom;
+                can-undo: root.can-undo;
+                can-redo: root.can-redo;
+                is-bold: root.is-bold;
+                is-italic: root.is-italic;
+                is-underline: root.is-underline;
+                is-strikethrough: root.is-strikethrough;
+                text-alignment: root.text-alignment;
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                page-zoom-changed(val) => { root.page-zoom = val; }
+                overflow-requested => {
+                    if (root.toolbar-overflow-open) {
+                        root.close-toolbar-overflow();
+                    } else {
+                        root.toolbar-overflow-open = true;
+                        overflow-menu-focus.focus();
+                    }
+                }
+                undo => { root.undo(); }
+                redo => { root.redo(); }
+                toggle-bold => { root.toggle-bold(); }
+                toggle-italic => { root.toggle-italic(); }
+                toggle-underline => { root.toggle-underline(); }
+                toggle-strikethrough => { root.toggle-strikethrough(); }
+                select-alignment(val) => { root.select-alignment(val); }
+                insert-table => { root.insert-table(); }
+                insert-shape => { root.insert-shape(); }
+                insert-text-box => { root.insert-text-box(); }
+                insert-comment => { root.insert-comment(); }
+                add-page => { root.add-page(); }
+                toggle-sidebar => { root.toggle-sidebar(); }
+            }
+
+            HorizontalLayout {
+                spacing: 0px;
+                vertical-stretch: 1;
+
+                if !root.rtl : WriterPageCanvas {
+                    doc-title: root.doc-title;
+                    doc-content <=> root.doc-content;
+                    render-blocks <=> root.render-blocks;
+                    selection-rects <=> root.selection-rects;
+                    selection-anchor <=> root.selection-anchor;
+                    selection-focus <=> root.selection-focus;
+                    selection-announcement: root.selection-announcement;
+                    page-zoom <=> root.page-zoom;
+                    page-scroll-x <=> root.page-scroll-x;
+                    page-scroll-y <=> root.page-scroll-y;
+                    page-count: root.page-count;
+                    page-stack-height: root.page-stack-height;
+                    page-orientation: root.page-orientation;
+                    paper-size: root.paper-size;
+                    margin-preset: root.margin-preset;
+                    page-zoom-changed(value) => { root.page-zoom-changed(value); }
+                    page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
+                    document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                    pointer-released(x, y) => { root.pointer-released(x, y); }
+                    pointer-cancelled => { root.pointer-cancelled(); }
+                    key-pressed(event) => { return reject; }
+                }
+
+                if root.inspector-visible : WriterInspector {
+                    preferred-width: 290px;
+                    inspector-tab <=> root.inspector-tab;
+                    is-bold <=> root.is-bold;
+                    is-italic <=> root.is-italic;
+                    is-underline <=> root.is-underline;
+                    is-strikethrough <=> root.is-strikethrough;
+                    heading-level <=> root.heading-level;
+                    font-family-index <=> root.font-family-index;
+                    font-size-pt <=> root.font-size-pt;
+                    text-alignment <=> root.text-alignment;
+                    line-spacing-index <=> root.line-spacing-index;
+                    list-style-index <=> root.list-style-index;
+                    column-count <=> root.column-count;
+                    margin-preset <=> root.margin-preset;
+                    drop-cap-enabled <=> root.drop-cap-enabled;
+                    page-orientation <=> root.page-orientation;
+                    paper-size <=> root.paper-size;
+                    status-left: root.status-left;
+                    word-count: root.word-count;
+                    char-count: root.char-count;
+                    page-count: root.page-count;
+                    reading-time-mins: root.reading-time-mins;
+                    toggle-bold => { root.toggle-bold(); }
+                    toggle-italic => { root.toggle-italic(); }
+                    toggle-underline => { root.toggle-underline(); }
+                    toggle-strikethrough => { root.toggle-strikethrough(); }
+                    select-heading(idx) => { root.select-heading(idx); }
+                    select-font-family(idx) => { root.select-font-family(idx); }
+                    increase-font-size => { root.increase-font-size(); }
+                    decrease-font-size => { root.decrease-font-size(); }
+                    select-alignment(idx) => { root.select-alignment(idx); }
+                    indent-text => { root.indent-text(); }
+                    outdent-text => { root.outdent-text(); }
+                    select-line-spacing(idx) => { root.select-line-spacing(idx); }
+                    select-list-style(idx) => { root.select-list-style(idx); }
+                    select-columns(cols) => { root.select-columns(cols); }
+                    select-margins(idx) => { root.select-margins(idx); }
+                    toggle-drop-cap => { root.toggle-drop-cap(); }
+                    select-orientation(idx) => { root.select-orientation(idx); }
+                    select-paper-size(idx) => { root.select-paper-size(idx); }
+                }
+
+                if root.rtl : WriterPageCanvas {
+                    doc-title: root.doc-title;
+                    doc-content <=> root.doc-content;
+                    render-blocks <=> root.render-blocks;
+                    selection-rects <=> root.selection-rects;
+                    selection-anchor <=> root.selection-anchor;
+                    selection-focus <=> root.selection-focus;
+                    selection-announcement: root.selection-announcement;
+                    page-zoom <=> root.page-zoom;
+                    page-scroll-x <=> root.page-scroll-x;
+                    page-scroll-y <=> root.page-scroll-y;
+                    page-count: root.page-count;
+                    page-stack-height: root.page-stack-height;
+                    page-orientation: root.page-orientation;
+                    paper-size: root.paper-size;
+                    margin-preset: root.margin-preset;
+                    page-zoom-changed(value) => { root.page-zoom-changed(value); }
+                    page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
+                    document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                    pointer-released(x, y) => { root.pointer-released(x, y); }
+                    pointer-cancelled => { root.pointer-cancelled(); }
+                    key-pressed(event) => { return reject; }
+                }
+            }
+
+            WriterStatusBar {
+                leading-text: root.status-left;
+                trailing-text: root.status-right;
+            }
+        }
+    }
+
+    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
+        width: root.width;
+        height: root.height;
+        background: transparent;
+
+        TouchArea { clicked => { root.close-toolbar-overflow(); } }
+
+        VerticalLayout {
+            padding-top: Theme.tokens.metrics.toolbar-height + Theme.tokens.space.sm;
+            padding-right: Theme.tokens.space.lg;
+            padding-left: Theme.tokens.space.lg;
+            cross-axis-alignment: end;
+            WriterToolbarOverflow {
+                inspector-available: root.inspector-available;
+                inspector-visible: root.inspector-visible;
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                close-requested => { root.close-toolbar-overflow(); }
+            }
+        }
+    }
+
+    if root.template-chooser-open : TemplateChooserModal {
+        width: root.width;
+        height: root.height;
+        template-selected <=> root.template-selected;
+        template-category <=> root.template-category;
+        cancel-template => { root.cancel-template(); }
+        create-template(idx) => { root.create-template(idx); }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => { root.palette-invoked(idx); }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => { root.palette-move(delta); }
+        key-text(text) => { root.palette-key-text(text); }
+        backspace => { root.palette-backspace(); }
+        close-requested => {
+            root.palette-open = false;
+            root.palette-close();
+        }
+    }
+}
