@@ -31,12 +31,6 @@ export component WriterActionToolbar inherits LoomToolbar {
     callback toggle-underline;
     callback toggle-strikethrough;
     callback select-alignment(int);
-    callback insert-table;
-    callback insert-shape;
-    callback insert-text-box;
-    callback insert-comment;
-    callback add-page;
-    callback toggle-sidebar;
 
     function next-page-zoom() -> float {
         return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
@@ -44,23 +38,11 @@ export component WriterActionToolbar inherits LoomToolbar {
 
     // Left Navigation / Document Group
     LoomToolbarGroup {
-        LoomIconButton {
-            icon: "sidebar";
-            label: "View";
-            tooltip: "Toggle View";
-            clicked => { root.toggle-sidebar(); }
-        }
         LoomButton {
             icon: "zoom-in";
             label: Math.round(root.page-zoom * 100) + "%";
             variant: "ghost";
             clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-        LoomIconButton {
-            icon: "plus";
-            label: "Add Page";
-            tooltip: "Add Page";
-            clicked => { root.add-page(); }
         }
         LoomIconButton {
             icon: "undo";
@@ -81,33 +63,6 @@ export component WriterActionToolbar inherits LoomToolbar {
     LoomToolbarDivider { }
 
     // Center Insert Group (matching Apple Pages Insert tools)
-    LoomToolbarGroup {
-        LoomButton {
-            icon: "table";
-            label: root.wide ? "Table" : "";
-            variant: "ghost";
-            clicked => { root.insert-table(); }
-        }
-        LoomButton {
-            icon: "shape";
-            label: root.wide ? "Shape" : "";
-            variant: "ghost";
-            clicked => { root.insert-shape(); }
-        }
-        LoomButton {
-            icon: "text";
-            label: root.wide ? "Text" : "";
-            variant: "ghost";
-            clicked => { root.insert-text-box(); }
-        }
-        LoomButton {
-            icon: "comment";
-            label: root.wide ? "Comment" : "";
-            variant: "ghost";
-            clicked => { root.insert-comment(); }
-        }
-    }
-
     LoomToolbarDivider { }
 
     // Fast Formatting Group
@@ -214,12 +169,6 @@ export component WriterToolbarBody inherits HorizontalLayout {
     callback toggle-underline;
     callback toggle-strikethrough;
     callback select-alignment(int);
-    callback insert-table;
-    callback insert-shape;
-    callback insert-text-box;
-    callback insert-comment;
-    callback add-page;
-    callback toggle-sidebar;
 
     spacing: Theme.tokens.space.xs;
 
@@ -228,23 +177,11 @@ export component WriterToolbarBody inherits HorizontalLayout {
     }
 
     LoomToolbarGroup {
-        LoomIconButton {
-            icon: "sidebar";
-            label: "View";
-            tooltip: "Toggle View";
-            clicked => { root.toggle-sidebar(); }
-        }
         LoomButton {
             icon: "zoom-in";
             label: Math.round(root.page-zoom * 100) + "%";
             variant: "ghost";
             clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-        LoomIconButton {
-            icon: "plus";
-            label: "Add Page";
-            tooltip: "Add Page";
-            clicked => { root.add-page(); }
         }
         LoomIconButton {
             icon: "undo";
@@ -263,33 +200,6 @@ export component WriterToolbarBody inherits HorizontalLayout {
     }
 
     LoomToolbarDivider { }
-
-    LoomToolbarGroup {
-        LoomButton {
-            icon: "table";
-            label: root.wide ? "Table" : "";
-            variant: "ghost";
-            clicked => { root.insert-table(); }
-        }
-        LoomButton {
-            icon: "shape";
-            label: root.wide ? "Shape" : "";
-            variant: "ghost";
-            clicked => { root.insert-shape(); }
-        }
-        LoomButton {
-            icon: "text";
-            label: root.wide ? "Text" : "";
-            variant: "ghost";
-            clicked => { root.insert-text-box(); }
-        }
-        LoomButton {
-            icon: "comment";
-            label: root.wide ? "Comment" : "";
-            variant: "ghost";
-            clicked => { root.insert-comment(); }
-        }
-    }
 
     LoomToolbarDivider { }
 

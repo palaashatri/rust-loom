@@ -1301,7 +1301,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_word_count(word_count.min(i32::MAX as usize) as i32);
     app.set_char_count(char_count.min(i32::MAX as usize) as i32);
     // ~200 wpm average reading speed
-    app.set_reading_time_mins(((word_count + 199) / 200).max(1).min(i32::MAX as usize) as i32);
+    app.set_reading_time_mins(word_count.div_ceil(200).max(1).min(i32::MAX as usize) as i32);
     app.set_status_left(SharedString::from(format!(
         "{} words · {} chars · {} blocks",
         word_count, char_count, block_count
@@ -2938,7 +2938,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             );
             next.set_selection(selection);
             apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-            let msg = if enabled { "Strikethrough removed" } else { "Strikethrough applied" };
+            let msg = if enabled {
+                "Strikethrough removed"
+            } else {
+                "Strikethrough applied"
+            };
             app.set_status_right(SharedString::from(msg));
             app.set_selection_announcement(SharedString::from(msg));
         });
@@ -3047,131 +3051,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             );
             next.set_selection(sel);
             apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
-        });
-    }
-
-    // ── List style (stub — domain support pending) ────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_select_list_style(move |_index| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("List styles: coming in a future update"));
-            }
-        });
-    }
-
-    // ── Columns (stub) ────────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_select_columns(move |count| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from(format!("Columns set to {count}")));
-            }
-        });
-    }
-
-    // ── Margins (stub) ────────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_select_margins(move |preset| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_margin_preset(preset);
-                let label = match preset {
-                    0 => "Narrow",
-                    2 => "Wide",
-                    _ => "Normal",
-                };
-                app.set_status_right(SharedString::from(format!("Margins: {label}")));
-            }
-        });
-    }
-
-    // ── Drop cap (stub) ───────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_toggle_drop_cap(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let current = app.get_drop_cap_enabled();
-                app.set_drop_cap_enabled(!current);
-                let msg = if !current { "Drop cap enabled" } else { "Drop cap disabled" };
-                app.set_status_right(SharedString::from(msg));
-            }
-        });
-    }
-
-    // ── Page orientation (stub) ───────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_select_orientation(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_page_orientation(index);
-                let label = if index == 0 { "Portrait" } else { "Landscape" };
-                app.set_status_right(SharedString::from(format!("Orientation: {label}")));
-            }
-        });
-    }
-
-    // ── Paper size (stub) ─────────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_select_paper_size(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_paper_size(index);
-                let label = if index == 0 { "US Letter" } else { "A4" };
-                app.set_status_right(SharedString::from(format!("Paper size: {label}")));
-            }
-        });
-    }
-
-    // ── Insert actions (stubs) ────────────────────────────────────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_insert_table(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("Insert table: coming in a future update"));
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_insert_shape(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("Insert shape: coming in a future update"));
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_insert_text_box(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("Insert text box: coming in a future update"));
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_insert_comment(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("Insert comment: coming in a future update"));
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_add_page(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("Add page: coming in a future update"));
-            }
-        });
-    }
-
-    // ── Sidebar toggle (stub — sidebar not yet implemented) ───────────────
-    {
-        let app_ref = app.as_weak();
-        app.on_toggle_sidebar(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_right(SharedString::from("Sidebar: coming in a future update"));
-            }
         });
     }
 

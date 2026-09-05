@@ -193,9 +193,6 @@ export component WriterPageCanvas inherits Rectangle {
     in-out property <length> page-scroll-y: 0px;
     in property <int> page-count: 1;
     in property <length> page-stack-height: 842px;
-    in property <int> page-orientation: 0;
-    in property <int> paper-size: 0;
-    in property <int> margin-preset: 0;
     callback document-edited(string, int, int);
     callback selection-changed(int, int);
     callback pointer-pressed(length, length, bool);
@@ -222,11 +219,12 @@ export component WriterPageCanvas inherits Rectangle {
         flicked => { root.page-scroll-changed(self.viewport-x, self.viewport-y); }
 
         page := Rectangle {
-            private property <length> base-width: root.paper-size == 1 ? 595px : 612px;
-            private property <length> base-height: root.paper-size == 1 ? 842px : 792px;
-            private property <length> raw-width: root.page-orientation == 1 ? self.base-height : self.base-width;
-            private property <length> raw-height: root.page-orientation == 1 ? self.base-width : self.base-height;
-            private property <length> page-padding: (root.margin-preset == 1 ? 36px : (root.margin-preset == 2 ? 108px : 72px)) * root.page-zoom;
+            // A4 geometry; must match loom_writer_core::PageStyle::default().
+            private property <length> base-width: 595px;
+            private property <length> base-height: 842px;
+            private property <length> raw-width: self.base-width;
+            private property <length> raw-height: self.base-height;
+            private property <length> page-padding: 72px * root.page-zoom;
 
             x: max(24px, (page-scroll.width - self.width) / 2);
             y: 24px;

@@ -27,7 +27,6 @@ export component WriterApp inherits Window {
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
-    in-out property <int> inspector-tab: 0;
     callback window-resized(length);
     changed rtl => {
         Theme.rtl = root.rtl;
@@ -65,12 +64,6 @@ export component WriterApp inherits Window {
     in-out property <int> font-size-pt: 11;
     in-out property <int> text-alignment: 0;
     in-out property <int> line-spacing-index: 1;
-    in-out property <int> list-style-index: 0;
-    in-out property <int> column-count: 1;
-    in-out property <int> margin-preset: 0;
-    in-out property <bool> drop-cap-enabled: false;
-    in-out property <int> page-orientation: 0;
-    in-out property <int> paper-size: 0;
     in property <int> word-count: 0;
     in property <int> char-count: 0;
     in property <int> reading-time-mins: 1;
@@ -106,18 +99,6 @@ export component WriterApp inherits Window {
     callback indent-text;
     callback outdent-text;
     callback select-line-spacing(int);
-    callback select-list-style(int);
-    callback select-columns(int);
-    callback select-margins(int);
-    callback toggle-drop-cap;
-    callback select-orientation(int);
-    callback select-paper-size(int);
-    callback insert-table;
-    callback insert-shape;
-    callback insert-text-box;
-    callback insert-comment;
-    callback add-page;
-    callback toggle-sidebar;
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -281,12 +262,6 @@ export component WriterApp inherits Window {
                 toggle-underline => { root.toggle-underline(); }
                 toggle-strikethrough => { root.toggle-strikethrough(); }
                 select-alignment(val) => { root.select-alignment(val); }
-                insert-table => { root.insert-table(); }
-                insert-shape => { root.insert-shape(); }
-                insert-text-box => { root.insert-text-box(); }
-                insert-comment => { root.insert-comment(); }
-                add-page => { root.add-page(); }
-                toggle-sidebar => { root.toggle-sidebar(); }
             }
 
             HorizontalLayout {
@@ -306,9 +281,6 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
-                    page-orientation: root.page-orientation;
-                    paper-size: root.paper-size;
-                    margin-preset: root.margin-preset;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
@@ -321,8 +293,7 @@ export component WriterApp inherits Window {
                 }
 
                 if root.inspector-visible : WriterInspector {
-                    preferred-width: 290px;
-                    inspector-tab <=> root.inspector-tab;
+                    preferred-width: 320px;
                     is-bold <=> root.is-bold;
                     is-italic <=> root.is-italic;
                     is-underline <=> root.is-underline;
@@ -332,12 +303,6 @@ export component WriterApp inherits Window {
                     font-size-pt <=> root.font-size-pt;
                     text-alignment <=> root.text-alignment;
                     line-spacing-index <=> root.line-spacing-index;
-                    list-style-index <=> root.list-style-index;
-                    column-count <=> root.column-count;
-                    margin-preset <=> root.margin-preset;
-                    drop-cap-enabled <=> root.drop-cap-enabled;
-                    page-orientation <=> root.page-orientation;
-                    paper-size <=> root.paper-size;
                     status-left: root.status-left;
                     word-count: root.word-count;
                     char-count: root.char-count;
@@ -355,12 +320,6 @@ export component WriterApp inherits Window {
                     indent-text => { root.indent-text(); }
                     outdent-text => { root.outdent-text(); }
                     select-line-spacing(idx) => { root.select-line-spacing(idx); }
-                    select-list-style(idx) => { root.select-list-style(idx); }
-                    select-columns(cols) => { root.select-columns(cols); }
-                    select-margins(idx) => { root.select-margins(idx); }
-                    toggle-drop-cap => { root.toggle-drop-cap(); }
-                    select-orientation(idx) => { root.select-orientation(idx); }
-                    select-paper-size(idx) => { root.select-paper-size(idx); }
                 }
 
                 if root.rtl : WriterPageCanvas {
@@ -376,9 +335,6 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
-                    page-orientation: root.page-orientation;
-                    paper-size: root.paper-size;
-                    margin-preset: root.margin-preset;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
