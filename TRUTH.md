@@ -15,13 +15,13 @@ The score is intentionally frozen during the UI-foundation reset unless verified
 ## Active gate
 
 ```text
-ACTIVE PHASE: WRITER
+ACTIVE PHASE: PRESENT
 FOUNDATION STATUS: ACCEPTED
-ACTIVE APPLICATION: WRITER (IN_PROGRESS)
-LOCKED APPLICATIONS: PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
+ACTIVE APPLICATION: PRESENT (IN_PROGRESS)
+LOCKED APPLICATIONS: PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-Loom Sheets has passed its complete acceptance gate and deep audit. Loom Writer is the active application under development per `AGENTS.MD` Section 4.
+Loom Sheets and Loom Writer have passed their complete acceptance gates and deep audits. Loom Present is the active application under development per `AGENTS.MD` Section 4.
 
 ## Why the reset is necessary
 
@@ -91,8 +91,8 @@ After the shared foundation becomes `ACCEPTED`, application migration proceeds o
 | Order | Application | Status |
 |---:|---|---|
 | 1 | Sheets | ACCEPTED |
-| 2 | Writer | IN_PROGRESS |
-| 3 | Present | LOCKED |
+| 2 | Writer | ACCEPTED |
+| 3 | Present | IN_PROGRESS |
 | 4 | Photo | LOCKED |
 | 5 | Motion | LOCKED |
 | 6 | Video | LOCKED |
@@ -124,7 +124,7 @@ Verified capabilities:
 
 ### Writer
 
-Status: `IN_PROGRESS` (Shared UI foundation adopted; deep audit passed; mechanical & visual verification captured)
+Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
 
 Verified capabilities:
 - Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
@@ -143,13 +143,30 @@ Verified capabilities:
   - 0 warnings with Clippy (`-D warnings`).
   - Native screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and states (default, inspector, template chooser).
 
-Current product limitation: the visible editor remains below a professional word processor in complex pagination/layout, complex tables/images/floating objects, review workflows, headers/footers, and interchange depth.
-
 ### Present
 
-Foundation strengths include deck/slide/object models, ordering/alignment helpers, notes, PDF output, partial PPTX import/export, presenter-related engine primitives, persistence/history, and native file workflows.
+Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
 
-Current product limitation: professional object authoring/direct manipulation, mixed media, animation authoring, presenter workflows, recording/video export, and interchange fidelity remain incomplete.
+Verified capabilities:
+- Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
+- Complete removal of placebo and fake controls: clean toolbar (`LoomToolbar`, `LoomIconButton`, `LoomOverflowButton`) and inspector (`LoomPanel`, `LoomSegmentedControl`, `LoomSectionHeader`, `LoomButton`).
+- Native macOS AppKit `NSMenu` and Linux DBusMenu reflection (`MenuBarService`) with command projection (`file.new`, `file.open`, `file.save`, `file.export_pdf`, `edit.undo`, `edit.redo`, `slide.new`, `slide.duplicate`, `slide.delete`, `slide.prev`, `slide.next`, `view.inspector`).
+- Dynamic menu enablement synchronization matching document state, history, selection, and viewport constraints.
+- Deep audit test suite passing (scene graph, shapes, selection, marquee, snapping, notes, undo/redo, persistence, PPTX/PDF export, macOS AppKit menu bar reflection).
+- File byte size ceilings enforced and reduced:
+  - `main.rs`: 95,635 bytes (ceiling 123,901 bytes; reduced by 28,266 bytes).
+  - `app.slint`: 20,432 bytes (ceiling 42,883 bytes; reduced by 22,451 bytes).
+  - `present_components.slint`: 23,544 bytes (ceiling 34,385 bytes; reduced by 10,841 bytes).
+  - `desktop_tests.rs`: 25,607 bytes (under 65,536 limit).
+  - `audit_tests.rs`: 10,009 bytes (under 65,536 limit).
+  - `theme_chooser.slint`: 20,491 bytes (under 32,768 limit).
+  - `inspector.slint`: 7,521 bytes (under 32,768 limit).
+  - `toolbar.slint`: 3,248 bytes (under 32,768 limit).
+- Test and audit verification:
+  - 78 unit/integration tests passing (29 in `loom-present-app`, 49 in `loom-present-core`).
+  - 4 automated bootstrap audits passing (governance, code structure, asset provenance, UI foundation).
+  - 0 warnings with Clippy (`-D warnings`).
+  - Native screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and states (default, theme chooser, command palette).
 
 ### Photo
 

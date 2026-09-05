@@ -1,9 +1,9 @@
 schema_version = 1
-phase = "writer"
+phase = "present"
 foundation_status = "ACCEPTED"
 application_development_locked = false
 consumer_imports_allowed = true
-next_application = "present"
+next_application = "photo"
 
 application_order = [
   "sheets",
@@ -28,6 +28,7 @@ allowed_active_prefixes = [
   "loom-design-bible/tokens/",
   "loom-sheets/",
   "loom-writer/",
+  "loom-present/",
 ]
 
 [foundation_gate]
@@ -44,8 +45,8 @@ directions = ["ltr", "rtl"]
 
 [application_status]
 sheets = "ACCEPTED"
-writer = "IN_PROGRESS"
-present = "LOCKED"
+writer = "ACCEPTED"
+present = "IN_PROGRESS"
 photo = "LOCKED"
 motion = "LOCKED"
 video = "LOCKED"

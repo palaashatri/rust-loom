@@ -1,0 +1,110 @@
+import {
+    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
+    LoomButton, LoomIconButton, LoomOverflowButton,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component PresentActionToolbar inherits LoomToolbar {
+    in property <bool> rtl: Theme.rtl;
+    in property <bool> wide: false;
+    in property <bool> overflow: false;
+    in property <bool> inspector-visible: false;
+    in property <bool> notes-visible: false;
+    in property <bool> is-preview-mode: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+
+    callback toggle-notes;
+    callback open-theme-chooser;
+    callback add-slide;
+    callback add-text;
+    callback add-shape;
+    callback toggle-preview;
+    callback toggle-inspector;
+    callback export-pdf;
+    callback overflow-requested;
+    callback undo;
+    callback redo;
+
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "undo";
+            label: "Undo";
+            tooltip: "Undo last edit (Cmd+Z)";
+            enabled: root.can-undo;
+            clicked => { root.undo(); }
+        }
+        LoomIconButton {
+            icon: "redo";
+            label: "Redo";
+            tooltip: "Redo last edit (Cmd+Shift+Z)";
+            enabled: root.can-redo;
+            clicked => { root.redo(); }
+        }
+        LoomIconButton {
+            icon: "plus";
+            label: "Add Slide";
+            tooltip: "Add a new slide";
+            clicked => { root.add-slide(); }
+        }
+    }
+
+    LoomToolbarDivider { }
+
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "text";
+            label: "Text";
+            tooltip: "Add text box";
+            clicked => { root.add-text(); }
+        }
+        LoomIconButton {
+            icon: "shape";
+            label: "Shape";
+            tooltip: "Add shape";
+            clicked => { root.add-shape(); }
+        }
+        LoomIconButton {
+            icon: "format";
+            label: "Theme";
+            tooltip: "Choose presentation theme";
+            clicked => { root.open-theme-chooser(); }
+        }
+        LoomIconButton {
+            icon: "eye";
+            label: "Notes";
+            tooltip: "Toggle speaker notes drawer";
+            selected: root.notes-visible;
+            clicked => { root.toggle-notes(); }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "play";
+            label: "Play";
+            tooltip: "Play presentation (preview)";
+            selected: root.is-preview-mode;
+            clicked => { root.toggle-preview(); }
+        }
+        LoomIconButton {
+            icon: "format";
+            label: "Inspector";
+            tooltip: "Format Inspector (Cmd+Option+I)";
+            selected: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        LoomIconButton {
+            icon: "export";
+            label: "Export PDF";
+            tooltip: "Export presentation as PDF (Cmd+E)";
+            clicked => { root.export-pdf(); }
+        }
+        if root.overflow : LoomOverflowButton {
+            tooltip: "More presentation commands";
+            clicked => { root.overflow-requested(); }
+        }
+    }
+}

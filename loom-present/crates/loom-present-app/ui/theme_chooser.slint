@@ -1,0 +1,424 @@
+import {
+    LoomButton, LoomSegmentedControl,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+
+component PresentThemeCard inherits Rectangle {
+    in property <string> title: "Theme";
+    in property <bool> selected: false;
+    in property <length> preview-width: 180px;
+    in property <length> preview-height: 101px;
+    in property <color> preview-background: Theme.palette().paper;
+    callback clicked;
+
+    width: root.preview-width + 20px;
+    height: root.preview-height + 60px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: touch.has-hover && !root.selected ? Theme.palette().surface-raised : transparent;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
+
+    VerticalLayout {
+        spacing: 8px;
+        padding: 8px;
+        alignment: center;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: root.preview-width;
+            height: root.preview-height;
+            border-radius: Theme.tokens.metrics.radius-small;
+            background: root.preview-background;
+            border-width: root.selected ? 2px : 1px;
+            border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: Theme.palette().shadow;
+            clip: true;
+            @children
+        }
+
+        if root.selected : Rectangle {
+            height: 22px;
+            border-radius: Theme.tokens.metrics.radius-small;
+            background: Theme.palette().accent;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                alignment: center;
+                cross-axis-alignment: center;
+                Text {
+                    text: root.title;
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().accent-ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        if !root.selected : Text {
+            text: root.title;
+            font-size: Theme.tokens.typography.caption;
+            font-weight: 500;
+            color: Theme.palette().ink;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component PresentThemeChooser inherits Rectangle {
+    in-out property <bool> open: false;
+    in-out property <int> theme-selected: 0;
+    in-out property <int> theme-category: 0;
+    in-out property <bool> aspect-ratio-wide: true;
+
+    callback choose-theme-category(int);
+    callback cancel-theme;
+    callback create-theme(int);
+
+    function theme-visible(idx: int) -> bool {
+        if (root.theme-category == 0) { return true; }
+        if (root.theme-category == 1 && (idx == 0 || idx == 1)) { return true; }
+        if (root.theme-category == 2 && idx == 3) { return true; }
+        if (root.theme-category == 3 && (idx == 0 || idx == 2)) { return true; }
+        return false;
+    }
+
+    width: 100%;
+    height: 100%;
+    background: Theme.palette().scrim;
+
+    modal-touch := TouchArea {
+        clicked => { }
+    }
+
+    Rectangle {
+        width: min(1160px, max(1px, parent.width - 48px));
+        height: min(760px, max(480px, parent.height - 48px));
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: Theme.tokens.metrics.radius-large;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().surface;
+        clip: true;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.palette().shadow;
+
+        VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+
+            HorizontalLayout {
+                spacing: 0px;
+                vertical-stretch: 1;
+
+                // Sidebar
+                Rectangle {
+                    width: 220px;
+                    background: Theme.palette().panel;
+
+                    VerticalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        padding-top: Theme.tokens.space.xl;
+                        padding-bottom: Theme.tokens.space.xl;
+                        padding-left: Theme.tokens.space.lg;
+                        padding-right: Theme.tokens.space.lg;
+
+                        HorizontalLayout {
+                            padding-left: Theme.tokens.space.md;
+                            padding-bottom: Theme.tokens.space.sm;
+                            Text {
+                                text: "THEMES";
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: Theme.palette().ink-secondary;
+                            }
+                        }
+
+                        Rectangle {
+                            height: 32px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            background: root.theme-category == 0 ? Theme.palette().surface-raised : transparent;
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
+                                Icon { size: 16px; icon: "new"; tint: root.theme-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Text {
+                                    text: "All Themes";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: root.theme-category == 0 ? 600 : 400;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            TouchArea { clicked => { root.choose-theme-category(0); } }
+                        }
+
+                        Rectangle {
+                            height: 32px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            background: root.theme-category == 1 ? Theme.palette().surface-raised : transparent;
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
+                                Icon { size: 16px; icon: "document"; tint: root.theme-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Text {
+                                    text: "Basic";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: root.theme-category == 1 ? 600 : 400;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            TouchArea { clicked => { root.choose-theme-category(1); } }
+                        }
+
+                        Rectangle {
+                            height: 32px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            background: root.theme-category == 2 ? Theme.palette().surface-raised : transparent;
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
+                                Icon { size: 16px; icon: "play"; tint: root.theme-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Text {
+                                    text: "Dynamic";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: root.theme-category == 2 ? 600 : 400;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            TouchArea { clicked => { root.choose-theme-category(2); } }
+                        }
+
+                        Rectangle {
+                            height: 32px;
+                            border-radius: Theme.tokens.metrics.radius-medium;
+                            background: root.theme-category == 3 ? Theme.palette().surface-raised : transparent;
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
+                                Icon { size: 16px; icon: "format"; tint: root.theme-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
+                                Text {
+                                    text: "Minimal";
+                                    font-size: Theme.tokens.typography.body;
+                                    font-weight: root.theme-category == 3 ? 600 : 400;
+                                    color: Theme.palette().ink;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            TouchArea { clicked => { root.choose-theme-category(3); } }
+                        }
+
+                        Rectangle { vertical-stretch: 1; background: transparent; }
+
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
+                            Text {
+                                text: "English (US)";
+                                font-size: Theme.tokens.typography.caption;
+                                color: Theme.palette().ink-secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().border; }
+                }
+
+                // Content Area
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    padding-top: Theme.tokens.space.xxl;
+                    padding-bottom: Theme.tokens.space.xl;
+                    padding-left: Theme.tokens.space.xxl;
+                    padding-right: Theme.tokens.space.xxl;
+                    spacing: Theme.tokens.space.xl;
+
+                    HorizontalLayout {
+                        Text {
+                            text: "Choose a Theme";
+                            font-size: 24px;
+                            font-weight: 700;
+                            color: Theme.palette().ink;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+
+                        LoomSegmentedControl {
+                            items: ["Widescreen (16:9)", "Standard (4:3)"];
+                            current: root.aspect-ratio-wide ? 0 : 1;
+                            label: "Theme Aspect Ratio";
+                            selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: Theme.tokens.space.xl;
+
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xl;
+
+                            if root.theme-visible(0) : PresentThemeCard {
+                                title: "Basic White";
+                                selected: root.theme-selected == 0;
+                                preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                preview-background: Theme.palette().paper;
+                                clicked => { root.theme-selected = 0; }
+                                VerticalLayout {
+                                    padding: 12px;
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "Basic White";
+                                        font-size: Theme.tokens.typography.caption;
+                                        font-weight: 700;
+                                        color: Theme.palette().paper-ink;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                    Text {
+                                        text: "Presentation Title";
+                                        font-size: Theme.tokens.typography.micro;
+                                        color: Theme.palette().paper-muted;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+
+                            if root.theme-visible(1) : PresentThemeCard {
+                                title: "Basic Black";
+                                selected: root.theme-selected == 1;
+                                preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                preview-background: Theme.palette().surface-sunken;
+                                clicked => { root.theme-selected = 1; }
+                                VerticalLayout {
+                                    padding: 12px;
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "Basic Black";
+                                        font-size: Theme.tokens.typography.caption;
+                                        font-weight: 700;
+                                        color: Theme.palette().ink;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                    Text {
+                                        text: "Presentation Title";
+                                        font-size: Theme.tokens.typography.micro;
+                                        color: Theme.palette().ink-secondary;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xl;
+
+                            if root.theme-visible(2) : PresentThemeCard {
+                                title: "Classic Editorial";
+                                selected: root.theme-selected == 2;
+                                preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                preview-background: Theme.palette().paper;
+                                clicked => { root.theme-selected = 2; }
+                                VerticalLayout {
+                                    padding: 12px;
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "Classic Editorial";
+                                        font-size: Theme.tokens.typography.caption;
+                                        font-weight: 700;
+                                        color: Theme.palette().paper-ink;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                    Text {
+                                        text: "Presentation Title";
+                                        font-size: Theme.tokens.typography.micro;
+                                        color: Theme.palette().paper-muted;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+
+                            if root.theme-visible(3) : PresentThemeCard {
+                                title: "Dynamic Accent";
+                                selected: root.theme-selected == 3;
+                                preview-width: root.aspect-ratio-wide ? 180px : 144px;
+                                preview-height: root.aspect-ratio-wide ? 101px : 108px;
+                                preview-background: Theme.palette().accent;
+                                clicked => { root.theme-selected = 3; }
+                                VerticalLayout {
+                                    padding: 12px;
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "Dynamic Accent";
+                                        font-size: Theme.tokens.typography.caption;
+                                        font-weight: 700;
+                                        color: Theme.palette().accent-ink;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
+                                    Text {
+                                        text: "Presentation Title";
+                                        font-size: Theme.tokens.typography.micro;
+                                        color: Theme.palette().accent-ink;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+            }
+
+            // Footer Bar
+            Rectangle {
+                height: 56px;
+                background: Theme.palette().chrome;
+
+                Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
+
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.lg;
+                    padding-left: Theme.tokens.space.xl;
+                    padding-right: Theme.tokens.space.xl;
+                    cross-axis-alignment: center;
+
+                    Text {
+                        text: "Escape to cancel • Return to create";
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-secondary;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+
+                    LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        clicked => { root.cancel-theme(); }
+                    }
+
+                    LoomButton {
+                        label: "Create Presentation";
+                        variant: "primary";
+                        clicked => { root.create-theme(root.theme-selected); }
+                    }
+                }
+            }
+        }
+    }
+}

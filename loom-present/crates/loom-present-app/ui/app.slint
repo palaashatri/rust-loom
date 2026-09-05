@@ -1,19 +1,14 @@
-import {
-    TitleChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, DirectionalLayout,
-    IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem, StatusBar, SidebarSurface, InspectorSurface,
-    SectionHeader, Field, SegmentedControl, RangeSlider, PropertyRow,
-    CanvasSurface, TemplateCard
-} from "toolkit.slint";
 import { CommandPalette, CommandPaletteItem } from "components.slint";
-import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
-    PresentToolbarBody, PresentSlideStrip, PresentSlideCanvas, PresentNotesEditor,
-    PresentInspector, PresentStatusBar, PresentToolbarOverflow
+    PresentSlideStrip, PresentSlideCanvas, PresentNotesEditor,
+    PresentStatusBar, PresentToolbarOverflow
 } from "present_components.slint";
+import { PresentActionToolbar } from "toolbar.slint";
+import { PresentInspector } from "inspector.slint";
+import { PresentThemeChooser } from "theme_chooser.slint";
+
 export { Theme, ResponsivePolicy } from "theme.slint";
-
-
 
 export component PresentApp inherits Window {
     title: "Loom Present";
@@ -98,17 +93,38 @@ export component PresentApp inherits Window {
     callback open-deck;
     callback save-deck;
     callback save-as-deck;
-    callback add-slide;
-    callback duplicate-slide;
-    callback delete-slide;
+    callback export-pdf;
+    callback export-pptx;
     callback undo;
     callback redo;
+    callback add-slide;
+    callback delete-slide;
+    callback duplicate-slide;
+    callback prev-slide;
+    callback next-slide;
     callback select-slide(int);
-    callback select-element(int);
     callback add-text;
     callback add-shape;
+    callback select-element(int);
     callback transform-element(string, float, float, float, float);
     callback set-element-rotation(string, float);
+    callback update-element-content(string);
+    callback apply-template(int);
+    callback set-transition(int);
+    callback create-theme(int);
+    callback cancel-theme;
+    callback choose-theme-category(int);
+    callback toggle-inspector;
+    callback toggle-preview-mode;
+    public function close-toolbar-overflow() {
+        root.toolbar-overflow-open = false;
+    }
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+    callback notes-edited(string);
     callback canvas-pressed(float, float, bool);
     callback canvas-moved(float, float);
     callback canvas-released(float, float);
@@ -122,75 +138,28 @@ export component PresentApp inherits Window {
     callback handle-moved(int, string, float, float);
     callback handle-released(int, string);
     callback handle-cancelled(int, string);
-    callback update-element-content(string);
-    callback export-pdf;
-    callback notes-edited(string);
-    callback toggle-preview-mode;
-    callback apply-template(int);
-    callback set-transition(int);
-    callback prev-slide;
-    callback next-slide;
-    callback toggle-inspector;
-    callback create-theme(int);
-    callback cancel-theme;
 
-    in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
+    in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <string> palette-query: "";
     in-out property <int> palette-selected: 0;
     callback palette-invoked(int);
     callback palette-query-changed(string);
+    callback palette-close;
     callback palette-move(int);
     callback palette-key-text(string);
     callback palette-backspace;
-    callback palette-close;
 
-    public function open-palette() {
-        root.palette-open = true;
-        root.palette-query = "";
-        palette.grab-focus();
-    }
-
-    function theme-visible(theme-index: int) -> bool {
-        return root.theme-category == 0
-            || (root.theme-category == 1 && theme-index <= 1)
-            || (root.theme-category == 2 && theme-index == 2)
-            || (root.theme-category == 3 && theme-index >= 3);
-    }
-
-    function choose-theme-category(category-index: int) {
-        root.theme-category = category-index;
-        if (category-index == 1 && root.theme-selected > 1) {
-            root.theme-selected = 0;
-        } else if (category-index == 2) {
-            root.theme-selected = 2;
-        } else if (category-index == 3) {
-            root.theme-selected = 3;
-        }
-    }
-
-    function compact-label(full-label: string) -> string {
-        return root.labeled-export ? full-label : "";
-    }
-
-    public function close-toolbar-overflow() {
-        if (root.toolbar-overflow-open) {
-            root.toolbar-overflow-open = false;
-            app-focus.focus();
-        }
-    }
-
-    changed overflow-toolbar => {
-        if (!root.overflow-toolbar) {
-            root.close-toolbar-overflow();
-        }
+    function close-overflow-menu() {
+        root.toolbar-overflow-open = false;
+        app-focus.focus();
     }
 
     overflow-menu-focus := FocusScope {
         enabled: root.toolbar-overflow-open;
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                root.close-toolbar-overflow();
+                root.close-overflow-menu();
                 return accept;
             }
             return reject;
@@ -252,81 +221,44 @@ export component PresentApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
-            // Document Chrome Titlebar
-            TitleChrome {
-                title: root.deck-title;
-                trailing-text: root.is-preview-mode ? "Presenting" : root.slide-count-text;
-            }
-
-            // Keynote-style action toolbar. Select a concrete slot owner so a
-            // context row never silently stretches icon-over-label controls.
-                if !root.is-preview-mode && root.labeled-toolbar : LabeledToolbar {
-                    PresentToolbarBody {
-                    rtl: root.rtl;
-                    labeled: true;
-                    overflow: root.overflow-toolbar;
-                    toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
-                    open-theme-chooser => {
-                        root.theme-selected = 0;
-                        root.theme-category = 0;
-                        root.theme-chooser-open = true;
-                    }
-                    add-slide => { root.add-slide(); }
-                    add-text => { root.add-text(); }
-                    add-shape => { root.add-shape(); }
-                    toggle-preview => { root.toggle-preview-mode(); }
-                    toggle-inspector => { root.toggle-inspector(); }
-                    export-pdf => { root.export-pdf(); }
-                    overflow-requested => {
-                        if (root.toolbar-overflow-open) {
-                            root.close-toolbar-overflow();
-                        } else {
-                            root.toolbar-overflow-open = true;
-                            overflow-menu-focus.focus();
-                        }
-                    }
+            if !root.is-preview-mode : PresentActionToolbar {
+                rtl: root.rtl;
+                overflow: root.overflow-toolbar;
+                inspector-visible: root.show-inspector;
+                notes-visible: root.show-notes-drawer;
+                is-preview-mode: root.is-preview-mode;
+                can-undo: root.can-undo;
+                can-redo: root.can-redo;
+                undo => { root.undo(); }
+                redo => { root.redo(); }
+                toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
+                open-theme-chooser => {
+                    root.theme-selected = 0;
+                    root.theme-category = 0;
+                    root.theme-chooser-open = true;
                 }
-            }
-                if !root.is-preview-mode && !root.labeled-toolbar : ContextToolbar {
-                    PresentToolbarBody {
-                    rtl: root.rtl;
-                    labeled: false;
-                    overflow: root.overflow-toolbar;
-                    toggle-notes => { root.show-notes-drawer = !root.show-notes-drawer; }
-                    open-theme-chooser => {
-                        root.theme-selected = 0;
-                        root.theme-category = 0;
-                        root.theme-chooser-open = true;
-                    }
-                    add-slide => { root.add-slide(); }
-                    add-text => { root.add-text(); }
-                    add-shape => { root.add-shape(); }
-                    toggle-preview => { root.toggle-preview-mode(); }
-                    toggle-inspector => { root.toggle-inspector(); }
-                    export-pdf => { root.export-pdf(); }
-                    overflow-requested => {
-                        if (root.toolbar-overflow-open) {
-                            root.close-toolbar-overflow();
-                        } else {
-                            root.toolbar-overflow-open = true;
-                            overflow-menu-focus.focus();
-                        }
+                add-slide => { root.add-slide(); }
+                add-text => { root.add-text(); }
+                add-shape => { root.add-shape(); }
+                toggle-preview => { root.toggle-preview-mode(); }
+                toggle-inspector => { root.toggle-inspector(); }
+                export-pdf => { root.export-pdf(); }
+                overflow-requested => {
+                    if (root.toolbar-overflow-open) {
+                        root.close-toolbar-overflow();
+                    } else {
+                        root.toolbar-overflow-open = true;
+                        overflow-menu-focus.focus();
                     }
                 }
             }
 
             // Main Slide Canvas Area
-            DirectionalLayout {
+            HorizontalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
-                rtl: root.rtl;
 
-                // Slide strip owns thumbnail geometry and actions. The
-                // primary canvas remains the stretchable sibling.
-                // HorizontalLayout preserves declaration order, therefore
-                // RTL places the inspector and slide strip before the canvas.
                 if root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
-                    preferred-width: 280px;
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
@@ -348,7 +280,6 @@ export component PresentApp inherits Window {
                 }
 
                 if root.rtl && !root.is-preview-mode : PresentSlideStrip {
-                    preferred-width: 220px;
                     titles: root.slide-titles;
                     active-index: root.active-slide-index;
                     select-slide(idx) => { root.select-slide(idx); }
@@ -417,10 +348,17 @@ export component PresentApp inherits Window {
                                     color: Theme.palette().ink;
                                     horizontal-stretch: 1;
                                 }
-                                IconOnlyToolbarItem {
-                                    icon: "close";
-                                    label: "Close notes drawer";
+                                TouchArea {
+                                    width: 24px;
+                                    height: 24px;
                                     clicked => { root.show-notes-drawer = false; }
+                                    Text {
+                                        text: "✕";
+                                        font-size: Theme.tokens.typography.caption;
+                                        color: Theme.palette().ink-secondary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
 
@@ -433,10 +371,7 @@ export component PresentApp inherits Window {
                     }
                 }
 
-                // Format inspector follows the selected slide element and
-                // uses stacked local property rows for translation safety.
                 if !root.rtl && !root.is-preview-mode : PresentSlideStrip {
-                    preferred-width: 220px;
                     titles: root.slide-titles;
                     active-index: root.active-slide-index;
                     select-slide(idx) => { root.select-slide(idx); }
@@ -445,7 +380,6 @@ export component PresentApp inherits Window {
                 }
 
                 if !root.rtl && root.show-inspector && !root.is-preview-mode : PresentInspector {
-                    preferred-width: 280px;
                     inspector-tab <=> root.inspector-tab;
                     active-template-index <=> root.active-template-index;
                     transition-index <=> root.transition-index;
@@ -475,15 +409,14 @@ export component PresentApp inherits Window {
         }
     }
 
-    // Compact toolbar overflow menu. The command list is an app-local
-    // component so its vertical spacing remains stable at large text sizes.
+    // Compact toolbar overflow menu
     if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
         width: root.width;
         height: root.height;
         background: transparent;
         TouchArea { clicked => { root.close-toolbar-overflow(); } }
         VerticalLayout {
-            padding-top: Theme.tokens.metrics.header-height + Theme.tokens.metrics.context-toolbar-height + Theme.tokens.space.sm;
+            padding-top: Theme.tokens.metrics.context-toolbar-height + Theme.tokens.space.sm;
             padding-left: Theme.tokens.space.lg;
             padding-right: Theme.tokens.space.lg;
             cross-axis-alignment: end;
@@ -502,357 +435,14 @@ export component PresentApp inherits Window {
         }
     }
 
-    if root.theme-chooser-open : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        background: Theme.palette().scrim;
-
-        Rectangle {
-            // The theme browser is intentionally large enough for visual
-            // comparison; fixed 960×620 geometry looked like a cramped
-            // dialog on wide macOS displays.
-            width: min(1160px, max(1px, parent.width - 48px));
-            height: min(760px, max(480px, parent.height - 48px));
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            border-radius: Theme.tokens.metrics.radius-large;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface;
-            clip: true;
-            drop-shadow-blur: 24px;
-            drop-shadow-offset-y: 8px;
-            drop-shadow-color: Theme.palette().shadow;
-
-            VerticalLayout {
-                spacing: 0px;
-                padding: 0px;
-
-                HorizontalLayout {
-                    spacing: 0px;
-                    vertical-stretch: 1;
-
-                    // Sidebar
-                    Rectangle {
-                        width: 220px;
-                        background: Theme.palette().panel;
-
-                        VerticalLayout {
-                            spacing: Theme.tokens.space.sm;
-                            padding-top: Theme.tokens.space.xl;
-                            padding-bottom: Theme.tokens.space.xl;
-                            padding-left: Theme.tokens.space.lg;
-                            padding-right: Theme.tokens.space.lg;
-
-                            HorizontalLayout {
-                                padding-left: Theme.tokens.space.md;
-                                padding-bottom: Theme.tokens.space.sm;
-                                Text {
-                                    text: "THEMES";
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    color: Theme.palette().ink-secondary;
-                                }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.theme-category == 0 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "grid"; tint: root.theme-category == 0 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "All Themes";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.theme-category == 0 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-theme-category(0); } }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.theme-category == 1 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "slide"; tint: root.theme-category == 1 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "Basic";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.theme-category == 1 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-theme-category(1); } }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.theme-category == 2 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "wand"; tint: root.theme-category == 2 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "Dynamic";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.theme-category == 2 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-theme-category(2); } }
-                            }
-
-                            Rectangle {
-                                height: 32px;
-                                border-radius: Theme.tokens.metrics.radius-medium;
-                                background: root.theme-category == 3 ? Theme.palette().surface-raised : transparent;
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.md; padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md; cross-axis-alignment: center;
-                                    Icon { size: 16px; icon: "brush"; tint: root.theme-category == 3 ? Theme.palette().accent : Theme.palette().ink-secondary; }
-                                    Text {
-                                        text: "Minimal";
-                                        font-size: Theme.tokens.typography.body;
-                                        font-weight: root.theme-category == 3 ? 600 : 400;
-                                        color: Theme.palette().ink;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea { clicked => { root.choose-theme-category(3); } }
-                            }
-
-                            Rectangle { vertical-stretch: 1; background: transparent; }
-
-                            HorizontalLayout {
-                                spacing: Theme.tokens.space.sm; padding: Theme.tokens.space.md;
-                                Text {
-                                    text: "English (US)";
-                                    font-size: Theme.tokens.typography.caption;
-                                    color: Theme.palette().ink-secondary;
-                                    vertical-alignment: center;
-                                }
-                                Icon { size: 12px; icon: "chevron-down"; tint: Theme.palette().ink-secondary; }
-                            }
-                        }
-
-                        Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.palette().border; }
-                    }
-
-                    // Content Area
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        padding-top: Theme.tokens.space.xxl;
-                        padding-bottom: Theme.tokens.space.xl;
-                        padding-left: Theme.tokens.space.xxl;
-                        padding-right: Theme.tokens.space.xxl;
-                        spacing: Theme.tokens.space.xl;
-
-                        HorizontalLayout {
-                            Text {
-                                text: "Choose a Theme";
-                                font-size: 24px;
-                                font-weight: 700;
-                                color: Theme.palette().ink;
-                                horizontal-stretch: 1;
-                                vertical-alignment: center;
-                            }
-
-                            // Aspect ratio picker
-                            SegmentedControl {
-                                items: ["Widescreen (16:9)", "Standard (4:3)"];
-                                current: root.aspect-ratio-wide ? 0 : 1;
-                                label: "Theme Aspect Ratio";
-                                selected(idx) => { root.aspect-ratio-wide = (idx == 0); }
-                            }
-                        }
-
-                        // The modal content column is 684px wide at the
-                        // reference viewport. Two rows keep every 200px-wide
-                        // widescreen card inside that column instead of
-                        // clipping the fourth card at the right edge.
-                        VerticalLayout {
-                            spacing: Theme.tokens.space.xl;
-
-                            HorizontalLayout {
-                                spacing: Theme.tokens.space.xl;
-
-                                if root.theme-visible(0) : TemplateCard {
-                                    title: "Basic White";
-                                    selected: root.theme-selected == 0;
-                                    width: root.aspect-ratio-wide ? 200px : 160px;
-                                    height: 170px;
-                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
-                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
-                                    preview-background: Theme.palette().paper;
-                                    show-selected-badge: true;
-                                    clicked => { root.theme-selected = 0; }
-                                    VerticalLayout {
-                                        padding: 12px;
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text {
-                                            text: "Basic White";
-                                            font-size: Theme.tokens.typography.caption;
-                                            font-weight: 700;
-                                            color: Theme.palette().paper-ink;
-                                            horizontal-alignment: center;
-                                        }
-                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
-                                        Text {
-                                            text: "Presentation Title";
-                                            font-size: Theme.tokens.typography.micro;
-                                            color: Theme.palette().paper-muted;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-
-                                if root.theme-visible(1) : TemplateCard {
-                                    title: "Basic Black";
-                                    selected: root.theme-selected == 1;
-                                    width: root.aspect-ratio-wide ? 200px : 160px;
-                                    height: 170px;
-                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
-                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
-                                    preview-background: Theme.palette().surface-sunken;
-                                    show-selected-badge: true;
-                                    clicked => { root.theme-selected = 1; }
-                                    VerticalLayout {
-                                        padding: 12px;
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text {
-                                            text: "Basic Black";
-                                            font-size: Theme.tokens.typography.caption;
-                                            font-weight: 700;
-                                            color: Theme.palette().ink;
-                                            horizontal-alignment: center;
-                                        }
-                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
-                                        Text {
-                                            text: "Presentation Title";
-                                            font-size: Theme.tokens.typography.micro;
-                                            color: Theme.palette().ink-secondary;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-                            }
-
-                            HorizontalLayout {
-                                spacing: Theme.tokens.space.xl;
-
-                                if root.theme-visible(2) : TemplateCard {
-                                    title: "Classic Editorial";
-                                    selected: root.theme-selected == 2;
-                                    width: root.aspect-ratio-wide ? 200px : 160px;
-                                    height: 170px;
-                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
-                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
-                                    preview-background: Theme.palette().paper;
-                                    show-selected-badge: true;
-                                    clicked => { root.theme-selected = 2; }
-                                    VerticalLayout {
-                                        padding: 12px;
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text {
-                                            text: "Classic Editorial";
-                                            font-size: Theme.tokens.typography.caption;
-                                            font-weight: 700;
-                                            color: Theme.palette().paper-ink;
-                                            horizontal-alignment: center;
-                                        }
-                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
-                                        Text {
-                                            text: "Presentation Title";
-                                            font-size: Theme.tokens.typography.micro;
-                                            color: Theme.palette().paper-muted;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-
-                                if root.theme-visible(3) : TemplateCard {
-                                    title: "Dynamic Accent";
-                                    selected: root.theme-selected == 3;
-                                    width: root.aspect-ratio-wide ? 200px : 160px;
-                                    height: 170px;
-                                    preview-width: root.aspect-ratio-wide ? 180px : 144px;
-                                    preview-height: root.aspect-ratio-wide ? 101px : 108px;
-                                    preview-background: Theme.palette().accent;
-                                    show-selected-badge: true;
-                                    clicked => { root.theme-selected = 3; }
-                                    VerticalLayout {
-                                        padding: 12px;
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Text {
-                                            text: "Dynamic Accent";
-                                            font-size: Theme.tokens.typography.caption;
-                                            font-weight: 700;
-                                            color: Theme.palette().accent-ink;
-                                            horizontal-alignment: center;
-                                        }
-                                        Rectangle { width: 40px; height: 2px; background: Theme.palette().accent; }
-                                        Text {
-                                            text: "Presentation Title";
-                                            font-size: Theme.tokens.typography.micro;
-                                            color: Theme.palette().accent-ink;
-                                            horizontal-alignment: center;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle { vertical-stretch: 1; background: transparent; }
-                    }
-                }
-
-                // Footer Bar
-                Rectangle {
-                    height: 56px;
-                    background: Theme.palette().chrome;
-
-                    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.palette().border; }
-
-                    HorizontalLayout {
-                        spacing: Theme.tokens.space.lg;
-                        padding-left: Theme.tokens.space.xl;
-                        padding-right: Theme.tokens.space.xl;
-                        cross-axis-alignment: center;
-
-                        Text {
-                            text: "Escape to cancel • Return to create";
-                            font-size: Theme.tokens.typography.caption;
-                            color: Theme.palette().ink-secondary;
-                            horizontal-stretch: 1;
-                            vertical-alignment: center;
-                        }
-
-                        ToolbarButton {
-                            label: "Cancel";
-                            clicked => { root.cancel-theme(); }
-                        }
-
-                        ToolbarButton {
-                            label: "Create Presentation";
-                            primary: true;
-                            clicked => { root.create-theme(root.theme-selected); }
-                        }
-                    }
-                }
-            }
-        }
+    if root.theme-chooser-open : PresentThemeChooser {
+        open <=> root.theme-chooser-open;
+        theme-selected <=> root.theme-selected;
+        theme-category <=> root.theme-category;
+        aspect-ratio-wide <=> root.aspect-ratio-wide;
+        choose-theme-category(cat) => { root.choose-theme-category(cat); }
+        cancel-theme => { root.cancel-theme(); }
+        create-theme(idx) => { root.create-theme(idx); }
     }
 
     palette := CommandPalette {
