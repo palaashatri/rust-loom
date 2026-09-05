@@ -14,6 +14,7 @@ export struct WriterRenderBlock {
     font-size: length,
     height: length,
     alignment: int,
+    marker: string,
     unsupported: bool,
     unsupported-label: string,
 }
@@ -82,7 +83,6 @@ component WriterDocumentEditor inherits Rectangle {
         y: 0px;
         width: root.width;
         height: root.height;
-        clip: true;
         for selection in root.selection-rects : Rectangle {
             x: selection.x * root.page-zoom;
             y: selection.y * root.page-zoom;
@@ -90,6 +90,21 @@ component WriterDocumentEditor inherits Rectangle {
             height: max(1px, selection.height * root.page-zoom);
             background: selection.caret ? transparent : Theme.palette().selection;
             visible: !selection.caret;
+            accessible-role: none;
+        }
+        for block in root.render-blocks : Text {
+            // List markers hang in the left page margin; the content column
+            // never shifts, keeping caret and selection geometry aligned.
+            x: block.x * root.page-zoom - 18px * root.page-zoom;
+            y: block.y * root.page-zoom;
+            width: 14px * root.page-zoom;
+            height: block.height * root.page-zoom;
+            text: block.marker;
+            visible: block.marker != "";
+            font-size: block.font-size * root.page-zoom;
+            color: Theme.palette().paper-ink;
+            horizontal-alignment: right;
+            vertical-alignment: top;
             accessible-role: none;
         }
         for block in root.render-blocks : StyledText {

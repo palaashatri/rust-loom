@@ -21,6 +21,7 @@ pub struct DocumentFormattingState {
     pub font_size_pt: i32,
     pub alignment: i32,
     pub line_spacing_index: i32,
+    pub list_style_index: i32,
 }
 
 /// UTF-8 byte offsets in Writer's canonical `editor_text()` representation.
@@ -538,6 +539,7 @@ pub fn formatting_state(document: &WriterDocument) -> DocumentFormattingState {
         font_size_pt: 11,
         alignment: uniform_alignment(document),
         line_spacing_index: 1,
+        list_style_index: 0,
     }
 }
 
@@ -654,6 +656,47 @@ pub fn formatting_state_for_selection(
         font_size_pt: if font_size_pt <= 0 { 11 } else { font_size_pt },
         alignment,
         line_spacing_index,
+        list_style_index: uniform_list_style_index(&selected_blocks, document),
+    }
+}
+
+/// Returns the shared list-style control index for the selected blocks, or 0
+/// (None) when the selection spans blocks with different list kinds.
+fn uniform_list_style_index(selected_blocks: &[usize], document: &WriterDocument) -> i32 {
+    selected_blocks
+        .first()
+        .map(|index| list_style_index_for_kind(&document.blocks[*index].kind))
+        .filter(|first| {
+            selected_blocks
+                .iter()
+                .all(|index| list_style_index_for_kind(&document.blocks[*index].kind) == *first)
+        })
+        .unwrap_or(0)
+}
+
+fn list_style_index_for_kind(kind: &str) -> i32 {
+    match kind {
+        "list-bulleted" => 1,
+        "list-numbered" => 2,
+        _ => 0,
+    }
+}
+
+/// Applies a list style to the selected blocks: 0 removes the list, 1 applies
+/// bullets, 2 applies numbering. List-ness is a block kind, so the edit is a
+/// real document mutation that persists, undoes, and exports like any other.
+pub fn set_selection_list_style(
+    document: &mut WriterDocument,
+    selection: DocumentSelection,
+    index: i32,
+) {
+    let kind = match index {
+        1 => "list-bulleted",
+        2 => "list-numbered",
+        _ => "paragraph",
+    };
+    for block_index in selected_block_indices(document, selection) {
+        document.blocks[block_index].kind = kind.to_string();
     }
 }
 

@@ -17,8 +17,8 @@ use std::time::Instant;
 use document_formatting::{
     formatting_state_for_selection, indent_selection, set_selection_alignment, set_selection_bold,
     set_selection_font_family, set_selection_font_size, set_selection_heading,
-    set_selection_italic, set_selection_line_spacing, set_selection_strikethrough,
-    set_selection_underline, DocumentSelection,
+    set_selection_italic, set_selection_line_spacing, set_selection_list_style,
+    set_selection_strikethrough, set_selection_underline, DocumentSelection,
 };
 use loom_command::{
     CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSpec,
@@ -1315,6 +1315,7 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_font_family_index(formatting.font_family_index);
     app.set_font_size_pt(formatting.font_size_pt);
     app.set_line_spacing_index(formatting.line_spacing_index);
+    app.set_list_style_index(formatting.list_style_index);
     app.set_heading_level(heading_level);
     app.set_text_alignment(text_alignment);
     app.set_word_count(word_count.min(i32::MAX as usize) as i32);
@@ -1388,9 +1389,11 @@ fn writer_render_projection(
     let base_page = layout
         .as_ref()
         .and_then(|page_layout| page_layout.page_bounds.first().copied());
+    let mut numbered_counter = 0usize;
     for block in &doc.blocks {
         let font_size = style.font_size_for_kind(block.kind.as_str());
         let fallback_height = writer_render_height_for_width(block, font_size, content_width);
+        let marker = writer_list_marker(block.kind.as_str(), &mut numbered_counter);
         let mut projected = false;
         if let (Some(page_layout), Some(base_page)) = (layout.as_ref(), base_page) {
             let zoom = page_layout.zoom.max(f32::EPSILON);
@@ -1412,6 +1415,7 @@ fn writer_render_projection(
                     y,
                     content_width,
                     height,
+                    &marker,
                 ));
             }
         }
@@ -1423,6 +1427,7 @@ fn writer_render_projection(
                 fallback_y,
                 content_width,
                 height,
+                &marker,
             ));
             fallback_y += height;
         }
@@ -1493,6 +1498,7 @@ fn writer_render_row(
     y: f32,
     width: f32,
     height: f32,
+    marker: &str,
 ) -> WriterRenderBlock {
     let unsupported = matches!(block.style.alignment, loom_text::Alignment::Justify);
     WriterRenderBlock {
@@ -1504,12 +1510,34 @@ fn writer_render_row(
         height,
         font_size: PageStyle::default().font_size_for_kind(block.kind.as_str()),
         alignment: writer_render_alignment(block.style.alignment),
+        marker: SharedString::from(marker),
         unsupported,
         unsupported_label: if unsupported {
             SharedString::from("Justify unavailable")
         } else {
             SharedString::default()
         },
+    }
+}
+
+/// Display marker for a list-kind block. Numbered items are counted across
+/// consecutive `list-numbered` blocks via `numbered_counter`; any other kind
+/// resets the counter. Markers hang in the left page margin so the content
+/// column — and therefore caret and selection geometry — never shifts.
+fn writer_list_marker(kind: &str, numbered_counter: &mut usize) -> String {
+    match kind {
+        "list-bulleted" => {
+            *numbered_counter = 0;
+            "\u{2022}".to_string()
+        }
+        "list-numbered" => {
+            *numbered_counter += 1;
+            format!("{numbered_counter}.")
+        }
+        _ => {
+            *numbered_counter = 0;
+            String::new()
+        }
     }
 }
 
@@ -2708,6 +2736,29 @@ fn wire_writer_shared_callbacks(
         });
     }
 
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_list_style(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            let sel = next.selection();
+            set_selection_list_style(
+                &mut next,
+                DocumentSelection::range(sel.anchor, sel.focus),
+                index,
+            );
+            next.set_selection(sel);
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            let label = match index {
+                1 => "Bulleted list",
+                2 => "Numbered list",
+                _ => "List removed",
+            };
+            app.set_status_right(SharedString::from(label));
+        });
+    }
+
     // Page setup mutations are real document edits: they participate in
     // undo history, drive layout/selection geometry, persist in the
     // .loomdoc package, and size the exported PDF.
@@ -3560,6 +3611,50 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         out_dir,
         "zoom-scroll",
     )?);
+
+    // Lists are real block-kind edits: applying one must change the projected
+    // marker column and the kind that persists into the package.
+    {
+        let mut next = state.current.borrow().clone();
+        let sel = next.selection();
+        set_selection_list_style(
+            &mut next,
+            DocumentSelection::range(sel.anchor, sel.focus),
+            1,
+        );
+        next.set_selection(sel);
+        apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+    }
+    {
+        let current = state.current.borrow();
+        if !current
+            .blocks
+            .iter()
+            .any(|block| block.kind == "list-bulleted")
+        {
+            return Err("journey list style did not reach document kinds".into());
+        }
+        let projection = writer_render_projection(&current, *state.viewport.borrow());
+        if !projection
+            .0
+            .iter()
+            .any(|row| row.marker.as_str() == "\u{2022}")
+        {
+            return Err("journey bulleted list did not project markers".into());
+        }
+    }
+    screenshots.push(capture_writer_journey_step(&app, args, out_dir, "lists")?);
+    {
+        let mut next = state.current.borrow().clone();
+        let sel = next.selection();
+        set_selection_list_style(
+            &mut next,
+            DocumentSelection::range(sel.anchor, sel.focus),
+            0,
+        );
+        next.set_selection(sel);
+        apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+    }
 
     // Page setup is a real document edit: switching to landscape Letter must
     // relayout the projection, update the pushed page geometry, and survive

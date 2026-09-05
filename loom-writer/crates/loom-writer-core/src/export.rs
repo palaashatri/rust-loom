@@ -75,7 +75,22 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
     };
     let line_step = page_style.body_font_size_pt * 2.0;
     y -= line_step + 8.0;
+    let mut numbered_index = 0usize;
     for b in &doc.blocks {
+        let marker = match b.kind.as_str() {
+            "list-bulleted" => {
+                numbered_index = 0;
+                Some("- ".to_string())
+            }
+            "list-numbered" => {
+                numbered_index += 1;
+                Some(format!("{numbered_index}. "))
+            }
+            _ => {
+                numbered_index = 0;
+                None
+            }
+        };
         let style = match b.kind.as_str() {
             "heading1" => TextStyle {
                 size_pt: 15.0,
@@ -89,7 +104,11 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             },
             _ => body.clone(),
         };
-        pdf.draw_text(page, x, y, b.text.as_str(), &style);
+        let text = match &marker {
+            Some(prefix) => format!("{prefix}{}", b.text.as_str()),
+            None => b.text.as_str().to_string(),
+        };
+        pdf.draw_text(page, x, y, &text, &style);
         y -= line_step;
         if y < page_style.margin_bottom_pt {
             break;

@@ -74,6 +74,7 @@ export component WriterApp inherits Window {
     in-out property <int> page-paper-index: 0;
     in-out property <int> page-orientation-index: 0;
     in-out property <int> page-margins-index: 0;
+    in-out property <int> list-style-index: 0;
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -109,6 +110,7 @@ export component WriterApp inherits Window {
     callback select-paper-size(int);
     callback select-orientation(int);
     callback select-margins(int);
+    callback select-list-style(int);
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -319,6 +321,7 @@ export component WriterApp inherits Window {
                     page-paper-index <=> root.page-paper-index;
                     page-orientation-index <=> root.page-orientation-index;
                     page-margins-index <=> root.page-margins-index;
+                    list-style-index <=> root.list-style-index;
                     status-left: root.status-left;
                     word-count: root.word-count;
                     char-count: root.char-count;
@@ -339,6 +342,7 @@ export component WriterApp inherits Window {
                     select-paper-size(idx) => { root.select-paper-size(idx); }
                     select-orientation(idx) => { root.select-orientation(idx); }
                     select-margins(idx) => { root.select-margins(idx); }
+                    select-list-style(idx) => { root.select-list-style(idx); }
                 }
 
                 if root.rtl : WriterPageCanvas {

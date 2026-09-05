@@ -551,6 +551,7 @@ impl WriterDocument {
     /// Render to Markdown.
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
+        let mut numbered_index = 0usize;
         for b in &self.blocks {
             match b.kind.as_str() {
                 "heading1" => out.push_str(&format!("# {}\n\n", b.text.as_str())),
@@ -559,7 +560,18 @@ impl WriterDocument {
                 "heading4" => out.push_str(&format!("#### {}\n\n", b.text.as_str())),
                 "heading5" => out.push_str(&format!("##### {}\n\n", b.text.as_str())),
                 "heading6" => out.push_str(&format!("###### {}\n\n", b.text.as_str())),
-                _ => out.push_str(&format!("{}\n\n", b.text.as_str())),
+                "list-bulleted" => {
+                    numbered_index = 0;
+                    out.push_str(&format!("- {}\n", b.text.as_str()));
+                }
+                "list-numbered" => {
+                    numbered_index += 1;
+                    out.push_str(&format!("{}. {}\n", numbered_index, b.text.as_str()));
+                }
+                _ => {
+                    numbered_index = 0;
+                    out.push_str(&format!("{}\n\n", b.text.as_str()));
+                }
             }
         }
         out

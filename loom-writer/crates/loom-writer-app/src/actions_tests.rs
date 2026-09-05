@@ -1339,3 +1339,87 @@ fn selection_announcement_is_meaningful_and_focus_restores_after_palette() {
     apply_document(&app, &d2);
     assert_eq!(app.get_selection_announcement(), "Selected 6 characters");
 }
+
+#[test]
+fn list_style_kind_mutation_undoes_and_persists() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("First\nSecond\nThird"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    let app_ref = app.as_weak();
+    // Apply a bulleted list to the whole document the way the inspector does.
+    let _ = &app_ref;
+    {
+        let state = state.clone();
+        let app = app_ref.upgrade().unwrap();
+        let mut next = state.current.borrow().clone();
+        let end = next.editor_text().len();
+        let sel = TextSelection::range(0, end);
+        let selection = DocumentSelection::range(sel.anchor, sel.focus);
+        set_selection_list_style(&mut next, selection, 1);
+        next.set_selection(sel);
+        apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+    }
+    {
+        let current = state.current.borrow();
+        assert!(
+            current
+                .blocks
+                .iter()
+                .all(|block| block.kind == "list-bulleted"),
+            "all blocks should become bulleted list items"
+        );
+    }
+    // Undo returns every block to a plain paragraph. The registry gates
+    // undo on history state, so refresh enablement after the mutation.
+    {
+        let mut registry = state.registry.lock().unwrap();
+        let history = state.history.borrow();
+        sync_writer_registry_enablement(&mut registry, &state.current.borrow(), &history);
+    }
+    app.invoke_undo();
+    {
+        let current = state.current.borrow();
+        assert!(
+            current.blocks.iter().all(|block| block.kind == "paragraph"),
+            "undo should restore plain paragraphs"
+        );
+    }
+}
+
+#[test]
+fn numbered_lists_render_sequential_markers_and_markdown() {
+    let mut document = text_document("One\nTwo\nplain\nThree");
+    for index in [0usize, 1, 3] {
+        document.blocks[index].kind = "list-numbered".to_string();
+    }
+    let (rows, _) = writer_render_projection(&document, PageViewport::default());
+    let markers: Vec<String> = rows
+        .iter()
+        .filter(|row| !row.marker.is_empty())
+        .map(|row| row.marker.to_string())
+        .collect();
+    assert_eq!(
+        markers,
+        vec!["1.", "2.", "1."],
+        "numbering restarts after the plain paragraph"
+    );
+
+    let markdown = document.to_markdown();
+    assert!(markdown.contains("1. One"));
+    assert!(markdown.contains("2. Two"));
+    assert!(markdown.contains("1. Three"));
+    assert!(!markdown.contains("3. plain"));
+
+    let mut bulleted = text_document("Alpha");
+    bulleted.blocks[0].kind = "list-bulleted".to_string();
+    assert!(bulleted.to_markdown().contains("- Alpha"));
+}
+
+#[test]
+fn list_documents_round_trip_through_package() {
+    let mut document = text_document("Item");
+    document.blocks[0].kind = "list-bulleted".to_string();
+    let bytes = loom_writer_core::save_document(&document).expect("save");
+    let reopened = loom_writer_core::load_document(&bytes).expect("load");
+    assert_eq!(reopened.blocks[0].kind, "list-bulleted");
+}

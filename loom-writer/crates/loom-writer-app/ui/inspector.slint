@@ -17,6 +17,7 @@ export component WriterInspector inherits LoomPanel {
     in-out property <int> page-paper-index: 0;
     in-out property <int> page-orientation-index: 0;
     in-out property <int> page-margins-index: 0;
+    in-out property <int> list-style-index: 0;
     in property <string> status-left: "";
     in property <int> word-count: 83;
     in property <int> char-count: 507;
@@ -38,6 +39,7 @@ export component WriterInspector inherits LoomPanel {
     callback select-paper-size(int);
     callback select-orientation(int);
     callback select-margins(int);
+    callback select-list-style(int);
 
     title: "Format";
     width: 320px;
@@ -199,6 +201,15 @@ export component WriterInspector inherits LoomPanel {
                     label: "Line Spacing";
                     selected(idx) => { root.select-line-spacing(idx); }
                 }
+            }
+
+            LoomSectionHeader { title: "Lists"; }
+
+            LoomSegmentedControl {
+                items: ["None", "Bulleted", "Numbered"];
+                current <=> root.list-style-index;
+                label: "List Style";
+                selected(idx) => { root.select-list-style(idx); }
             }
 
             LoomSectionHeader { title: "Page Setup"; }
