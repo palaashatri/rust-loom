@@ -1,7 +1,16 @@
 import {
     LoomPanel, LoomSectionHeader, LoomSegmentedControl, LoomIconButton, LoomButton,
+    LoomTextField,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
+
+/// One anchored comment thread shown in the format inspector.
+export struct WriterCommentEntry {
+    id: string,
+    author: string,
+    body: string,
+    resolved: bool,
+}
 import { Theme } from "theme.slint";
 
 export component WriterInspector inherits LoomPanel {
@@ -18,6 +27,8 @@ export component WriterInspector inherits LoomPanel {
     in-out property <int> page-orientation-index: 0;
     in-out property <int> page-margins-index: 0;
     in-out property <int> list-style-index: 0;
+    in property <[WriterCommentEntry]> comment-entries: [];
+    in-out property <string> comment-draft: "";
     in property <string> status-left: "";
     in property <int> word-count: 83;
     in property <int> char-count: 507;
@@ -40,6 +51,9 @@ export component WriterInspector inherits LoomPanel {
     callback select-orientation(int);
     callback select-margins(int);
     callback select-list-style(int);
+    callback add-comment(string);
+    callback set-comment-resolved(string, bool);
+    callback delete-comment(string);
 
     title: "Format";
     width: 320px;
@@ -200,6 +214,66 @@ export component WriterInspector inherits LoomPanel {
                     current <=> root.line-spacing-index;
                     label: "Line Spacing";
                     selected(idx) => { root.select-line-spacing(idx); }
+                }
+            }
+
+            LoomSectionHeader { title: "Comments"; }
+
+            LoomTextField {
+                label: "New comment";
+                placeholder: "Comment on the selection…";
+                value <=> root.comment-draft;
+                accepted(body) => { root.add-comment(body); }
+            }
+
+            LoomButton {
+                label: "Add Comment";
+                variant: "secondary";
+                enabled: root.comment-draft != "";
+                clicked => { root.add-comment(root.comment-draft); }
+            }
+
+            for entry in root.comment-entries : Rectangle {
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: entry.resolved
+                    ? Theme.palette().surface-sunken
+                    : Theme.palette().surface-raised;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+
+                VerticalLayout {
+                    padding: Theme.tokens.space.sm;
+                    spacing: Theme.tokens.space.xs;
+
+                    Text {
+                        text: entry.resolved
+                            ? entry.author + " · resolved"
+                            : entry.author;
+                        font-size: Theme.tokens.typography.micro;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    Text {
+                        text: entry.body;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: start;
+
+                        LoomButton {
+                            label: entry.resolved ? "Reopen" : "Resolve";
+                            variant: "ghost";
+                            clicked => { root.set-comment-resolved(entry.id, !entry.resolved); }
+                        }
+                        LoomButton {
+                            label: "Delete";
+                            variant: "ghost";
+                            clicked => { root.delete-comment(entry.id); }
+                        }
+                    }
                 }
             }
 

@@ -15,10 +15,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use document_formatting::{
-    formatting_state_for_selection, indent_selection, set_selection_alignment, set_selection_bold,
-    set_selection_font_family, set_selection_font_size, set_selection_heading,
-    set_selection_italic, set_selection_line_spacing, set_selection_list_style,
-    set_selection_strikethrough, set_selection_underline, DocumentSelection,
+    formatting_state_for_selection, indent_selection, selection_text_spans,
+    set_selection_alignment, set_selection_bold, set_selection_font_family,
+    set_selection_font_size, set_selection_heading, set_selection_italic,
+    set_selection_line_spacing, set_selection_list_style, set_selection_strikethrough,
+    set_selection_underline, DocumentSelection,
 };
 use loom_command::{
     CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSpec,
@@ -64,6 +65,7 @@ struct Args {
     template: Option<TemplateId>,
     template_chooser: bool,
     inspector: bool,
+    comment: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -87,6 +89,7 @@ where
         template: None,
         template_chooser: false,
         inspector: false,
+        comment: None,
     };
     let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
@@ -131,6 +134,10 @@ where
             }
             "--inspector" => {
                 args.inspector = true;
+            }
+            "--comment" => {
+                let body = it.next().ok_or("--comment needs a body")?;
+                args.comment = Some(body);
             }
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string());
@@ -1322,6 +1329,17 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_char_count(char_count.min(i32::MAX as usize) as i32);
     // ~200 wpm average reading speed
     app.set_reading_time_mins(word_count.div_ceil(200).max(1).min(i32::MAX as usize) as i32);
+    let comment_entries: Vec<WriterCommentEntry> = doc
+        .live_comment_threads()
+        .iter()
+        .map(|thread| WriterCommentEntry {
+            id: SharedString::from(thread.id.as_str()),
+            author: SharedString::from(thread.author.as_str()),
+            body: SharedString::from(thread.body.as_str()),
+            resolved: thread.resolved,
+        })
+        .collect();
+    app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
     app.set_status_left(SharedString::from(format!(
         "{} words · {} chars · {} blocks",
         word_count, char_count, block_count
@@ -1524,6 +1542,25 @@ fn writer_render_row(
 /// consecutive `list-numbered` blocks via `numbered_counter`; any other kind
 /// resets the counter. Markers hang in the left page margin so the content
 /// column — and therefore caret and selection geometry — never shifts.
+/// Returns the block whose canonical editor-text range contains the given
+/// editor-stream byte offset.
+fn block_containing_offset(document: &WriterDocument, offset: usize) -> Option<&RichBlock> {
+    let mut cursor = 0usize;
+    for block in &document.blocks {
+        let len = block.text.len_bytes();
+        let sep = if cursor + len < document.editor_text().len() {
+            1
+        } else {
+            0
+        };
+        if offset < cursor + len + sep || (sep == 0 && offset <= cursor + len) {
+            return Some(block);
+        }
+        cursor += len + sep;
+    }
+    None
+}
+
 fn writer_list_marker(kind: &str, numbered_counter: &mut usize) -> String {
     match kind {
         "list-bulleted" => {
@@ -2759,6 +2796,82 @@ fn wire_writer_shared_callbacks(
         });
     }
 
+    // Comments are anchored document data: adding, resolving, and deleting
+    // participate in undo history and persist in the .loomdoc package.
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_add_comment(move |body| {
+            let Some(app) = app_ref.upgrade() else { return };
+            if body.trim().is_empty() {
+                return;
+            }
+            let mut next = state.current.borrow().clone();
+            let (anchor, focus) = {
+                let current = state.current.borrow();
+                let selection = current.selection();
+                (selection.anchor, selection.focus)
+            };
+            let spans = selection_text_spans(&next, DocumentSelection::range(anchor, focus));
+            let result = match spans.first() {
+                Some(&(block_index, start, end)) => {
+                    let block_id = next.blocks[block_index].id;
+                    next.add_comment_thread(block_id, start, end, &body)
+                }
+                // A collapsed caret comments on the whole containing block.
+                None => {
+                    let (block_id, len_bytes) = {
+                        let document = &next;
+                        match block_containing_offset(document, anchor) {
+                            Some(block) => (block.id, block.text.len_bytes()),
+                            None => return,
+                        }
+                    };
+                    next.add_comment_thread(block_id, 0, len_bytes, &body)
+                }
+            };
+            match result {
+                Ok(_) => {
+                    app.set_comment_draft(SharedString::from(""));
+                    apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                    app.set_status_right(SharedString::from("Comment added"));
+                }
+                Err(error) => {
+                    app.set_status_right(SharedString::from(format!("Comment failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_set_comment_resolved(move |id, resolved| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            if next.set_comment_thread_resolved(&id, resolved) {
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                let label = if resolved {
+                    "Comment resolved"
+                } else {
+                    "Comment reopened"
+                };
+                app.set_status_right(SharedString::from(label));
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_delete_comment(move |id| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            if next.remove_comment_thread(&id) {
+                apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+                app.set_status_right(SharedString::from("Comment deleted"));
+            }
+        });
+    }
+
     // Page setup mutations are real document edits: they participate in
     // undo history, drive layout/selection geometry, persist in the
     // .loomdoc package, and size the exported PDF.
@@ -2872,6 +2985,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         pdf_filter,
         registry: Arc::new(Mutex::new(initial_registry)),
     });
+    if let Some(body) = &args.comment {
+        let mut document = state.current.borrow().clone();
+        if let Some(block) = document.blocks.first().cloned() {
+            let len = block.text.len_bytes();
+            let _ = document.add_comment_thread(block.id, 0, len, body);
+            *state.current.borrow_mut() = document;
+        }
+    }
     // Keep one shared adapter alive for the whole application lifetime.  Its
     // registered sink below dispatches accepted native menu actions into the
     // same Slint callbacks used by toolbar and palette controls.
@@ -3655,6 +3776,22 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         next.set_selection(sel);
         apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
     }
+
+    // Comments are anchored document data: adding one must surface it in the
+    // inspector model and survive the package round-trip below.
+    app.invoke_add_comment(SharedString::from("Review this opening"));
+    {
+        let current = state.current.borrow();
+        if current.comments.len() != 1 || current.comments[0].body != "Review this opening" {
+            return Err("journey comment was not added".into());
+        }
+    }
+    if app.get_comment_entries().iter().count() != 1 {
+        return Err("journey comment entry missing from the UI model".into());
+    }
+    screenshots.push(capture_writer_journey_step(
+        &app, args, out_dir, "comments",
+    )?);
 
     // Page setup is a real document edit: switching to landscape Letter must
     // relayout the projection, update the pushed page geometry, and survive

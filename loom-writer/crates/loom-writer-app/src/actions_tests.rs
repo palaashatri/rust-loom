@@ -1423,3 +1423,62 @@ fn list_documents_round_trip_through_package() {
     let reopened = loom_writer_core::load_document(&bytes).expect("load");
     assert_eq!(reopened.blocks[0].kind, "list-bulleted");
 }
+
+#[test]
+fn comments_add_resolve_delete_undo_and_round_trip() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("Hello anchored world"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    // Select "anchored" and add a comment on it.
+    let mut next = state.current.borrow().clone();
+    let block_len = next.blocks[0].text.len_bytes();
+    next.set_selection(TextSelection::range(6, 6 + block_len.min(14)));
+    let selection = next.selection().clone();
+    apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+    app.invoke_add_comment(SharedString::from("Nice phrase"));
+    {
+        let current = state.current.borrow();
+        assert_eq!(current.comments.len(), 1);
+        assert_eq!(current.comments[0].body, "Nice phrase");
+        assert_eq!(current.comments[0].block_id, current.blocks[0].id);
+        assert_eq!(current.comments[0].start, 6);
+    }
+    assert_eq!(app.get_comment_entries().iter().count(), 1);
+
+    // Resolve, then delete.
+    let id = state.current.borrow().comments[0].id.clone();
+    app.invoke_set_comment_resolved(SharedString::from(id.clone()), true);
+    assert!(state.current.borrow().comments[0].resolved);
+    app.invoke_delete_comment(SharedString::from(id));
+    assert!(state.current.borrow().comments.is_empty());
+
+    // Re-add and undo: the comment add participates in history.
+    app.invoke_add_comment(SharedString::from("Second"));
+    app.invoke_undo();
+    assert!(
+        state.current.borrow().comments.is_empty(),
+        "undo should remove the comment"
+    );
+
+    // A fresh comment survives the package round-trip.
+    app.invoke_add_comment(SharedString::from("Persisted"));
+    let bytes = loom_writer_core::save_document(&state.current.borrow()).expect("save");
+    let reopened = loom_writer_core::load_document(&bytes).expect("load");
+    assert_eq!(reopened.comments.len(), 1);
+    assert_eq!(reopened.comments[0].body, "Persisted");
+}
+
+#[test]
+fn comment_on_caret_anchors_whole_block_and_rejects_empty_body() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("Whole block"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+    app.invoke_add_comment(SharedString::from("   "));
+    assert!(state.current.borrow().comments.is_empty());
+    app.invoke_add_comment(SharedString::from("On the block"));
+    let current = state.current.borrow();
+    assert_eq!(current.comments.len(), 1);
+    assert_eq!(current.comments[0].start, 0);
+    assert_eq!(current.comments[0].end, current.blocks[0].text.len_bytes());
+}

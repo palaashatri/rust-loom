@@ -13,6 +13,7 @@ use loom_package::zip::{self, PackageArchive};
 use loom_text::ParagraphStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod comments;
 mod export;
 mod page_setup;
 
@@ -234,6 +235,8 @@ pub struct WriterDocument {
     pub title: String,
     /// Page setup (paper size, orientation, margins) driving layout and export.
     pub page: PageSetup,
+    /// Anchored comment threads. Threads follow their block across edits.
+    pub comments: Vec<CommentThread>,
     /// Document blocks in order.
     pub blocks: Vec<RichBlock>,
     /// Active text selection in the canonical [`Self::editor_text`] stream.
@@ -251,6 +254,7 @@ impl WriterDocument {
             id: id.into(),
             title: title.into(),
             page: PageSetup::default(),
+            comments: Vec::new(),
             blocks: Vec::new(),
             selection: TextSelection::caret(0),
         }
@@ -491,6 +495,8 @@ impl WriterDocument {
         s.push(']');
         s.push_str(",\"page\":");
         s.push_str(&self.page.write_content_json());
+        s.push_str(",\"comments\":");
+        s.push_str(&self.comments_to_content_json());
         s.push_str(",\"selection\":");
         s.push_str(&selection_json(&self.selection));
         s.push('}');
@@ -504,6 +510,7 @@ impl WriterDocument {
         let mut blocks: Vec<RichBlock> = Vec::new();
         let mut selection = TextSelection::caret(0);
         let mut page = PageSetup::default();
+        let mut comments: Vec<CommentThread> = Vec::new();
 
         // Minimal safe parse: reuse loom_package's bounded JSON parser on the
         // top-level object, then iterate the entries array.
@@ -534,6 +541,11 @@ impl WriterDocument {
                         }
                     }
                 }
+                "comments" => {
+                    if let JsonValue::Raw(raw) = v {
+                        comments = WriterDocument::comments_from_content_json(raw);
+                    }
+                }
                 _ => {}
             }
         }
@@ -541,6 +553,7 @@ impl WriterDocument {
             id,
             title,
             page,
+            comments,
             blocks,
             selection,
         };
@@ -3622,6 +3635,7 @@ impl WriterDocument {
                     id: String::new(),
                     title: String::new(),
                     page: PageSetup::default(),
+                    comments: Vec::new(),
                     blocks: vec![block.clone()],
                     selection: TextSelection::caret(0),
                 }

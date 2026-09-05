@@ -3,9 +3,10 @@ import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
-    WriterActionToolbar, WriterToolbarBody, WriterPageCanvas, WriterInspector,
+    WriterActionToolbar, WriterToolbarBody, WriterPageCanvas,
     WriterStatusBar, WriterToolbarOverflow, WriterRenderBlock, WriterSelectionRect
 } from "writer_components.slint";
+import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
@@ -75,6 +76,8 @@ export component WriterApp inherits Window {
     in-out property <int> page-orientation-index: 0;
     in-out property <int> page-margins-index: 0;
     in-out property <int> list-style-index: 0;
+    in property <[WriterCommentEntry]> comment-entries: [];
+    in-out property <string> comment-draft: "";
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -111,6 +114,9 @@ export component WriterApp inherits Window {
     callback select-orientation(int);
     callback select-margins(int);
     callback select-list-style(int);
+    callback add-comment(string);
+    callback set-comment-resolved(string, bool);
+    callback delete-comment(string);
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -322,6 +328,10 @@ export component WriterApp inherits Window {
                     page-orientation-index <=> root.page-orientation-index;
                     page-margins-index <=> root.page-margins-index;
                     list-style-index <=> root.list-style-index;
+                    comment-entries: root.comment-entries;
+                    add-comment(body) => { root.add-comment(body); }
+                    set-comment-resolved(id, resolved) => { root.set-comment-resolved(id, resolved); }
+                    delete-comment(id) => { root.delete-comment(id); }
                     status-left: root.status-left;
                     word-count: root.word-count;
                     char-count: root.char-count;
