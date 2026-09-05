@@ -979,11 +979,11 @@ pub trait MenuBarService: Send + Sync {
 }
 
 /// Production native global menu bar service for macOS and Linux.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct NativeMenuBar {
-    current: Mutex<Option<MenuBar>>,
-    action_sink: Mutex<Option<MenuActionSink>>,
-    installed: AtomicBool,
+    current: Arc<Mutex<Option<MenuBar>>>,
+    action_sink: Arc<Mutex<Option<MenuActionSink>>>,
+    installed: Arc<AtomicBool>,
 }
 
 impl NativeMenuBar {
@@ -1017,6 +1017,26 @@ impl MenuBarService for NativeMenuBar {
     fn install_menu_bar(&self, menu_bar: &MenuBar) -> Result<(), DesktopError> {
         *self.current.lock().unwrap() = Some(menu_bar.clone());
         self.installed.store(true, Ordering::SeqCst);
+        #[cfg(target_os = "macos")]
+        {
+            let current = self.current.clone();
+            let action_sink = self.action_sink.clone();
+            let dispatcher = Arc::new(move |item_id: &str| -> Result<(), DesktopError> {
+                let action = {
+                    let guard = current.lock().unwrap();
+                    let bar = guard.as_ref().ok_or_else(|| {
+                        DesktopError::InvalidRequest("native menu bar is not installed".into())
+                    })?;
+                    bar.dispatch_action(item_id, CommandSource::Menu)?
+                };
+                let sink = action_sink.lock().unwrap().clone();
+                if let Some(sink) = sink {
+                    sink(action)?;
+                }
+                Ok(())
+            });
+            crate::macos_menu::install_native_macos_menu(menu_bar, dispatcher)?;
+        }
         Ok(())
     }
 
@@ -1028,6 +1048,8 @@ impl MenuBarService for NativeMenuBar {
     ) -> Result<(), DesktopError> {
         if let Some(ref mut menu_bar) = *self.current.lock().unwrap() {
             if menu_bar.update_item_state(item_id, enabled, checked) {
+                #[cfg(target_os = "macos")]
+                crate::macos_menu::update_native_item(item_id, enabled, checked);
                 return Ok(());
             }
         }
@@ -1040,6 +1062,8 @@ impl MenuBarService for NativeMenuBar {
             DesktopError::InvalidRequest("native menu bar is not installed".into())
         })?;
         if menu_bar.apply_command_state(state) {
+            #[cfg(target_os = "macos")]
+            crate::macos_menu::update_native_command_state(state);
             Ok(())
         } else {
             Err(DesktopError::InvalidRequest(format!(

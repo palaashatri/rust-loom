@@ -2,7 +2,10 @@
 
 use std::rc::Rc;
 
-use loom_desktop::{FileFilter, ScriptedFileDialogs};
+use loom_desktop::{
+    build_standard_menu_bar, CommandAction, CommandState, FileFilter, Menu, MenuBarService,
+    MenuItem, MenuShortcut, NativeMenuBar, ScriptedFileDialogs,
+};
 use loom_sheets_core::{
     evaluate, export_xlsx_from_grid, from_csv, shift_formula_references, to_csv, CalcError,
     CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec, PivotAggregation, Sheet,
@@ -898,4 +901,88 @@ fn test_deep_audit_data_interop_csv_and_xlsx() {
     assert!(!xlsx_bytes.is_empty());
     // Verify valid ZIP magic number
     assert_eq!(&xlsx_bytes[0..4], b"PK\x03\x04");
+}
+
+#[test]
+fn test_deep_audit_native_macos_global_menu_bar() {
+    let menu = NativeMenuBar::new();
+    let bar = build_standard_menu_bar(
+        "Loom Sheets",
+        vec![
+            MenuItem::action_with_shortcut(
+                "file.export_csv",
+                "Export CSV...",
+                MenuShortcut::primary_shift("C"),
+            ),
+            MenuItem::action_with_shortcut(
+                "file.export_xlsx",
+                "Export Excel...",
+                MenuShortcut::primary_shift("E"),
+            ),
+        ],
+        vec![],
+        vec![],
+        vec![Menu::new(
+            "Table",
+            vec![
+                MenuItem::action("table.add_row", "Add Row"),
+                MenuItem::action("table.delete_row", "Delete Row"),
+                MenuItem::action("table.add_col", "Add Column"),
+                MenuItem::action("table.delete_col", "Delete Column"),
+                MenuItem::Separator,
+                MenuItem::action("table.sort_asc", "Sort Ascending"),
+                MenuItem::action("table.sort_desc", "Sort Descending"),
+            ],
+        )],
+    );
+
+    // 1. Menu hierarchy structure
+    assert!(bar.find_item("file.new").is_some());
+    assert!(bar.find_item("file.save").is_some());
+    assert!(bar.find_item("edit.undo").is_some());
+    assert!(bar.find_item("table.sort_asc").is_some());
+    assert!(bar.find_item("file.export_csv").is_some());
+
+    // 2. Install menu bar
+    assert!(menu.install_menu_bar(&bar).is_ok());
+    assert!(menu.is_installed());
+
+    // 3. Action sink registration and invocation
+    let dispatched = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let dispatched_ref = dispatched.clone();
+    menu.register_action_sink(Arc::new(move |action: CommandAction| {
+        dispatched_ref.lock().unwrap().push(action.id);
+        Ok(())
+    }))
+    .expect("register sink");
+
+    // Enabled action dispatches
+    assert!(menu.dispatch_action("file.save").is_ok());
+    assert_eq!(dispatched.lock().unwrap().as_slice(), &["file.save"]);
+
+    // 4. State updates: disable an item and verify dispatch is rejected
+    assert!(menu.update_item("file.save", false, None).is_ok());
+    assert!(menu.dispatch_action("file.save").is_err());
+
+    // Re-enable and verify dispatch succeeds
+    assert!(menu.update_item("file.save", true, None).is_ok());
+    assert!(menu.dispatch_action("file.save").is_ok());
+    assert_eq!(
+        dispatched.lock().unwrap().as_slice(),
+        &["file.save", "file.save"]
+    );
+
+    // 5. Dynamic command projection update
+    let cmd_state = CommandState::action("file.save", "Save Workbook")
+        .with_shortcut(MenuShortcut::primary("S"))
+        .with_enabled(true);
+    assert!(menu.update_command_state(&cmd_state).is_ok());
+    assert_eq!(
+        menu.installed_menu_bar()
+            .unwrap()
+            .find_item("file.save")
+            .unwrap()
+            .label(),
+        Some("Save Workbook")
+    );
 }
