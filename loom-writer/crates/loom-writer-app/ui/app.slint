@@ -68,6 +68,13 @@ export component WriterApp inherits Window {
     in property <int> char-count: 0;
     in property <int> reading-time-mins: 1;
 
+    in property <float> page-width-pt: 595.0;
+    in property <float> page-height-pt: 842.0;
+    in property <float> page-margin-pt: 72.0;
+    in-out property <int> page-paper-index: 0;
+    in-out property <int> page-orientation-index: 0;
+    in-out property <int> page-margins-index: 0;
+
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
@@ -99,6 +106,9 @@ export component WriterApp inherits Window {
     callback indent-text;
     callback outdent-text;
     callback select-line-spacing(int);
+    callback select-paper-size(int);
+    callback select-orientation(int);
+    callback select-margins(int);
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
@@ -281,6 +291,9 @@ export component WriterApp inherits Window {
                     page-scroll-y <=> root.page-scroll-y;
                     page-count: root.page-count;
                     page-stack-height: root.page-stack-height;
+                    page-width-pt: root.page-width-pt;
+                    page-height-pt: root.page-height-pt;
+                    page-margin-pt: root.page-margin-pt;
                     page-zoom-changed(value) => { root.page-zoom-changed(value); }
                     page-scroll-changed(x, y) => { root.page-scroll-changed(x, y); }
                     document-edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
@@ -303,6 +316,9 @@ export component WriterApp inherits Window {
                     font-size-pt <=> root.font-size-pt;
                     text-alignment <=> root.text-alignment;
                     line-spacing-index <=> root.line-spacing-index;
+                    page-paper-index <=> root.page-paper-index;
+                    page-orientation-index <=> root.page-orientation-index;
+                    page-margins-index <=> root.page-margins-index;
                     status-left: root.status-left;
                     word-count: root.word-count;
                     char-count: root.char-count;
@@ -320,6 +336,9 @@ export component WriterApp inherits Window {
                     indent-text => { root.indent-text(); }
                     outdent-text => { root.outdent-text(); }
                     select-line-spacing(idx) => { root.select-line-spacing(idx); }
+                    select-paper-size(idx) => { root.select-paper-size(idx); }
+                    select-orientation(idx) => { root.select-orientation(idx); }
+                    select-margins(idx) => { root.select-margins(idx); }
                 }
 
                 if root.rtl : WriterPageCanvas {

@@ -13,6 +13,12 @@ use loom_package::zip::{self, PackageArchive};
 use loom_text::ParagraphStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod export;
+mod page_setup;
+
+pub use export::{export_document_as_docx, export_pdf};
+pub use page_setup::PageSetup;
+
 /// Stable document id.
 pub type DocId = String;
 
@@ -226,6 +232,8 @@ pub struct WriterDocument {
     pub id: DocId,
     /// Title (used for display and export).
     pub title: String,
+    /// Page setup (paper size, orientation, margins) driving layout and export.
+    pub page: PageSetup,
     /// Document blocks in order.
     pub blocks: Vec<RichBlock>,
     /// Active text selection in the canonical [`Self::editor_text`] stream.
@@ -242,6 +250,7 @@ impl WriterDocument {
         Self {
             id: id.into(),
             title: title.into(),
+            page: PageSetup::default(),
             blocks: Vec::new(),
             selection: TextSelection::caret(0),
         }
@@ -480,6 +489,8 @@ impl WriterDocument {
             s.push('}');
         }
         s.push(']');
+        s.push_str(",\"page\":");
+        s.push_str(&self.page.write_content_json());
         s.push_str(",\"selection\":");
         s.push_str(&selection_json(&self.selection));
         s.push('}');
@@ -492,6 +503,7 @@ impl WriterDocument {
         let mut title = String::new();
         let mut blocks: Vec<RichBlock> = Vec::new();
         let mut selection = TextSelection::caret(0);
+        let mut page = PageSetup::default();
 
         // Minimal safe parse: reuse loom_package's bounded JSON parser on the
         // top-level object, then iterate the entries array.
@@ -515,12 +527,20 @@ impl WriterDocument {
                         selection = parse_selection(raw)?;
                     }
                 }
+                "page" => {
+                    if let JsonValue::Raw(raw) = v {
+                        if let Some(setup) = PageSetup::from_content_json_value(raw) {
+                            page = setup;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
         let mut document = Self {
             id,
             title,
+            page,
             blocks,
             selection,
         };
@@ -2362,51 +2382,11 @@ impl Clone for ContentParser {
 }
 
 /// Escapes text for XML element content: &, <, > become entities.
-fn xml_escape_text(value: &str) -> String {
+pub(crate) fn xml_escape_text(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
-}
-
-/// Exports a document to a minimal valid `.docx` archive: each block becomes one `<w:p>`
-/// paragraph; heading blocks carry `<w:pStyle w:val="HeadingN"/>`. Round-trips through
-/// [`extract_docx_blocks`] preserving kinds and texts.
-pub fn export_document_as_docx(
-    doc: &WriterDocument,
-) -> Result<Vec<u8>, loom_package::zip::ArchiveError> {
-    let mut body = String::new();
-    for block in &doc.blocks {
-        if block.text.as_str().trim().is_empty() {
-            continue;
-        }
-        // "heading3" -> "Heading3"; anything else exports as a plain paragraph.
-        let style = if let Some(digits) = block.kind.strip_prefix("heading") {
-            if digits.chars().all(|c| c.is_ascii_digit()) {
-                let mut styled = String::from("Heading");
-                styled.push_str(digits);
-                format!("<w:pPr><w:pStyle w:val=\"{styled}\"/></w:pPr>")
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-        body.push_str(&format!(
-            "<w:p>{style}<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
-            xml_escape_text(block.text.as_str())
-        ));
-    }
-    let document_xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
-         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
-         <w:body>{body}</w:body></w:document>"
-    );
-    let mut arch = PackageArchive::new();
-    arch.add("[Content_Types].xml", br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#.to_vec())?;
-    arch.add("_rels/.rels", br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#.to_vec())?;
-    arch.add("word/document.xml", document_xml.into_bytes())?;
-    arch.to_bytes()
 }
 
 /// Save a document to a `.loomdoc` byte buffer (ZIP + manifest).
@@ -2455,50 +2435,6 @@ pub fn load_document(bytes: &[u8]) -> Result<WriterDocument, WriterError> {
     let s = std::str::from_utf8(content)
         .map_err(|_| WriterError::Invalid("content not utf8".into()))?;
     WriterDocument::from_content_json(s)
-}
-
-/// Render the document to a single A4 PDF page using the shared
-/// deterministic PDF writer. Output is byte-for-byte deterministic for the
-/// same document.
-pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
-    use loom_pdf::{PdfDocument, TextStyle};
-    let mut pdf = PdfDocument::new();
-    let page = pdf.add_page(595.0, 842.0);
-    pdf.draw_text(
-        page,
-        56.0,
-        790.0,
-        &doc.title,
-        &TextStyle {
-            size_pt: 20.0,
-            bold: true,
-            ..Default::default()
-        },
-    );
-    let body = TextStyle {
-        size_pt: 11.0,
-        fill_rgb: (0.15, 0.13, 0.11),
-        ..Default::default()
-    };
-    let mut y = 760.0;
-    for b in &doc.blocks {
-        let style = match b.kind.as_str() {
-            "heading1" => TextStyle {
-                size_pt: 15.0,
-                bold: true,
-                ..Default::default()
-            },
-            "heading2" => TextStyle {
-                size_pt: 13.0,
-                bold: true,
-                ..Default::default()
-            },
-            _ => body.clone(),
-        };
-        pdf.draw_text(page, 56.0, y, b.text.as_str(), &style);
-        y -= 22.0;
-    }
-    pdf.serialize()
 }
 
 /// One text-search hit in a document block.
@@ -3673,6 +3609,7 @@ impl WriterDocument {
                 let hits: Vec<SearchMatch> = WriterDocument {
                     id: String::new(),
                     title: String::new(),
+                    page: PageSetup::default(),
                     blocks: vec![block.clone()],
                     selection: TextSelection::caret(0),
                 }

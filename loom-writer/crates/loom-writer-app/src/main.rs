@@ -1288,6 +1288,25 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     app.set_page_count(page_count);
     app.set_page_stack_height(page_stack_height);
+    let page_style = doc.page.page_style();
+    app.set_page_width_pt(page_style.width_pt);
+    app.set_page_height_pt(page_style.height_pt);
+    app.set_page_margin_pt(page_style.margin_top_pt);
+    app.set_page_paper_index(match doc.page.paper {
+        loom_writer_core::PaperSize::A4 => 0,
+        loom_writer_core::PaperSize::Letter => 1,
+        _ => 0,
+    });
+    app.set_page_orientation_index(match doc.page.orientation {
+        loom_writer_core::PageOrientation::Portrait => 0,
+        loom_writer_core::PageOrientation::Landscape => 1,
+    });
+    app.set_page_margins_index(match doc.page.margins {
+        loom_writer_core::PageMarginsPreset::Normal => 0,
+        loom_writer_core::PageMarginsPreset::Narrow => 1,
+        loom_writer_core::PageMarginsPreset::Wide => 2,
+        _ => 0,
+    });
     app.set_selection_announcement(SharedString::from(announcement.clone()));
     app.set_is_bold(formatting.bold);
     app.set_is_italic(formatting.italic);
@@ -1319,6 +1338,10 @@ fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewp
     let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
     app.set_page_count(page_count);
     app.set_page_stack_height(page_stack_height);
+    let page_style = doc.page.page_style();
+    app.set_page_width_pt(page_style.width_pt);
+    app.set_page_height_pt(page_style.height_pt);
+    app.set_page_margin_pt(page_style.margin_top_pt);
 }
 
 /// Project the authoritative rich-text model into the display-only StyledText
@@ -1345,11 +1368,11 @@ fn writer_render_projection(
     doc: &WriterDocument,
     viewport: PageViewport,
 ) -> (Vec<WriterRenderBlock>, Vec<WriterSelectionRect>) {
-    let style = PageStyle::default();
+    let style = doc.page.page_style();
     let layout_viewport = PageViewport {
-        // The page editor owns an A4 surface.  Keep the layout viewport in
-        // page points so the projection remains independent of shell width;
-        // scrolling and zoom are still taken from controller state.
+        // The layout viewport stays in page points so the projection remains
+        // independent of shell width; scrolling and zoom are still taken from
+        // controller state.
         width: style.width_pt,
         height: style.height_pt,
         zoom: normalize_page_zoom(viewport.zoom, 1.0),
@@ -1420,7 +1443,7 @@ fn writer_render_projection(
 }
 
 fn writer_projection_metrics(doc: &WriterDocument, viewport: PageViewport) -> (i32, f32) {
-    let style = PageStyle::default();
+    let style = doc.page.page_style();
     let layout_viewport = PageViewport {
         width: style.width_pt,
         height: style.height_pt,
@@ -1534,7 +1557,7 @@ fn writer_pointer_offset(
     if doc.blocks.is_empty() {
         return Some(0);
     }
-    let style = PageStyle::default();
+    let style = doc.page.page_style();
     let zoom = normalize_page_zoom(viewport.zoom, 1.0);
     let layout = doc
         .layout(
@@ -1866,8 +1889,8 @@ fn project_selection_event(
         app,
         document,
         PageViewport {
-            width: PageStyle::default().width_pt,
-            height: PageStyle::default().height_pt,
+            width: document.page.page_style().width_pt,
+            height: document.page.page_style().height_pt,
             zoom: app.get_page_zoom(),
             scroll_x: app.get_page_scroll_x(),
             scroll_y: app.get_page_scroll_y(),
@@ -2684,6 +2707,66 @@ fn wire_writer_shared_callbacks(
             state.pointer_anchor.set(None);
         });
     }
+
+    // Page setup mutations are real document edits: they participate in
+    // undo history, drive layout/selection geometry, persist in the
+    // .loomdoc package, and size the exported PDF.
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_paper_size(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            next.page.paper = match index {
+                1 => loom_writer_core::PaperSize::Letter,
+                _ => loom_writer_core::PaperSize::A4,
+            };
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            app.set_status_right(SharedString::from(format!(
+                "Paper: {}",
+                if index == 1 { "US Letter" } else { "A4" }
+            )));
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_orientation(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            next.page.orientation = match index {
+                1 => loom_writer_core::PageOrientation::Landscape,
+                _ => loom_writer_core::PageOrientation::Portrait,
+            };
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            app.set_status_right(SharedString::from(format!(
+                "Orientation: {}",
+                if index == 1 { "Landscape" } else { "Portrait" }
+            )));
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_select_margins(move |index| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let mut next = state.current.borrow().clone();
+            next.page.margins = match index {
+                1 => loom_writer_core::PageMarginsPreset::Narrow,
+                2 => loom_writer_core::PageMarginsPreset::Wide,
+                _ => loom_writer_core::PageMarginsPreset::Normal,
+            };
+            apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+            app.set_status_right(SharedString::from(format!(
+                "Margins: {}",
+                match index {
+                    1 => "Narrow",
+                    2 => "Wide",
+                    _ => "Normal",
+                }
+            )));
+        });
+    }
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
@@ -2743,6 +2826,149 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // same Slint callbacks used by toolbar and palette controls.
     let menu_service = Arc::new(NativeMenuBar::new());
     wire_writer_shared_callbacks(&app, &state, Some(menu_service.clone()));
+
+    let mut menu_bar = build_standard_menu_bar(
+        "Loom Writer",
+        vec![MenuItem::action_with_shortcut(
+            "file.export_pdf",
+            "Export to PDF...",
+            MenuShortcut::primary("E"),
+        )],
+        vec![],
+        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
+        vec![Menu::new(
+            "Format",
+            vec![
+                MenuItem::action_with_shortcut("format.bold", "Bold", MenuShortcut::primary("B")),
+                MenuItem::action_with_shortcut(
+                    "format.italic",
+                    "Italic",
+                    MenuShortcut::primary("I"),
+                ),
+                MenuItem::action_with_shortcut(
+                    "format.underline",
+                    "Underline",
+                    MenuShortcut::primary("U"),
+                ),
+            ],
+        )],
+    );
+    // Only commands with a registered Writer/controller sink are enabled.
+    // Application/window/help entries remain disabled until a real native
+    // host bridge is installed for them.
+    menu_bar.disable_items_except([
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "file.export_pdf",
+        "edit.undo",
+        "edit.redo",
+        "app.palette",
+        "view.inspector",
+        "format.bold",
+        "format.italic",
+        "format.underline",
+    ]);
+    menu_service
+        .install_menu_bar(&menu_bar)
+        .map_err(|error| error.to_string())?;
+    let app_ref = app.as_weak();
+    let registry_for_menu = state.registry.clone();
+    menu_service
+        .register_action_sink(Arc::new(move |action: CommandAction| {
+            // Menu, toolbar, palette, shortcut and a11y converge here: the
+            // registry is authoritative and disabled commands never schedule.
+            let id = action.id.clone();
+            let enabled = registry_for_menu
+                .lock()
+                .unwrap()
+                .get(&CommandId::new(&id))
+                .map(|spec| spec.enabled)
+                .unwrap_or(false);
+            if !enabled {
+                return Err(DesktopError::InvalidRequest(format!(
+                    "command '{id}' is currently disabled"
+                )));
+            }
+            // Demonstrate that every surface shares one handler by invoking
+            // through the registry with a Menu source before scheduling.
+            let _ = registry_for_menu
+                .lock()
+                .unwrap()
+                .invoke(&CommandInvocation::new(id.clone(), InvocationSource::Menu));
+            schedule_menu_action(&app_ref, action)
+        }))
+        .map_err(|error| error.to_string())?;
+
+    wire_palette(&app);
+    // Live GUI palette wiring overrides the headless `wire_palette` handlers so
+    // query filtering and dispatch go through the shared `CommandRegistry`.
+    // This ensures menu/toolbar/palette/shortcut/a11y all use one `search`
+    // ranking and one `invoke` guard.
+    {
+        let state_for_palette = state.clone();
+        let app_ref = app.as_weak();
+        app.on_palette_query_changed(move |query| {
+            if let Some(app) = app_ref.upgrade() {
+                let registry = state_for_palette.registry.lock().unwrap();
+                rebuild_palette_with_registry(&app, &registry, query.as_str());
+                app.set_palette_selected(0);
+            }
+        });
+    }
+    {
+        let state_for_palette = state.clone();
+        let app_ref = app.as_weak();
+        app.on_palette_invoked(move |index| {
+            if let Some(app) = app_ref.upgrade() {
+                let registry = state_for_palette.registry.lock().unwrap();
+                let q = app.get_palette_query().trim().to_string();
+                let command = if q.is_empty() {
+                    let mut specs: Vec<&CommandSpec> =
+                        registry.commands().filter(|s| s.enabled).collect();
+                    specs.sort_by(|a, b| a.order.cmp(&b.order).then(a.id.cmp(&b.id)));
+                    specs
+                        .into_iter()
+                        .filter_map(|spec| {
+                            master_palette(&app)
+                                .into_iter()
+                                .find(|c| c.id == spec.id.as_str())
+                        })
+                        .nth(index as usize)
+                } else {
+                    registry
+                        .search(&q)
+                        .into_iter()
+                        .filter(|(spec, _)| spec.enabled)
+                        .filter_map(|(spec, _)| {
+                            master_palette(&app)
+                                .into_iter()
+                                .find(|c| c.id == spec.id.as_str())
+                        })
+                        .nth(index as usize)
+                };
+                if let Some(command) = command {
+                    // Palette source shares handler with toolbar/menu/shortcut/a11y
+                    let _ = registry.invoke(&CommandInvocation::new(
+                        command.id,
+                        InvocationSource::Palette,
+                    ));
+                    app.set_palette_open(false);
+                    let _ = dispatch_palette_action(&app, command.action);
+                    // Demonstrate other sources share the same handler:
+                    let _ = registry.invoke(&CommandInvocation::new(
+                        command.id,
+                        InvocationSource::Accessibility,
+                    ));
+                    let _ = registry.invoke(&CommandInvocation::new(
+                        command.id,
+                        InvocationSource::Shortcut,
+                    ));
+                }
+            }
+        });
+    }
 
     {
         let state = state.clone();
@@ -3053,149 +3279,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
         });
     }
-
-    let mut menu_bar = build_standard_menu_bar(
-        "Loom Writer",
-        vec![MenuItem::action_with_shortcut(
-            "file.export_pdf",
-            "Export to PDF...",
-            MenuShortcut::primary("E"),
-        )],
-        vec![],
-        vec![MenuItem::check("view.inspector", "Format Inspector", false)],
-        vec![Menu::new(
-            "Format",
-            vec![
-                MenuItem::action_with_shortcut("format.bold", "Bold", MenuShortcut::primary("B")),
-                MenuItem::action_with_shortcut(
-                    "format.italic",
-                    "Italic",
-                    MenuShortcut::primary("I"),
-                ),
-                MenuItem::action_with_shortcut(
-                    "format.underline",
-                    "Underline",
-                    MenuShortcut::primary("U"),
-                ),
-            ],
-        )],
-    );
-    // Only commands with a registered Writer/controller sink are enabled.
-    // Application/window/help entries remain disabled until a real native
-    // host bridge is installed for them.
-    menu_bar.disable_items_except([
-        "file.new",
-        "file.open",
-        "file.save",
-        "file.save_as",
-        "file.export_pdf",
-        "edit.undo",
-        "edit.redo",
-        "app.palette",
-        "view.inspector",
-        "format.bold",
-        "format.italic",
-        "format.underline",
-    ]);
-    menu_service
-        .install_menu_bar(&menu_bar)
-        .map_err(|error| error.to_string())?;
-    let app_ref = app.as_weak();
-    let registry_for_menu = state.registry.clone();
-    menu_service
-        .register_action_sink(Arc::new(move |action: CommandAction| {
-            // Menu, toolbar, palette, shortcut and a11y converge here: the
-            // registry is authoritative and disabled commands never schedule.
-            let id = action.id.clone();
-            let enabled = registry_for_menu
-                .lock()
-                .unwrap()
-                .get(&CommandId::new(&id))
-                .map(|spec| spec.enabled)
-                .unwrap_or(false);
-            if !enabled {
-                return Err(DesktopError::InvalidRequest(format!(
-                    "command '{id}' is currently disabled"
-                )));
-            }
-            // Demonstrate that every surface shares one handler by invoking
-            // through the registry with a Menu source before scheduling.
-            let _ = registry_for_menu
-                .lock()
-                .unwrap()
-                .invoke(&CommandInvocation::new(id.clone(), InvocationSource::Menu));
-            schedule_menu_action(&app_ref, action)
-        }))
-        .map_err(|error| error.to_string())?;
-
-    wire_palette(&app);
-    // Live GUI palette wiring overrides the headless `wire_palette` handlers so
-    // query filtering and dispatch go through the shared `CommandRegistry`.
-    // This ensures menu/toolbar/palette/shortcut/a11y all use one `search`
-    // ranking and one `invoke` guard.
-    {
-        let state_for_palette = state.clone();
-        let app_ref = app.as_weak();
-        app.on_palette_query_changed(move |query| {
-            if let Some(app) = app_ref.upgrade() {
-                let registry = state_for_palette.registry.lock().unwrap();
-                rebuild_palette_with_registry(&app, &registry, query.as_str());
-                app.set_palette_selected(0);
-            }
-        });
-    }
-    {
-        let state_for_palette = state.clone();
-        let app_ref = app.as_weak();
-        app.on_palette_invoked(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                let registry = state_for_palette.registry.lock().unwrap();
-                let q = app.get_palette_query().trim().to_string();
-                let command = if q.is_empty() {
-                    let mut specs: Vec<&CommandSpec> =
-                        registry.commands().filter(|s| s.enabled).collect();
-                    specs.sort_by(|a, b| a.order.cmp(&b.order).then(a.id.cmp(&b.id)));
-                    specs
-                        .into_iter()
-                        .filter_map(|spec| {
-                            master_palette(&app)
-                                .into_iter()
-                                .find(|c| c.id == spec.id.as_str())
-                        })
-                        .nth(index as usize)
-                } else {
-                    registry
-                        .search(&q)
-                        .into_iter()
-                        .filter(|(spec, _)| spec.enabled)
-                        .filter_map(|(spec, _)| {
-                            master_palette(&app)
-                                .into_iter()
-                                .find(|c| c.id == spec.id.as_str())
-                        })
-                        .nth(index as usize)
-                };
-                if let Some(command) = command {
-                    // Palette source shares handler with toolbar/menu/shortcut/a11y
-                    let _ = registry.invoke(&CommandInvocation::new(
-                        command.id,
-                        InvocationSource::Palette,
-                    ));
-                    app.set_palette_open(false);
-                    let _ = dispatch_palette_action(&app, command.action);
-                    // Demonstrate other sources share the same handler:
-                    let _ = registry.invoke(&CommandInvocation::new(
-                        command.id,
-                        InvocationSource::Accessibility,
-                    ));
-                    let _ = registry.invoke(&CommandInvocation::new(
-                        command.id,
-                        InvocationSource::Shortcut,
-                    ));
-                }
-            }
-        });
-    }
     // Ensure keyboard shortcuts in Slint also observe honest enablement via the
     // same registry (they dispatch to the same `on_*` callbacks that now guard
     // with `Toolbar` — the menu/palette/a11y paths above show the cross-surface
@@ -3476,6 +3559,33 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         args,
         out_dir,
         "zoom-scroll",
+    )?);
+
+    // Page setup is a real document edit: switching to landscape Letter must
+    // relayout the projection, update the pushed page geometry, and survive
+    // the package round-trip below.
+    let portrait_style = state.current.borrow().page.page_style();
+    app.invoke_select_orientation(1);
+    app.invoke_select_paper_size(1);
+    let landscape_style = state.current.borrow().page.page_style();
+    if (landscape_style.width_pt, landscape_style.height_pt) != (792.0, 612.0) {
+        return Err(format!(
+            "journey page setup did not switch to landscape Letter ({:?})",
+            (landscape_style.width_pt, landscape_style.height_pt)
+        ));
+    }
+    if app.get_page_width_pt() != 792.0 || app.get_page_height_pt() != 612.0 {
+        return Err(format!(
+            "journey page geometry was not pushed to the UI ({:?})",
+            (app.get_page_width_pt(), app.get_page_height_pt())
+        ));
+    }
+    let _ = portrait_style;
+    screenshots.push(capture_writer_journey_step(
+        &app,
+        args,
+        out_dir,
+        "page-setup",
     )?);
 
     app.invoke_save_doc();
