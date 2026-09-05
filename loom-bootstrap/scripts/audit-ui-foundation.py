@@ -69,7 +69,7 @@ else:
         errors.append("foundation baselines exist before human visual acceptance")
 
 for app in APPS:
-    if app == "sheets" and status == "ACCEPTED":
+    if app in ("sheets", "writer") and status == "ACCEPTED":
         continue
     ui_root = ROOT / f"loom-{app}" / "crates" / f"loom-{app}-app" / "ui"
     if not ui_root.exists():

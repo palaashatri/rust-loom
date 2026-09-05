@@ -15,13 +15,13 @@ The score is intentionally frozen during the UI-foundation reset unless verified
 ## Active gate
 
 ```text
-ACTIVE PHASE: SHEETS
+ACTIVE PHASE: WRITER
 FOUNDATION STATUS: ACCEPTED
-ACTIVE APPLICATION: SHEETS (ACCEPTED)
-LOCKED APPLICATIONS: WRITER, PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
+ACTIVE APPLICATION: WRITER (IN_PROGRESS)
+LOCKED APPLICATIONS: PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-The shared UI foundation and Loom Sheets have achieved full acceptance with verified mechanical CI, governance audits, and native visual captures. Next application in sequence is Writer per `AGENTS.MD` Section 4.
+Loom Sheets has passed its complete acceptance gate and deep audit. Loom Writer is the active application under development per `AGENTS.MD` Section 4.
 
 ## Why the reset is necessary
 
@@ -91,7 +91,7 @@ After the shared foundation becomes `ACCEPTED`, application migration proceeds o
 | Order | Application | Status |
 |---:|---|---|
 | 1 | Sheets | ACCEPTED |
-| 2 | Writer | NOT_STARTED |
+| 2 | Writer | IN_PROGRESS |
 | 3 | Present | LOCKED |
 | 4 | Photo | LOCKED |
 | 5 | Motion | LOCKED |
@@ -124,9 +124,26 @@ Verified capabilities:
 
 ### Writer
 
-Foundation strengths include editable document data, persistence/history/recovery, search/statistics helpers, block/formatting algorithms, selection-aware formatting work, Markdown/PDF paths, partial DOCX import/export, and native file workflows.
+Status: `IN_PROGRESS` (Shared UI foundation adopted; deep audit passed; mechanical & visual verification captured)
 
-Current product limitation: the visible editor remains below a professional word processor in pagination/layout, rich structured editing, tables/images/floating objects, review workflows, headers/footers, shaping/bidi behavior, print fidelity, and interchange depth.
+Verified capabilities:
+- Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
+- UI debt reduction: `app.slint` reduced to 15,269 bytes (from 36,518 bytes); `writer_components.slint` reduced to 12,785 bytes (from 32,542 bytes); `main.rs` reduced to 141,585 bytes (from 194,401 bytes).
+- Full document model & multi-page layout: RichBlock structure with character style runs, paragraph styles, headings H1-H6, multi-page layout engine with zoom and scroll projection.
+- Text selection & grapheme-safe navigation: Collapsed caret, range selection, UTF-8 and extended grapheme boundary clamping, word boundary detection.
+- Undo/redo isolation & coalescing: Typing coalescence within time windows, discrete formatting actions creating undoable snapshots, memory-bounded history cache.
+- Native persistence & export: Native `.loomdoc` package format saving and loading with integrity verification, Markdown export, deterministic PDF export.
+- Document metrics & table of contents: Word count, character count, sentence count, reading time estimation, hierarchical outline/TOC generation from headings.
+- Format Inspector: Dedicated side panel with Style/Layout/More tabs, paragraph style selector, character style toggles (Bold/Italic/Underline), alignment, and live document statistics.
+- Template Chooser: Modal sheet with category filtering (All Templates, Basic, Letters, Curricula Vitae) and deterministic template initialization.
+- Native macOS Global Menu Bar: AppKit reflection for File, Edit, View, and Format menus with live command state synchronization.
+- Test and audit verification:
+  - 125 unit/integration tests passing (64 in `loom-writer-app`, 61 in `loom-writer-core`).
+  - 4 automated bootstrap audits passing (governance, code structure, asset provenance, UI foundation).
+  - 0 warnings with Clippy (`-D warnings`).
+  - Native screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and states (default, inspector, template chooser).
+
+Current product limitation: the visible editor remains below a professional word processor in complex pagination/layout, complex tables/images/floating objects, review workflows, headers/footers, and interchange depth.
 
 ### Present
 

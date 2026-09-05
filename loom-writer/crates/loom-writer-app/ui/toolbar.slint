@@ -1,0 +1,207 @@
+import {
+    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
+    LoomButton, LoomIconButton, LoomOverflowButton,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component WriterActionToolbar inherits LoomToolbar {
+    in property <bool> rtl: Theme.rtl;
+    in property <bool> wide: false;
+    in property <bool> overflow: false;
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    in property <bool> labeled-export: false;
+    in property <float> page-zoom: 1.0;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <bool> is-bold: false;
+    in property <bool> is-italic: false;
+    in property <bool> is-underline: false;
+
+    callback toggle-inspector;
+    callback export-pdf;
+    callback overflow-requested;
+    callback page-zoom-changed(float);
+    callback undo;
+    callback redo;
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+
+    function next-page-zoom() -> float {
+        return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
+    }
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "zoom-in";
+            label: Math.round(root.page-zoom * 100) + "%";
+            variant: "ghost";
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
+        }
+        LoomIconButton {
+            icon: "undo";
+            label: "Undo";
+            tooltip: "Undo last edit (Cmd+Z)";
+            enabled: root.can-undo;
+            clicked => { root.undo(); }
+        }
+        LoomIconButton {
+            icon: "redo";
+            label: "Redo";
+            tooltip: "Redo last edit (Cmd+Shift+Z)";
+            enabled: root.can-redo;
+            clicked => { root.redo(); }
+        }
+    }
+
+    LoomToolbarDivider { }
+
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "bold";
+            label: "Bold";
+            tooltip: "Bold (Cmd+B)";
+            selected: root.is-bold;
+            clicked => { root.toggle-bold(); }
+        }
+        LoomIconButton {
+            icon: "italic";
+            label: "Italic";
+            tooltip: "Italic (Cmd+I)";
+            selected: root.is-italic;
+            clicked => { root.toggle-italic(); }
+        }
+        LoomIconButton {
+            icon: "underline";
+            label: "Underline";
+            tooltip: "Underline (Cmd+U)";
+            selected: root.is-underline;
+            clicked => { root.toggle-underline(); }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "format";
+            label: root.wide ? "Format" : "";
+            variant: root.inspector-visible ? "primary" : "ghost";
+            selected: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        LoomButton {
+            icon: "export";
+            label: root.wide || root.labeled-export ? "Export PDF" : "";
+            variant: "ghost";
+            clicked => { root.export-pdf(); }
+        }
+        if root.overflow : LoomOverflowButton {
+            clicked => { root.overflow-requested(); }
+        }
+    }
+}
+
+export component WriterToolbarBody inherits HorizontalLayout {
+    in property <bool> wide: false;
+    in property <bool> overflow: false;
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    in property <bool> labeled-export: false;
+    in property <float> page-zoom: 1.0;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <bool> is-bold: false;
+    in property <bool> is-italic: false;
+    in property <bool> is-underline: false;
+    in property <bool> rtl: false;
+
+    callback toggle-inspector;
+    callback export-pdf;
+    callback overflow-requested;
+    callback page-zoom-changed(float);
+    callback undo;
+    callback redo;
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+
+    spacing: Theme.tokens.space.xs;
+
+    function next-page-zoom() -> float {
+        return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
+    }
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "zoom-in";
+            label: Math.round(root.page-zoom * 100) + "%";
+            variant: "ghost";
+            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
+        }
+        LoomIconButton {
+            icon: "undo";
+            label: "Undo";
+            tooltip: "Undo last edit (Cmd+Z)";
+            enabled: root.can-undo;
+            clicked => { root.undo(); }
+        }
+        LoomIconButton {
+            icon: "redo";
+            label: "Redo";
+            tooltip: "Redo last edit (Cmd+Shift+Z)";
+            enabled: root.can-redo;
+            clicked => { root.redo(); }
+        }
+    }
+
+    LoomToolbarDivider { }
+
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "bold";
+            label: "Bold";
+            tooltip: "Bold (Cmd+B)";
+            selected: root.is-bold;
+            clicked => { root.toggle-bold(); }
+        }
+        LoomIconButton {
+            icon: "italic";
+            label: "Italic";
+            tooltip: "Italic (Cmd+I)";
+            selected: root.is-italic;
+            clicked => { root.toggle-italic(); }
+        }
+        LoomIconButton {
+            icon: "underline";
+            label: "Underline";
+            tooltip: "Underline (Cmd+U)";
+            selected: root.is-underline;
+            clicked => { root.toggle-underline(); }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "format";
+            label: root.wide ? "Format" : "";
+            variant: root.inspector-visible ? "primary" : "ghost";
+            selected: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        LoomButton {
+            icon: "export";
+            label: root.wide || root.labeled-export ? "Export PDF" : "";
+            variant: "ghost";
+            clicked => { root.export-pdf(); }
+        }
+        if root.overflow : LoomOverflowButton {
+            clicked => { root.overflow-requested(); }
+        }
+    }
+}

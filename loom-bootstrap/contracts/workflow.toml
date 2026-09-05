@@ -1,9 +1,9 @@
 schema_version = 1
-phase = "sheets"
+phase = "writer"
 foundation_status = "ACCEPTED"
 application_development_locked = false
 consumer_imports_allowed = true
-next_application = "writer"
+next_application = "present"
 
 application_order = [
   "sheets",
@@ -23,9 +23,11 @@ allowed_active_prefixes = [
   "README.md",
   "loom-bootstrap/",
   "loom-core/crates/loom-ui/",
+  "loom-core/crates/loom-desktop/",
   "loom-design-bible/contracts/",
   "loom-design-bible/tokens/",
   "loom-sheets/",
+  "loom-writer/",
 ]
 
 [foundation_gate]
@@ -41,8 +43,8 @@ text_scales = [1.0, 1.25, 1.5]
 directions = ["ltr", "rtl"]
 
 [application_status]
-sheets = "IN_PROGRESS"
-writer = "LOCKED"
+sheets = "ACCEPTED"
+writer = "IN_PROGRESS"
 present = "LOCKED"
 photo = "LOCKED"
 motion = "LOCKED"

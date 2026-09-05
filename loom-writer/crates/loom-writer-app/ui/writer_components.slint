@@ -1,43 +1,26 @@
-import {
-    DirectionalLayout, ToolbarGroup, ToolbarSpacer, ToolbarButton, ContextToolbar,
-    LabeledToolbar, IconOnlyToolbarItem, Overflow, IconOverLabelToolbarItem,
-    InspectorSurface, SectionHeader, TextField, SegmentedControl,
-    StatusBar, CanvasSurface
-} from "toolkit.slint";
+import { LoomStatusBar, LoomStatusText, LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
 
+export { WriterToolbarBody, WriterActionToolbar } from "toolbar.slint";
+export { WriterInspector } from "inspector.slint";
+
 /// A rendered paragraph projected from the Writer document model.
-///
-/// Editing still happens in the native `TextInput` below, while this model is
-/// rendered immediately underneath it. Keeping the projection as structured
-/// rows lets paragraph styles (heading size and alignment) and character runs
-/// remain visible without making the editable buffer responsible for rich
-/// layout.
 export struct WriterRenderBlock {
     content: styled-text,
-    /// Body-editor coordinates in logical page points.  The Rust projection
-    /// derives these from `WriterDocument::layout`; the editor applies the
-    /// current zoom when painting the row.
     x: length,
     y: length,
     width: length,
     font-size: length,
     height: length,
     alignment: int,
-    /// True when the source paragraph uses a style the reference renderer
-    /// cannot reproduce faithfully (for example persisted Justify).
     unsupported: bool,
     unsupported-label: string,
 }
 
 /// A selection highlight or collapsed caret rectangle projected from the
-/// authoritative Writer page layout.  `caret` distinguishes a one-pixel
-/// insertion marker from a non-collapsed text highlight.
+/// authoritative Writer page layout.
 export struct WriterSelectionRect {
-    /// Zero-based source page for this geometry. The current canvas renders
-    /// pages in a single scrollable projection, so this remains inspectable
-    /// even when a selection spans page boundaries.
     page-index: int,
     x: length,
     y: length,
@@ -46,259 +29,7 @@ export struct WriterSelectionRect {
     caret: bool,
 }
 
-/// Writer's responsive command surface. The slot host owns the row height;
-/// this component owns only command grouping and visibility. Keeping the
-/// groups local to Writer prevents the editor shell from growing a second,
-/// app-specific toolbar grammar in the shared toolkit.
-export component WriterToolbarBody inherits DirectionalLayout {
-    in property <bool> wide: false;
-    in property <bool> overflow: false;
-    in property <bool> inspector-available: true;
-    in property <bool> inspector-visible: false;
-    in property <bool> labeled-export: false;
-    in property <float> page-zoom: 1.0;
-    callback toggle-inspector;
-    callback export-pdf;
-    callback overflow-requested;
-    callback page-zoom-changed(float);
-
-    spacing: Theme.tokens.space.xs;
-    leading-padding: 0px;
-    trailing-padding: 0px;
-    horizontal-stretch: 1;
-    vertical-stretch: 1;
-
-    function next-page-zoom() -> float {
-        return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
-    }
-
-    // The command groups are explicitly mirrored instead of relying on the
-    // stable HorizontalLayout primitive to infer child order. This keeps the
-    // LTR branch unchanged while giving RTL users the same leading/middle/
-    // trailing command hierarchy on the opposite side of the window.
-    if !root.rtl && root.wide : ToolbarGroup {
-        labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "eye";
-            label: "View";
-            accessible-label: "View";
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem {
-            icon: "zoom-in";
-            label: Math.round(root.page-zoom * 100) + "%";
-            accessible-label: "Page zoom";
-            enabled: true;
-            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-        IconOverLabelToolbarItem {
-            icon: "plus";
-            label: "Add Page";
-            accessible-label: "Add Page unavailable";
-            enabled: false;
-        }
-    }
-
-    if !root.rtl && !root.wide : ToolbarGroup {
-        labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "eye";
-            label: "View";
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        if root.overflow : Overflow {
-            label: "More Writer actions";
-            clicked => { root.overflow-requested(); }
-        }
-    }
-
-    if !root.rtl && !root.overflow : ToolbarSpacer { }
-
-    if !root.rtl && root.wide : ToolbarGroup {
-        labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
-    }
-
-    if !root.rtl && !root.overflow : ToolbarSpacer { }
-
-    if !root.rtl && root.wide : ToolbarGroup {
-        labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "format";
-            label: "Format";
-            accessible-label: "Format inspector";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem { icon: "document"; label: "Document"; accessible-label: "Document settings unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "export";
-            label: "Export";
-            accessible-label: "Export PDF";
-            clicked => { root.export-pdf(); }
-        }
-    }
-
-    if !root.rtl && !root.wide && !root.overflow : ToolbarGroup {
-        labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem {
-            icon: "zoom-in";
-            label: "Page Zoom";
-            enabled: true;
-            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-    }
-
-    if !root.rtl && root.overflow : ToolbarSpacer { }
-    if !root.rtl && root.overflow : ToolbarGroup {
-        labeled-slot: false;
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem {
-            icon: "zoom-in";
-            label: "Page Zoom";
-            enabled: true;
-            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-    }
-
-    // RTL order: trailing actions, insertion actions, then leading actions.
-    if root.rtl && root.overflow : ToolbarGroup {
-        labeled-slot: false;
-        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem {
-            icon: "zoom-in";
-            label: "Page Zoom";
-            enabled: true;
-            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-    }
-    if root.rtl && root.overflow : ToolbarSpacer { }
-
-    if root.rtl && !root.wide && !root.overflow : ToolbarGroup {
-        labeled-slot: false;
-        IconOnlyToolbarItem { icon: "export"; label: "Export PDF"; clicked => { root.export-pdf(); } }
-        IconOnlyToolbarItem {
-            icon: "format";
-            label: "Format";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOnlyToolbarItem {
-            icon: "zoom-in";
-            label: "Page Zoom";
-            enabled: true;
-            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-    }
-
-    if root.rtl && root.wide : ToolbarGroup {
-        labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "export";
-            label: "Export";
-            accessible-label: "Export PDF";
-            clicked => { root.export-pdf(); }
-        }
-        IconOverLabelToolbarItem { icon: "document"; label: "Document"; accessible-label: "Document settings unavailable"; enabled: false; }
-        IconOverLabelToolbarItem {
-            icon: "format";
-            label: "Format";
-            accessible-label: "Format inspector";
-            checked: root.inspector-visible;
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-        IconOverLabelToolbarItem { icon: "share"; label: "Share"; accessible-label: "Share unavailable"; enabled: false; }
-    }
-
-    if root.rtl && !root.overflow : ToolbarSpacer { }
-
-    if root.rtl && root.wide : ToolbarGroup {
-        labeled-slot: true;
-        IconOverLabelToolbarItem { icon: "comment"; label: "Comment"; accessible-label: "Insert comment unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "image"; label: "Media"; accessible-label: "Insert media unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "shape"; label: "Shape"; accessible-label: "Insert shape unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "text"; label: "Text"; accessible-label: "Insert text box unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "chart"; label: "Chart"; accessible-label: "Insert chart unavailable"; enabled: false; }
-        IconOverLabelToolbarItem { icon: "table"; label: "Table"; accessible-label: "Insert table unavailable"; enabled: false; }
-    }
-
-    if root.rtl && !root.overflow : ToolbarSpacer { }
-
-    if root.rtl && root.wide : ToolbarGroup {
-        labeled-slot: true;
-        IconOverLabelToolbarItem {
-            icon: "plus";
-            label: "Add Page";
-            accessible-label: "Add Page unavailable";
-            enabled: false;
-        }
-        IconOverLabelToolbarItem {
-            icon: "zoom-in";
-            label: Math.round(root.page-zoom * 100) + "%";
-            accessible-label: "Page zoom";
-            enabled: true;
-            clicked => { root.page-zoom-changed(root.next-page-zoom()); }
-        }
-        IconOverLabelToolbarItem {
-            icon: "eye";
-            label: "View";
-            accessible-label: "View";
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-    }
-
-    if root.rtl && !root.wide : ToolbarGroup {
-        labeled-slot: false;
-        if root.overflow : Overflow {
-            label: "More Writer actions";
-            clicked => { root.overflow-requested(); }
-        }
-        if !root.overflow : IconOnlyToolbarItem {
-            icon: "eye";
-            label: "View";
-            enabled: root.inspector-available;
-            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
-        }
-    }
-}
-
-/// Writer's selection-aware text editor. The editor is intentionally kept as
-/// a local component so its accessible value and selection announcement stay
-/// beside the paper surface that owns them.
+/// Writer's selection-aware text editor.
 component WriterDocumentEditor inherits Rectangle {
     in-out property <string> text: "";
     in property <[WriterRenderBlock]> render-blocks: [];
@@ -331,9 +62,6 @@ component WriterDocumentEditor inherits Rectangle {
     accessible-action-default => { editor.focus(); }
     forward-focus: editor;
 
-    // This focus helper must stay behind the editor. Slint dispatches pointer
-    // events front-to-back (last child first); keeping the full-surface target
-    // first lets TextInput own caret placement, selection, and text editing.
     focus-touch := TouchArea { clicked => { editor.focus(); } }
 
     if root.text == "" : Text {
@@ -349,12 +77,6 @@ component WriterDocumentEditor inherits Rectangle {
         accessible-role: none;
     }
 
-    // StyledText is a display projection only. The native editor remains the
-    // top-most *editing* child so pointer selection, IME composition, and
-    // keyboard editing continue to use the same authoritative text buffer.
-    // Selection and caret overlays are painted here because the native
-    // TextInput's glyphs are intentionally transparent while rich runs are
-    // visible.
     preview := Rectangle {
         x: 0px;
         y: 0px;
@@ -385,10 +107,6 @@ component WriterDocumentEditor inherits Rectangle {
                     : TextHorizontalAlignment.left;
             vertical-alignment: top;
         }
-        // Persisted Justify paragraphs are intentionally not reflowed by the
-        // reference renderer. Keep their text readable while making the
-        // unsupported fallback explicit in the projection instead of silently
-        // presenting a left-aligned result as if it were justified.
         for block in root.render-blocks : Text {
             x: block.x * root.page-zoom;
             y: block.y * root.page-zoom;
@@ -402,10 +120,6 @@ component WriterDocumentEditor inherits Rectangle {
             visible: block.unsupported;
             accessible-role: none;
         }
-        // Paint the caret after rich text so it remains visible at a collapsed
-        // selection.  The visibility guard mirrors normal editor behavior but
-        // keeps a deterministic caret in headless captures when the insertion
-        // point is collapsed and the editor has not yet received focus.
         for selection in root.selection-rects : Rectangle {
             x: selection.x * root.page-zoom;
             y: selection.y * root.page-zoom;
@@ -428,33 +142,20 @@ component WriterDocumentEditor inherits Rectangle {
         wrap: word-wrap;
         vertical-alignment: top;
         font-size: root.font-size;
-        // Rich text is painted by `preview`; keeping the editable buffer's
-        // glyphs transparent avoids a duplicate plain-text layer.  Native
-        // selection paint is also transparent because the layout-derived
-        // overlay above keeps styled glyphs visible inside the highlight.
         color: transparent;
         selection-background-color: transparent;
-        // The rich projection owns selected glyph styling; the custom caret
-        // overlay supplies the insertion marker that a transparent TextInput
-        // cannot draw on non-Apple platforms.
         selection-foreground-color: transparent;
         accessible-role: none;
         edited => {
-            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte_offset);
-            root.edited(editor.text, editor.anchor-position-byte-offset, editor.cursor-position_byte-offset);
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
+            root.edited(editor.text, editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
         }
         cursor-position-changed(_) => {
-            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position_byte_offset);
+            root.selection-changed(editor.anchor-position-byte-offset, editor.cursor-position-byte-offset);
         }
         key-pressed(event) => { return root.key-pressed(event); }
     }
 
-    // The display projection and native TextInput now share the core layout's
-    // coordinates. Route all pointer gestures through the controller's exact
-    // hit-test instead of letting TextInput infer offsets from body metrics.
-    // This keeps heading, alignment, paragraph-gap, and page-break geometry in
-    // one authoritative coordinate system while preserving native keyboard
-    // and IME editing after focus.
     pointer-surface := TouchArea {
         enabled: root.enabled;
         pointer-event(event) => {
@@ -478,9 +179,8 @@ component WriterDocumentEditor inherits Rectangle {
     changed selection-focus => { editor.set-selection-offsets(root.selection-anchor, root.selection-focus); }
 }
 
-/// The editable paper surface. Canvas centering is expressed through nested
-/// layouts; only the document's page model owns its portrait aspect ratio.
-export component WriterPageCanvas inherits CanvasSurface {
+/// The editable paper surface.
+export component WriterPageCanvas inherits Rectangle {
     in property <string> doc-title: "Untitled Document";
     in-out property <string> doc-content: "";
     in property <[WriterRenderBlock]> render-blocks: [];
@@ -503,8 +203,10 @@ export component WriterPageCanvas inherits CanvasSurface {
     callback page-scroll-changed(length, length);
     callback key-pressed(event: KeyEvent) -> EventResult;
 
-    // The paper itself is document geometry, not shell chrome. Keep its
-    // A4 proportions and let the Flickable own real zoom/scroll state.
+    background: Theme.palette().canvas;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
     page-scroll := Flickable {
         x: 0px;
         y: 0px;
@@ -516,214 +218,81 @@ export component WriterPageCanvas inherits CanvasSurface {
         viewport-y <=> root.page-scroll-y;
         flicked => { root.page-scroll-changed(self.viewport-x, self.viewport-y); }
 
-    page := Rectangle {
-        private property <length> page-padding: 72px * root.page-zoom;
-        x: max(24px, (page-scroll.width - self.width) / 2);
-        y: 24px;
-        width: 595px * root.page-zoom;
-        // A single page keeps the established A4 surface. Multi-page
-        // documents use one continuous, scrollable paper stack whose height
-        // is derived from the same core page bounds used by the projection.
-        height: root.page-count > 1
-            ? (root.page-stack-height + 160px) * root.page-zoom
-            : 842px * root.page-zoom;
-        border-radius: Theme.tokens.metrics.radius-small;
-        border-width: 1px;
-        border-color: Theme.palette().border;
-        background: Theme.palette().paper;
-        drop-shadow-blur: 24px;
-        drop-shadow-offset-y: 8px;
-        drop-shadow-color: Theme.palette().shadow;
-        clip: true;
-
-        VerticalLayout {
-            padding-top: page.page-padding;
-            padding-bottom: page.page-padding;
-            padding-left: page.page-padding;
-            padding-right: page.page-padding;
-            spacing: Theme.tokens.space.lg;
-
-            Text {
-                text: root.doc-title;
-                font-size: Theme.tokens.typography.heading * root.page-zoom;
-                font-weight: 700;
-                color: Theme.palette().paper-ink;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-            Text {
-                text: "Local-first document";
-                font-size: Theme.tokens.typography.body * root.page-zoom;
-                color: Theme.palette().paper-muted;
-            }
-            Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
-
-            document-editor := WriterDocumentEditor {
-                text <=> root.doc-content;
-                render-blocks <=> root.render-blocks;
-                selection-rects <=> root.selection-rects;
-                selection-anchor <=> root.selection-anchor;
-                selection-focus <=> root.selection-focus;
-                selection-announcement <=> root.selection-announcement;
-                page-zoom: root.page-zoom;
-                // Keep the native hit-test buffer on the same body metric as
-                // `PageStyle::body_font_size_pt` used by the core layout.
-                // Rich heading rows are shielded above because one TextInput
-                // cannot expose per-block hit testing.
-                font-size: 11px * root.page-zoom;
-                edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
-                selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
-                pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
-                pointer-moved(x, y) => { root.pointer-moved(x, y); }
-                pointer-released(x, y) => { root.pointer-released(x, y); }
-                pointer-cancelled => { root.pointer-cancelled(); }
-                key-pressed(event) => { return root.key-pressed(event); }
-            }
-        }
-    }
-}
-}
-
-/// A compact, localization-safe property row. Writer inspectors intentionally
-/// stack the label above its control: this keeps 150% text and RTL labels from
-/// competing for a fixed two-column width.
-component WriterPropertyRow inherits Rectangle {
-    in property <string> label: "Property";
-    min-height: Theme.tokens.metrics.control-height;
-    VerticalLayout {
-        spacing: Theme.tokens.space.xs;
-        Text {
-            text: root.label;
-            font-size: Theme.tokens.typography.caption;
-            font-weight: 500;
-            color: Theme.palette().ink-secondary;
-            wrap: word-wrap;
-            horizontal-stretch: 1;
-        }
-        VerticalLayout {
-            horizontal-stretch: 1;
-            @children
-        }
-    }
-}
-
-/// Selection-driven format inspector. Property rows and sections remain in a
-/// single vertical flow, so translated labels automatically stack instead of
-/// painting into their neighbouring control column.
-export component WriterInspector inherits InspectorSurface {
-    in-out property <int> inspector-tab: 0;
-    in-out property <bool> is-bold: false;
-    in-out property <bool> is-italic: false;
-    in-out property <bool> is-underline: false;
-    in-out property <int> heading-level: 0;
-    in-out property <int> text-alignment: 0;
-    in property <string> status-left: "";
-    callback toggle-bold;
-    callback toggle-italic;
-    callback toggle-underline;
-    callback select-heading(int);
-    callback select-alignment(int);
-
-    title: "Format";
-    min-panel-width: 240px;
-
-    VerticalLayout {
-        spacing: Theme.tokens.space.lg;
-        padding: 0px;
-        alignment: start;
-
-        SegmentedControl {
-            items: ["Style", "Layout", "More"];
-            current <=> root.inspector-tab;
-            label: "Format Tabs";
-        }
-
-        SectionHeader { title: "Paragraph Style"; }
-        SegmentedControl {
-            items: ["Body", "H1", "H2", "H3"];
-            current <=> root.heading-level;
-            label: "Heading Style";
-            selected(idx) => { root.select-heading(idx); }
-        }
-
-        SectionHeader { title: "Font"; }
-        WriterPropertyRow {
-            label: "Family";
-            TextField { label: "Font family"; value: "Helvetica Neue"; enabled: false; }
-        }
-        WriterPropertyRow {
-            label: "Style";
-            HorizontalLayout {
-                spacing: Theme.tokens.space.xs;
-                IconOnlyToolbarItem { icon: "bold"; label: "Bold"; checked: root.is-bold; clicked => { root.toggle-bold(); } }
-                IconOnlyToolbarItem { icon: "italic"; label: "Italic"; checked: root.is-italic; clicked => { root.toggle-italic(); } }
-                IconOnlyToolbarItem { icon: "underline"; label: "Underline"; checked: root.is-underline; clicked => { root.toggle-underline(); } }
-                IconOnlyToolbarItem { icon: "strikethrough"; label: "Strikethrough"; checked: false; enabled: false; }
-            }
-        }
-
-        SectionHeader { title: "Alignment"; }
-        SegmentedControl {
-            // Justified line layout is not implemented by the reference
-            // StyledText renderer.  Keep persisted Justify paragraphs
-            // indeterminate instead of exposing an enabled placebo option.
-            items: ["Left", "Center", "Right"];
-            current <=> root.text-alignment;
-            label: "Text Alignment";
-            selected(idx) => { root.select-alignment(idx); }
-        }
-        WriterPropertyRow {
-            label: "Indentation";
-            HorizontalLayout {
-                spacing: Theme.tokens.space.xs;
-                IconOnlyToolbarItem { icon: "outdent"; label: "Decrease indent"; enabled: false; }
-                IconOnlyToolbarItem { icon: "indent"; label: "Increase indent"; enabled: false; }
-            }
-        }
-
-        SectionHeader { title: "Spacing & Lists"; }
-        WriterPropertyRow {
-            label: "Line Spacing";
-            TextField { label: "Line Spacing"; value: "1.15"; enabled: false; }
-        }
-        WriterPropertyRow {
-            label: "Bullets";
-            TextField { label: "Bullets & Lists"; value: "None"; enabled: false; }
-        }
-
-        Rectangle { vertical-stretch: 1; background: transparent; }
-        Rectangle {
-            height: 68px;
-            border-radius: Theme.tokens.metrics.radius-medium;
-            background: Theme.palette().surface-sunken;
+        page := Rectangle {
+            private property <length> page-padding: 72px * root.page-zoom;
+            x: max(24px, (page-scroll.width - self.width) / 2);
+            y: 24px;
+            width: 595px * root.page-zoom;
+            height: root.page-count > 1
+                ? (root.page-stack-height + 160px) * root.page-zoom
+                : 842px * root.page-zoom;
+            border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
             border-color: Theme.palette().border;
+            background: Theme.palette().paper;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+            clip: true;
+
             VerticalLayout {
-                padding-left: Theme.tokens.space.lg;
-                padding-right: Theme.tokens.space.lg;
-                padding-top: Theme.tokens.space.md;
-                padding-bottom: Theme.tokens.space.md;
-                spacing: Theme.tokens.space.xs;
-                alignment: center;
-                Text { text: "Document Statistics"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
-                Text { text: root.status-left; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; overflow: elide; }
+                padding-top: page.page-padding;
+                padding-bottom: page.page-padding;
+                padding-left: page.page-padding;
+                padding-right: page.page-padding;
+                spacing: Theme.tokens.space.lg;
+
+                Text {
+                    text: root.doc-title;
+                    font-size: Theme.tokens.typography.heading * root.page-zoom;
+                    font-weight: 700;
+                    color: Theme.palette().paper-ink;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "Local-first document";
+                    font-size: Theme.tokens.typography.body * root.page-zoom;
+                    color: Theme.palette().paper-muted;
+                }
+                Rectangle { height: 1.5px; background: Theme.palette().paper-line; }
+
+                document-editor := WriterDocumentEditor {
+                    text <=> root.doc-content;
+                    render-blocks <=> root.render-blocks;
+                    selection-rects <=> root.selection-rects;
+                    selection-anchor <=> root.selection-anchor;
+                    selection-focus <=> root.selection-focus;
+                    selection-announcement <=> root.selection-announcement;
+                    page-zoom: root.page-zoom;
+                    font-size: 11px * root.page-zoom;
+                    edited(value, anchor, focus) => { root.document-edited(value, anchor, focus); }
+                    selection-changed(anchor, focus) => { root.selection-changed(anchor, focus); }
+                    pointer-pressed(x, y, extend) => { root.pointer-pressed(x, y, extend); }
+                    pointer-moved(x, y) => { root.pointer-moved(x, y); }
+                    pointer-released(x, y) => { root.pointer-released(x, y); }
+                    pointer-cancelled => { root.pointer-cancelled(); }
+                    key-pressed(event) => { return root.key-pressed(event); }
+                }
             }
         }
     }
 }
 
-/// App-local status surface. This is deliberately tiny, but giving it a
-/// named owner keeps status alignment and future accessibility annotations out
-/// of the Window shell.
-export component WriterStatusBar inherits StatusBar {
-    leading: root.leading-text;
-    trailing: root.trailing-text;
+/// App-local status surface using canonical LoomStatusBar.
+export component WriterStatusBar inherits LoomStatusBar {
     in property <string> leading-text: "";
     in property <string> trailing-text: "";
+    LoomStatusText {
+        text: root.leading-text;
+        horizontal-stretch: 1;
+    }
+    LoomStatusText {
+        text: root.trailing-text;
+    }
 }
 
-/// The modal overflow surface uses the same command labels as the compact
-/// toolbar while keeping its geometry in a vertical flow.
+/// Modal overflow surface for compact toolbars.
 export component WriterToolbarOverflow inherits Rectangle {
     in property <bool> inspector-available: true;
     in property <bool> inspector-visible: false;
@@ -745,16 +314,18 @@ export component WriterToolbarOverflow inherits Rectangle {
     VerticalLayout {
         spacing: Theme.tokens.space.xs;
         padding: Theme.tokens.space.sm;
-        ToolbarButton {
-            icon: "eye"; label: "View"; enabled: root.inspector-available; horizontal-stretch: 1;
+        LoomButton {
+            icon: "format";
+            label: "Format";
+            variant: root.inspector-visible ? "primary" : "ghost";
+            selected: root.inspector-visible;
+            enabled: root.inspector-available;
             clicked => { root.toggle-inspector(); root.close-requested(); }
         }
-        ToolbarButton {
-            icon: "format"; label: "Format"; checked: root.inspector-visible; enabled: root.inspector-available; horizontal-stretch: 1;
-            clicked => { root.toggle-inspector(); root.close-requested(); }
-        }
-        ToolbarButton {
-            icon: "export"; label: "Export PDF"; horizontal-stretch: 1;
+        LoomButton {
+            icon: "export";
+            label: "Export PDF";
+            variant: "ghost";
             clicked => { root.export-pdf(); root.close-requested(); }
         }
     }
