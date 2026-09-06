@@ -3,6 +3,7 @@
 Loom Motion is a motion graphics and keyframe animation studio engineered for high-precision timeline pacing, transform curves, and vector animation.
 
 ![Loom Motion main window](docs/screenshot.png)
+*Captured from the current build: `cargo run -p loom-motion-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
 
 ## Core Capabilities
 

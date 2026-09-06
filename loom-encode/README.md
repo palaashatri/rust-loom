@@ -3,6 +3,7 @@
 Loom Encode is a batch media transcoding and delivery powerhouse with deterministic pipeline plans, progress streaming, and watch folder automation.
 
 ![Loom Encode main window](docs/screenshot.png)
+*Captured from the current build: `cargo run -p loom-encode-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
 
 ## Core Capabilities
 

@@ -129,7 +129,7 @@ fn sample_session() -> PresentationSession {
         slide.add_element(text_element(
             "cover-body",
             ElementType::BodyText,
-            "A private, native creative studio designed for Linux.",
+            "A private, native creative studio on your desktop.",
             92.0,
             230.0,
             700.0,

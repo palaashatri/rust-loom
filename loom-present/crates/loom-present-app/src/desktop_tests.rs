@@ -74,7 +74,7 @@ fn refresh_projects_selected_element_into_canvas_and_inspector() {
     assert_eq!(app.get_selection_count(), 1);
     assert_eq!(
         app.get_active_element_content().as_str(),
-        "A private, native creative studio designed for Linux."
+        "A private, native creative studio on your desktop."
     );
     assert_eq!(app.get_element_y_text().as_str(), "230 pt");
     assert_eq!(app.get_element_height_text().as_str(), "120 pt");

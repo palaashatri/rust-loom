@@ -3,6 +3,7 @@
 Loom Sheets is a fast, local-first analytical spreadsheet application with Apple Numbers-class visual polish and recalculation integrity.
 
 ![Loom Sheets main window](docs/screenshot.png)
+*Captured from the current build: `cargo run -p loom-sheets-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
 
 ## Core Capabilities
 

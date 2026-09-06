@@ -3,6 +3,7 @@
 Loom Present is an elegant, local-first presentation design application engineered with Apple Keynote-class aesthetic clarity and presenter tools.
 
 ![Loom Present main window](docs/screenshot.png)
+*Captured from the current build: `cargo run -p loom-present-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
 
 ## Core Capabilities
 

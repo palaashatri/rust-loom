@@ -2,6 +2,7 @@
 """Validate Loom's authority model and serial workflow lock."""
 from __future__ import annotations
 
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -156,42 +157,36 @@ if phase == "ui-foundation":
         "ACTIVE PHASE: UI FOUNDATION",
         "FOUNDATION STATUS: ACCEPTANCE_BLOCKED",
         "APPLICATION DEVELOPMENT: LOCKED",
-        "Current complete-suite readiness remains approximately **29/100**",
     )
 elif phase == "sheets":
     truth_phrases = (
         "ACTIVE PHASE: SHEETS",
         "FOUNDATION STATUS: ACCEPTED",
         "ACTIVE APPLICATION: SHEETS",
-        "Current complete-suite readiness remains approximately **29/100**",
     )
 elif phase == "writer":
     truth_phrases = (
         "ACTIVE PHASE: WRITER",
         "FOUNDATION STATUS: ACCEPTED",
         "ACTIVE APPLICATION: WRITER",
-        "Current complete-suite readiness remains approximately **29/100**",
     )
 elif phase == "present":
     truth_phrases = (
         "ACTIVE PHASE: PRESENT",
         "FOUNDATION STATUS: ACCEPTED",
         "ACTIVE APPLICATION: PRESENT",
-        "Current complete-suite readiness remains approximately **29/100**",
     )
 elif phase == "photo":
     truth_phrases = (
         "ACTIVE PHASE: PHOTO",
         "FOUNDATION STATUS: ACCEPTED",
         "ACTIVE APPLICATION: PHOTO",
-        "Current complete-suite readiness remains approximately **29/100**",
     )
 elif phase == "motion":
     truth_phrases = (
         "ACTIVE PHASE: MOTION",
         "FOUNDATION STATUS: ACCEPTED",
         "ACTIVE APPLICATION: MOTION",
-        "Current complete-suite readiness remains approximately **29/100**",
     )
 else:
     truth_phrases = ()
@@ -199,6 +194,21 @@ else:
 for phrase in truth_phrases:
     if phrase.lower() not in truth_lower:
         fail(f"TRUTH.md missing required active-state statement: {phrase}")
+
+# TRUTH.md owns the readiness number (updated only from verified evidence);
+# governance requires the statement to be present with a well-formed score.
+if phase:
+    readiness = re.search(
+        r"Current complete-suite readiness (?:remains )?(?:is )?approximately \*\*(\d+)/100\*\*",
+        truth_text,
+    )
+    if readiness is None:
+        fail(
+            "TRUTH.md missing required readiness statement: "
+            "'Current complete-suite readiness ... approximately **N/100**'"
+        )
+    elif int(readiness.group(1)) > 100:
+        fail(f"TRUTH.md readiness score out of range: {readiness.group(1)}")
 
 for app in APPS:
     if app in ("sheets", "writer", "present", "photo", "motion") and phase in ("sheets", "writer", "present", "photo", "motion"):

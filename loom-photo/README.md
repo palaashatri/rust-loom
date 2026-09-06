@@ -3,6 +3,7 @@
 Loom Photo is a layer-based raster and image design application built with professional pixel compositing, non-destructive adjustments, and Apple Creator Studio-class desktop design.
 
 ![Loom Photo main window](docs/screenshot.png)
+*Captured from the current build: `cargo run -p loom-photo-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
 
 ## Core Capabilities
 
