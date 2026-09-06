@@ -8,7 +8,7 @@ Loom is a local-first Rust + Slint creative-suite **functional alpha** with eigh
 
 It is **not** yet a professional replacement for mature office, image, motion, video, audio, or encoding software. No application currently passes the acceptance definition in `AGENTS.MD`.
 
-Current complete-suite readiness remains approximately **29/100**.
+Current complete-suite readiness is approximately **30/100**, raised from 29 only for Writer's verified user-facing capability: four document features replaced facade controls with real, persisted, undoable workflows and passed an end-to-end journey plus a judge-reviewed viewport/theme acceptance pass.
 
 The score is intentionally frozen during the UI-foundation reset unless verified user-facing capability materially changes. Repository cleanup, smaller code, better CI, and stronger governance are valuable, but they do not by themselves increase professional product readiness.
 
@@ -21,7 +21,21 @@ ACTIVE APPLICATION: WRITER (IN_PROGRESS)
 LOCKED APPLICATIONS: PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-Loom Sheets is certified ACCEPTED. Loom Writer is currently the active application undergoing deep functional, interaction, and visual redesign to align with professional desktop standards (e.g. Apple Pages). Present, Photo, Motion, Video, Studio, and Encode remain strictly LOCKED per AGENTS.MD Section 4 until Writer passes its complete acceptance gate.
+Loom Sheets is certified ACCEPTED. Loom Writer is the active application and has completed its section 13 acceptance **evidence pass** (2026-09-06); its status label remains `IN_PROGRESS` because two gate items still require work recorded below. Present, Photo, Motion, Video, Studio, and Encode remain strictly LOCKED per AGENTS.MD Section 4 until Writer passes its complete acceptance gate.
+
+### Writer acceptance evidence (verified 2026-09-06)
+
+- **Features now real (previously facade controls):** per-document page setup (paper/orientation/margins — persisted, undoable, drives layout, canvas geometry, and export PDF page size), bulleted/numbered list styles (block-kind edits with hanging markers, restart-after-interrupt numbering, markdown/PDF export), anchored comments (block-id + byte-range threads, resolve/reopen/delete, undoable, persisted in `.loomdoc`), and markdown-native tables (block text is the table source of truth; insertion at the caret, verbatim markdown export). All are reachable through the command registry / palette keyboard path.
+- **End-to-end journey:** `loom-writer/.work/qa-round8/journey/` — type, select, format, lists, comments, tables, page setup, undo/redo, zoom/scroll, save `.loomdoc`, reopen, export PDF, and cancel/failure paths all assert real state (block kinds, marker projection, comment threads, table parse-back, page-style switch, package round-trip) and PASS.
+- **Viewport/theme acceptance:** 18 deterministic captures covering 1024×720, 1280×800, 1440×900, 1920×1200 × light/dark/high-contrast, plus inspector (seeded with comment + table) and template-chooser states, in `loom-writer/.work/acceptance/`. A full judge review passed all 18 with no clipping, no ellipsized action labels, and no contrast defects; three defects it found first (status-bar clipping under the inspector, unseeded headless captures, left-heavy chooser grid) were fixed and re-verified.
+- **Native macOS visual QA:** live-GUI window captures via `screencapture -l` across nine states in `loom-writer/.work/qa-native/` (light/dark/high-contrast, inspector light/dark seeded with comments and a table, template chooser, palette).
+- **Tests/gates:** 149 tests green (72 app, 77 core), `loom-writer-core` and `loom-writer-app` clippy-clean, code-structure and governance audits PASS (legacy byte ceilings enforced).
+
+### Remaining Writer gate blockers
+
+1. **Human visual acceptance** (section 5): the judge-reviewed captures above are agent-reviewed evidence; `ACCEPTED` additionally requires explicit human sign-off of the represented design.
+2. **Representative performance evidence** (section 13 item 10): no measured interaction/pagination budget runs exist yet.
+3. **Documented limitations** (not severity-1/2): table cells are edited as markdown text rather than a pointer-driven cell grid; commented ranges are listed in the inspector but not yet visually highlighted in the canvas.
 
 ## Why the reset is necessary
 
@@ -35,11 +49,11 @@ The visible result is below the desired product bar. Current captures have demon
 |---|---:|---|
 | Core/backend engineering | 65/100 | Many meaningful models, algorithms, persistence paths, parsers/exporters, and media helpers exist. |
 | Architecture & persistence | 70/100 | Shared history/recovery/storage/jobs/platform foundations are useful, but oversized modules and duplicated host logic remain significant debt. |
-| Functionality reachable through GUI | 30/100 | A large amount of core capability is still disconnected from a coherent professional desktop workflow. |
-| Interaction design | 20/100 | Selection, direct manipulation, context-sensitive commands, responsive chrome, and app-specific editor semantics remain incomplete. |
-| Visual design & polish | 21/100 | Existing application UI is not accepted as production-quality and is explicitly frozen as legacy reference only. |
+| Functionality reachable through GUI | 33/100 | Writer's core daily workflow (typing, selection, rich formatting, lists, comments, tables, page setup, save/reopen, PDF/Markdown/DOCX export) is now wired end to end with journey evidence; other apps' GUI reachability is unchanged. |
+| Interaction design | 23/100 | Writer: undoable document edits with truthful enablement, keyboard/palette reachability, responsive toolbar/inspector breakpoints, scrollable chrome. Direct manipulation remains partial (text tables, no canvas comment highlight). |
+| Visual design & polish | 21/100 | Writer's redesigned UI passed a judge-reviewed viewport/theme acceptance pass; other applications' UI remains frozen legacy reference. |
 | Professional workflow depth | 25/100 | Useful slices exist in every app, but none completes the mature daily workflow expected of its category. |
-| **Overall product readiness** | **29/100** | Functional alpha with substantial foundations; professional-suite parity is not established. |
+| **Overall product readiness** | **30/100** | Functional alpha with substantial foundations; professional-suite parity is not established. |
 
 The overall score is not an arithmetic mean. User-visible workflow completion, reliability, and acceptance evidence dominate.
 
