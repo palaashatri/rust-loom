@@ -34,6 +34,7 @@ use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{
+    Text,
     floor_grapheme_boundary, grapheme_boundaries, grapheme_count, PageStyle, PageViewport,
     RichBlock, TextSelection, WriterDocument,
 };
@@ -611,6 +612,12 @@ fn writer_command_catalog() -> Vec<CommandSpec> {
             .with_description("Align selected paragraphs to the right")
             .with_category("format")
             .with_order(101),
+        // Insert — a real document edit; enabled for any open document.
+        CommandSpec::new("writer.table.insert", "Insert Table")
+            .with_undo_label("Insert Table")
+            .with_description("Insert a table at the caret")
+            .with_category("insert")
+            .with_order(20),
         // Utility/palette/inspector — always enabled
         CommandSpec::new("app.palette", "Command Palette")
             .with_undo_label("Open Palette")
@@ -2162,18 +2169,63 @@ fn wire_responsive_layout(app: &WriterApp) {
     });
 }
 
+/// Applies capture-seeding flags (--comment/--table) to a document so
+/// headless acceptance captures and the live GUI show identical state.
+fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
+    if let Some(body) = &args.comment {
+        if let Some(block) = document.blocks.first().cloned() {
+            let len = block.text.len_bytes();
+            let _ = document.add_comment_thread(block.id, 0, len, body);
+        }
+    }
+    if args.table {
+        if document
+            .insert_table_block(
+                usize::MAX,
+                loom_writer_core::INSERT_ROWS,
+                loom_writer_core::INSERT_COLUMNS,
+            )
+            .is_ok()
+        {
+            // Populate sample cells so captures demonstrate cell text
+            // rendering, not just the empty skeleton.
+            if let Some(block) = document
+                .blocks
+                .iter_mut()
+                .rev()
+                .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
+            {
+                let mut table =
+                    loom_writer_core::parse_table_markdown(block.text.as_str());
+                let sample = [
+                    ["Region", "Sessions", "Change"],
+                    ["North", "1,204", "+8.1%"],
+                    ["South", "987", "+5.4%"],
+                ];
+                for (row, values) in sample.iter().enumerate() {
+                    for (column, value) in values.iter().enumerate() {
+                        table.set(row, column, *value);
+                    }
+                }
+                block.text = Text::from_str(&table.to_markdown());
+            }
+        }
+    }
+}
+
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
-    let doc = match &args.open {
+    let mut doc = match &args.open {
         Some(p) => load_file(Path::new(p))?,
         None => args
             .template
             .map(template_document)
             .unwrap_or_else(sample_document),
     };
+    apply_capture_seeds(&mut doc, args);
     apply_document(&app, &doc);
     app.set_template_chooser_open(args.template_chooser);
     app.set_show_inspector(args.inspector);
@@ -2989,7 +3041,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     // Build the document once; both the GUI state and the initial registry
     // enablement are derived from this single loaded instance.
-    let initial_document = if let Some(document) = recovered {
+    let initial_document = if let Some(document) = recovered.clone() {
         document
     } else {
         match &args.open {
@@ -3023,24 +3075,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         pdf_filter,
         registry: Arc::new(Mutex::new(initial_registry)),
     });
-    if let Some(body) = &args.comment {
+    // Seed only a fresh document: a recovered session already contains
+    // whatever the previous seeded run added.
+    if recovered.is_none() {
         let mut document = state.current.borrow().clone();
-        if let Some(block) = document.blocks.first().cloned() {
-            let len = block.text.len_bytes();
-            let _ = document.add_comment_thread(block.id, 0, len, body);
-            *state.current.borrow_mut() = document;
-        }
-    }
-    if args.table {
-        let mut document = state.current.borrow().clone();
-        if document
-            .insert_table_block(
-                usize::MAX,
-                loom_writer_core::INSERT_ROWS,
-                loom_writer_core::INSERT_COLUMNS,
-            )
-            .is_ok()
-        {
+        let before = document.clone();
+        apply_capture_seeds(&mut document, args);
+        if document != before {
             *state.current.borrow_mut() = document;
         }
     }

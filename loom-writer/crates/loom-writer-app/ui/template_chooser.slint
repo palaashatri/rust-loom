@@ -228,7 +228,7 @@ export component TemplateChooserModal inherits Rectangle {
                         // Row 1: Basic & Presentation
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
-                            alignment: start;
+                            alignment: center;
 
                             if root.template-visible(0) : WriterTemplateCard {
                                 title: "Blank";
@@ -295,7 +295,7 @@ export component TemplateChooserModal inherits Rectangle {
                         // Row 2: Letters, CV & Newsletters
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xl;
-                            alignment: start;
+                            alignment: center;
 
                             if root.template-visible(3) : WriterTemplateCard {
                                 title: "Business Letter";

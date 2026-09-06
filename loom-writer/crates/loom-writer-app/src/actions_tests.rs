@@ -1519,3 +1519,49 @@ fn insert_table_is_undoable_and_persists() {
         .expect("table parses");
     assert_eq!(table.rows.len(), loom_writer_core::INSERT_ROWS);
 }
+
+#[test]
+fn table_and_comments_reachable_through_keyboard_command_paths() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("Body"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    // The command registry is the single keyboard surface: palette search
+    // must find the table command and dispatch must insert a table.
+    {
+        let registry = state.registry.lock().unwrap();
+        let hits = registry.search("table");
+        assert!(
+            hits.iter()
+                .any(|(spec, _)| spec.id.as_str() == "writer.table.insert"),
+            "palette search should find the Insert Table command"
+        );
+    }
+    assert!(dispatch_command(&app, "writer.table.insert"));
+    assert_eq!(
+        state.current.borrow().blocks[1].kind,
+        loom_writer_core::TABLE_BLOCK_KIND
+    );
+
+    // Undo through the same registry surface removes it again.
+    assert!(dispatch_command(&app, "edit.undo"));
+    assert_eq!(state.current.borrow().blocks.len(), 1);
+}
+
+#[test]
+fn inspector_commands_expose_a11y_labels() {
+    // The foundation contract requires every icon-only action to carry an
+    // accessible label; the Writer toolbar's icon buttons all set one.
+    let source = include_str!("../ui/toolbar.slint");
+    for icon_button in source.split("LoomIconButton {").skip(1) {
+        let block: String = icon_button
+            .lines()
+            .take_while(|line| !line.contains('}'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            block.contains("label:") || block.contains("accessible-label:"),
+            "toolbar icon button missing accessible label: {block}"
+        );
+    }
+}

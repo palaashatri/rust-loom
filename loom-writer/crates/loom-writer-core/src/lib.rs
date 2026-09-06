@@ -4,8 +4,8 @@
 //! and export to Markdown / plain text. It deliberately has no UI dependency;
 //! the Slint interface (a documented follow-on) consumes this engine.
 
-pub use loom_document::{CaretAffinity, TextSelection};
-use loom_document::{Mutation, Offset, Text, TextEdit};
+pub use loom_document::{CaretAffinity, Text, TextSelection};
+use loom_document::{Mutation, Offset, TextEdit};
 use loom_package::manifest::{
     json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
 };

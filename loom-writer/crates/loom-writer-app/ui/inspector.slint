@@ -3,6 +3,7 @@ import {
     LoomTextField,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
 
 /// One anchored comment thread shown in the format inspector.
 export struct WriterCommentEntry {
@@ -11,7 +12,6 @@ export struct WriterCommentEntry {
     body: string,
     resolved: bool,
 }
-import { Theme } from "theme.slint";
 
 export component WriterInspector inherits LoomPanel {
     in-out property <bool> is-bold: false;
@@ -58,13 +58,23 @@ export component WriterInspector inherits LoomPanel {
     title: "Format";
     width: 320px;
 
+    // Content scrolls; the panel never grows past the window height, so the
+    // status bar below always stays fully visible.
     VerticalLayout {
         spacing: Theme.tokens.space.md;
-        padding: Theme.tokens.space.md;
-        alignment: start;
 
-        // TAB 0: STYLE
-        VerticalLayout {
+        Flickable {
+            vertical-stretch: 1;
+            viewport-width: parent.width;
+            viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            padding: Theme.tokens.space.md;
+            alignment: start;
+
+            // TAB 0: STYLE
+            VerticalLayout {
             spacing: Theme.tokens.space.md;
 
             LoomSectionHeader { title: "Paragraph Style"; }
@@ -234,6 +244,10 @@ export component WriterInspector inherits LoomPanel {
             }
 
             for entry in root.comment-entries : Rectangle {
+                accessible-role: AccessibleRole.text;
+                accessible-label: entry.resolved
+                    ? "Comment by " + entry.author + ", resolved: " + entry.body
+                    : "Comment by " + entry.author + ": " + entry.body;
                 border-radius: Theme.tokens.metrics.radius-medium;
                 background: entry.resolved
                     ? Theme.palette().surface-sunken
@@ -310,10 +324,10 @@ export component WriterInspector inherits LoomPanel {
             }
 
         }
+        }
+        }
 
-        Rectangle { vertical-stretch: 1; background: transparent; }
-
-        // Persistent bottom document status card
+        // Persistent bottom document status card (pinned below the scroll area)
         Rectangle {
             height: 52px;
             border-radius: Theme.tokens.metrics.radius-medium;
