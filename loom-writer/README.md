@@ -20,8 +20,30 @@ Loom Writer is a calm, professional local-first word processor engineered for pr
 ## Visual QA Status
 
 - **Status**: **PASS** (section 13 acceptance evidence pass, 2026-09-06).
-- **Evidence**: 18-capture viewport/theme matrix (1024×720 – 1920×1200 × light/dark/high-contrast) independently reviewed with no clipping, ellipsized labels, or contrast defects; native macOS `screencapture` QA across nine live states; end-to-end GUI journey covers typing, formatting, lists, comments, tables, page setup, undo/redo, save/reopen, and export.
+- **Evidence**: an 18-capture viewport/theme matrix (1024×720 – 1920×1200 × light/dark/high-contrast) independently reviewed with no clipping, ellipsized labels, or contrast defects; native macOS `screencapture` QA across nine live states; an end-to-end GUI journey covering typing, formatting, lists, comments, tables, page setup, undo/redo, save/reopen, and export.
 - **Remaining gate items**: explicit human visual sign-off and representative performance budgets (see `TRUTH.md`).
+
+### Acceptance matrix (deterministic renderer)
+
+| 1024×720 | 1280×800 | 1440×900 | 1920×1200 |
+|---|---|---|---|
+| ![1024 light](docs/acceptance/writer-1024x720-light.png) | ![1280 light](docs/acceptance/writer-1280x800-light.png) | ![1440 light](docs/acceptance/writer-1440x900-light.png) | ![1920 light](docs/acceptance/writer-1920x1200-light.png) |
+| ![1024 dark](docs/acceptance/writer-1024x720-dark.png) | ![1280 dark](docs/acceptance/writer-1280x800-dark.png) | ![1440 dark](docs/acceptance/writer-1440x900-dark.png) | ![1920 dark](docs/acceptance/writer-1920x1200-dark.png) |
+| ![1024 HC](docs/acceptance/writer-1024x720-high-contrast.png) | ![1280 HC](docs/acceptance/writer-1280x800-high-contrast.png) | ![1440 HC](docs/acceptance/writer-1440x900-high-contrast.png) | ![1920 HC](docs/acceptance/writer-1920x1200-high-contrast.png) |
+
+Light/dark/high-contrast rows; the full 18-capture set (including inspector and template-chooser states at every viewport) lives in [`docs/acceptance/`](docs/acceptance).
+
+### Inspector with comments and a table (1280×800, light)
+
+![Inspector with comments and table](docs/acceptance/writer-1280x800-inspector.png)
+
+### Native macOS captures (live GUI, `screencapture -l`)
+
+| Light | Dark inspector (seeded comment) |
+|---|---|
+| ![Native light](docs/qa-native/writer-live-light-1280.png) | ![Native dark inspector](docs/qa-native/writer-live-inspector-dark.png) |
+
+All nine native captures (themes, inspector, template chooser, palette, table) live in [`docs/qa-native/`](docs/qa-native).
 
 ## Development
 
