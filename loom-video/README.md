@@ -3,7 +3,7 @@
 Loom Video is a local-first non-linear video editor (NLE) providing multi-track timeline editing, waveform previews, clip trimming, and local FFmpeg delivery pipelines.
 
 ![Loom Video main window](docs/screenshot.png)
-*Captured from the current build: `cargo run -p loom-video-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
+*macOS native window capture (`screencapture -l`) of the current build. A pixel-reproducible renderer capture of the same state is at [docs/screenshot-deterministic.png](docs/screenshot-deterministic.png) (`cargo run -p loom-video-app -- --screenshot docs/screenshot-deterministic.png --size 1280x800 --theme light`).*
 
 ## Core Capabilities
 

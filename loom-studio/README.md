@@ -3,7 +3,7 @@
 Loom Studio is a local-first digital audio workstation (DAW) featuring multitrack arrangement, realtime audio transport, mixer channels, and high-fidelity WAV bounce rendering.
 
 ![Loom Studio main window](docs/screenshot.png)
-*Captured from the current build: `cargo run -p loom-studio-app -- --screenshot docs/screenshot.png --size 1280x800 --theme light`.*
+*macOS native window capture (`screencapture -l`) of the current build. A pixel-reproducible renderer capture of the same state is at [docs/screenshot-deterministic.png](docs/screenshot-deterministic.png) (`cargo run -p loom-studio-app -- --screenshot docs/screenshot-deterministic.png --size 1280x800 --theme light`).*
 
 ## Core Capabilities
 
