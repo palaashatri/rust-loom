@@ -19,6 +19,30 @@ redistributable = true
 attribution_required = false
 
 [[allow]]
+glob = "loom-*/docs/screenshot-deterministic.png"
+origin = "Loom project-generated deterministic screenshot"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
+glob = "loom-*/docs/acceptance/*.png"
+origin = "Loom project-generated acceptance test screenshot"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
+glob = "loom-*/docs/qa-native/*.png"
+origin = "Loom project-generated native QA screenshot"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
 glob = "loom-vision/crates/loom-vision-cli/fixtures/hello.png"
 origin = "Loom-generated test fixture"
 license = "Repository project license"
