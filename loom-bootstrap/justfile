@@ -1,0 +1,52 @@
+# Loom suite orchestration tasks.
+# Invoke with `just <recipe>`, or run scripts/ directly (just is optional).
+
+REPOS := "loom-core loom-writer loom-sheets loom-present loom-photo loom-motion loom-video loom-studio loom-encode loom-vision loom-plugin-sdk"
+
+default:
+    @just --list
+
+fmt:
+    bash scripts/fmt-all.sh
+
+clippy:
+    bash scripts/clippy-all.sh
+
+test:
+    bash scripts/test-all.sh
+
+build:
+    bash scripts/build-all.sh --debug
+
+release:
+    bash scripts/build-all.sh
+
+visual-qa:
+    bash scripts/visual-qa-all.sh
+
+offline-test:
+    bash scripts/offline-test.sh
+
+samples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    SAMPLE_DIR="$ROOT/../loom-samples"
+    if [ ! -d "$SAMPLE_DIR" ]; then
+      echo "SKIP samples: ../loom-samples does not exist"
+      exit 0
+    fi
+    if [ -x "$SAMPLE_DIR/scripts/generate-samples.sh" ]; then
+      bash "$SAMPLE_DIR/scripts/generate-samples.sh"
+    elif [ -f "$SAMPLE_DIR/scripts/generate-samples.sh" ]; then
+      echo "NOTE samples: generator exists but is not executable: $SAMPLE_DIR/scripts/generate-samples.sh"
+      echo "TODO samples: generator not yet implemented; run it once it exists"
+    else
+      echo "NOTE samples: ../loom-samples has no scripts/generate-samples.sh yet"
+    fi
+
+package:
+    bash scripts/package.sh
+
+verify-package:
+    bash scripts/verify-package.sh

@@ -1,0 +1,12 @@
+# Loom dev image: CI image plus interactive tooling.
+FROM loom-bootstrap-ci
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        bash \
+        curl \
+        vim \
+        jq \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/loom-bootstrap

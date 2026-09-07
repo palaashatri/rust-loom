@@ -1,0 +1,19 @@
+[package]
+name = "loom-plugin-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Command line tool for validating and installing Loom plugin packages."
+
+[[bin]]
+name = "loom-plugin"
+path = "src/main.rs"
+
+[dependencies]
+loom-plugin-manifest.workspace = true
+loom-plugin-host.workspace = true
+zip.workspace = true
+
+[dev-dependencies]

@@ -1,0 +1,204 @@
+// Loom canvas/timeline primitives: selection handles, ruler strips, playheads.
+//
+// Pure visual primitives with no domain or media semantics. Positions are
+// unit-normalized floats, labels are caller-provided strings, and callbacks
+// carry only visual state. Geometry, palette, spacing, radius, and typography
+// come from Theme only.
+// Slint 1.17 exposes no menu, menu-item, or dialog accessible roles, so the
+// handle maps to button, the ruler maps to text, and the playhead maps to
+// slider, each with an explicit accessible label. The click-selection callback
+// on the handle is named `picked` because Slint shares one identifier
+// namespace for properties and callbacks, so a `selected` state property and
+// a `selected()` callback cannot coexist on one component.
+
+import { Theme } from "../theme.slint";
+
+export component LoomCanvasHandle inherits Rectangle {
+    in property <string> label: "Handle";
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback nudged(int, int);
+    callback picked();
+
+    width: Theme.tokens.space.md;
+    height: Theme.tokens.space.md;
+    border-radius: 1px;
+    border-width: handle-focus.has-focus ? 2px : 1px;
+    border-color: handle-focus.has-focus ? Theme.palette().focus
+        : root.selected ? Theme.palette().accent
+        : Theme.palette().border-strong;
+    background: !root.enabled ? Theme.palette().surface-sunken
+        : root.selected ? Theme.palette().accent
+        : handle-touch.pressed ? Theme.palette().surface-sunken
+        : handle-touch.has-hover ? Theme.palette().surface-raised
+        : Theme.palette().surface;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.picked(); } }
+
+    Rectangle {
+        x: (parent.width - Theme.tokens.space.xs) / 2;
+        y: (parent.height - Theme.tokens.space.xs) / 2;
+        width: Theme.tokens.space.xs;
+        height: Theme.tokens.space.xs;
+        border-radius: 0.5px;
+        background: root.selected ? Theme.palette().accent-ink : transparent;
+    }
+
+    handle-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.LeftArrow) { root.nudged(-1, 0); return accept; }
+            if (event.text == Key.RightArrow) { root.nudged(1, 0); return accept; }
+            if (event.text == Key.UpArrow) { root.nudged(0, -1); return accept; }
+            if (event.text == Key.DownArrow) { root.nudged(0, 1); return accept; }
+            if (event.text == Key.Space || event.text == Key.Return) { root.picked(); return accept; }
+            return reject;
+        }
+    }
+    handle-touch := TouchArea {
+        x: (parent.width - 20px) / 2;
+        y: (parent.height - 20px) / 2;
+        width: 20px;
+        height: 20px;
+        enabled: root.enabled;
+        clicked => { handle-focus.focus(); root.picked(); }
+    }
+}
+
+export component LoomTimelineRuler inherits Rectangle {
+    in property <string> label: "Timeline ruler";
+    in property <string> start-label: "Start";
+    in property <string> end-label: "End";
+    in property <int> tick-count: 9;
+
+    height: Theme.tokens.metrics.panel-header-height;
+    min-width: 160px;
+    background: Theme.palette().chrome;
+    accessible-role: text;
+    accessible-label: root.label;
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+
+    VerticalLayout {
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        padding-top: Theme.tokens.space.xs;
+        padding-bottom: 2px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            Text {
+                text: root.start-label;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Text {
+                text: root.end-label;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+            alignment: space-between;
+            for idx in root.tick-count : Rectangle {
+                width: 1px;
+                height: Math.mod(idx, 4) == 0 ? Theme.tokens.space.md : Theme.tokens.space.sm;
+                background: Theme.palette().border-strong;
+            }
+        }
+    }
+}
+
+export component LoomTimelineMarker inherits Rectangle {
+    in property <string> label: "Playhead";
+    in-out property <float> position: 0.0;
+    in property <bool> enabled: true;
+    callback moved(float);
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 120px;
+    background: transparent;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: root.position;
+    accessible-value-minimum: 0.0;
+    accessible-value-maximum: 1.0;
+
+    property <length> track-inset: Theme.tokens.space.md;
+    property <length> track-w: root.width - track-inset * 2;
+
+    Rectangle {
+        x: root.track-inset;
+        y: (parent.height - Theme.tokens.space.sm) / 2;
+        width: root.track-w;
+        height: Theme.tokens.space.sm;
+        border-radius: 2px;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().surface-sunken;
+        Rectangle {
+            width: clamp(root.position * parent.width, 0px, parent.width);
+            height: parent.height;
+            border-radius: parent.border-radius;
+            background: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+        }
+    }
+    Rectangle {
+        x: root.track-inset + clamp(root.position * (root.track-w - Theme.tokens.space.lg), 0px, root.track-w - Theme.tokens.space.lg);
+        y: (root.height - Theme.tokens.metrics.icon-size) / 2;
+        width: Theme.tokens.space.lg;
+        height: Theme.tokens.metrics.icon-size;
+        border-radius: Theme.tokens.metrics.radius-small;
+        border-width: marker-focus.has-focus ? 2px : 1px;
+        border-color: marker-focus.has-focus ? Theme.palette().focus
+            : root.enabled ? Theme.palette().accent
+            : Theme.palette().ink-disabled;
+        background: root.enabled ? Theme.palette().surface-raised : Theme.palette().surface-sunken;
+    }
+
+    marker-focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.LeftArrow) {
+                root.position = max(0.0, root.position - 0.05);
+                root.moved(root.position);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.position = min(1.0, root.position + 0.05);
+                root.moved(root.position);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    marker-touch := TouchArea {
+        enabled: root.enabled;
+        moved => {
+            if (self.pressed) {
+                marker-focus.focus();
+                root.position = max(0.0, min(1.0, (self.mouse-x - root.track-inset) / root.track-w));
+                root.moved(root.position);
+            }
+        }
+        clicked => {
+            marker-focus.focus();
+            root.position = max(0.0, min(1.0, (self.mouse-x - root.track-inset) / root.track-w));
+            root.moved(root.position);
+        }
+    }
+}

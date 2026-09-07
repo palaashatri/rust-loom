@@ -1,0 +1,25 @@
+[package]
+name = "loom-writer-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom Writer desktop application"
+
+[[bin]]
+name = "loom-writer"
+path = "src/main.rs"
+
+[dependencies]
+loom-writer-core = { path = "../loom-writer-core" }
+loom-command = { path = "../../../loom-core/crates/loom-command" }
+loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
+loom-storage = { path = "../../../loom-core/crates/loom-storage" }
+loom-text = { path = "../../../loom-core/crates/loom-text" }
+loom-ui = { path = "../../../loom-core/crates/loom-ui" }
+loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
+slint = "1.17.1"
+
+[build-dependencies]
+slint-build = "1.17.1"

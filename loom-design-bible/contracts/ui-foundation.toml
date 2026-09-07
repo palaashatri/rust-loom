@@ -1,0 +1,71 @@
+schema_version = 1
+status = "ACCEPTED"
+consumer_imports_allowed = true
+human_visual_approval_required = true
+approved_baselines = true
+
+required_viewports = ["1024x720", "1280x800", "1440x900", "1920x1200"]
+required_themes = ["light", "dark", "high-contrast"]
+required_text_scales = [1.0, 1.25, 1.5]
+required_directions = ["ltr", "rtl"]
+
+required_components = [
+  "LoomButton",
+  "LoomIconButton",
+  "LoomTextField",
+  "LoomSearchField",
+  "LoomToggle",
+  "LoomSegmentedControl",
+  "LoomProgressBar",
+  "LoomToolbar",
+  "LoomToolbarGroup",
+  "LoomToolbarSpacer",
+  "LoomToolbarDivider",
+  "LoomOverflowButton",
+  "LoomPanel",
+  "LoomSectionHeader",
+  "LoomTabStrip",
+  "LoomListRow",
+  "LoomStatusBar",
+  "LoomStatusText",
+  "LoomMenu",
+  "LoomPopover",
+  "LoomDialog",
+  "LoomTableRow",
+  "LoomEmptyState",
+  "LoomErrorState",
+  "LoomCanvasHandle",
+  "LoomTimelineRuler",
+  "LoomTimelineMarker",
+]
+
+required_interaction_states = [
+  "normal",
+  "hover",
+  "pressed",
+  "focus",
+  "disabled",
+  "selected",
+  "destructive",
+  "long-label",
+]
+
+[mechanical]
+unintended_overlap_px = 0
+clipped_action_labels = 0
+toolbar_wrap_allowed = false
+toolbar_horizontal_scroll_allowed = false
+icon_only_accessible_label_required = true
+icon_only_tooltip_contract_required = true
+keyboard_activation_required = true
+visible_focus_required = true
+local_palette_overrides_allowed = false
+local_standard_geometry_allowed = false
+external_unregistered_assets_allowed = false
+
+[visual]
+workspace_must_dominate_chrome = true
+rounded_card_soup_allowed = false
+strong_default_zebra_striping_allowed = false
+redundant_document_titles_allowed = false
+baseline_refresh_can_approve_design = false

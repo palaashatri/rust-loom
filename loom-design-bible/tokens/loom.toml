@@ -1,0 +1,314 @@
+# Loom Design Tokens — canonical primitive/semantic token source
+#
+# `contracts/desktop-ui.toml` defines component geometry, shell composition,
+# responsive behavior, forbidden patterns, and acceptance policy. This file
+# defines the values consumed by themes/components. Runtime theme values must
+# match this file exactly; CI must reject drift.
+
+format-version = "2.0.0"
+
+[meta]
+name = "loom-design-tokens"
+version = "2.0.0"
+owner = "loom-ui"
+geometry-contract = "../contracts/desktop-ui.toml"
+
+# ---------------------------------------------------------------------------
+# Palette. Neutral chrome keeps visual weight on user content; terracotta is
+# reserved for focus, selection, primary actions, and meaningful emphasis.
+# ---------------------------------------------------------------------------
+[palette.light]
+canvas = "#F4F4F6"
+canvas-alt = "#EAEAEF"
+surface = "#FFFFFF"
+surface-raised = "#FFFFFF"
+surface-sunken = "#EDEDF2"
+chrome = "#FFFFFF"
+panel = "#F9F9FA"
+overlay = "#FFFFFFF8"
+ink = "#18181B"
+ink-secondary = "#64646E"
+ink-disabled = "#5F5F68"
+accent = "#D95324"
+accent-hover = "#E66333"
+accent-pressed = "#B84016"
+accent-ink = "#FFFFFF"
+success = "#16A34A"
+warning = "#D97706"
+danger = "#DC2626"
+info = "#0284C7"
+border = "#E2E2E8"
+border-strong = "#C8C8D2"
+focus = "#D95324"
+selection = "#D95324"
+selection-soft = "#FBECE5"
+danger-surface = "#FEE2E2"
+shadow = "#00000014"
+scrim = "#0000004D"
+grid-major = "#C8C8D2"
+grid-minor = "#E2E2E8"
+paper = "#FFFFFF"
+paper-ink = "#18181B"
+paper-muted = "#71717A"
+paper-line = "#E4E4E7"
+media-stage = "#0A0A0C"
+content-accent = "#D95324"
+content-accent-soft = "#FBECE5"
+content-cool = "#0284C7"
+content-cool-soft = "#E0F2FE"
+meter-good = "#16A34A"
+meter-warn = "#D97706"
+
+[palette.dark]
+canvas = "#121214"
+canvas-alt = "#0E0E10"
+surface = "#1A1A1E"
+surface-raised = "#24242A"
+surface-sunken = "#141416"
+chrome = "#1A1A1E"
+panel = "#161619"
+overlay = "#24242AF2"
+ink = "#F4F4F6"
+ink-secondary = "#9898A0"
+ink-disabled = "#8C8C94"
+accent = "#E06338"
+accent-hover = "#ED754A"
+accent-pressed = "#CA5329"
+accent-ink = "#FFFFFF"
+success = "#22C55E"
+warning = "#F59E0B"
+danger = "#EF4444"
+info = "#38BDF8"
+border = "#2A2A30"
+border-strong = "#3C3C46"
+focus = "#E06338"
+selection = "#E06338"
+selection-soft = "#341E17"
+danger-surface = "#361919"
+shadow = "#00000099"
+scrim = "#000000B3"
+grid-major = "#34343C"
+grid-minor = "#222228"
+paper = "#FFFFFF"
+paper-ink = "#1A1A1E"
+paper-muted = "#71717A"
+paper-line = "#E4E4E7"
+media-stage = "#0A0A0C"
+content-accent = "#E06338"
+content-accent-soft = "#341E17"
+content-cool = "#38BDF8"
+content-cool-soft = "#122B38"
+meter-good = "#22C55E"
+meter-warn = "#F59E0B"
+
+[palette.high-contrast]
+canvas = "#000000"
+canvas-alt = "#000000"
+surface = "#000000"
+surface-raised = "#161616"
+surface-sunken = "#000000"
+chrome = "#000000"
+panel = "#000000"
+overlay = "#000000F2"
+ink = "#FFFFFF"
+ink-secondary = "#FFFFFF"
+ink-disabled = "#C8C8C8"
+accent = "#FFD84D"
+accent-hover = "#FFE681"
+accent-pressed = "#E7BD25"
+accent-ink = "#000000"
+success = "#80FF80"
+warning = "#FFBD52"
+danger = "#FF7164"
+info = "#80CCFF"
+border = "#FFFFFF"
+border-strong = "#FFFFFF"
+focus = "#FFD84D"
+selection = "#FFD84D"
+selection-soft = "#3A3200"
+danger-surface = "#3D0D09"
+shadow = "#000000"
+scrim = "#000000CC"
+grid-major = "#FFFFFF"
+grid-minor = "#777777"
+paper = "#FFFFFF"
+paper-ink = "#000000"
+paper-muted = "#222222"
+paper-line = "#000000"
+media-stage = "#000000"
+content-accent = "#FFD84D"
+content-accent-soft = "#FFFFFF"
+content-cool = "#003CFF"
+content-cool-soft = "#FFFFFF"
+meter-good = "#00FF66"
+meter-warn = "#FFD84D"
+
+# ---------------------------------------------------------------------------
+# Semantic token mapping. Components consume semantic roles; apps consume
+# components. Application UI may consume content-specific paper/media/grid
+# roles but may not create local palette values.
+# ---------------------------------------------------------------------------
+[semantic]
+color-surface-canvas = { source = "palette.{theme}.canvas" }
+color-surface-canvas-alt = { source = "palette.{theme}.canvas-alt" }
+color-surface-default = { source = "palette.{theme}.surface" }
+color-surface-raised = { source = "palette.{theme}.surface-raised" }
+color-surface-sunken = { source = "palette.{theme}.surface-sunken" }
+color-surface-chrome = { source = "palette.{theme}.chrome" }
+color-surface-panel = { source = "palette.{theme}.panel" }
+color-surface-overlay = { source = "palette.{theme}.overlay" }
+color-ink-primary = { source = "palette.{theme}.ink" }
+color-ink-secondary = { source = "palette.{theme}.ink-secondary" }
+color-ink-disabled = { source = "palette.{theme}.ink-disabled" }
+color-accent-default = { source = "palette.{theme}.accent" }
+color-accent-hover = { source = "palette.{theme}.accent-hover" }
+color-accent-pressed = { source = "palette.{theme}.accent-pressed" }
+color-accent-ink = { source = "palette.{theme}.accent-ink" }
+color-status-success = { source = "palette.{theme}.success" }
+color-status-warning = { source = "palette.{theme}.warning" }
+color-status-danger = { source = "palette.{theme}.danger" }
+color-status-info = { source = "palette.{theme}.info" }
+color-border-default = { source = "palette.{theme}.border" }
+color-border-strong = { source = "palette.{theme}.border-strong" }
+color-focus = { source = "palette.{theme}.focus" }
+color-selection = { source = "palette.{theme}.selection" }
+color-selection-soft = { source = "palette.{theme}.selection-soft" }
+color-scrim = { source = "palette.{theme}.scrim" }
+color-grid-major = { source = "palette.{theme}.grid-major" }
+color-grid-minor = { source = "palette.{theme}.grid-minor" }
+color-paper = { source = "palette.{theme}.paper" }
+color-paper-ink = { source = "palette.{theme}.paper-ink" }
+color-media-stage = { source = "palette.{theme}.media-stage" }
+
+# ---------------------------------------------------------------------------
+# Spacing — only these values are permitted for chrome/component spacing.
+# ---------------------------------------------------------------------------
+[spacing]
+units = "px"
+scale = [2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+
+# ---------------------------------------------------------------------------
+# Radii. Flush work panels use 0; rounded values are for controls, content
+# cards with semantic grouping, menus/popovers, and modal surfaces.
+# ---------------------------------------------------------------------------
+[radius]
+units = "px"
+scale = [2, 4, 6, 8, 10, 12]
+control = 6
+compact = 4
+popover = 10
+
+[border]
+units = "px"
+hairline = 1
+default = 1
+strong = 2
+
+# ---------------------------------------------------------------------------
+# Typography — logical px follow desktop point-like sizing. UI labels use 13;
+# user document/media content is independent of this scale.
+# ---------------------------------------------------------------------------
+[type.size]
+units = "px"
+"10" = 10
+"11" = 11
+"12" = 12
+"13" = 13
+"14" = 14
+"16" = 16
+"20" = 20
+"24" = 24
+"32" = 32
+"40" = 40
+
+[type.role]
+micro = 10
+caption = 11
+small = 12
+ui = 13
+body = 14
+subtitle = 16
+heading = 20
+large-heading = 24
+display = 32
+
+[type.leading]
+ui = 18
+caption = 15
+body = 20
+compact-ratio = 1.35
+body-ratio = 1.43
+relaxed-ratio = 1.5
+
+[type.weight]
+regular = 400
+medium = 500
+semibold = 600
+bold = 700
+
+[type.family]
+ui = "Noto Sans"
+serif = "Noto Serif"
+mono = "Noto Sans Mono"
+fallback = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans KR", "Noto Sans Arabic", "Noto Sans Devanagari", "DejaVu Sans", "sans-serif"]
+
+# ---------------------------------------------------------------------------
+# Component/chrome metrics. Duplicated in desktop-ui.toml intentionally and
+# checked by CI: token value and behavioral contract are allowed to diverge
+# only in a reviewed migration commit that updates both.
+# ---------------------------------------------------------------------------
+[metrics]
+control-height = 28
+compact-control-height = 24
+prominent-control-height = 32
+toolbar-height = 40
+context-toolbar-height = 40
+labeled-toolbar-min-height = 48
+labeled-toolbar-max-height = 52
+header-height = 40
+panel-header-height = 32
+status-height = 28
+sheet-tab-height = 30
+formula-bar-height = 32
+icon-standard = 16
+icon-small = 14
+focus-ring = 2
+focus-offset = 2
+
+[motion.duration]
+units = "ms"
+instant = 0
+fast = 120
+standard = 180
+deliberate = 220
+slow = 250
+
+[motion.easing]
+out-quad = [0.33, 1.00, 0.68, 1.00]
+in-out = [0.65, 0.00, 0.35, 1.00]
+
+[shadow]
+none = "none"
+popover = "0 1px 3px rgba(0, 0, 0, 0.18)"
+
+[icon]
+units = "px"
+viewbox = 20
+render-standard = 16
+render-large = 20
+stroke-width = 1.5
+corner-radius = 2
+align-guides = [4, 8, 12, 16]
+
+[data-viz]
+categorical = ["#B4552D", "#2E7D6E", "#C98A2E", "#4A6B8A", "#7A5C8A", "#6B8A4A"]
+
+[a11y]
+contrast-body = 4.5
+contrast-large = 3.0
+contrast-ui = 3.0
+# Loom is a pointer/keyboard desktop suite. 28 px is the default target; 20 px
+# is permitted only for specialized dense affordances with a >=28 px hit area.
+target-default = 28
+target-visual-minimum = 20
+text-scale = [1.0, 1.25, 1.5, 2.0]

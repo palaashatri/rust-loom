@@ -1,0 +1,15 @@
+[package]
+name = "loom-sheets-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom Sheets command-line interface"
+
+[[bin]]
+name = "loom-sheets-cli"
+path = "src/main.rs"
+
+[dependencies]
+loom-sheets-core = { path = "../loom-sheets-core" }
+loom-package = { workspace = true }

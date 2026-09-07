@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/loom-writer-core",
+    "crates/loom-writer-cli",
+    "crates/loom-writer-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+loom-document = { path = "../loom-core/crates/loom-document" }
+loom-package = { path = "../loom-core/crates/loom-package" }
+loom-text = { path = "../loom-core/crates/loom-text" }
+loom-command = { path = "../loom-core/crates/loom-command" }
+loom-pdf = { path = "../loom-core/crates/loom-pdf" }
+loom-ui = { path = "../loom-core/crates/loom-ui" }
+loom-test-support = { path = "../loom-core/crates/loom-test-support" }

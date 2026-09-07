@@ -1,0 +1,247 @@
+import {
+    LoomButton, LoomIconButton, LoomStatusBar, LoomStatusText,
+    LoomToolbarSpacer,
+} from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+export component PhotoCanvas inherits Rectangle {
+    in property <bool> has-preview: false;
+    in property <image> preview-image;
+    in property <float> document-width: 1.0;
+    in property <float> document-height: 1.0;
+    in property <float> selected-layer-bounds-x: 0.0;
+    in property <float> selected-layer-bounds-y: 0.0;
+    in property <float> selected-layer-bounds-width: 1.0;
+    in property <float> selected-layer-bounds-height: 1.0;
+    in property <bool> has-selected-layer-bounds: false;
+    in property <bool> show-grid: true;
+    in property <int> active-tool: 0;
+    in-out property <bool> pan-mode: false;
+    in-out property <float> zoom-value: 72.0;
+    in-out property <length> viewport-pan-x: 0px;
+    in-out property <length> viewport-pan-y: 0px;
+    out property <bool> panning: canvas-pan.pressed;
+    callback import-image;
+
+    background: Theme.palette().media-stage;
+
+    stage := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        clip: true;
+
+        // Subtle grid lines
+        if root.show-grid : Rectangle { x: parent.width / 2; width: 1px; height: parent.height; background: Theme.palette().grid-major; }
+        if root.show-grid : Rectangle { y: parent.height / 2; width: parent.width; height: 1px; background: Theme.palette().grid-major; }
+        if root.show-grid : Rectangle { x: parent.width / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+        if root.show-grid : Rectangle { x: parent.width * 3 / 4; width: 1px; height: parent.height; background: Theme.palette().grid-minor; }
+        if root.show-grid : Rectangle { y: parent.height / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+        if root.show-grid : Rectangle { y: parent.height * 3 / 4; width: parent.width; height: 1px; background: Theme.palette().grid-minor; }
+
+        if root.has-preview : viewport := Rectangle {
+            property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
+            property <length> scaled-height: max(90px, stage.height * root.zoom-value / 100.0);
+            property <float> document-aspect: root.document-height > 0 ? root.document-width / root.document-height : 1.0;
+            property <length> image-content-width: min(parent.width, parent.height * document-aspect);
+            property <length> image-content-height: min(parent.height, parent.width / document-aspect);
+            property <length> image-content-x: (parent.width - image-content-width) / 2;
+            property <length> image-content-y: (parent.height - image-content-height) / 2;
+
+            x: (stage.width - self.scaled-width) / 2 + root.viewport-pan-x;
+            y: (stage.height - self.scaled-height) / 2 + root.viewport-pan-y;
+            width: self.scaled-width;
+            height: self.scaled-height;
+            background: Theme.palette().paper-ink;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: Theme.palette().shadow;
+            clip: true;
+
+            Image {
+                source: root.preview-image;
+                x: viewport.image-content-x;
+                y: viewport.image-content-y;
+                width: viewport.image-content-width;
+                height: viewport.image-content-height;
+                image-fit: fill;
+            }
+
+            if root.has-selected-layer-bounds : Rectangle {
+                property <length> bounds-x: viewport.image-content-x + viewport.image-content-width * root.selected-layer-bounds-x;
+                property <length> bounds-y: viewport.image-content-y + viewport.image-content-height * root.selected-layer-bounds-y;
+                property <length> bounds-width: viewport.image-content-width * root.selected-layer-bounds-width;
+                property <length> bounds-height: viewport.image-content-height * root.selected-layer-bounds-height;
+                x: bounds-x;
+                y: bounds-y;
+                width: max(2px, bounds-width);
+                height: max(2px, bounds-height);
+                border-width: 2px;
+                border-color: Theme.palette().selection;
+                background: transparent;
+
+                for corner in [0, 1, 2, 3] : Rectangle {
+                    x: corner == 1 || corner == 3 ? bounds-width - 4px : -4px;
+                    y: corner >= 2 ? bounds-height - 4px : -4px;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: Theme.tokens.metrics.radius-small;
+                    background: Theme.palette().paper;
+                    border-width: 1px;
+                    border-color: Theme.palette().accent;
+                }
+            }
+        }
+
+        if !root.has-preview : VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+            alignment: center;
+            spacing: Theme.tokens.space.lg;
+
+            HorizontalLayout {
+                alignment: center;
+                Icon {
+                    icon: "image";
+                    size: 48px;
+                    tint: Theme.palette().ink-disabled;
+                }
+            }
+            Text {
+                text: "No Image Open";
+                font-size: Theme.tokens.typography.title;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Import a PNG or JPEG, or open an existing .loomphoto project";
+                font-size: Theme.tokens.typography.body;
+                color: Theme.palette().ink-secondary;
+                horizontal-alignment: center;
+            }
+            HorizontalLayout {
+                alignment: center;
+                LoomButton {
+                    icon: "import";
+                    label: "Import Image...";
+                    variant: "primary";
+                    clicked => { root.import-image(); }
+                }
+            }
+        }
+
+        canvas-focus := FocusScope {
+            enabled: root.has-preview;
+            key-pressed(event) => {
+                if (event.text == Key.LeftArrow) { root.viewport-pan-x -= 1px; return accept; }
+                if (event.text == Key.RightArrow) { root.viewport-pan-x += 1px; return accept; }
+                if (event.text == Key.UpArrow) { root.viewport-pan-y -= 1px; return accept; }
+                if (event.text == Key.DownArrow) { root.viewport-pan-y += 1px; return accept; }
+                return reject;
+            }
+        }
+
+        canvas-pan := TouchArea {
+            enabled: root.has-preview && root.pan-mode;
+            mouse-cursor: root.pan-mode ? (self.pressed ? MouseCursor.grabbing : MouseCursor.grab) : MouseCursor.default;
+            property <length> start-pan-x: 0px;
+            property <length> start-pan-y: 0px;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    self.start-pan-x = root.viewport-pan-x;
+                    self.start-pan-y = root.viewport-pan-y;
+                    canvas-focus.focus();
+                }
+            }
+            moved => {
+                if (self.pressed && root.pan-mode) {
+                    root.viewport-pan-x = clamp(self.start-pan-x + self.mouse-x - self.pressed-x, -stage.width, stage.width);
+                    root.viewport-pan-y = clamp(self.start-pan-y + self.mouse-y - self.pressed-y, -stage.height, stage.height);
+                }
+            }
+        }
+    }
+}
+
+export component PhotoStatusBar inherits LoomStatusBar {
+    in property <string> project-name: "";
+    in property <string> dimensions: "";
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Local";
+
+    LoomStatusText {
+        text: root.status-left;
+        strong: true;
+    }
+    if root.dimensions != "" : LoomStatusText {
+        text: root.dimensions;
+    }
+    LoomToolbarSpacer { }
+    if root.project-name != "" : LoomStatusText {
+        text: root.project-name;
+    }
+    LoomStatusText {
+        text: root.status-right;
+    }
+}
+
+export component PhotoToolbarOverflow inherits Rectangle {
+    in property <bool> inspector-visible: false;
+    in property <float> zoom-value: 72.0;
+
+    callback toggle-inspector;
+    callback export-png;
+    callback export-jpeg;
+    callback add-layer;
+    callback add-adjustment;
+    callback import-image;
+    callback zoom-changed(float);
+
+    width: 200px;
+    background: Theme.palette().panel;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    drop-shadow-blur: 12px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+
+    VerticalLayout {
+        padding: Theme.tokens.space.sm;
+        spacing: Theme.tokens.space.xs;
+
+        LoomButton {
+            icon: "plus";
+            label: "Add Pixel Layer";
+            clicked => { root.add-layer(); }
+        }
+        LoomButton {
+            icon: "wand";
+            label: "Add Adjustment";
+            clicked => { root.add-adjustment(); }
+        }
+        LoomButton {
+            icon: "import";
+            label: "Import Image";
+            clicked => { root.import-image(); }
+        }
+        LoomButton {
+            icon: "format";
+            label: root.inspector-visible ? "Hide Inspector" : "Show Inspector";
+            clicked => { root.toggle-inspector(); }
+        }
+        LoomButton {
+            icon: "export";
+            label: "Export PNG";
+            clicked => { root.export-png(); }
+        }
+        LoomButton {
+            icon: "export";
+            label: "Export JPEG";
+            clicked => { root.export-jpeg(); }
+        }
+    }
+}

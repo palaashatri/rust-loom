@@ -1,0 +1,474 @@
+import {
+    DocumentChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, DirectionalLayout,
+    IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow, ToolkitStatusBar, CanvasSurface
+} from "toolkit.slint";
+import {
+    SidebarSurface, InspectorSurface, WorkspaceRow, PrimaryButton, TransportButton, Slider,
+    SegmentedControl, Field, StatusPill, MetricChip, CommandPalette, CommandPaletteItem
+} from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import { StudioTransport } from "studio_transport.slint";
+import { StudioLibrary } from "studio_library.slint";
+import { ArrangementRegion, StudioArrangement } from "studio_arrangement.slint";
+import { StudioMixer } from "studio_mixer.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
+
+component StudioToolbarBody inherits DirectionalLayout {
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+    in property <bool> audio-available: false;
+    in property <bool> input-available: false;
+    in property <bool> is-playing: false;
+    in property <bool> is-recording: false;
+    in-out property <bool> is-looping: false;
+    in-out property <bool> metronome-on: true;
+    in property <[string]> track-labels: [];
+    in property <string> export-path: "loom-studio-mix.wav";
+    callback play-pause;
+    callback stop;
+    callback toggle-record;
+    callback toggle-loop;
+    callback toggle-metronome;
+    callback add-track;
+    callback export-mix(string);
+    callback overflow-requested;
+
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: root.is-playing ? "pause" : "play";
+            label: root.is-playing ? "Pause" : "Play";
+            enabled: root.audio-available;
+            checked: root.is-playing;
+            clicked => { root.play-pause(); }
+        }
+        IconOverLabelToolbarItem { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
+        IconOverLabelToolbarItem {
+            icon: "record";
+            label: root.is-recording ? "Recording" : "Record";
+            enabled: root.input-available;
+            checked: root.is-recording;
+            clicked => { root.toggle-record(); }
+        }
+        IconOverLabelToolbarItem { icon: "link"; label: "Loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+        IconOverLabelToolbarItem { icon: "clock"; label: "Metronome"; checked: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
+    }
+
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: root.is-playing ? "pause" : "play";
+            label: root.is-playing ? "Pause" : "Play";
+            enabled: root.audio-available;
+            checked: root.is-playing;
+            clicked => { root.play-pause(); }
+        }
+        IconOnlyToolbarItem { icon: "stop"; label: "Stop"; enabled: root.audio-available; clicked => { root.stop(); } }
+        IconOnlyToolbarItem {
+            icon: "record";
+            label: root.is-recording ? "Recording" : "Record";
+            enabled: root.input-available;
+            checked: root.is-recording;
+            clicked => { root.toggle-record(); }
+        }
+        if root.overflow : Overflow { label: "More Studio actions"; clicked => { root.overflow-requested(); } }
+    }
+
+    if root.labeled || !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "link"; label: "Loop"; checked: root.is-looping; clicked => { root.toggle-loop(); } }
+        IconOverLabelToolbarItem { icon: "clock"; label: "Metronome"; checked: root.metronome-on; clicked => { root.toggle-metronome(); } }
+        IconOverLabelToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: "Bounce WAV";
+            enabled: root.track-labels.length > 0;
+            clicked => { root.export-mix(root.export-path); }
+        }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem { icon: "link"; label: "Loop"; checked: root.is-looping; clicked => { root.is-looping = !root.is-looping; root.toggle-loop(); } }
+        IconOnlyToolbarItem { icon: "clock"; label: "Metronome"; checked: root.metronome-on; clicked => { root.metronome-on = !root.metronome-on; root.toggle-metronome(); } }
+        IconOnlyToolbarItem { icon: "plus"; label: "Add Track"; clicked => { root.add-track(); } }
+        IconOnlyToolbarItem {
+            icon: "export";
+            label: "Bounce WAV";
+            enabled: root.track-labels.length > 0;
+            clicked => { root.export-mix(root.export-path); }
+        }
+    }
+}
+
+export component StudioApp inherits Window {
+    title: "Loom Studio";
+    min-width: 920px;
+    min-height: 720px;
+    background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
+    // Responsive mode comes from the host so width-dependent panes cannot
+    // feed back into the breakpoint predicate and create a binding loop.
+    in property <bool> compact-layout: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> overflow-toolbar: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
+
+    in property <string> song-title: "Untitled Song";
+    in property <string> tempo-text: "120 BPM · 48 kHz";
+    in-out property <float> bpm-val: 120.0;
+    in property <string> workspace-mode: "Quick";
+    in-out property <int> workspace-mode-index: 0;
+    in property <[string]> track-labels: [];
+    in property <[string]> track-kinds: [];
+    in property <[int]> track-region-counts: [];
+    in property <[ArrangementRegion]> regions: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <[bool]> track-arms: [];
+    in property <[float]> track-volumes: [];
+    in property <[float]> track-pans: [];
+    in property <int> active-track-index: 0;
+    in property <float> duration-seconds: 10.0;
+    in-out property <float> playhead-seconds: 0.0;
+    in-out property <float> timeline-zoom: 1.0;
+    in-out property <float> timeline-scroll-seconds: 0.0;
+    in property <bool> audio-available: false;
+    in property <bool> input-available: false;
+    in property <string> output-device: "No output device";
+    in property <string> input-device: "No input device";
+    in property <[string]> midi-ports: [];
+    in-out property <int> selected-midi-port: 0;
+    in property <string> midi-status: "No MIDI input connected";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in-out property <bool> is-playing: false;
+    in-out property <bool> is-recording: false;
+    in-out property <bool> is-looping: false;
+    in-out property <bool> metronome-on: true;
+    in-out property <string> import-path: "";
+    in-out property <string> export-path: "loom-studio-mix.wav";
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Local";
+    in property <string> selection-label: "No region selected";
+    in property <string> selected-region-id: "";
+    in-out property <bool> context-menu-open: false;
+    in property <string> job-state: "Idle";
+    in property <float> job-progress: 0.0;
+    in property <bool> job-cancellable: false;
+
+    /// Focus the arrangement's selected-region keyboard command scope.
+    public function focus-arrangement() {
+        arrangement.focus-timeline();
+    }
+
+    callback new-song;
+    callback open-song;
+    callback save-song;
+    callback save-as-song;
+    callback undo;
+    callback redo;
+    callback add-track;
+    callback select-track(int);
+    callback set-workspace-mode(int);
+    callback play-pause;
+    callback stop;
+    callback toggle-record;
+    callback toggle-loop;
+    callback toggle-metronome;
+    callback seek(float);
+    callback bpm-changed(float);
+    callback toggle-mute(int);
+    callback toggle-solo(int);
+    callback toggle-rec-arm(int);
+    callback volume-changed(int, float);
+    callback pan-changed(int, float);
+    callback import-audio(string);
+    callback export-mix(string);
+    callback cancel-job;
+    callback connect-midi(int);
+
+    callback select-region(int, string);
+    callback begin-region-gesture(int, string, string);
+    callback move-region(int, string, float);
+    callback trim-region-start(int, string, float);
+    callback trim-region-end(int, string, float);
+    callback end-region-gesture;
+    callback cancel-region-gesture;
+    callback split-region(int, string);
+    callback delete-region(int, string);
+
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
+                root.open-palette();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+        spacing: 0px;
+
+        DocumentChrome {
+            title: root.song-title;
+            trailing-text: root.tempo-text + " · " + root.workspace-mode;
+        }
+
+        if root.labeled-toolbar : LabeledToolbar {
+            StudioToolbarBody {
+                rtl: root.rtl;
+                labeled: true;
+                overflow: false;
+                audio-available: root.audio-available;
+                input-available: root.input-available;
+                is-playing: root.is-playing;
+                is-recording: root.is-recording;
+                is-looping <=> root.is-looping;
+                metronome-on <=> root.metronome-on;
+                track-labels: root.track-labels;
+                export-path: root.export-path;
+                play-pause => { root.play-pause(); }
+                stop => { root.stop(); }
+                toggle-record => { root.toggle-record(); }
+                toggle-loop => { root.toggle-loop(); }
+                toggle-metronome => { root.toggle-metronome(); }
+                add-track => { root.add-track(); }
+                export-mix(path) => { root.export-mix(path); }
+                overflow-requested => { root.open-palette(); }
+            }
+        }
+        if !root.labeled-toolbar : ContextToolbar {
+            StudioToolbarBody {
+                rtl: root.rtl;
+                labeled: false;
+                overflow: root.overflow-toolbar;
+                audio-available: root.audio-available;
+                input-available: root.input-available;
+                is-playing: root.is-playing;
+                is-recording: root.is-recording;
+                is-looping <=> root.is-looping;
+                metronome-on <=> root.metronome-on;
+                track-labels: root.track-labels;
+                export-path: root.export-path;
+                play-pause => { root.play-pause(); }
+                stop => { root.stop(); }
+                toggle-record => { root.toggle-record(); }
+                toggle-loop => { root.toggle-loop(); }
+                toggle-metronome => { root.toggle-metronome(); }
+                add-track => { root.add-track(); }
+                export-mix(path) => { root.export-mix(path); }
+                overflow-requested => { root.open-palette(); }
+            }
+        }
+
+        DirectionalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+            rtl: root.rtl;
+
+            // HorizontalLayout is declaration ordered. Mirror the outer
+            // library/mixer siblings explicitly so RTL keeps the logical
+            // leading library and trailing mixer on opposite edges.
+            if root.rtl : StudioMixer {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 292px;
+                max-width: root.compact-layout ? 264px : 320px;
+                compact-layout: root.compact-layout;
+                active-track-index: root.active-track-index;
+                track-labels: root.track-labels;
+                track-volumes: root.track-volumes;
+                track-pans: root.track-pans;
+                track-mutes: root.track-mutes;
+                track-solos: root.track-solos;
+                track-arms: root.track-arms;
+                input-available: root.input-available;
+                selection-label: root.selection-label;
+                job-state: root.job-state;
+                job-progress: root.job-progress;
+                job-cancellable: root.job-cancellable;
+                export-path <=> root.export-path;
+                volume-changed(index, value) => { root.volume-changed(index, value); }
+                pan-changed(index, value) => { root.pan-changed(index, value); }
+                mute-toggled(index) => { root.toggle-mute(index); }
+                solo-toggled(index) => { root.toggle-solo(index); }
+                record-arm-toggled(index) => { root.toggle-rec-arm(index); }
+                export-mix(path) => { root.export-mix(path); }
+                cancel-job => { root.cancel-job(); }
+            }
+
+            if !root.rtl : StudioLibrary {
+                min-width: root.compact-layout ? 200px : 224px;
+                preferred-width: root.compact-layout ? 208px : 248px;
+                max-width: root.compact-layout ? 224px : 280px;
+                compact-layout: root.compact-layout;
+                track-labels: root.track-labels;
+                midi-ports: root.midi-ports;
+                selected-midi-port <=> root.selected-midi-port;
+                import-path <=> root.import-path;
+                midi-status: root.midi-status;
+                output-device: root.output-device;
+                input-device: root.input-device;
+                import-audio(path) => { root.import-audio(path); }
+                connect-midi(index) => { root.connect-midi(index); }
+                add-track => { root.add-track(); }
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 0px;
+                StudioTransport {
+                    playhead-seconds <=> root.playhead-seconds;
+                    duration-seconds: root.duration-seconds;
+                    seek(value) => { root.seek(value); }
+                }
+                arrangement := StudioArrangement {
+                    vertical-stretch: 1;
+                    track-labels: root.track-labels;
+                    track-kinds: root.track-kinds;
+                    track-region-counts: root.track-region-counts;
+                    regions: root.regions;
+                    selected-region-id: root.selected-region-id;
+                    context-menu-open <=> root.context-menu-open;
+                    selected-region-track: root.active-track-index;
+                    playhead-seconds: root.playhead-seconds;
+                    looping: root.is-looping;
+                    timeline-zoom <=> root.timeline-zoom;
+                    timeline-scroll-seconds <=> root.timeline-scroll-seconds;
+                    selection-label: root.selection-label;
+                    job-state: root.job-state;
+                    job-progress: root.job-progress;
+                    job-cancellable: root.job-cancellable;
+                    track-mutes: root.track-mutes;
+                    track-solos: root.track-solos;
+                    track-arms: root.track-arms;
+                    active-track-index: root.active-track-index;
+                    duration-seconds: root.duration-seconds;
+                    workspace-mode-index: root.workspace-mode-index;
+                    compact-layout: root.compact-layout;
+                    input-available: root.input-available;
+                    select-track(index) => { root.select-track(index); }
+                    mute-toggled(index) => { root.toggle-mute(index); }
+                    solo-toggled(index) => { root.toggle-solo(index); }
+                    record-arm-toggled(index) => { root.toggle-rec-arm(index); }
+                    select-region(track, id) => { root.select-region(track, id); }
+                    begin-region-gesture(index, id, kind) => { root.begin-region-gesture(index, id, kind); }
+                    move-region(index, id, delta) => { root.move-region(index, id, delta); }
+                    trim-region-start(index, id, delta) => { root.trim-region-start(index, id, delta); }
+                    trim-region-end(index, id, delta) => { root.trim-region-end(index, id, delta); }
+                    end-region-gesture => { root.end-region-gesture(); }
+                    cancel-region-gesture => { root.cancel-region-gesture(); }
+                    split-region(index, id) => { root.split-region(index, id); }
+                    delete-region(index, id) => { root.delete-region(index, id); }
+                }
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            if !root.rtl : StudioMixer {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 292px;
+                max-width: root.compact-layout ? 264px : 320px;
+                compact-layout: root.compact-layout;
+                active-track-index: root.active-track-index;
+                track-labels: root.track-labels;
+                track-volumes: root.track-volumes;
+                track-pans: root.track-pans;
+                track-mutes: root.track-mutes;
+                track-solos: root.track-solos;
+                track-arms: root.track-arms;
+                input-available: root.input-available;
+                selection-label: root.selection-label;
+                job-state: root.job-state;
+                job-progress: root.job-progress;
+                job-cancellable: root.job-cancellable;
+                export-path <=> root.export-path;
+                volume-changed(index, value) => { root.volume-changed(index, value); }
+                pan-changed(index, value) => { root.pan-changed(index, value); }
+                mute-toggled(index) => { root.toggle-mute(index); }
+                solo-toggled(index) => { root.toggle-solo(index); }
+                record-arm-toggled(index) => { root.toggle-rec-arm(index); }
+                export-mix(path) => { root.export-mix(path); }
+                cancel-job => { root.cancel-job(); }
+            }
+
+            if root.rtl : StudioLibrary {
+                min-width: root.compact-layout ? 200px : 224px;
+                preferred-width: root.compact-layout ? 208px : 248px;
+                max-width: root.compact-layout ? 224px : 280px;
+                compact-layout: root.compact-layout;
+                track-labels: root.track-labels;
+                midi-ports: root.midi-ports;
+                selected-midi-port <=> root.selected-midi-port;
+                import-path <=> root.import-path;
+                midi-status: root.midi-status;
+                output-device: root.output-device;
+                input-device: root.input-device;
+                import-audio(path) => { root.import-audio(path); }
+                connect-midi(index) => { root.connect-midi(index); }
+                add-track => { root.add-track(); }
+            }
+        }
+
+        ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => {
+            root.palette-invoked(idx);
+        }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => {
+            root.palette-move(delta);
+        }
+        key-text(text) => {
+            root.palette-key-text(text);
+        }
+        backspace => {
+            root.palette-backspace();
+        }
+        close-requested => {
+            root.palette-open = false;
+            app-focus.focus();
+        }
+    }
+    }
+
+}

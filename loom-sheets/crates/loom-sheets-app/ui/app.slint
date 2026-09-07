@@ -1,0 +1,591 @@
+import { TemplateChooserModal } from "template_chooser.slint";
+import {
+    LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
+} from "foundation.slint";
+import { SheetChart } from "chart.slint";
+import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import {
+    FormulaNameBar, SheetActionToolbar, SheetGridSurface, SheetInspector, SheetSelectionOverlay,
+    SheetScrollbars, SheetTable, SheetTabs
+} from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
+
+export component SheetsApp inherits Window {
+    title: "Untitled";
+    min-width: 900px;
+    min-height: 680px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.palette().canvas;
+
+    in property <bool> show-quick-formulas: false;
+    in property <bool> wide-toolbar: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> labeled-export: false;
+    in property <bool> overflow-toolbar: false;
+    in property <bool> rtl: false;
+    in-out property <bool> toolbar-overflow-open: false;
+    // Wide/reference windows open the contextual inspector by default. The
+    // controller closes it below the compact breakpoint and restores it when
+    // returning to a wide window unless the user has explicitly hidden it.
+    in-out property <bool> show-inspector: true;
+    in property <bool> inspector-available: true;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in-out property <int> inspector-tab: 0;
+    in property <bool> inspector-show-table: true;
+    in property <bool> inspector-show-cell: true;
+    callback window-resized(length);
+    changed rtl => {
+        Theme.rtl = root.rtl;
+    }
+    changed width => {
+        root.window-resized(root.width);
+        if (!ResponsivePolicy.priority-2-overflow(root.width)) {
+            root.close-toolbar-overflow();
+        }
+    }
+
+    in property <string> sheet-name: "Untitled";
+    in property <string> status-left: "";
+    in property <string> status-right: "";
+    in property <[int]> rows: [];
+    in property <[int]> cols: [];
+    in property <[string]> column-headers: [];
+    in property <[string]> row-headers: [];
+    in property <[string]> cells: [];
+    in property <[int]> cell-alignments: [];
+    // The grid renders a bounded slice of the sparse workbook. These are
+    // zero-based worksheet coordinates, not visual row/column indexes.
+    in property <int> view-row-origin: 0;
+    in property <int> view-col-origin: 0;
+    in property <int> workbook-rows: 1;
+    in property <int> workbook-cols: 1;
+    in property <length> grid-col-width: 80px;
+    in property <length> grid-row-height: 24px;
+    in property <length> grid-col-offset: 0px;
+    in property <length> grid-row-offset: 0px;
+    in property <length> grid-visible-width: 640px;
+    in property <length> grid-visible-height: 360px;
+    in property <length> grid-content-width: 640px;
+    in property <length> grid-content-height: 360px;
+    in property <[length]> grid-column-widths: [];
+    in property <[length]> grid-row-heights: [];
+    in-out property <length> grid-scroll-x: 0px;
+    in-out property <length> grid-scroll-y: 0px;
+    in-out property <length> grid-viewport-width: 720px;
+    in-out property <length> grid-viewport-height: 420px;
+    in property <string> selected-cell: "A1";
+    in property <int> selected-row: 0;
+    in property <int> selected-col: 0;
+    in property <int> selection-anchor-row: 0;
+    in property <int> selection-anchor-col: 0;
+    in property <int> selection-start-row: 0;
+    in property <int> selection-start-col: 0;
+    in property <int> selection-end-row: 0;
+    in property <int> selection-end-col: 0;
+    in property <string> selection-range: "A1";
+    in property <int> selection-count: 1;
+    in property <string> selection-formula: "";
+    in-out property <string> formula-edit-buffer: "";
+    in property <string> selection-value: "";
+    in property <string> selection-announcement: "A1 selected; value: Empty";
+    in property <string> table-rows-label: "1";
+    in property <string> table-cols-label: "1";
+    in property <string> selected-row-height: "24 px";
+    in property <string> selected-col-width: "80 px";
+    in-out property <string> inspector-search: "";
+    in-out property <string> formula-feedback: "Ready";
+    in-out property <bool> is-editing: false;
+    in-out property <[string]> sheet-names: ["Sheet 1"];
+    in-out property <int> active-sheet-index: 0;
+    in-out property <string> zoom-level: "125%";
+
+    in-out property <bool> template-chooser-open: false;
+    in-out property <int> template-selected: 0;
+    in-out property <int> template-category: 0;
+
+    callback new-sheet;
+    callback open-sheet;
+    callback save-sheet;
+    callback save-as-sheet;
+    callback export-csv;
+    callback export-xlsx;
+    callback undo;
+    callback redo;
+    callback cell-clicked(int, int);
+    callback commit-selected-cell(string);
+    callback cancel-selected-cell;
+    callback begin-edit(string);
+    callback quick-formula(string);
+    callback navigate-selection(int, int);
+    callback extend-selection(int, int);
+    callback fill-selection;
+    callback grid-scrolled;
+    callback grid-viewport-changed(length, length);
+    callback inspector-search-edited(string);
+    callback inspector-context-changed(int);
+    callback toggle-inspector;
+    callback create-template(int);
+    callback cancel-template;
+    callback select-sheet(int);
+    callback add-sheet;
+    callback add-row;
+    callback organize;
+    callback cycle-zoom;
+    callback add-comment;
+    callback insert-chart;
+    callback add-shape;
+    callback add-category;
+    callback pivot-table;
+    callback rename-sheet(string);
+    callback add-table-col;
+    callback delete-row;
+    callback delete-col;
+    callback delete-sheet;
+    callback sort-ascending;
+    callback sort-descending;
+    callback freeze-panes;
+    callback unfreeze-panes;
+    callback adjust-row-height(int);
+    callback adjust-col-width(int);
+    callback set-cell-format(int);
+    callback set-cell-alignment(int);
+    callback clear-selected-cells;
+    callback copy-selection;
+    callback cut-selection;
+    callback paste-selection;
+    callback select-all;
+    callback close-chart;
+    callback toggle-chart-kind;
+
+    in-out property <bool> chart-visible: false;
+    in-out property <string> chart-title: "Chart";
+    in-out property <[string]> chart-categories: [];
+    in-out property <[string]> chart-values-display: [];
+    in-out property <[float]> chart-normalized: [];
+    in-out property <int> cell-format: 0;
+    in-out property <int> cell-alignment: 0;
+
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    // Exposed for the native grid journey and for restoring keyboard focus
+    // after a formula-bar or toolbar interaction.
+    public function focus-grid() {
+        grid-surface.focus-grid();
+    }
+
+    public function focus-formula-bar() {
+        root.is-editing = true;
+        formula-bar.focus-formula-bar();
+    }
+
+    public function reset-formula-edit-buffer() {
+        formula-edit-buffer = selection-formula;
+    }
+
+    public function close-toolbar-overflow() {
+        if (root.toolbar-overflow-open) {
+            root.toolbar-overflow-open = false;
+            app-focus.focus();
+        }
+    }
+
+    changed overflow-toolbar => {
+        if (!root.overflow-toolbar) {
+            root.close-toolbar-overflow();
+        }
+    }
+
+    overflow-menu-focus := FocusScope {
+        enabled: root.toolbar-overflow-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-toolbar-overflow();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    template-chooser-focus := FocusScope {
+        enabled: root.template-chooser-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel-template();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.create-template(root.template-selected);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    changed template-chooser-open => {
+        if (root.template-chooser-open) {
+            template-chooser-focus.focus();
+        } else {
+            app-focus.focus();
+        }
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == Key.K || event.text == "k") {
+                    root.open-palette();
+                    return accept;
+                }
+                if (event.text == "n" || event.text == "N") {
+                    root.new-sheet();
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    root.open-sheet();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    if (event.modifiers.shift) { root.save-as-sheet(); } else { root.save-sheet(); }
+                    return accept;
+                }
+                if (event.text == "e" || event.text == "E") {
+                    root.export-csv();
+                    return accept;
+                }
+                if (event.text == "z" || event.text == "Z") {
+                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                    return accept;
+                }
+                if (event.text == "c" || event.text == "C") {
+                    root.copy-selection();
+                    return accept;
+                }
+                if (event.text == "x" || event.text == "X") {
+                    root.cut-selection();
+                    return accept;
+                }
+                if (event.text == "v" || event.text == "V") {
+                    root.paste-selection();
+                    return accept;
+                }
+                if (event.text == "a" || event.text == "A") {
+                    root.select-all();
+                    return accept;
+                }
+            }
+            if (event.text == Key.Backspace || event.text == Key.Delete) {
+                root.clear-selected-cells();
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                if (event.modifiers.shift) { root.extend-selection(0, -1); } else { root.navigate-selection(0, -1); }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (event.modifiers.shift) { root.extend-selection(0, 1); } else { root.navigate-selection(0, 1); }
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                if (event.modifiers.shift) { root.extend-selection(-1, 0); } else { root.navigate-selection(-1, 0); }
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                if (event.modifiers.shift) { root.extend-selection(1, 0); } else { root.navigate-selection(1, 0); }
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+
+            // Numbers Unified Action Toolbar
+            SheetActionToolbar {
+                rtl: root.rtl;
+                wide: root.wide-toolbar;
+                overflow: root.overflow-toolbar;
+                inspector-available: root.inspector-available;
+                inspector-visible: root.inspector-visible;
+                labeled-export: root.labeled-export;
+                can-undo: root.can-undo;
+                can-redo: root.can-redo;
+                zoom-level: root.zoom-level;
+                new-sheet => { root.add-sheet(); }
+                open-sheet => { root.open-sheet(); }
+                save-sheet => { root.save-sheet(); }
+                undo => { root.undo(); }
+                redo => { root.redo(); }
+                toggle-inspector => { root.toggle-inspector(); }
+                export-csv => { root.export-csv(); }
+                zoom-clicked => { root.cycle-zoom(); }
+                add-category => { root.add-category(); }
+                pivot-table => { root.pivot-table(); }
+                add-row => { root.add-row(); }
+                insert-chart => { root.insert-chart(); }
+                edit-text => { root.begin-edit(root.selection-formula); }
+                add-shape => { root.add-shape(); }
+                add-comment => { root.add-comment(); }
+                organize => { root.organize(); }
+                overflow-requested => {
+                    if (root.toolbar-overflow-open) {
+                        root.close-toolbar-overflow();
+                    } else {
+                        root.toolbar-overflow-open = true;
+                        overflow-menu-focus.focus();
+                    }
+                }
+            }
+
+            // Numbers-style sheet tabs
+            SheetTabs {
+                sheets: root.sheet-names;
+                active-sheet: root.active-sheet-index;
+                can-add-sheet: true;
+                select-sheet(idx) => { root.select-sheet(idx); }
+                add-sheet => { root.add-sheet(); }
+            }
+
+            formula-bar := FormulaNameBar {
+                selection-range: root.selection-range;
+                selection-formula: root.selection-formula;
+                selection-count: root.selection-count;
+                show-quick-formulas: root.show-quick-formulas;
+                formula-edit-buffer <=> root.formula-edit-buffer;
+                is-editing: root.is-editing;
+                commit(text) => {
+                    root.is-editing = false;
+                    root.commit-selected-cell(text);
+                }
+                cancel => {
+                    root.is-editing = false;
+                    root.cancel-selected-cell();
+                }
+                quick-formula(function) => { root.quick-formula(function); }
+                fill-selection => { root.fill-selection(); }
+            }
+
+            // Main spreadsheet workspace
+            HorizontalLayout {
+                spacing: 0px;
+                vertical-stretch: 1;
+
+                if root.rtl && root.inspector-visible : SheetInspector {
+                    selection-range: root.selection-range;
+                    selection-value: root.selection-value;
+                    selection-formula: root.selection-formula;
+                    sheet-name: root.sheet-name;
+                    table-rows-label: root.table-rows-label;
+                    table-cols-label: root.table-cols-label;
+                    selected-row-height: root.selected-row-height;
+                    selected-col-width: root.selected-col-width;
+                    cell-format: root.cell-format;
+                    cell-alignment: root.cell-alignment;
+                    inspector-search <=> root.inspector-search;
+                    inspector-tab <=> root.inspector-tab;
+                    inspector-show-table: root.inspector-show-table;
+                    inspector-show-cell: root.inspector-show-cell;
+                    inspector-search-edited(query) => { root.inspector-search-edited(query); }
+                    inspector-context-changed(index) => { root.inspector-context-changed(index); }
+                    rename-sheet(name) => { root.rename-sheet(name); }
+                    add-table-row => { root.add-row(); }
+                    delete-table-row => { root.delete-row(); }
+                    add-table-col => { root.add-table-col(); }
+                    delete-table-col => { root.delete-col(); }
+                    adjust-row-height(delta) => { root.adjust-row-height(delta); }
+                    adjust-col-width(delta) => { root.adjust-col-width(delta); }
+                    set-cell-format(fmt) => { root.set-cell-format(fmt); }
+                    set-cell-alignment(align) => { root.set-cell-alignment(align); }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+
+                    grid-surface := SheetGridSurface {
+                        width: parent.width;
+                        height: parent.height;
+                        sheet-name: root.sheet-name;
+                        selection-formula: root.selection-formula;
+                        rows: root.rows;
+                        cols: root.cols;
+                        column-headers: root.column-headers;
+                        row-headers: root.row-headers;
+                        cells: root.cells;
+                        cell-alignments: root.cell-alignments;
+                        view-row-origin: root.view-row-origin;
+                        view-col-origin: root.view-col-origin;
+                        selected-row: root.selected-row;
+                        selected-col: root.selected-col;
+                        selection-start-row: root.selection-start-row;
+                        selection-start-col: root.selection-start-col;
+                        selection-end-row: root.selection-end-row;
+                        selection-end-col: root.selection-end-col;
+                        selection-announcement: root.selection-announcement;
+                        grid-col-offset: root.grid-col-offset;
+                        grid-row-offset: root.grid-row-offset;
+                        grid-visible-width: root.grid-visible-width;
+                        grid-visible-height: root.grid-visible-height;
+                        grid-content-width: root.grid-content-width;
+                        grid-content-height: root.grid-content-height;
+                        grid-column-widths: root.grid-column-widths;
+                        grid-row-heights: root.grid-row-heights;
+                        grid-scroll-x <=> root.grid-scroll-x;
+                        grid-scroll-y <=> root.grid-scroll-y;
+                        cell-clicked(row, col) => { root.cell-clicked(row, col); }
+                        clear-selected => { root.clear-selected-cells(); }
+                        fill-selection => { root.fill-selection(); }
+                        grid-scrolled => { root.grid-scrolled(); }
+                        grid-viewport-changed(width, height) => {
+                            root.grid-viewport-width = width;
+                            root.grid-viewport-height = height;
+                            root.grid-viewport-changed(width, height);
+                        }
+                        navigate-selection(row-delta, col-delta) => { root.navigate-selection(row-delta, col-delta); }
+                        extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
+                        begin-edit(initial-text) => {
+                            root.is-editing = true;
+                            root.begin-edit(initial-text);
+                        }
+                    }
+
+                    if root.chart-visible : SheetChart {
+                        x: min(parent.width - 400px, 120px);
+                        y: min(parent.height - 260px, 180px);
+                        title: root.chart-title;
+                        categories: root.chart-categories;
+                        values-display: root.chart-values-display;
+                        normalized: root.chart-normalized;
+                        close-chart => { root.chart-visible = false; root.close-chart(); }
+                        toggle-kind => { root.toggle-chart-kind(); }
+                    }
+                }
+
+                if !root.rtl && root.inspector-visible : SheetInspector {
+                    selection-range: root.selection-range;
+                    selection-value: root.selection-value;
+                    selection-formula: root.selection-formula;
+                    sheet-name: root.sheet-name;
+                    table-rows-label: root.table-rows-label;
+                    table-cols-label: root.table-cols-label;
+                    selected-row-height: root.selected-row-height;
+                    selected-col-width: root.selected-col-width;
+                    cell-format: root.cell-format;
+                    cell-alignment: root.cell-alignment;
+                    inspector-search <=> root.inspector-search;
+                    inspector-tab <=> root.inspector-tab;
+                    inspector-show-table: root.inspector-show-table;
+                    inspector-show-cell: root.inspector-show-cell;
+                    inspector-search-edited(query) => { root.inspector-search-edited(query); }
+                    inspector-context-changed(index) => { root.inspector-context-changed(index); }
+                    rename-sheet(name) => { root.rename-sheet(name); }
+                    add-table-row => { root.add-row(); }
+                    delete-table-row => { root.delete-row(); }
+                    add-table-col => { root.add-table-col(); }
+                    delete-table-col => { root.delete-col(); }
+                    adjust-row-height(delta) => { root.adjust-row-height(delta); }
+                    adjust-col-width(delta) => { root.adjust-col-width(delta); }
+                    set-cell-format(fmt) => { root.set-cell-format(fmt); }
+                    set-cell-alignment(align) => { root.set-cell-alignment(align); }
+                }
+            }
+
+
+        }
+    }
+
+    // Compact toolbar overflow menu
+    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+
+        TouchArea {
+            clicked => { root.close-toolbar-overflow(); }
+        }
+
+        Rectangle {
+            x: max(8px, root.width - 272px);
+            y: Theme.tokens.metrics.header-height + Theme.tokens.metrics.sheet-tab-height + Theme.tokens.metrics.toolbar-height + 8px;
+            width: 256px;
+            height: 76px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.sm;
+                padding: Theme.tokens.space.md;
+
+                LoomButton {
+                    icon: "export";
+                    label: "Export CSV";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.export-csv(); root.close-toolbar-overflow(); }
+                }
+            }
+        }
+    }
+
+    // Numbers-Style Template Chooser Modal
+    if root.template-chooser-open : TemplateChooserModal {
+        width: root.width;
+        height: root.height;
+        template-selected <=> root.template-selected;
+        template-category <=> root.template-category;
+        cancel-template => { root.cancel-template(); }
+        create-template(selected) => { root.create-template(selected); }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => { root.palette-invoked(idx); }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => { root.palette-move(delta); }
+        key-text(text) => { root.palette-key-text(text); }
+        backspace => { root.palette-backspace(); }
+        close-requested => {
+            root.palette-open = false;
+            root.palette-close();
+        }
+    }
+}

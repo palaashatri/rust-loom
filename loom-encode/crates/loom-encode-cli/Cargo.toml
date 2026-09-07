@@ -1,0 +1,13 @@
+[package]
+name = "loom-encode-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loom-encode-cli"
+path = "src/main.rs"
+
+[dependencies]
+loom-encode-core = { path = "../loom-encode-core" }

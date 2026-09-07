@@ -1,0 +1,322 @@
+// Loom Motion - Format Inspector
+import {
+    LoomPanel, LoomSectionHeader, LoomSegmentedControl,
+    LoomIconButton, LoomToolbarSpacer
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component MotionRangeSlider inherits Rectangle {
+    in property <string> label: "Value";
+    in-out property <float> value: 0.0;
+    in property <float> minimum: 0.0;
+    in property <float> maximum: 100.0;
+    in property <bool> enabled: true;
+    callback changed(float);
+
+    height: Theme.tokens.metrics.control-height;
+    min-width: 120px;
+    background: transparent;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (!root.enabled) { return reject; }
+            if (event.text == Key.LeftArrow || event.text == Key.DownArrow) {
+                root.value = max(root.minimum, root.value - (root.maximum - root.minimum) / 20.0);
+                root.changed(root.value);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.UpArrow) {
+                root.value = min(root.maximum, root.value + (root.maximum - root.minimum) / 20.0);
+                root.changed(root.value);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: (parent.height - 4px) / 2;
+        width: root.width;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.palette().surface-sunken;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+
+        Rectangle {
+            width: root.maximum > root.minimum
+                ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * parent.width, 0px, parent.width)
+                : 0px;
+            height: parent.height;
+            border-radius: 2px;
+            background: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+        }
+    }
+
+    thumb := Rectangle {
+        x: root.maximum > root.minimum
+            ? clamp((root.value - root.minimum) / (root.maximum - root.minimum) * (parent.width - 16px), 0px, parent.width - 16px)
+            : 0px;
+        y: (parent.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: touch.pressed ? Theme.palette().surface-raised : Theme.palette().surface;
+        border-width: 1.5px;
+        border-color: touch.has-hover || focus.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+        drop-shadow-blur: 2px;
+        drop-shadow-color: Theme.palette().shadow;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                focus.focus();
+                let ratio = clamp((self.mouse-x - 8px) / (root.width - 16px), 0.0, 1.0);
+                root.value = root.minimum + ratio * (root.maximum - root.minimum);
+                root.changed(root.value);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                let ratio = clamp((self.mouse-x - 8px) / (root.width - 16px), 0.0, 1.0);
+                root.value = root.minimum + ratio * (root.maximum - root.minimum);
+                root.changed(root.value);
+            }
+        }
+    }
+}
+
+export component MotionInspector inherits LoomPanel {
+    in property <bool> expanded: true;
+    in property <bool> compact-layout: false;
+    in-out property <int> inspector-tab: 0;
+    in property <string> layer-detail: "";
+    in-out property <float> pos-x: 960.0;
+    in-out property <float> pos-y: 540.0;
+    in-out property <float> scale-val: 100.0;
+    in-out property <float> rotation-val: 0.0;
+    in-out property <float> opacity-val: 100.0;
+    in property <string> timecode-display: "00:00:00:00";
+    in property <string> timecode-text: "00:00:00:00 (60 fps)";
+    in property <float> duration-secs: 10.0;
+    in property <float> selected-keyframe-time: 0.0;
+    in property <string> selected-keyframe-property: "";
+
+    callback toggle-expanded;
+    callback transform-changed(string, float);
+    callback edit-keyframe-time(string, float);
+
+    width: root.expanded ? (root.compact-layout ? 240px : 304px) : 56px;
+    title: root.expanded ? "Inspector" : "";
+    animate width { duration: Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+
+    if !root.expanded : VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-top: Theme.tokens.space.md;
+        alignment: start;
+        LoomIconButton {
+            icon: "chevron-left";
+            tooltip: "Expand Inspector";
+            clicked => { root.toggle-expanded(); }
+        }
+    }
+
+    if root.expanded : VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+
+        // Header Tab Strip
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            LoomSegmentedControl {
+                items: ["Transform", "Timing"];
+                current <=> root.inspector-tab;
+                horizontal-stretch: 1;
+            }
+            LoomIconButton {
+                icon: "chevron-right";
+                tooltip: "Collapse Inspector";
+                clicked => { root.toggle-expanded(); }
+            }
+        }
+
+        if root.layer-detail != "" : HorizontalLayout {
+            padding-left: Theme.tokens.space.xs;
+            Text {
+                text: root.layer-detail;
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 600;
+                color: Theme.palette().accent;
+            }
+        }
+
+        // Tab 0: Transform
+        if root.inspector-tab == 0 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+
+            LoomSectionHeader { title: "POSITION"; }
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    Text { text: "X Position"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                    LoomToolbarSpacer { }
+                    Text { text: Math.round(root.pos-x) + " px"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                }
+                MotionRangeSlider {
+                    label: "X position";
+                    value: root.pos-x;
+                    minimum: 0.0;
+                    maximum: 1920.0;
+                    changed(val) => { root.pos-x = val; root.transform-changed("pos-x", val); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    Text { text: "Y Position"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                    LoomToolbarSpacer { }
+                    Text { text: Math.round(root.pos-y) + " px"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                }
+                MotionRangeSlider {
+                    label: "Y position";
+                    value: root.pos-y;
+                    minimum: 0.0;
+                    maximum: 1080.0;
+                    changed(val) => { root.pos-y = val; root.transform-changed("pos-y", val); }
+                }
+            }
+
+            LoomSectionHeader { title: "APPEARANCE"; }
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    Text { text: "Scale"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                    LoomToolbarSpacer { }
+                    Text { text: Math.round(root.scale-val) + "%"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                }
+                MotionRangeSlider {
+                    label: "Scale";
+                    value: root.scale-val;
+                    minimum: 10.0;
+                    maximum: 200.0;
+                    changed(val) => { root.scale-val = val; root.transform-changed("scale", val); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    Text { text: "Rotation"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                    LoomToolbarSpacer { }
+                    Text { text: Math.round(root.rotation-val) + "°"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                }
+                MotionRangeSlider {
+                    label: "Rotation";
+                    value: root.rotation-val;
+                    minimum: -180.0;
+                    maximum: 180.0;
+                    changed(val) => { root.rotation-val = val; root.transform-changed("rotation", val); }
+                }
+            }
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    Text { text: "Opacity"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; }
+                    LoomToolbarSpacer { }
+                    Text { text: Math.round(root.opacity-val) + "%"; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                }
+                MotionRangeSlider {
+                    label: "Opacity";
+                    value: root.opacity-val;
+                    minimum: 0.0;
+                    maximum: 100.0;
+                    changed(val) => { root.opacity-val = val; root.transform-changed("opacity", val); }
+                }
+            }
+        }
+
+        // Tab 1: Timing
+        if root.inspector-tab == 1 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+
+            LoomSectionHeader { title: "COMPOSITION"; }
+
+            Rectangle {
+                height: 32px;
+                border-radius: Theme.tokens.metrics.radius-small;
+                background: Theme.palette().surface-sunken;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                HorizontalLayout {
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    Text { text: "Timecode"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+                    LoomToolbarSpacer { }
+                    Text { text: root.timecode-display; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; vertical-alignment: center; }
+                }
+            }
+
+            Rectangle {
+                height: 32px;
+                border-radius: Theme.tokens.metrics.radius-small;
+                background: Theme.palette().surface-sunken;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                HorizontalLayout {
+                    padding-left: Theme.tokens.space.md;
+                    padding-right: Theme.tokens.space.md;
+                    Text { text: "Frame Rate"; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; vertical-alignment: center; }
+                    LoomToolbarSpacer { }
+                    Text { text: root.timecode-text; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; vertical-alignment: center; }
+                }
+            }
+
+            LoomSectionHeader { title: "KEYFRAME"; }
+
+            if root.selected-keyframe-property != "" : VerticalLayout {
+                spacing: Theme.tokens.space.xs;
+                HorizontalLayout {
+                    Text { text: root.selected-keyframe-property; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink; }
+                    LoomToolbarSpacer { }
+                    Text { text: (Math.round(root.selected-keyframe-time * 1000) / 1000) + " s"; font-size: Theme.tokens.typography.caption; color: Theme.palette().accent; }
+                }
+                MotionRangeSlider {
+                    label: "Keyframe time";
+                    minimum: 0.0;
+                    maximum: Math.max(0.001, root.duration-secs);
+                    value: root.selected-keyframe-time;
+                    changed(val) => { root.edit-keyframe-time(root.selected-keyframe-property, val); }
+                }
+                Text {
+                    text: "Use Shift + Arrow in the timeline to nudge keyframes.";
+                    wrap: word-wrap;
+                    font-size: Theme.tokens.typography.micro;
+                    color: Theme.palette().ink-secondary;
+                }
+            }
+
+            if root.selected-keyframe-property == "" : Text {
+                text: "Select a keyframe marker in the timeline to edit its timing.";
+                wrap: word-wrap;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

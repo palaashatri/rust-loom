@@ -1,0 +1,230 @@
+// Loom UI deterministic component reference surface.
+//
+// This is the executable specimen for the shared desktop toolkit. Human-
+// approved captures become regression evidence; an agent may not bless an
+// arbitrary changed screenshot merely by replacing a baseline.
+
+import {
+    DocumentChrome, Toolbar, ToolbarGroup, ToolbarSpacer,
+    ToolbarButton, ToolbarIconButton, SidebarSurface, InspectorSurface,
+    SectionHeader, ToolkitStatusBar, SearchField, TextField, DirectionalLayout,
+    SegmentedControl, Toggle, RangeSlider, PropertyRow, TabStrip
+} from "toolkit.slint";
+import { EmptyState, StatusPill, CommandPalette, CommandPaletteItem } from "components.slint";
+import { Theme } from "theme.slint";
+export { Theme } from "theme.slint";
+
+export component SmokeWindow inherits Window {
+    title: "Loom UI Reference";
+    width: 1280px;
+    height: 800px;
+    background: Theme.palette().canvas;
+
+    in-out property <[CommandPaletteItem]> palette-commands: [
+        { id: "document.new", label: "New Document", shortcut: "Ctrl+N", enabled: true },
+        { id: "document.open", label: "Open…", shortcut: "Ctrl+O", enabled: true },
+        { id: "document.save", label: "Save", shortcut: "Ctrl+S", enabled: true },
+        { id: "document.export", label: "Export…", shortcut: "Ctrl+E", enabled: false },
+    ];
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        DocumentChrome { title: "Component Reference"; trailing-text: "1280 × 800"; }
+
+        Toolbar {
+            ToolbarGroup {
+                ToolbarButton { icon: "new"; label: "New"; }
+                ToolbarButton { icon: "open"; label: "Open"; }
+                ToolbarIconButton { icon: "save"; label: "Save"; }
+            }
+            ToolbarGroup {
+                leading-separation: true;
+                ToolbarIconButton { icon: "undo"; label: "Undo"; enabled: false; }
+                ToolbarIconButton { icon: "redo"; label: "Redo"; enabled: false; }
+            }
+            ToolbarSpacer { }
+            ToolbarGroup {
+                SearchField { label: "Search commands"; placeholder: "Search"; width: 180px; }
+                ToolbarButton { icon: "export"; label: "Export"; primary: true; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 0px;
+            padding: 0px;
+            vertical-stretch: 1;
+
+            SidebarSurface {
+                width: 240px;
+                title: "Controls";
+                VerticalLayout {
+                    spacing: 12px;
+                    padding: 12px;
+
+                    SectionHeader { title: "Buttons"; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        ToolbarButton { icon: "bold"; label: "Bold"; checked: true; }
+                        ToolbarIconButton { icon: "italic"; label: "Italic"; }
+                        ToolbarIconButton { icon: "underline"; label: "Underline"; enabled: false; }
+                    }
+                    ToolbarButton { label: "Primary Action"; primary: true; }
+
+                    SectionHeader { title: "Fields"; }
+                    TextField { label: "Name"; placeholder: "Untitled"; value: "Project 01"; }
+                    SearchField { label: "Filter items"; placeholder: "Filter items"; }
+
+                    SectionHeader { title: "Choice"; }
+                    SegmentedControl { label: "Alignment"; items: ["Left", "Center", "Right"]; current: 0; }
+                    Toggle { label: "Snap to guides"; checked: true; }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                background: Theme.palette().canvas;
+                VerticalLayout {
+                    spacing: 12px;
+                    padding: 16px;
+                    Rectangle {
+                        vertical-stretch: 1;
+                        background: Theme.palette().surface-raised;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        EmptyState {
+                            width: 100%; height: 100%; icon: "document";
+                            title: "Content owns the window";
+                            description: "Chrome is compact and neutral. Actions remain readable, panels are subordinate, and the primary work surface expands first.";
+                            action-text: "Create Document";
+                        }
+                    }
+                    Rectangle {
+                        min-height: 104px;
+                        max-height: 104px;
+                        background: Theme.palette().surface-raised;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        VerticalLayout {
+                            spacing: 8px;
+                            padding: 12px;
+                            TabStrip { tabs: ["Document", "Comments", "History"]; current: 0; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                StatusPill { text: "Selected"; tone: 1; }
+                                StatusPill { text: "Ready"; tone: 2; }
+                                StatusPill { text: "Warning"; tone: 3; }
+                                StatusPill { text: "Error"; tone: 4; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            InspectorSurface {
+                width: 280px;
+                title: "Inspector";
+                VerticalLayout {
+                    spacing: 12px;
+                    padding: 12px;
+                    SectionHeader { title: "Transform"; }
+                    PropertyRow { label: "X"; TextField { label: "X position"; value: "120 px"; } }
+                    PropertyRow { label: "Y"; TextField { label: "Y position"; value: "84 px"; } }
+                    SectionHeader { title: "Appearance"; }
+                    PropertyRow { label: "Opacity"; RangeSlider { label: "Opacity"; value: 72; minimum: 0; maximum: 100; } }
+                    PropertyRow { label: "Blend"; SegmentedControl { label: "Blend mode"; items: ["Normal", "Multiply", "Screen"]; current: 0; } }
+                    SectionHeader { title: "Accessibility"; }
+                    TextField { label: "Description"; placeholder: "Describe selection"; }
+                    Toggle { label: "Include in reading order"; checked: true; }
+                }
+            }
+        }
+
+        ToolkitStatusBar { leading: "Reference fixture • deterministic software renderer"; trailing: "Ready"; }
+    }
+
+    CommandPalette {
+        open: false;
+        selected: 0;
+        query: "";
+        commands: root.palette-commands;
+    }
+}
+
+/// Stable LTR/RTL probe rows. HorizontalLayout preserves declaration order,
+/// so each row owns one explicit ordering and the window toggles visibility
+/// between them. Keeping the rows as named, always-addressable components
+/// also lets the Rust test inspect their actual computed child positions.
+component DirectionalProbeLtr inherits HorizontalLayout {
+    in property <length> leading-padding: 0px;
+    in property <length> trailing-padding: 0px;
+    out property <length> first_x: first.x;
+    out property <length> second_x: second.x;
+    alignment: stretch;
+    padding-left: root.leading-padding;
+    padding-right: root.trailing-padding;
+    spacing: 4px;
+    first := ToolbarButton { icon: "settings"; label: "Leading action"; }
+    second := ToolbarButton { icon: "export"; label: "Trailing action"; }
+}
+
+component DirectionalProbeRtl inherits HorizontalLayout {
+    in property <length> leading-padding: 0px;
+    in property <length> trailing-padding: 0px;
+    out property <length> first_x: first.x;
+    out property <length> second_x: second.x;
+    alignment: stretch;
+    // Logical leading/trailing insets are mirrored with the order.
+    padding-left: root.trailing-padding;
+    padding-right: root.leading-padding;
+    spacing: 4px;
+    second := ToolbarButton { icon: "export"; label: "Trailing action"; }
+    first := ToolbarButton { icon: "settings"; label: "Leading action"; }
+}
+
+/// Small executable probe for direction and localization-sensitive geometry.
+/// It is intentionally separate from the visual reference surface so a
+/// regression test can toggle both states without replacing an approved
+/// baseline capture.
+export component DirectionalPropertyProbeWindow inherits Window {
+    title: "Loom UI direction probe";
+    width: 420px;
+    height: 180px;
+    background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    // Expose the actual child positions so the Rust probe can assert order,
+    // not merely compare two screenshots.
+    out property <length> first-x: root.rtl ? rtl_row.first_x : ltr_row.first_x;
+    out property <length> second-x: root.rtl ? rtl_row.second_x : ltr_row.second_x;
+
+    ltr_row := DirectionalProbeLtr {
+        width: 100%;
+        height: 72px;
+        leading-padding: 8px;
+        trailing-padding: 28px;
+        visible: !root.rtl;
+    }
+
+    rtl_row := DirectionalProbeRtl {
+        width: 100%;
+        height: 72px;
+        leading-padding: 8px;
+        trailing-padding: 28px;
+        visible: root.rtl;
+    }
+
+    property-row := PropertyRow {
+        x: 8px;
+        y: 82px;
+        width: 180px;
+        label: "A deliberately long localized property label";
+        ToolbarButton { icon: "check"; label: "Value"; }
+    }
+    out property <bool> property-row-stacked: property-row.resolved-stacked;
+    out property <length> property-row-label-height: property-row.resolved-label-height;
+    out property <length> property-row-control-y: property-row.resolved-control-y;
+}

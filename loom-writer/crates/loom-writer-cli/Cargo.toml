@@ -1,0 +1,15 @@
+[package]
+name = "loom-writer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom Writer command-line interface"
+
+[[bin]]
+name = "loom-writer-cli"
+path = "src/main.rs"
+
+[dependencies]
+loom-writer-core = { path = "../loom-writer-core" }
+loom-package = { workspace = true }

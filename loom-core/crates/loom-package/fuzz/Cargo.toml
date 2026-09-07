@@ -1,0 +1,24 @@
+[package]
+name = "loom-package-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+loom-package = { path = ".." }
+
+# Prevent this crate from being treated as a workspace member of loom-core,
+# so `cargo test` and CI never require cargo-fuzz. It is invoked only through
+# `cargo fuzz run`, as documented in loom-.../fuzz/README.md.
+[workspace]
+
+[[bin]]
+name = "package_read"
+path = "fuzz_targets/package_read.rs"
+test = false
+doc = false
+bench = false

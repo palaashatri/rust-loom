@@ -1,0 +1,927 @@
+// Video-specific workspace surfaces. The shared shell, controls, and theme
+// remain owned by loom-ui; these components keep Video's timeline state and
+// command callbacks local to the application.
+import {
+    PrimaryButton, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Slider,
+    Field, CanvasBackdrop, TransportButton
+} from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import {
+    ToolbarButton, IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow
+} from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
+import {
+    DirectionalLayout, ToolbarGroup, ToolbarSpacer,
+    ToolkitStatusBar
+} from "../../../../loom-core/crates/loom-ui/ui/toolkit.slint";
+import { Icon } from "../../../../loom-core/crates/loom-ui/ui/icons.slint";
+import { Theme } from "../../../../loom-core/crates/loom-ui/ui/theme.slint";
+
+/// Video's context toolbar. All actions retain the app's existing command
+/// callbacks; this component only owns the responsive presentation.
+export component VideoToolbarBody inherits DirectionalLayout {
+    in-out property <string> active-nle-tool: "Select";
+    in-out property <bool> snap-enabled: true;
+    in property <bool> show-inspector: true;
+    in property <bool> inspector-available: true;
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+    in property <bool> exporting: false;
+    in property <bool> backend-available: false;
+    in property <int> clip-count: 0;
+    in property <string> import-path: "";
+    in property <string> export-path: "";
+    callback select-nle-tool(string);
+    callback toggle-snap;
+    callback toggle-inspector;
+    callback import-media(string);
+    callback export-timeline(string);
+    callback overflow-requested;
+
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: "cursor";
+            label: "Select";
+            checked: root.active-nle-tool == "Select";
+            clicked => {
+                root.active-nle-tool = "Select";
+                root.select-nle-tool("Select");
+            }
+        }
+        IconOverLabelToolbarItem {
+            icon: "scissors";
+            label: "Blade";
+            checked: root.active-nle-tool == "Blade";
+            clicked => {
+                root.active-nle-tool = "Blade";
+                root.select-nle-tool("Blade");
+            }
+        }
+        IconOverLabelToolbarItem {
+            icon: "link";
+            label: "Snap";
+            checked: root.snap-enabled;
+            clicked => {
+                root.snap-enabled = !root.snap-enabled;
+                root.toggle-snap();
+            }
+        }
+    }
+
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "cursor";
+            label: "Select";
+            checked: root.active-nle-tool == "Select";
+            clicked => {
+                root.active-nle-tool = "Select";
+                root.select-nle-tool("Select");
+            }
+        }
+        IconOnlyToolbarItem {
+            icon: "scissors";
+            label: "Blade";
+            checked: root.active-nle-tool == "Blade";
+            clicked => {
+                root.active-nle-tool = "Blade";
+                root.select-nle-tool("Blade");
+            }
+        }
+        IconOnlyToolbarItem {
+            icon: "link";
+            label: "Snap";
+            checked: root.snap-enabled;
+            clicked => {
+                root.snap-enabled = !root.snap-enabled;
+                root.toggle-snap();
+            }
+        }
+        if root.overflow : Overflow {
+            label: "More Video actions";
+            clicked => { root.overflow-requested(); }
+        }
+    }
+
+    if root.labeled || !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: "import";
+            label: "Import";
+            clicked => { root.import-media(root.import-path); }
+        }
+        IconOverLabelToolbarItem {
+            icon: "format";
+            label: "Inspector";
+            checked: root.show-inspector;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOverLabelToolbarItem {
+            icon: "export";
+            label: root.exporting ? "Exporting" : "Export";
+            enabled: root.backend-available && root.clip-count > 0 && !root.exporting;
+            clicked => { root.export-timeline(root.export-path); }
+        }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: "import";
+            label: "Import";
+            clicked => { root.import-media(root.import-path); }
+        }
+        IconOnlyToolbarItem {
+            icon: "format";
+            label: "Inspector";
+            checked: root.show-inspector;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        IconOnlyToolbarItem {
+            icon: "export";
+            label: root.exporting ? "Exporting" : "Export";
+            enabled: root.backend-available && root.clip-count > 0 && !root.exporting;
+            clicked => { root.export-timeline(root.export-path); }
+        }
+    }
+}
+
+/// Media-bin panel and local backend status card.
+export component VideoMediaBin inherits SidebarSurface {
+    in property <length> panel-width: 258px;
+    in property <[string]> media-bin-items: [];
+    in-out property <string> import-path: "";
+    in property <int> clip-count: 0;
+    in property <bool> backend-available: false;
+    in property <string> backend-version: "FFmpeg not found";
+    callback import-media(string);
+
+    width: root.panel-width;
+    title: "Media";
+    detail: root.media-bin-items.length + " imported · " + root.clip-count + " clips";
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+        Field {
+            label: "Media path";
+            placeholder: "Choose a media file…";
+            value <=> root.import-path;
+        }
+        ToolbarButton {
+            icon: "import";
+            text: "Import Local Media";
+            enabled: root.backend-available;
+            clicked => { root.import-media(root.import-path); }
+        }
+        Rectangle { height: 1px; background: Theme.palette().border; }
+        for item[index] in root.media-bin-items : WorkspaceRow {
+            label: item;
+            height: 58px;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.md;
+                Rectangle {
+                    width: 58px;
+                    height: 42px;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    background: Theme.palette().surface-sunken;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    Icon { icon: "video"; size: 18px; tint: Theme.palette().accent; }
+                }
+                VerticalLayout {
+                    spacing: Theme.tokens.space.xs;
+                    Text {
+                        text: item;
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "Local media";
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-disabled;
+                    }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+        Rectangle {
+            min-height: 70px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            background: Theme.palette().surface-sunken;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            VerticalLayout {
+                padding: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.sm;
+                Text {
+                    text: root.backend-available ? "FFmpeg / FFprobe / FFplay" : "Install FFmpeg tools";
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 650;
+                    color: Theme.palette().ink;
+                    horizontal-stretch: 1;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.backend-version;
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}
+
+/// Preview stage with inset geometry owned by a layout rather than rigid
+/// offsets. The image itself remains content-sized and letterboxed.
+export component VideoPreviewStage inherits CanvasBackdrop {
+    in property <bool> compact-layout: false;
+    in property <bool> has-preview: false;
+    in property <image> preview-image;
+
+    vertical-stretch: 1;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+        padding: root.compact-layout ? Theme.tokens.space.lg : Theme.tokens.space.xxl;
+
+        stage := Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            border-radius: Theme.tokens.metrics.radius-large;
+            background: Theme.palette().media-stage;
+            clip: true;
+            border-width: 1px;
+            border-color: Theme.palette().border-strong;
+
+            if root.has-preview : Image {
+                source: root.preview-image;
+                width: parent.width;
+                height: parent.height;
+                image-fit: contain;
+            }
+            if !root.has-preview : VerticalLayout {
+                alignment: center;
+                spacing: Theme.tokens.space.md;
+                Icon { icon: "video"; size: 44px; tint: Theme.palette().ink-disabled; }
+                Text {
+                    text: "Import media to decode a real preview frame";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body-large;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+/// Transport strip for synchronized playhead controls and scrubbing.
+export component VideoTransport inherits Rectangle {
+    in property <bool> compact-layout: false;
+    in property <float> frame-step: 1.0 / 30.0;
+    in property <int> clip-count: 0;
+    in property <bool> backend-available: false;
+    in property <string> playback-clock-source: "No clock";
+    in property <string> audio-output-status: "Audio output unavailable";
+    in-out property <bool> is-playing: false;
+    in-out property <float> playhead-seconds: 0;
+    in property <float> timeline-duration: 1;
+    in property <string> timecode-display: "00:00:00:00";
+    callback play-pause;
+    callback stop-playback;
+    callback seek(float);
+    callback add-marker;
+
+    height: 56px;
+    background: Theme.palette().surface;
+
+    HorizontalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-left: Theme.tokens.space.xl;
+        padding-right: Theme.tokens.space.xl;
+        alignment: center;
+        TransportButton {
+            icon: "chevron-left";
+            label: "Step one frame backward";
+            enabled: root.clip-count > 0;
+            clicked => {
+                root.playhead-seconds = max(0.0, root.playhead-seconds - root.frame-step);
+                root.seek(root.playhead-seconds);
+            }
+        }
+        TransportButton {
+            icon: root.is-playing ? "pause" : "play";
+            label: "Play selected media";
+            enabled: root.backend-available && root.clip-count > 0;
+            active: root.is-playing;
+            clicked => { root.play-pause(); }
+        }
+        TransportButton {
+            icon: "stop";
+            label: "Stop playback";
+            enabled: root.is-playing;
+            clicked => { root.stop-playback(); }
+        }
+        TransportButton {
+            icon: "chevron-right";
+            label: "Step one frame forward";
+            enabled: root.clip-count > 0;
+            clicked => {
+                root.playhead-seconds = min(root.timeline-duration, root.playhead-seconds + root.frame-step);
+                root.seek(root.playhead-seconds);
+            }
+        }
+        Text {
+            text: root.timecode-display;
+            width: 88px;
+            color: Theme.palette().ink;
+            font-size: Theme.tokens.typography.body;
+            font-weight: 650;
+            vertical-alignment: center;
+        }
+        if !root.compact-layout : Text {
+            text: "Drag ruler to scrub";
+            width: 132px;
+            color: Theme.palette().ink-secondary;
+            font-size: Theme.tokens.typography.caption;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if !root.compact-layout : Text {
+            text: root.playback-clock-source + " · " + root.audio-output-status;
+            width: 190px;
+            color: Theme.palette().ink-disabled;
+            font-size: Theme.tokens.typography.micro;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Slider {
+            label: "Playhead";
+            horizontal-stretch: 1;
+            minimum: 0;
+            maximum: Math.max(0.01, root.timeline-duration);
+            value <=> root.playhead-seconds;
+            changed(value) => { root.seek(value); }
+        }
+        IconOnlyToolbarItem {
+            icon: "plus-circle";
+            label: "Add marker";
+            clicked => { root.add-marker(); }
+        }
+    }
+}
+
+/// Timeline ruler, track controls, clips, and playhead. Clip coordinates remain
+/// relative to the content lane; only the panel shell is sized by the parent.
+export component VideoTimeline inherits Rectangle {
+    in property <float> timeline-duration: 1;
+    in-out property <float> zoom-level: 1;
+    in-out property <float> scroll-offset: 0;
+    in property <length> track-header-width: 180px;
+    in property <[string]> track-labels: [];
+    in property <[bool]> track-mutes: [];
+    in property <[bool]> track-solos: [];
+    in property <int> active-track-index: 0;
+    in property <[string]> clip-labels: [];
+    in property <[float]> clip-starts: [];
+    in property <[float]> clip-durations: [];
+    in property <[string]> clip-cache-status: [];
+    in property <int> active-clip-index: 0;
+    in property <string> active-nle-tool: "Select";
+    in-out property <float> playhead-seconds: 0;
+    in property <float> frame-step: 1.0 / 30.0;
+    callback select-track(int);
+    callback toggle-track-mute(int);
+    callback toggle-track-solo(int);
+    callback select-clip(int);
+    callback move-clip(int, float);
+    callback trim-clip-in(int, float);
+    callback trim-clip-out(int, float);
+    callback begin-clip-gesture(int, string);
+    callback end-clip-gesture;
+    callback cancel-clip-gesture;
+    callback split-clip;
+    callback seek(float);
+
+    height: 230px;
+    background: Theme.palette().surface-sunken;
+    clip: true;
+
+    property <float> visible-duration: max(0.01, root.timeline-duration / max(1.0, root.zoom-level));
+
+    timeline-focus := FocusScope {
+        enabled: root.clip-labels.length > 0;
+        key-pressed(event) => {
+            if (event.modifiers.alt && event.text == Key.LeftArrow) {
+                root.trim-clip-in(root.active-clip-index, -root.frame-step);
+                return accept;
+            }
+            if (event.modifiers.alt && event.text == Key.RightArrow) {
+                root.trim-clip-in(root.active-clip-index, root.frame-step);
+                return accept;
+            }
+            if (event.modifiers.shift && event.text == Key.LeftArrow) {
+                root.trim-clip-out(root.active-clip-index, -root.frame-step);
+                return accept;
+            }
+            if (event.modifiers.shift && event.text == Key.RightArrow) {
+                root.trim-clip-out(root.active-clip-index, root.frame-step);
+                return accept;
+            }
+            if (!event.modifiers.shift && !event.modifiers.alt && event.text == Key.UpArrow) {
+                root.move-clip(root.active-clip-index, -root.frame-step);
+                return accept;
+            }
+            if (!event.modifiers.shift && !event.modifiers.alt && event.text == Key.DownArrow) {
+                root.move-clip(root.active-clip-index, root.frame-step);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.playhead-seconds = max(0.0, root.playhead-seconds - root.frame-step);
+                root.seek(root.playhead-seconds);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.playhead-seconds = min(root.timeline-duration, root.playhead-seconds + root.frame-step);
+                root.seek(root.playhead-seconds);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            height: 34px;
+            background: Theme.palette().surface;
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                alignment: center;
+                Text {
+                    text: "TIMELINE";
+                    color: Theme.palette().ink-secondary;
+                    font-size: Theme.tokens.typography.micro;
+                    font-weight: 700;
+                }
+                ToolbarButton {
+                    text: "−";
+                    label: "Zoom out timeline";
+                    clicked => { root.zoom-level = max(1.0, root.zoom-level - 0.5); }
+                }
+                Slider {
+                    label: "Timeline zoom";
+                    width: 92px;
+                    minimum: 1;
+                    maximum: 4;
+                    value <=> root.zoom-level;
+                }
+                ToolbarButton {
+                    text: "+";
+                    label: "Zoom in timeline";
+                    clicked => { root.zoom-level = min(4.0, root.zoom-level + 0.5); }
+                }
+                Slider {
+                    label: "Timeline scroll";
+                    horizontal-stretch: 1;
+                    minimum: 0;
+                    maximum: max(0.0, root.timeline-duration - root.visible-duration);
+                    value <=> root.scroll-offset;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 30px;
+            background: Theme.palette().surface;
+            HorizontalLayout {
+                spacing: 0px;
+                Rectangle {
+                    width: root.track-header-width;
+                    background: Theme.palette().panel;
+                    Text {
+                        text: "TRACKS";
+                        x: 9px;
+                        width: parent.width - 18px;
+                        font-size: Theme.tokens.typography.micro;
+                        font-weight: 700;
+                        color: Theme.palette().ink-disabled;
+                        vertical-alignment: center;
+                    }
+                }
+                ruler-lane := Rectangle {
+                    horizontal-stretch: 1;
+                    background: Theme.palette().surface;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        Text { text: "0s"; horizontal-stretch: 1; color: Theme.palette().ink-disabled; font-size: Theme.tokens.typography.micro; }
+                        Text {
+                            text: Math.round((root.scroll-offset + root.visible-duration * 0.25) * 10) / 10 + "s";
+                            horizontal-stretch: 1;
+                            color: Theme.palette().ink-disabled;
+                            font-size: Theme.tokens.typography.micro;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: Math.round((root.scroll-offset + root.visible-duration * 0.5) * 10) / 10 + "s";
+                            horizontal-stretch: 1;
+                            color: Theme.palette().ink-disabled;
+                            font-size: Theme.tokens.typography.micro;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: Math.round((root.scroll-offset + root.visible-duration * 0.75) * 10) / 10 + "s";
+                            horizontal-stretch: 1;
+                            color: Theme.palette().ink-disabled;
+                            font-size: Theme.tokens.typography.micro;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: Math.round((root.scroll-offset + root.visible-duration) * 10) / 10 + "s";
+                            horizontal-stretch: 1;
+                            color: Theme.palette().ink-disabled;
+                            font-size: Theme.tokens.typography.micro;
+                            horizontal-alignment: right;
+                        }
+                    }
+                    ruler-scrub := TouchArea {
+                        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                timeline-focus.focus();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.playhead-seconds = clamp(root.scroll-offset + self.mouse-x / self.width * root.visible-duration, 0.0, root.timeline-duration);
+                            }
+                        }
+                        clicked => {
+                            root.playhead-seconds = clamp(root.scroll-offset + self.mouse-x / self.width * root.visible-duration, 0.0, root.timeline-duration);
+                            root.seek(root.playhead-seconds);
+                        }
+                    }
+                    Rectangle {
+                        x: clamp(parent.width * (root.playhead-seconds - root.scroll-offset) / root.visible-duration - 5px, 0px, parent.width - 10px);
+                        y: parent.height - 10px;
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: Theme.palette().meter-warn;
+                        border-width: 2px;
+                        border-color: Theme.palette().paper;
+                        animate x { duration: ruler-scrub.pressed || Theme.tokens.reduced-motion ? 0ms : 90ms; }
+                    }
+                }
+            }
+        }
+
+        for track[index] in root.track-labels : Rectangle {
+            height: 64px;
+            background: index == root.active-track-index ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
+            HorizontalLayout {
+                spacing: 0px;
+                Rectangle {
+                    width: root.track-header-width;
+                    background: Theme.palette().surface;
+                    HorizontalLayout {
+                        padding-left: Theme.tokens.space.md;
+                        padding-right: Theme.tokens.space.md;
+                        spacing: Theme.tokens.space.sm;
+                        IconOnlyToolbarItem {
+                            icon: "audio";
+                            label: "Mute track";
+                            checked: root.track-mutes[index];
+                            clicked => { root.toggle-track-mute(index); }
+                        }
+                        ToolbarButton {
+                            text: "S";
+                            checked: root.track-solos[index];
+                            clicked => { root.toggle-track-solo(index); }
+                        }
+                        Text {
+                            text: track;
+                            color: Theme.palette().ink;
+                            font-size: 11px;
+                            font-weight: index == root.active-track-index ? 650 : 500;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                    }
+                    TouchArea { clicked => { timeline-focus.focus(); root.select-track(index); } }
+                }
+                timeline-lane := Rectangle {
+                    horizontal-stretch: 1;
+                    background: Theme.palette().media-stage;
+                    for clip[clip-index] in root.clip-labels : Rectangle {
+                        visible: index == 0;
+                        property <length> clip-start-x: clamp(parent.width * (root.clip-starts[clip-index] - root.scroll-offset) / root.visible-duration, 0px, max(0px, parent.width - 12px));
+                        property <length> clip-render-width: max(0px, min(max(56px, parent.width * root.clip-durations[clip-index] / root.visible-duration - 3px), max(0px, parent.width - self.clip-start-x - 3px)));
+                        x: self.clip-start-x;
+                        width: self.clip-render-width;
+                        y: 6px;
+                        height: 52px;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+                        background: clip-index == root.active-clip-index ? Theme.palette().content-accent : clip-touch.has-hover ? Theme.palette().content-accent-soft : Theme.palette().content-cool;
+                        border-width: clip-index == root.active-clip-index || clip-touch.has-hover ? 2px : 1px;
+                        border-color: clip-index == root.active-clip-index ? Theme.palette().focus : clip-touch.has-hover ? Theme.palette().accent : Theme.palette().content-cool;
+                        animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
+                        accessible-role: button;
+                        accessible-label: clip + (clip-index == root.active-clip-index ? " (selected)" : "");
+                        accessible-action-default => {
+                            timeline-focus.focus();
+                            root.select-clip(clip-index);
+                            if (root.active-nle-tool == "Blade") { root.split-clip(); }
+                        }
+                        VerticalLayout {
+                            padding: Theme.tokens.space.sm;
+                            spacing: Theme.tokens.space.xs;
+                            Text { text: clip; color: Theme.palette().paper; font-size: 11px; font-weight: 650; overflow: elide; }
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.sm;
+                                Icon { icon: "waveform"; size: 16px; tint: Theme.palette().paper-line; }
+                                Text {
+                                    text: Math.round(root.clip-durations[clip-index] * 100) / 100 + "s";
+                                    font-size: Theme.tokens.typography.micro;
+                                    color: Theme.palette().paper-muted;
+                                    vertical-alignment: center;
+                                }
+                                if root.clip-cache-status.length > clip-index : Text {
+                                    text: root.clip-cache-status[clip-index];
+                                    font-size: Theme.tokens.typography.micro;
+                                    color: Theme.palette().paper-muted;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                        clip-touch := TouchArea {
+                            property <length> last-drag-x: 0px;
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                    timeline-focus.focus();
+                                    root.select-clip(clip-index);
+                                    root.begin-clip-gesture(clip-index, "Move");
+                                    self.last-drag-x = self.mouse-x;
+                                } else if (event.kind == PointerEventKind.cancel) {
+                                    root.cancel-clip-gesture();
+                                    self.last-drag-x = 0;
+                                } else if (event.kind == PointerEventKind.up) {
+                                    root.end-clip-gesture();
+                                    self.last-drag-x = 0;
+                                }
+                            }
+                            moved => {
+                                if (self.pressed && root.active-nle-tool != "Blade") {
+                                    let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
+                                    self.last-drag-x = self.mouse-x;
+                                    root.move-clip(clip-index, delta);
+                                }
+                            }
+                            clicked => {
+                                timeline-focus.focus();
+                                root.select-clip(clip-index);
+                                if (root.active-nle-tool == "Blade") { root.split-clip(); }
+                            }
+                        }
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            width: 9px;
+                            height: parent.height;
+                            background: clip-index == root.active-clip-index ? Theme.palette().focus : transparent;
+                            opacity: 0.75;
+                            accessible-role: button;
+                            accessible-label: "Trim in for " + clip;
+                            accessible-action-default => {
+                                timeline-focus.focus();
+                                root.select-clip(clip-index);
+                                root.trim-clip-in(clip-index, root.frame-step);
+                            }
+                            trim-in-touch := TouchArea {
+                                property <length> last-drag-x: 0px;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                        timeline-focus.focus();
+                                        root.select-clip(clip-index);
+                                        root.begin-clip-gesture(clip-index, "TrimIn");
+                                        self.last-drag-x = self.mouse-x;
+                                    } else if (event.kind == PointerEventKind.cancel) {
+                                        root.cancel-clip-gesture();
+                                        self.last-drag-x = 0;
+                                    } else if (event.kind == PointerEventKind.up) {
+                                        root.end-clip-gesture();
+                                        self.last-drag-x = 0;
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
+                                        self.last-drag-x = self.mouse-x;
+                                        root.trim-clip-in(clip-index, delta);
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            x: parent.width - 9px;
+                            y: 0px;
+                            width: 9px;
+                            height: parent.height;
+                            background: clip-index == root.active-clip-index ? Theme.palette().focus : transparent;
+                            opacity: 0.75;
+                            accessible-role: button;
+                            accessible-label: "Trim out for " + clip;
+                            accessible-action-default => {
+                                timeline-focus.focus();
+                                root.select-clip(clip-index);
+                                root.trim-clip-out(clip-index, -root.frame-step);
+                            }
+                            trim-out-touch := TouchArea {
+                                property <length> last-drag-x: 0px;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                        timeline-focus.focus();
+                                        root.select-clip(clip-index);
+                                        root.begin-clip-gesture(clip-index, "TrimOut");
+                                        self.last-drag-x = self.mouse-x;
+                                    } else if (event.kind == PointerEventKind.cancel) {
+                                        root.cancel-clip-gesture();
+                                        self.last-drag-x = 0;
+                                    } else if (event.kind == PointerEventKind.up) {
+                                        root.end-clip-gesture();
+                                        self.last-drag-x = 0;
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed) {
+                                        let delta = (self.mouse-x - self.last-drag-x) / max(1px, timeline-lane.width) * root.visible-duration;
+                                        self.last-drag-x = self.mouse-x;
+                                        root.trim-clip-out(clip-index, delta);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        x: clamp(parent.width * (root.playhead-seconds - root.scroll-offset) / root.visible-duration, 0px, parent.width - 2px);
+                        width: 2px;
+                        height: parent.height;
+                        background: Theme.palette().meter-warn;
+                        animate x { duration: Theme.tokens.reduced-motion ? 0ms : 90ms; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component VideoInspector inherits InspectorSurface {
+    in property <bool> compact-layout: false;
+    in property <[string]> clip-labels: [];
+    in property <[float]> clip-starts: [];
+    in property <[float]> clip-durations: [];
+    in property <[float]> clip-in-points: [];
+    in property <[float]> clip-out-points: [];
+    in property <[string]> clip-cache-status: [];
+    in property <int> active-clip-index: 0;
+    in-out property <int> inspector-tab: 0;
+    in-out property <string> export-path: "";
+    in property <bool> backend-available: false;
+    in property <bool> exporting: false;
+    in property <float> export-progress: 0;
+    callback split-clip;
+    callback trim-selected(float, float);
+    callback remove-clip;
+    callback export-timeline(string);
+    callback cancel-export;
+
+    width: root.compact-layout ? 240px : 306px;
+    min-panel-width: 240px;
+    title: "Inspector";
+    detail: root.clip-labels.length > 0 ? "Selected clip" : "No selection";
+
+    PaneTabs {
+        items: ["Clip", "Edit", "Export"];
+        current <=> root.inspector-tab;
+    }
+    Rectangle { height: 1px; background: Theme.palette().border; }
+    VerticalLayout {
+        spacing: Theme.tokens.space.lg;
+        padding: 0px;
+        if root.inspector-tab == 0 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            Text {
+                text: "CLIP";
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 700;
+                color: Theme.palette().ink-secondary;
+            }
+            Text {
+                text: root.clip-labels.length > 0 ? root.clip-labels[root.active-clip-index] : "No clip";
+                font-size: Theme.tokens.typography.body-large;
+                font-weight: 650;
+                color: Theme.palette().ink;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.clip-labels.length > 0 ? "Start " + Math.round(root.clip-starts[root.active-clip-index] * 100) / 100 + " s · Duration " + Math.round(root.clip-durations[root.active-clip-index] * 100) / 100 + " s" : "";
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.clip-labels.length > 0 && root.clip-in-points.length > root.active-clip-index ? "Source " + Math.round(root.clip-in-points[root.active-clip-index] * 100) / 100 + "–" + Math.round(root.clip-out-points[root.active-clip-index] * 100) / 100 + " s" : "";
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.clip-cache-status.length > root.active-clip-index ? root.clip-cache-status[root.active-clip-index] : "";
+                font-size: Theme.tokens.typography.micro;
+                color: Theme.palette().ink-disabled;
+                wrap: word-wrap;
+            }
+        }
+        if root.inspector-tab == 1 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            Text {
+                text: "TIMELINE EDIT";
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 700;
+                color: Theme.palette().ink-secondary;
+            }
+            ToolbarButton {
+                icon: "scissors";
+                text: "Split at Playhead";
+                enabled: root.clip-labels.length > 0;
+                clicked => { root.split-clip(); }
+            }
+            ToolbarButton {
+                icon: "chevron-right";
+                text: "Trim In +0.25s";
+                enabled: root.clip-labels.length > 0;
+                clicked => { root.trim-selected(0.25, 0); }
+            }
+            ToolbarButton {
+                icon: "chevron-left";
+                text: "Trim Out -0.25s";
+                enabled: root.clip-labels.length > 0;
+                clicked => { root.trim-selected(0, -0.25); }
+            }
+            ToolbarButton {
+                icon: "trash";
+                text: "Remove Clip (Ripple)";
+                enabled: root.clip-labels.length > 0;
+                clicked => { root.remove-clip(); }
+            }
+        }
+        if root.inspector-tab == 2 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            Text {
+                text: "LOCAL TIMELINE EXPORT";
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 700;
+                color: Theme.palette().ink-secondary;
+            }
+            Field {
+                label: "Export path";
+                placeholder: "Choose an output file…";
+                value <=> root.export-path;
+            }
+            PrimaryButton {
+                text: root.exporting ? "Exporting " + Math.round(root.export-progress) + "%" : "Export H.264";
+                enabled: root.backend-available && root.clip-labels.length > 0 && !root.exporting;
+                clicked => { root.export-timeline(root.export-path); }
+            }
+            ToolbarButton {
+                icon: "stop";
+                text: "Cancel Export";
+                enabled: root.exporting;
+                clicked => { root.cancel-export(); }
+            }
+            Text {
+                text: "The current renderer concatenates enabled video clips through FFmpeg. Audio mixing remains a separate integration milestone.";
+                wrap: word-wrap;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+            }
+        }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component VideoStatusBar inherits ToolkitStatusBar { }

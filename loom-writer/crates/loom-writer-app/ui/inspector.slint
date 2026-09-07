@@ -1,0 +1,359 @@
+import {
+    LoomPanel, LoomSectionHeader, LoomSegmentedControl, LoomIconButton, LoomButton,
+    LoomTextField,
+} from "foundation.slint";
+import { Icon } from "icons.slint";
+import { Theme } from "theme.slint";
+
+/// One anchored comment thread shown in the format inspector.
+export struct WriterCommentEntry {
+    id: string,
+    author: string,
+    body: string,
+    resolved: bool,
+}
+
+export component WriterInspector inherits LoomPanel {
+    in-out property <bool> is-bold: false;
+    in-out property <bool> is-italic: false;
+    in-out property <bool> is-underline: false;
+    in-out property <bool> is-strikethrough: false;
+    in-out property <int> heading-level: 0;
+    in-out property <int> font-family-index: 0;
+    in-out property <int> font-size-pt: 11;
+    in-out property <int> text-alignment: 0;
+    in-out property <int> line-spacing-index: 1;
+    in-out property <int> page-paper-index: 0;
+    in-out property <int> page-orientation-index: 0;
+    in-out property <int> page-margins-index: 0;
+    in-out property <int> list-style-index: 0;
+    in property <[WriterCommentEntry]> comment-entries: [];
+    in-out property <string> comment-draft: "";
+    in property <string> status-left: "";
+    in property <int> word-count: 83;
+    in property <int> char-count: 507;
+    in property <int> page-count: 1;
+    in property <int> reading-time-mins: 1;
+
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback toggle-strikethrough;
+    callback select-heading(int);
+    callback select-font-family(int);
+    callback increase-font-size;
+    callback decrease-font-size;
+    callback select-alignment(int);
+    callback indent-text;
+    callback outdent-text;
+    callback select-line-spacing(int);
+    callback select-paper-size(int);
+    callback select-orientation(int);
+    callback select-margins(int);
+    callback select-list-style(int);
+    callback add-comment(string);
+    callback set-comment-resolved(string, bool);
+    callback delete-comment(string);
+
+    title: "Format";
+    width: 320px;
+
+    // Content scrolls; the panel never grows past the window height, so the
+    // status bar below always stays fully visible.
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+
+        Flickable {
+            vertical-stretch: 1;
+            viewport-width: parent.width;
+            viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            padding: Theme.tokens.space.md;
+            alignment: start;
+
+            // TAB 0: STYLE
+            VerticalLayout {
+            spacing: Theme.tokens.space.md;
+
+            LoomSectionHeader { title: "Paragraph Style"; }
+
+            LoomSegmentedControl {
+                items: ["Body", "Title", "Sub", "H1", "H2", "H3"];
+                current <=> root.heading-level;
+                label: "Heading Style";
+                selected(idx) => { root.select-heading(idx); }
+            }
+
+            LoomSectionHeader { title: "Font & Size"; }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                cross-axis-alignment: center;
+
+                LoomSegmentedControl {
+                    horizontal-stretch: 1;
+                    items: ["Sans", "Serif", "Mono"];
+                    current <=> root.font-family-index;
+                    label: "Font Family";
+                    selected(idx) => { root.select-font-family(idx); }
+                }
+
+                // Font size stepper
+                Rectangle {
+                    width: 104px;
+                    height: 32px;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    background: Theme.palette().surface-raised;
+
+                    HorizontalLayout {
+                        spacing: 2px;
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        cross-axis-alignment: center;
+
+                        LoomIconButton {
+                            icon: "minus";
+                            label: "Smaller";
+                            tooltip: "Decrease font size";
+                            clicked => { root.decrease-font-size(); }
+                        }
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.font-size-pt + " pt";
+                            font-size: Theme.tokens.typography.caption;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        LoomIconButton {
+                            icon: "plus";
+                            label: "Larger";
+                            tooltip: "Increase font size";
+                            clicked => { root.increase-font-size(); }
+                        }
+                    }
+                }
+            }
+
+            // Character styles row
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xs;
+                alignment: start;
+
+                LoomIconButton {
+                    icon: "bold";
+                    label: "Bold";
+                    tooltip: "Bold (Cmd+B)";
+                    selected: root.is-bold;
+                    clicked => { root.toggle-bold(); }
+                }
+                LoomIconButton {
+                    icon: "italic";
+                    label: "Italic";
+                    tooltip: "Italic (Cmd+I)";
+                    selected: root.is-italic;
+                    clicked => { root.toggle-italic(); }
+                }
+                LoomIconButton {
+                    icon: "underline";
+                    label: "Underline";
+                    tooltip: "Underline (Cmd+U)";
+                    selected: root.is-underline;
+                    clicked => { root.toggle-underline(); }
+                }
+                LoomIconButton {
+                    icon: "strikethrough";
+                    label: "Strikethrough";
+                    tooltip: "Strikethrough";
+                    selected: root.is-strikethrough;
+                    clicked => { root.toggle-strikethrough(); }
+                }
+            }
+
+            LoomSectionHeader { title: "Alignment & Spacing"; }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+
+                LoomSegmentedControl {
+                    horizontal-stretch: 1;
+                    items: ["Left", "Center", "Right", "Justify"];
+                    current <=> root.text-alignment;
+                    label: "Text Alignment";
+                    selected(idx) => { root.select-alignment(idx); }
+                }
+
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xs;
+
+                    LoomIconButton {
+                        icon: "outdent";
+                        label: "Outdent";
+                        tooltip: "Decrease Indent";
+                        clicked => { root.outdent-text(); }
+                    }
+                    LoomIconButton {
+                        icon: "indent";
+                        label: "Indent";
+                        tooltip: "Increase Indent";
+                        clicked => { root.indent-text(); }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.tokens.space.sm;
+                cross-axis-alignment: center;
+
+                Text {
+                    text: "Line Spacing:";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-secondary;
+                }
+
+                LoomSegmentedControl {
+                    horizontal-stretch: 1;
+                    items: ["1.0", "1.15", "1.5", "2.0"];
+                    current <=> root.line-spacing-index;
+                    label: "Line Spacing";
+                    selected(idx) => { root.select-line-spacing(idx); }
+                }
+            }
+
+            LoomSectionHeader { title: "Comments"; }
+
+            LoomTextField {
+                label: "New comment";
+                placeholder: "Comment on the selection…";
+                value <=> root.comment-draft;
+                accepted(body) => { root.add-comment(body); }
+            }
+
+            LoomButton {
+                label: "Add Comment";
+                variant: "secondary";
+                enabled: root.comment-draft != "";
+                clicked => { root.add-comment(root.comment-draft); }
+            }
+
+            for entry in root.comment-entries : Rectangle {
+                accessible-role: AccessibleRole.text;
+                accessible-label: entry.resolved
+                    ? "Comment by " + entry.author + ", resolved: " + entry.body
+                    : "Comment by " + entry.author + ": " + entry.body;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                background: entry.resolved
+                    ? Theme.palette().surface-sunken
+                    : Theme.palette().surface-raised;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+
+                VerticalLayout {
+                    padding: Theme.tokens.space.sm;
+                    spacing: Theme.tokens.space.xs;
+
+                    Text {
+                        text: entry.resolved
+                            ? entry.author + " · resolved"
+                            : entry.author;
+                        font-size: Theme.tokens.typography.micro;
+                        color: Theme.palette().ink-secondary;
+                    }
+                    Text {
+                        text: entry.body;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        alignment: start;
+
+                        LoomButton {
+                            label: entry.resolved ? "Reopen" : "Resolve";
+                            variant: "ghost";
+                            clicked => { root.set-comment-resolved(entry.id, !entry.resolved); }
+                        }
+                        LoomButton {
+                            label: "Delete";
+                            variant: "ghost";
+                            clicked => { root.delete-comment(entry.id); }
+                        }
+                    }
+                }
+            }
+
+            LoomSectionHeader { title: "Lists"; }
+
+            LoomSegmentedControl {
+                items: ["None", "Bulleted", "Numbered"];
+                current <=> root.list-style-index;
+                label: "List Style";
+                selected(idx) => { root.select-list-style(idx); }
+            }
+
+            LoomSectionHeader { title: "Page Setup"; }
+
+            LoomSegmentedControl {
+                items: ["A4", "US Letter"];
+                current <=> root.page-paper-index;
+                label: "Paper Size";
+                selected(idx) => { root.select-paper-size(idx); }
+            }
+
+            LoomSegmentedControl {
+                items: ["Portrait", "Landscape"];
+                current <=> root.page-orientation-index;
+                label: "Orientation";
+                selected(idx) => { root.select-orientation(idx); }
+            }
+
+            LoomSegmentedControl {
+                items: ["Normal", "Narrow", "Wide"];
+                current <=> root.page-margins-index;
+                label: "Margins";
+                selected(idx) => { root.select-margins(idx); }
+            }
+
+        }
+        }
+        }
+
+        // Persistent bottom document status card (pinned below the scroll area)
+        Rectangle {
+            height: 52px;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            background: Theme.palette().surface-sunken;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+
+            VerticalLayout {
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                spacing: 2px;
+                alignment: center;
+
+                Text {
+                    text: "Page 1 of " + root.page-count;
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 600;
+                    color: Theme.palette().ink;
+                }
+                Text {
+                    text: root.status-left != "" ? root.status-left : "~" + root.reading-time-mins + " min read";
+                    font-size: Theme.tokens.typography.micro;
+                    color: Theme.palette().ink-secondary;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}

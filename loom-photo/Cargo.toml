@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/loom-photo-core",
+    "crates/loom-photo-cli",
+    "crates/loom-photo-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+loom-document = { path = "../loom-core/crates/loom-document" }
+loom-package = { path = "../loom-core/crates/loom-package" }
+loom-command = { path = "../loom-core/crates/loom-command" }
+loom-color = { path = "../loom-core/crates/loom-color" }
+loom-ui = { path = "../loom-core/crates/loom-ui" }
+loom-test-support = { path = "../loom-core/crates/loom-test-support" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

@@ -1,0 +1,17 @@
+[package]
+name = "loom-writer-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom Writer document engine (headless, testable)"
+
+[dependencies]
+loom-document = { workspace = true }
+loom-package = { workspace = true }
+loom-text = { workspace = true }
+loom-command = { workspace = true }
+loom-pdf = { workspace = true }
+unicode-segmentation = "1.13"
+
+[dev-dependencies]

@@ -1,0 +1,23 @@
+[package]
+name = "loom-motion-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loom-motion"
+path = "src/main.rs"
+
+[dependencies]
+loom-motion-core = { path = "../loom-motion-core" }
+loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
+loom-storage = { path = "../../../loom-core/crates/loom-storage" }
+loom-test-support.workspace = true
+loom-ui.workspace = true
+serde_json.workspace = true
+slint = "1.7"
+
+[build-dependencies]
+slint-build = "1.7"

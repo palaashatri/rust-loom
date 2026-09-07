@@ -1,0 +1,98 @@
+// RTL direction specimen (review surface, not product UI).
+//
+// Renders the direction-sensitive foundation primitives with the shared
+// direction switch engaged, so mirroring can be judged rather than
+// inferred. Spatial primitives (canvas handles, ruler, playhead) and
+// application chrome intentionally do not mirror; everything else must.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import {
+    LoomButton, LoomToggle, LoomSegmentedControl, LoomSearchField,
+    LoomProgressBar, LoomTabStrip, LoomListRow,
+} from "../foundation.slint";
+import { LoomMenu, LoomDialog } from "overlays.slint";
+import { LoomTableRow } from "data.slint";
+import { GallerySection } from "sections-a.slint";
+
+export component RtlSpecimenWindow inherits Window {
+    title: "Loom RTL specimen";
+    in-out property <string> theme-name: "light";
+    changed theme-name => { Theme.active-theme = root.theme-name; }
+    init => { Theme.rtl = true; }
+    background: Theme.palette().canvas;
+
+    ScrollView {
+        VerticalLayout {
+            spacing: Theme.tokens.space.xxl;
+            padding: Theme.tokens.space.xxl;
+
+            GallerySection {
+                title: "RTL controls";
+                detail: "Icon, switch, and search sides mirror; toggle knob parks left when on";
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.lg;
+                    alignment: start;
+                    LoomButton { label: "Create"; icon: "plus"; variant: "primary"; }
+                    LoomToggle { label: "Autosave"; checked: true; }
+                    LoomSearchField { width: 240px; value: "query"; label: "Search"; }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+            }
+            GallerySection {
+                title: "RTL order";
+                detail: "First segment and tab sit at the inline start (right)";
+                VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSegmentedControl {
+                        width: 300px;
+                        label: "Alignment";
+                        items: ["Left", "Center", "Right"];
+                        current: 1;
+                    }
+                    LoomTabStrip {
+                        items: ["Document", "Comments", "Versions"];
+                        current: 0;
+                    }
+                }
+            }
+            GallerySection {
+                title: "RTL rows and menu";
+                detail: "Leading icon/detail swap sides; menu check precedes the label";
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.xl;
+                    alignment: start;
+                    VerticalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        width: 320px;
+                        LoomListRow { label: "Hero image"; icon: "image"; detail: "2048 × 1365"; selected: true; }
+                        LoomTableRow { label: "Quarterly report"; detail: "Sheet"; status: "Synced"; selected: true; }
+                    }
+                    LoomMenu {
+                        width: 300px;
+                        label: "Export scope";
+                        items: ["Current page", "Selected pages", "Entire document"];
+                        current: 1;
+                        open: true;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+            }
+            GallerySection {
+                title: "RTL dialog and progress";
+                detail: "Actions dock to the inline end (left); progress fills from the right";
+                VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomDialog {
+                        width: 440px;
+                        title: "Discard unsaved changes?";
+                        body: "Three edited rows have not been saved yet.";
+                        LoomButton { label: "Save changes"; variant: "primary"; }
+                        LoomButton { label: "Discard"; variant: "danger"; }
+                    }
+                    LoomProgressBar { width: 300px; value: 0.63; label: "Background export"; }
+                }
+            }
+        }
+    }
+}

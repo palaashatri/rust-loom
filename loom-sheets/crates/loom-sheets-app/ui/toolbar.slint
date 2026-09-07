@@ -1,0 +1,150 @@
+import {
+    LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
+    LoomButton, LoomIconButton, LoomOverflowButton,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component SheetActionToolbar inherits LoomToolbar {
+    in property <bool> rtl: Theme.rtl;
+    in property <bool> wide: false;
+    in property <bool> overflow: false;
+    in property <bool> inspector-available: true;
+    in property <bool> inspector-visible: false;
+    in property <bool> labeled-export: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <string> zoom-level: "125%";
+    callback new-sheet;
+    callback open-sheet;
+    callback save-sheet;
+    callback undo;
+    callback redo;
+    callback toggle-inspector;
+    callback export-csv;
+    callback overflow-requested;
+    callback zoom-clicked;
+    callback add-category;
+    callback pivot-table;
+    callback add-row;
+    callback insert-chart;
+    callback edit-text;
+    callback add-shape;
+    callback add-comment;
+    callback organize;
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "zoom-in";
+            label: root.zoom-level;
+            variant: "ghost";
+            clicked => { root.zoom-clicked(); }
+        }
+        LoomIconButton {
+            icon: "undo";
+            label: "Undo";
+            tooltip: "Undo last edit (Cmd+Z)";
+            enabled: root.can-undo;
+            clicked => { root.undo(); }
+        }
+        LoomIconButton {
+            icon: "redo";
+            label: "Redo";
+            tooltip: "Redo last edit (Cmd+Shift+Z)";
+            enabled: root.can-redo;
+            clicked => { root.redo(); }
+        }
+    }
+
+    LoomToolbarDivider { }
+
+    if root.wide : LoomToolbarGroup {
+        LoomButton {
+            icon: "slider";
+            label: "Category";
+            variant: "ghost";
+            clicked => { root.add-category(); }
+        }
+        LoomButton {
+            icon: "grid";
+            label: "Pivot";
+            variant: "ghost";
+            clicked => { root.pivot-table(); }
+        }
+    }
+
+    if root.wide : LoomToolbarDivider { }
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "plus";
+            label: "Insert";
+            variant: "ghost";
+            clicked => { root.new-sheet(); }
+        }
+        LoomButton {
+            icon: "table";
+            label: "Row";
+            variant: "ghost";
+            clicked => { root.add-row(); }
+        }
+        LoomButton {
+            icon: "chart";
+            label: "Chart";
+            variant: "ghost";
+            clicked => { root.insert-chart(); }
+        }
+        LoomButton {
+            icon: "text";
+            label: "Text";
+            variant: "ghost";
+            clicked => { root.edit-text(); }
+        }
+        LoomButton {
+            icon: "shape";
+            label: "Shape";
+            variant: "ghost";
+            clicked => { root.add-shape(); }
+        }
+        LoomButton {
+            icon: "image";
+            label: "Media";
+            variant: "ghost";
+            clicked => { root.open-sheet(); }
+        }
+        LoomButton {
+            icon: "comment";
+            label: "Note";
+            variant: "ghost";
+            clicked => { root.add-comment(); }
+        }
+    }
+
+    LoomToolbarSpacer { }
+
+    LoomToolbarGroup {
+        LoomButton {
+            icon: "export";
+            label: root.labeled-export ? "Export" : "";
+            variant: "ghost";
+            clicked => { root.export-csv(); }
+        }
+        LoomButton {
+            icon: "format";
+            label: "Format";
+            variant: root.inspector-visible ? "primary" : "ghost";
+            selected: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
+        LoomButton {
+            icon: "organize";
+            label: "Sort";
+            variant: "ghost";
+            clicked => { root.organize(); }
+        }
+        if root.overflow : LoomOverflowButton {
+            clicked => { root.overflow-requested(); }
+        }
+    }
+}
+

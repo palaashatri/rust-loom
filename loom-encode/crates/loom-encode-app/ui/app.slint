@@ -1,0 +1,381 @@
+import {
+    DocumentChrome, ContextToolbar, LabeledToolbar, ToolbarGroup, ToolbarSpacer, DirectionalLayout,
+    IconOnlyToolbarItem, IconOverLabelToolbarItem, Overflow, ToolkitStatusBar, CanvasSurface
+} from "toolkit.slint";
+import {
+    PrimaryButton, SidebarSurface, InspectorSurface, WorkspaceRow, PaneTabs, Field,
+    MetricChip, Slider, SegmentedControl, StatusPill, CommandPalette, CommandPaletteItem
+} from "components.slint";
+import { Icon } from "icons.slint";
+import { Theme, ResponsivePolicy } from "theme.slint";
+import { EncodeQueue } from "encode_queue.slint";
+import { EncodeProgress } from "encode_progress.slint";
+import { EncodeInspector } from "encode_inspector.slint";
+export { Theme, ResponsivePolicy } from "theme.slint";
+
+component EncodeToolbarBody inherits DirectionalLayout {
+    in property <bool> labeled: false;
+    in property <bool> overflow: false;
+    in property <bool> running: false;
+    in property <bool> can-start: false;
+    in property <[string]> job-labels: [];
+    callback add-job;
+    callback remove-job;
+    callback start-queue;
+    callback cancel-queue;
+    callback overflow-requested;
+
+    spacing: Theme.tokens.space.xs;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem { icon: "plus"; label: "Add Job"; enabled: !root.running; clicked => { root.add-job(); } }
+        IconOverLabelToolbarItem { icon: "trash"; label: "Remove"; enabled: root.job-labels.length > 0 && !root.running; clicked => { root.remove-job(); } }
+    }
+
+    if !root.labeled : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem { icon: "plus"; label: "Add Job"; enabled: !root.running; clicked => { root.add-job(); } }
+        IconOnlyToolbarItem { icon: "trash"; label: "Remove"; enabled: root.job-labels.length > 0 && !root.running; clicked => { root.remove-job(); } }
+        if root.overflow : Overflow { label: "More Encode actions"; clicked => { root.overflow-requested(); } }
+    }
+
+    if root.labeled || !root.overflow : ToolbarSpacer { }
+
+    if root.labeled : ToolbarGroup { labeled-slot: true;
+        IconOverLabelToolbarItem {
+            icon: root.running ? "stop" : "play";
+            label: root.running ? "Cancel Queue" : "Start Queue";
+            enabled: root.can-start || root.running;
+            checked: root.running;
+            clicked => {
+                if (root.running) { root.cancel-queue(); } else { root.start-queue(); }
+            }
+        }
+    }
+
+    if !root.labeled && !root.overflow : ToolbarGroup { labeled-slot: false;
+        IconOnlyToolbarItem {
+            icon: root.running ? "stop" : "play";
+            label: root.running ? "Cancel Queue" : "Start Queue";
+            enabled: root.can-start || root.running;
+            checked: root.running;
+            clicked => {
+                if (root.running) { root.cancel-queue(); } else { root.start-queue(); }
+            }
+        }
+    }
+}
+
+export component EncodeApp inherits Window {
+    title: "Loom Encode";
+    min-width: 900px;
+    min-height: 680px;
+    background: Theme.palette().canvas;
+    in property <bool> rtl: false;
+    changed rtl => { Theme.rtl = root.rtl; }
+    // The host supplies this breakpoint after choosing the window size. A
+    // width-derived conditional pane can feed back into the window's implicit
+    // layout calculation during startup and produce unstable geometry.
+    in property <bool> compact-layout: false;
+    in property <bool> icon-only-toolbar: false;
+    in property <bool> labeled-toolbar: false;
+    in property <bool> overflow-toolbar: false;
+    callback window-resized(length);
+    changed width => { root.window-resized(root.width); }
+
+    in property <string> queue-name: "Delivery Queue";
+    in property <[string]> job-labels: [];
+    in property <[string]> job-details: [];
+    in property <[string]> job-statuses: [];
+    in property <[float]> job-progresses: [];
+    in property <[int]> job-tones: [];
+    in property <[bool]> job-running: [];
+    in property <int> active-job-index: 0;
+    in property <float> batch-progress: 0;
+    in property <float> active-job-progress: 0;
+    in property <string> selected-job-text: "No job selected";
+    in property <string> selected-job-details: "";
+    in-out property <string> selected-preset: "Web 1080p";
+    in-out property <string> selected-source: "";
+    in-out property <string> selected-output: "";
+    in property <string> selected-video: "";
+    in property <string> selected-audio: "";
+    in property <string> selected-audio-codec: "aac";
+    in property <string> selected-subtitles: "";
+    in property <int> selected-subtitle-mode: 0;
+    in property <string> selected-metadata: "";
+    in-out property <bool> metadata-copy: true;
+    in property <string> selected-destination: "";
+    in property <int> collision-policy: 0;
+    in property <string> selected-status: "";
+    in property <string> report-summary: "Conformance pending";
+    in property <bool> backend-available: false;
+    in property <string> backend-version: "FFmpeg not found";
+    in property <bool> running: false;
+    in property <bool> can-start: false;
+    in property <bool> can-retry: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <string> status-left: "Ready";
+    in property <string> status-right: "Offline";
+    in-out property <int> inspector-tab: 0;
+
+    callback new-queue;
+    callback open-queue;
+    callback save-queue;
+    callback save-as-queue;
+    callback undo;
+    callback redo;
+    callback add-job;
+    callback remove-job;
+    callback select-job(int);
+    callback preset-changed(string);
+    callback source-changed(string);
+    callback output-changed(string);
+    callback choose-source;
+    callback choose-output;
+    callback choose-subtitles;
+    callback source-dropped(data-transfer);
+    callback output-dropped(data-transfer);
+    callback audio-codec-changed(string);
+    callback subtitle-mode-changed(int);
+    callback metadata-copy-changed(bool);
+    callback collision-policy-changed(int);
+    callback move-job(int, int);
+    callback start-queue;
+    callback cancel-queue;
+    callback retry-job;
+
+    in-out property <[CommandPaletteItem]> palette-commands: [];
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query: "";
+    in-out property <int> palette-selected: 0;
+    callback palette-invoked(int);
+    callback palette-query-changed(string);
+    callback palette-move(int);
+    callback palette-key-text(string);
+    callback palette-backspace;
+    callback palette-close;
+
+    public function open-palette() {
+        root.palette-open = true;
+        root.palette-query = "";
+        palette.grab-focus();
+    }
+
+    app-focus := FocusScope {
+        key-pressed(event) => {
+            if (root.palette-open) { return reject; }
+            if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
+                root.open-palette();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+        spacing: 0px;
+        DocumentChrome {
+            title: root.queue-name;
+            trailing-text: root.job-labels.length == 1 ? "1 job" : root.job-labels.length + " jobs";
+        }
+        if root.labeled-toolbar : LabeledToolbar {
+            EncodeToolbarBody {
+                rtl: root.rtl;
+                labeled: true;
+                overflow: false;
+                running: root.running;
+                can-start: root.can-start;
+                job-labels: root.job-labels;
+                add-job => { root.add-job(); }
+                remove-job => { root.remove-job(); }
+                start-queue => { root.start-queue(); }
+                cancel-queue => { root.cancel-queue(); }
+                overflow-requested => { root.open-palette(); }
+            }
+        }
+        if !root.labeled-toolbar : ContextToolbar {
+            EncodeToolbarBody {
+                rtl: root.rtl;
+                labeled: false;
+                overflow: root.overflow-toolbar;
+                running: root.running;
+                can-start: root.can-start;
+                job-labels: root.job-labels;
+                add-job => { root.add-job(); }
+                remove-job => { root.remove-job(); }
+                start-queue => { root.start-queue(); }
+                cancel-queue => { root.cancel-queue(); }
+                overflow-requested => { root.open-palette(); }
+            }
+        }
+
+        DirectionalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+            rtl: root.rtl;
+
+            // HorizontalLayout preserves declaration order. Mirror the
+            // queue/inspector siblings explicitly for RTL while keeping the
+            // progress surface as the stretchable center.
+            if root.rtl : EncodeInspector {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 330px;
+                max-width: root.compact-layout ? 272px : 360px;
+                compact-layout: root.compact-layout;
+                running: root.running;
+                can-retry: root.can-retry;
+                inspector-tab <=> root.inspector-tab;
+                selected-source <=> root.selected-source;
+                selected-output <=> root.selected-output;
+                selected-preset: root.selected-preset;
+                selected-video: root.selected-video;
+                selected-audio: root.selected-audio;
+                selected-audio-codec: root.selected-audio-codec;
+                selected-subtitles: root.selected-subtitles;
+                selected-subtitle-mode: root.selected-subtitle-mode;
+                selected-metadata: root.selected-metadata;
+                metadata-copy: root.metadata-copy;
+                selected-destination: root.selected-destination;
+                collision-policy: root.collision-policy;
+                selected-status: root.selected-status;
+                report-summary: root.report-summary;
+                selected-job-details: root.selected-job-details;
+                status-left: root.status-left;
+                preset-changed(preset) => { root.preset-changed(preset); }
+                source-changed(path) => { root.source-changed(path); }
+                output-changed(path) => { root.output-changed(path); }
+                choose-source => { root.choose-source(); }
+                choose-output => { root.choose-output(); }
+                choose-subtitles => { root.choose-subtitles(); }
+                source-dropped(path) => { root.source-dropped(path); }
+                output-dropped(path) => { root.output-dropped(path); }
+                audio-codec-changed(codec) => { root.audio-codec-changed(codec); }
+                subtitle-mode-changed(mode) => { root.subtitle-mode-changed(mode); }
+                metadata-copy-changed(copy) => { root.metadata-copy-changed(copy); }
+                collision-policy-changed(policy) => { root.collision-policy-changed(policy); }
+                retry-job => { root.retry-job(); }
+            }
+
+            if !root.rtl : EncodeQueue {
+                min-width: root.compact-layout ? 280px : 320px;
+                preferred-width: root.compact-layout ? 296px : 360px;
+                max-width: root.compact-layout ? 320px : 392px;
+                compact-layout: root.compact-layout;
+                job-labels: root.job-labels;
+                job-details: root.job-details;
+                job-statuses: root.job-statuses;
+                job-progresses: root.job-progresses;
+                job-tones: root.job-tones;
+                job-running: root.job-running;
+                active-job-index: root.active-job-index;
+                batch-progress: root.batch-progress;
+                select-job(index) => { root.select-job(index); }
+                move-job(from, to) => { root.move-job(from, to); }
+            }
+            Rectangle { width: 1px; background: Theme.palette().border; }
+
+            EncodeProgress {
+                horizontal-stretch: 1;
+                compact-layout: root.compact-layout;
+                selected-job-text: root.selected-job-text;
+                selected-job-details: root.selected-job-details;
+                selected-output: root.selected-output;
+                active-job-progress: root.active-job-progress;
+                backend-available: root.backend-available;
+                backend-version: root.backend-version;
+            }
+
+            Rectangle { width: 1px; background: Theme.palette().border; }
+            if !root.rtl : EncodeInspector {
+                min-width: root.compact-layout ? 240px : 260px;
+                preferred-width: root.compact-layout ? 248px : 330px;
+                max-width: root.compact-layout ? 272px : 360px;
+                compact-layout: root.compact-layout;
+                running: root.running;
+                can-retry: root.can-retry;
+                inspector-tab <=> root.inspector-tab;
+                selected-source <=> root.selected-source;
+                selected-output <=> root.selected-output;
+                selected-preset: root.selected-preset;
+                selected-video: root.selected-video;
+                selected-audio: root.selected-audio;
+                selected-audio-codec: root.selected-audio-codec;
+                selected-subtitles: root.selected-subtitles;
+                selected-subtitle-mode: root.selected-subtitle-mode;
+                selected-metadata: root.selected-metadata;
+                metadata-copy: root.metadata-copy;
+                selected-destination: root.selected-destination;
+                collision-policy: root.collision-policy;
+                selected-status: root.selected-status;
+                report-summary: root.report-summary;
+                selected-job-details: root.selected-job-details;
+                status-left: root.status-left;
+                preset-changed(preset) => { root.preset-changed(preset); }
+                source-changed(path) => { root.source-changed(path); }
+                output-changed(path) => { root.output-changed(path); }
+                choose-source => { root.choose-source(); }
+                choose-output => { root.choose-output(); }
+                choose-subtitles => { root.choose-subtitles(); }
+                source-dropped(path) => { root.source-dropped(path); }
+                output-dropped(path) => { root.output-dropped(path); }
+                audio-codec-changed(codec) => { root.audio-codec-changed(codec); }
+                subtitle-mode-changed(mode) => { root.subtitle-mode-changed(mode); }
+                metadata-copy-changed(copy) => { root.metadata-copy-changed(copy); }
+                collision-policy-changed(policy) => { root.collision-policy-changed(policy); }
+                retry-job => { root.retry-job(); }
+            }
+
+            if root.rtl : EncodeQueue {
+                min-width: root.compact-layout ? 280px : 320px;
+                preferred-width: root.compact-layout ? 296px : 360px;
+                max-width: root.compact-layout ? 320px : 392px;
+                compact-layout: root.compact-layout;
+                job-labels: root.job-labels;
+                job-details: root.job-details;
+                job-statuses: root.job-statuses;
+                job-progresses: root.job-progresses;
+                job-tones: root.job-tones;
+                job-running: root.job-running;
+                active-job-index: root.active-job-index;
+                batch-progress: root.batch-progress;
+                select-job(index) => { root.select-job(index); }
+                move-job(from, to) => { root.move-job(from, to); }
+            }
+        }
+        ToolkitStatusBar { leading: root.status-left; trailing: root.status-right; }
+    }
+
+    palette := CommandPalette {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        open: root.palette-open;
+        commands: root.palette-commands;
+        query: root.palette-query;
+        selected: root.palette-selected;
+        command-invoked(idx) => {
+            root.palette-invoked(idx);
+        }
+        query-changed(q) => {
+            root.palette-query = q;
+            root.palette-query-changed(q);
+        }
+        move-selection(delta) => {
+            root.palette-move(delta);
+        }
+        key-text(text) => {
+            root.palette-key-text(text);
+        }
+        backspace => {
+            root.palette-backspace();
+        }
+        close-requested => {
+            root.palette-open = false;
+            app-focus.focus();
+        }
+    }
+    }
+}

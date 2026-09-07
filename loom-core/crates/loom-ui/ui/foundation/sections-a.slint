@@ -1,0 +1,249 @@
+import { Theme } from "../theme.slint";
+import {
+    LoomButton, LoomIconButton, LoomTextField, LoomSearchField,
+    LoomToggle, LoomSegmentedControl, LoomProgressBar,
+    LoomTabStrip,
+} from "../foundation.slint";
+
+export component GallerySection inherits Rectangle {
+    in property <string> title: "Section";
+    in property <string> detail: "";
+    background: transparent;
+    min-height: section-layout.min-height;
+    preferred-height: section-layout.preferred-height;
+
+    section-layout := VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding-bottom: Theme.tokens.space.xl;
+        VerticalLayout {
+            spacing: Theme.tokens.space.xs;
+            Text {
+                text: root.title;
+                font-size: Theme.tokens.typography.heading;
+                font-weight: 700;
+                color: Theme.palette().ink;
+            }
+            if root.detail != "" : Text {
+                text: root.detail;
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+            }
+        }
+        @children
+    }
+}
+
+export component ButtonsSection inherits Rectangle {
+    background: transparent;
+    min-height: buttons-layout.min-height;
+    preferred-height: buttons-layout.preferred-height;
+
+    buttons-layout := VerticalLayout {
+        GallerySection {
+            title: "Buttons";
+            detail: "Primary, secondary, ghost, destructive, disabled, icon-only";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.md;
+                alignment: start;
+                cross-axis-alignment: center;
+                LoomButton { label: "Create"; icon: "plus"; variant: "primary"; }
+                LoomButton { label: "Duplicate"; icon: "document"; }
+                LoomButton { label: "More detail"; variant: "ghost"; }
+                LoomButton { label: "Delete"; icon: "trash"; variant: "danger"; }
+                LoomButton { label: "Unavailable"; enabled: false; }
+                LoomIconButton { icon: "settings"; label: "Settings"; tooltip: "Open settings"; }
+                LoomIconButton { icon: "eye"; label: "Preview"; tooltip: "Toggle preview"; selected: true; }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}
+
+export component FieldsSection inherits Rectangle {
+    in-out property <string> sample-value: "Quarterly plan";
+    in-out property <string> search-value: "";
+    background: transparent;
+    min-height: fields-layout.min-height;
+    preferred-height: fields-layout.preferred-height;
+
+    fields-layout := VerticalLayout {
+        GallerySection {
+            title: "Fields";
+            detail: "Normal, invalid, search, long content";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.lg;
+                alignment: start;
+                LoomTextField {
+                    width: 240px;
+                    value <=> root.sample-value;
+                    label: "Document title";
+                    title: "Document title";
+                    placeholder: "Untitled";
+                }
+                LoomTextField {
+                    width: 220px;
+                    value: "Invalid value";
+                    label: "Invalid example";
+                    title: "Invalid example";
+                    invalid: true;
+                }
+                LoomSearchField {
+                    width: 260px;
+                    value <=> root.search-value;
+                    title: "Search this gallery";
+                    placeholder: "Search this gallery";
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}
+
+export component ChoiceSection inherits Rectangle {
+    in-out property <int> alignment: 0;
+    in-out property <bool> autosave: true;
+    background: transparent;
+    min-height: choice-layout.min-height;
+    preferred-height: choice-layout.preferred-height;
+
+    choice-layout := VerticalLayout {
+        GallerySection {
+            title: "Choice and state";
+            detail: "Keyboard-operable selection, toggle, and progress";
+            HorizontalLayout {
+                spacing: Theme.tokens.space.xxl;
+                alignment: start;
+                cross-axis-alignment: center;
+                LoomSegmentedControl {
+                    width: 280px;
+                    label: "Alignment";
+                    items: ["Left", "Center", "Right"];
+                    current <=> root.alignment;
+                }
+                LoomToggle { label: "Autosave"; checked <=> root.autosave; }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+                    cross-axis-alignment: center;
+                    Text {
+                        text: "Export:";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 500;
+                        color: Theme.palette().ink-secondary;
+                        vertical-alignment: center;
+                    }
+                    LoomProgressBar { width: 180px; value: 0.63; label: "Background export"; }
+                    Text {
+                        text: "63%";
+                        font-size: Theme.tokens.typography.caption;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}
+
+export component NavigationSection inherits Rectangle {
+    in-out property <int> current-tab: 0;
+    background: transparent;
+    min-height: nav-layout.min-height;
+    preferred-height: nav-layout.preferred-height;
+
+    nav-layout := VerticalLayout {
+        GallerySection {
+            title: "Navigation";
+            detail: "Tabs use an underline hierarchy rather than pill-shaped cards";
+            Rectangle {
+                width: 624px;
+                background: Theme.palette().surface;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                border-radius: Theme.tokens.metrics.radius-medium;
+                clip: true;
+
+                VerticalLayout {
+                    spacing: 0px;
+                    LoomTabStrip {
+                        items: ["Document", "Comments", "Versions"];
+                        current <=> root.current-tab;
+                    }
+                    VerticalLayout {
+                        padding: Theme.tokens.space.xl;
+                        spacing: Theme.tokens.space.sm;
+                        alignment: center;
+                        Text {
+                            text: root.current-tab == 0 ? "Document settings and layout properties."
+                                : root.current-tab == 1 ? "Discussion threads and inline review notes."
+                                : "Version history snapshots and revision checkpoints.";
+                            font-size: Theme.tokens.typography.body;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                        }
+                        Text {
+                            text: root.current-tab == 0 ? "Default orientation: Portrait · Margins: 1.0 in · Grid snap enabled"
+                                : root.current-tab == 1 ? "2 resolved comments · 1 pending review from editor"
+                                : "Last saved 3 minutes ago · 4 earlier versions archived";
+                            font-size: Theme.tokens.typography.caption;
+                            color: Theme.palette().ink-secondary;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ButtonsSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        ButtonsSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component FieldsSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        FieldsSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component ChoiceSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        ChoiceSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}
+
+export component NavigationSectionWindow inherits Window {
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.palette().canvas;
+    VerticalLayout {
+        alignment: start;
+        NavigationSection { }
+        Rectangle { vertical-stretch: 1; background: transparent; }
+    }
+}

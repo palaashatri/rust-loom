@@ -1,0 +1,11 @@
+[package]
+name = "loom-package"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loom versioned, inspectable document package container"
+
+[dependencies]
+
+[dev-dependencies]

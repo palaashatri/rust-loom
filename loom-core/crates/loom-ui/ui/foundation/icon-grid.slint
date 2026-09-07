@@ -1,0 +1,66 @@
+// Loom icon specimen sheet (review surface, not product UI).
+//
+// Renders every name in the shared Icon set as a labeled cell so icon
+// legibility can be judged at the canonical sizes instead of inferred
+// from path data. The icon list is supplied by the host (the Rust
+// ICON_NAMES registry), so this file cannot drift from the product set.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
+
+export component IconGridWindow inherits Window {
+    title: "Loom icon specimen";
+    in property <[string]> names: [];
+    in property <int> columns: 8;
+    in property <string> caption: "Loom icon set";
+    in-out property <string> theme-name: "light";
+    changed theme-name => { Theme.active-theme = root.theme-name; }
+    background: Theme.palette().canvas;
+
+    ScrollView {
+        VerticalLayout {
+            spacing: Theme.tokens.space.lg;
+            padding: Theme.tokens.space.xxl;
+
+            Text {
+                text: root.caption + " (" + root.names.length + " icons)";
+                font-size: Theme.tokens.typography.body-large;
+                font-weight: 700;
+                color: Theme.palette().ink;
+            }
+
+            GridLayout {
+                spacing: Theme.tokens.space.md;
+                for r in 12 : Row {
+                    for c in 8 : Rectangle {
+                        width: 118px;
+                        height: 64px;
+                        visible: (r * 8 + c) < root.names.length;
+                        background: Theme.palette().surface;
+                        border-width: 1px;
+                        border-color: Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-small;
+                        if (r * 8 + c) < root.names.length : VerticalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            padding: Theme.tokens.space.sm;
+                            alignment: center;
+                            Icon {
+                                size: 20px;
+                                icon: root.names[r * 8 + c];
+                                tint: Theme.palette().ink;
+                            }
+                            Text {
+                                text: root.names[r * 8 + c];
+                                font-size: Theme.tokens.typography.micro;
+                                color: Theme.palette().ink-secondary;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

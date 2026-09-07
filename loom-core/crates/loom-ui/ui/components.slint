@@ -1,0 +1,976 @@
+// Loom shared UI components — original Slint components built on the
+// Loom design tokens. All components are keyboard-accessible, expose
+// accessible labels, and avoid animation by default (hosts opt into
+// motion per the reduced-motion policy).
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+import {
+    DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+    AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+    InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+    TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+    IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+    PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+} from "toolkit.slint";
+
+// Canonical primitive implementations live in toolkit.slint. The exports at
+// the end of this file keep the legacy module path source-compatible while
+// ensuring applications do not silently fork toolbar, panel, field, tab, or
+// status geometry.
+
+export component LoomWindow inherits Window {
+    in property <string> app-name: "Loom";
+    in property <string> status-left: "";
+    in property <string> status-right: "";
+    in property <bool> show-status-bar: true;
+    in property <string> theme-name: "light";
+
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        Rectangle {
+            min-height: Theme.tokens.metrics.header-height;
+            max-height: Theme.tokens.metrics.header-height;
+            background: Theme.palette().surface;
+            VerticalLayout {
+            spacing: 0px;
+            padding: 0px;
+            HorizontalLayout {
+            spacing: 8px;
+            padding-left: 6px;
+            padding-right: 12px;
+            Icon {
+                icon: "layers";
+                size: 18px;
+                tint: Theme.palette().accent;
+            }
+            Text {
+                text: root.app-name;
+                font-size: Theme.tokens.typography.title;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            }
+            Rectangle {
+                height: 1px;
+                background: Theme.palette().border;
+            }
+            }
+        }
+        @children
+        if root.show-status-bar : StatusBar {
+            status-left: root.status-left;
+            status-right: root.status-right;
+        }
+    }
+}
+
+/// Compatibility spelling for the canonical horizontal toolbar button.
+/// `ToolbarButton` owns both the legacy `text` input and the explicit
+/// `label` input. Its resolved label prefers `label`, then `text`, then the
+/// icon name, so icon-only callers remain accessible without preventing
+/// callers from setting the inherited label independently.
+export component ToolButton inherits ToolbarButton { }
+
+
+/// Compatibility spelling for the canonical compact icon button.
+export component IconButton inherits IconOnlyToolbarItem { }
+
+
+/// Primary action button (accent background).
+export component PrimaryButton inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> enabled: true;
+    callback clicked;
+    height: Theme.tokens.metrics.control-height;
+    min-width: 78px;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    background: !root.enabled ? Theme.palette().surface-sunken : touch.pressed ? Theme.palette().accent-pressed : touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent;
+    border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : root.enabled ? Theme.palette().accent-hover : Theme.palette().border;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    Text { text: root.text; font-size: Theme.tokens.typography.body; font-weight: 650; color: root.enabled ? Theme.palette().accent-ink : Theme.palette().ink-disabled; }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
+}
+
+
+/// Compatibility spelling for the canonical range slider.
+export component Slider inherits RangeSlider { }
+
+/// Compatibility spelling for the canonical toggle control.
+export component Switch inherits Toggle {
+    in property <string> text: "";
+    label: root.text;
+}
+
+/// Tab bar navigation control.
+export component TabControl inherits Rectangle {
+    in property <[string]> tabs: [];
+    in-out property <int> current-tab: 0;
+    callback tab-changed(int);
+
+    height: 34px;
+    background: Theme.palette().surface;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+
+    HorizontalLayout {
+        spacing: 2px;
+        padding: 3px;
+
+        for tab-item[idx] in root.tabs : Rectangle {
+            height: parent.height - 6px;
+            border-radius: 4px;
+            background: idx == root.current-tab ? Theme.palette().surface-sunken
+                : item-touch.has-hover ? Theme.palette().surface-sunken
+                : transparent;
+            border-width: 1px;
+            border-color: item-focus.has-focus ? Theme.palette().focus : transparent;
+
+            animate background, border-color {
+                duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+                easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                alignment: center;
+                Text {
+                    text: tab-item;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: idx == root.current-tab ? 600 : 400;
+                    color: idx == root.current-tab ? Theme.palette().accent : Theme.palette().ink;
+                    vertical-alignment: center;
+                }
+            }
+
+            if idx == root.current-tab : Rectangle {
+                y: parent.height - 3px;
+                height: 2px;
+                width: parent.width - 16px;
+                border-radius: 1px;
+                background: Theme.palette().accent;
+            }
+
+            item-touch := TouchArea {
+                clicked => {
+                    item-focus.focus();
+                    root.current-tab = idx;
+                    root.tab-changed(idx);
+                }
+            }
+
+            item-focus := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == Key.Space || event.text == Key.Return) {
+                        root.current-tab = idx;
+                        root.tab-changed(idx);
+                        return accept;
+                    } else if (event.text == Key.LeftArrow && idx > 0) {
+                        root.current-tab = idx - 1;
+                        root.tab-changed(idx - 1);
+                        return accept;
+                    } else if (event.text == Key.RightArrow && (idx < root.tabs.length - 1)) {
+                        root.current-tab = idx + 1;
+                        root.tab-changed(idx + 1);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            accessible-role: AccessibleRole.tab;
+            accessible-label: tab-item;
+            accessible-action-default => {
+                root.current-tab = idx;
+                root.tab-changed(idx);
+            }
+        }
+    }
+}
+
+/// Modal dialog container overlaid on host content.
+export component ModalDialog inherits Rectangle {
+    in property <string> title: "";
+    in property <bool> open: false;
+    callback close-requested;
+
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+    visible: root.open;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.palette().scrim;
+
+        TouchArea {
+            clicked => {
+                root.close-requested();
+            }
+        }
+    }
+
+    dialog-surface := Rectangle {
+        // Keep the sheet content-sized for ordinary dialogs while bounding it
+        // to the viewport.  A fixed 520px height leaves large blank regions
+        // around short confirmation dialogs and makes the modal feel broken.
+        private property <length> available-width: max(0px, root.width - 32px);
+        private property <length> available-height: max(0px, root.height - 32px);
+        private property <length> dialog-width: min(480px, available-width);
+        private property <length> dialog-height: min(520px,
+            max(132px, dialog-layout.preferred-height));
+        private property <length> sheet-height: min(dialog-height, available-height);
+        x: (root.width - dialog-width) / 2;
+        y: (root.height - sheet-height) / 2;
+        width: dialog-width;
+        // The explicit bound keeps the centered sheet inside a short window;
+        // dialog-layout supplies the intrinsic height for normal content.
+        height: sheet-height;
+        min-height: min(132px, available-height);
+        max-height: available-height;
+        border-radius: Theme.tokens.metrics.radius-large;
+        background: Theme.palette().surface;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+
+        focus-scope := FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.close-requested();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        dialog-layout := VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: 100%;
+            height: 100%;
+            spacing: 0px;
+            padding: 0px;
+
+            Rectangle {
+                min-height: 44px;
+                max-height: 44px;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    Text {
+                        text: root.title;
+                        font-size: Theme.tokens.typography.title;
+                        font-weight: 600;
+                        color: Theme.palette().ink;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: "close";
+                        label: "Close dialog";
+                        clicked => { root.close-requested(); }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                HorizontalLayout {
+                    padding: 16px;
+                    @children
+                }
+            }
+        }
+    }
+
+    accessible-role: AccessibleRole.none;
+    accessible-label: root.title;
+}
+
+/// Collapsible/expandable container panel.
+export component CollapsiblePanel inherits Rectangle {
+    in property <string> title: "";
+    in-out property <bool> expanded: true;
+    callback toggled(bool);
+
+    background: Theme.palette().surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    max-width: 10000px;
+
+    accessible-role: AccessibleRole.none;
+    accessible-label: root.title;
+
+    focus-scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.expanded = !root.expanded;
+                root.toggled(root.expanded);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        header-bar := Rectangle {
+            min-height: 36px;
+            max-height: 36px;
+            background: header-touch.has-hover ? Theme.palette().surface-sunken : transparent;
+            border-radius: 8px;
+
+            animate background {
+                duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+                easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+
+                Icon {
+                    icon: "chevron-right";
+                    size: 16px;
+                    tint: Theme.palette().ink-secondary;
+                    y: (parent.height - 16px) / 2;
+                }
+
+                Text {
+                    text: root.title;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 600;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            header-touch := TouchArea {
+                clicked => {
+                    focus-scope.focus();
+                    root.expanded = !root.expanded;
+                    root.toggled(root.expanded);
+                }
+            }
+        }
+
+        body := VerticalLayout {
+            visible: root.expanded;
+            spacing: 0px;
+            padding: 0px;
+            Rectangle {
+                height: 1px;
+                background: Theme.palette().border;
+            }
+            Rectangle {
+                padding: 12px;
+                @children
+            }
+        }
+    }
+}
+
+/// Empty-state placeholder: icon, title, description, and optional host actions.
+///
+/// The max-width/max-height keep the root growable inside layouts; without
+/// them the fixed-size inner content makes the component report a fixed
+/// layout size and the surrounding stretch stops working (Slint quirk).
+export component EmptyState inherits Rectangle {
+    in property <string> icon: "layers";
+    in property <string> title: "";
+    in property <string> description: "";
+    in property <string> action-text: "";
+    callback action;
+    background: transparent; max-width: 10000px; max-height: 10000px;
+    Rectangle {
+        width: min(480px, parent.width - 32px); height: min(280px, parent.height - 32px); border-radius: 16px;
+        background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border;
+        VerticalLayout {
+            spacing: 10px; padding: 28px; alignment: center; cross-axis-alignment: center;
+            Rectangle { width: 54px; height: 54px; border-radius: 18px; background: Theme.palette().selection-soft; Icon { icon: root.icon; size: 25px; tint: Theme.palette().accent; } }
+            Text { text: root.title; font-size: Theme.tokens.typography.heading; font-weight: 650; color: Theme.palette().ink; horizontal-alignment: center; }
+            Text { text: root.description; font-size: Theme.tokens.typography.body; color: Theme.palette().ink-secondary; horizontal-alignment: center; wrap: word-wrap; width: 390px; }
+            if root.action-text != "" : PrimaryButton { text: root.action-text; clicked => { root.action(); } }
+        }
+    }
+}
+
+
+/// Bordered panel with an optional header.
+///
+/// Same growability note as EmptyState: max sizes keep the panel stretchable
+/// when placed in layouts.
+export component Panel inherits Rectangle {
+    in property <string> header: "";
+    in property <string> footer: "";
+    in property <bool> interactive: false;
+    background: Theme.palette().surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: interactive && touch.has-hover ? Theme.palette().border-strong : Theme.palette().border;
+    max-width: 10000px;
+    max-height: 10000px;
+
+    animate border-color {
+        duration: Theme.tokens.reduced-motion ? 0ms : 120ms;
+        easing: cubic-bezier(0.33, 1.0, 0.68, 1.0);
+    }
+
+    touch := TouchArea {
+        enabled: root.interactive;
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+        if root.header != "" : Rectangle {
+            min-height: 32px;
+            max-height: 32px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                Text {
+                    text: root.header;
+                    font-size: Theme.tokens.typography.caption;
+                    font-weight: 700;
+                    color: Theme.palette().ink-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        @children
+        if root.footer != "" : Rectangle {
+            min-height: 31px;
+            max-height: 31px;
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+                Rectangle {
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text {
+                        text: root.footer;
+                        font-size: Theme.tokens.typography.caption;
+                        color: Theme.palette().ink-disabled;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Compact semantic badge used for local/offline state, prototype limitations,
+/// success, warnings, and errors. Tone: 0 neutral, 1 accent, 2 success,
+/// 3 warning, 4 danger.
+export component StatusPill inherits Rectangle {
+    in property <string> text: "Local";
+    in property <int> tone: 0;
+    in property <length> max-content-width: 320px;
+    // Callers in a constrained row can provide the actual width available
+    // after sibling controls. A non-positive value keeps the intrinsic cap.
+    in property <length> available-width: 0px;
+    private property <length> width-cap: root.available-width > 0px
+        ? min(root.max-content-width, root.available-width)
+        : root.max-content-width;
+    // Intrinsic sizing keeps short status labels balanced, but long diagnostic
+    // text must never force a narrow sidebar wider than its parent.  Callers
+    // with a constrained panel pass its available content width; the label
+    // elides once the cap is reached.
+    min-width: max(48px, min(measure-label.preferred-width + 16px, root.width-cap));
+    preferred-width: max(48px, min(measure-label.preferred-width + 16px, root.width-cap));
+    max-width: max(48px, root.width-cap);
+    height: 22px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: root.tone == 1 ? Theme.palette().accent
+        : root.tone == 2 ? Theme.palette().success
+        : root.tone == 3 ? Theme.palette().warning
+        : root.tone == 4 ? Theme.palette().danger
+        : Theme.palette().border-strong;
+    background: root.tone == 1 ? Theme.palette().selection-soft
+        : root.tone == 4 ? Theme.palette().danger-surface
+        : Theme.palette().surface-sunken;
+
+    // Keep intrinsic measurement independent from the constrained visible
+    // label; otherwise `preferred-width` can feed back into `root.width`.
+    measure-label := Text {
+        text: root.text;
+        visible: false;
+    }
+
+    pill-label := Text {
+        text: root.text;
+        x: 8px;
+        width: max(0px, root.width - 16px);
+        font-size: Theme.tokens.typography.caption;
+        font-weight: 600;
+        color: root.tone == 1 ? Theme.palette().accent
+            : root.tone == 2 ? Theme.palette().success
+            : root.tone == 3 ? Theme.palette().warning
+            : root.tone == 4 ? Theme.palette().danger
+            : Theme.palette().ink-secondary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+/// Suite-wide application header. It keeps the application identity, document
+/// identity, context and local state in stable locations across every Loom app.
+export component AppHeader inherits Rectangle {
+    in property <string> app-name: "Loom";
+    in property <string> document-title: "Untitled";
+    in property <string> icon: "layers";
+    in property <string> context: "";
+    in property <string> state-text: "Local";
+    in property <int> state-tone: 0;
+    min-height: Theme.tokens.metrics.header-height;
+    max-height: Theme.tokens.metrics.header-height;
+    background: Theme.palette().chrome;
+    VerticalLayout {
+        spacing: 0px;
+        HorizontalLayout {
+            spacing: 11px;
+            padding-left: 14px;
+            padding-right: 14px;
+            cross-axis-alignment: center;
+            Rectangle {
+                width: 34px; height: 34px; border-radius: 11px;
+                background: Theme.palette().selection-soft;
+                border-width: 1px; border-color: Theme.palette().accent;
+                Icon { icon: root.icon; size: 18px; tint: Theme.palette().accent; }
+            }
+            VerticalLayout {
+                spacing: 1px;
+                Text { text: root.document-title; font-size: Theme.tokens.typography.title; font-weight: 650; color: Theme.palette().ink; overflow: elide; }
+                Text { text: root.app-name; font-size: Theme.tokens.typography.caption; font-weight: 600; color: Theme.palette().ink-secondary; overflow: elide; }
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            if root.context != "" : Rectangle {
+                height: 28px; min-width: 96px; max-width: 280px; border-radius: 8px; background: Theme.palette().surface-sunken; border-width: 1px; border-color: Theme.palette().border;
+                Text { text: root.context; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-secondary; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+            }
+            StatusPill { text: root.state-text; tone: root.state-tone; }
+        }
+        Rectangle { height: 1px; background: Theme.palette().border; }
+    }
+}
+
+
+/// Vertical workspace/mode rail item with an explicit selected state and full
+/// keyboard/accessibility behavior.
+export component RailButton inherits Rectangle {
+    in property <string> text: "";
+    in property <string> icon: "generic";
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 60px; height: 54px; border-radius: 10px; border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().border-strong : transparent;
+    background: root.checked ? Theme.palette().surface-raised : touch.has-hover ? Theme.palette().surface-sunken : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button; accessible-label: root.text; accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    if root.checked : Rectangle { x: 0px; y: 12px; width: 3px; height: parent.height - 24px; border-radius: 2px; background: Theme.palette().accent; }
+    VerticalLayout {
+        spacing: 4px; alignment: center;
+        Icon { icon: root.icon; size: 18px; tint: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().accent : Theme.palette().ink-secondary; }
+        Text { text: root.text; font-size: Theme.tokens.typography.micro; font-weight: root.checked ? 700 : 550; color: !root.enabled ? Theme.palette().ink-disabled : root.checked ? Theme.palette().ink : Theme.palette().ink-secondary; horizontal-alignment: center; }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
+}
+
+
+
+/// Hairline separator used between professional workspace regions.
+export component Hairline inherits Rectangle {
+    in property <bool> vertical: false;
+    min-width: root.vertical ? 1px : 0px;
+    preferred-width: root.vertical ? 1px : 100px;
+    max-width: root.vertical ? 1px : 100000px;
+    min-height: root.vertical ? 0px : 1px;
+    preferred-height: root.vertical ? 100px : 1px;
+    max-height: root.vertical ? 100000px : 1px;
+    background: Theme.palette().border;
+}
+
+/// Compatibility spelling for the canonical toolbar surface. The shared
+/// Toolbar owns the single-line geometry and leaves overflow behavior to the
+/// host through ToolbarOverflowButton.
+export component WorkspaceToolbar inherits Toolbar { }
+
+/// Subtle rounded card for library rows, jobs, tracks and layers.
+export component WorkspaceRow inherits Rectangle {
+    in property <string> label: "Workspace item";
+    in property <bool> selected: false;
+    in property <bool> emphasized: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    min-height: 42px; border-radius: Theme.tokens.metrics.radius-medium; border-width: 1px;
+    border-color: focus-scope.has-focus ? Theme.palette().focus : root.selected ? Theme.palette().accent : root.emphasized ? Theme.palette().border-strong : transparent;
+    background: root.selected ? Theme.palette().selection-soft : touch.has-hover && root.enabled ? Theme.palette().surface-raised : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    if root.selected : Rectangle { x: 0px; y: 8px; width: 3px; height: parent.height - 16px; border-radius: 2px; background: Theme.palette().accent; }
+    @children
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
+}
+
+
+/// Professional canvas backdrop with a subtle inner stage.
+export component CanvasBackdrop inherits Rectangle {
+    in property <color> stage-color: Theme.palette().surface-sunken;
+    background: Theme.palette().canvas-alt;
+    Rectangle { x: 17px; y: 18px; width: parent.width - 34px; height: parent.height - 34px; border-radius: 14px; background: Theme.palette().shadow; }
+    Rectangle {
+        x: 12px; y: 12px; width: parent.width - 24px; height: parent.height - 24px;
+        border-radius: 13px; border-width: 1px; border-color: Theme.palette().border-strong; background: root.stage-color; clip: true; @children
+    }
+}
+
+
+/// Compatibility spelling for the canonical tab strip.
+export component PaneTabs inherits TabStrip {
+    in property <[string]> items: [];
+    in property <string> label: "Panel tabs";
+    tabs: root.items;
+    accessible-label: root.label;
+}
+
+
+/// Small metric readout for timecode, zoom, color space and engine state.
+export component MetricChip inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    // Keep timecode/format readouts legible when a toolbar is constrained.
+    min-width: max(76px, metric-label.preferred-width + metric-value.preferred-width + 21px);
+    preferred-width: max(76px, metric-label.preferred-width + metric-value.preferred-width + 21px);
+    height: 28px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    background: Theme.palette().surface-sunken;
+    HorizontalLayout {
+        spacing: 5px;
+        padding-left: 8px;
+        padding-right: 8px;
+        metric-label := Text { text: root.label; font-size: Theme.tokens.typography.caption; color: Theme.palette().ink-disabled; vertical-alignment: center; }
+        metric-value := Text { text: root.value; font-size: Theme.tokens.typography.caption; font-weight: 650; color: Theme.palette().ink; vertical-alignment: center; }
+    }
+}
+
+/// Transport control with a circular selected/record state.
+export component TransportButton inherits Rectangle {
+    in property <string> icon: "play";
+    in property <string> label: "";
+    in property <bool> active: false;
+    in property <bool> destructive: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 36px; height: 36px; border-radius: 18px; border-width: 1px;
+    border-color: root.active ? (root.destructive ? Theme.palette().danger : Theme.palette().accent) : touch.has-hover ? Theme.palette().border-strong : Theme.palette().border;
+    background: root.active ? (root.destructive ? Theme.palette().danger-surface : Theme.palette().selection-soft) : touch.pressed ? Theme.palette().surface-sunken : touch.has-hover ? Theme.palette().surface-raised : transparent;
+    animate background, border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
+    accessible-role: button; accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    focus-scope := FocusScope { enabled: root.enabled; key-pressed(event) => { if (root.enabled && (event.text == Key.Space || event.text == Key.Return)) { root.clicked(); return accept; } return reject; } }
+    Icon { icon: root.icon; size: 16px; tint: !root.enabled ? Theme.palette().ink-disabled : root.destructive ? Theme.palette().danger : root.active ? Theme.palette().accent : Theme.palette().ink; }
+    touch := TouchArea { enabled: root.enabled; clicked => { focus-scope.focus(); root.clicked(); } }
+}
+
+/// One command shown by the searchable command palette.
+export struct CommandPaletteItem {
+    /// Stable command identifier used by journey logs.
+    id: string,
+    /// Human-readable command name.
+    label: string,
+    /// Shortcut hint, such as `Ctrl+K`.
+    shortcut: string,
+    /// Whether the command can currently run.
+    enabled: bool,
+}
+
+/// Modal, searchable, fully keyboard-operable command palette.
+///
+/// The host owns the command model and filters it as the query changes. The
+/// palette renders the filtered list, keeps the selection index, and routes
+/// every key through a single focus scope so the full journey — open, type,
+/// move, invoke, close — works without a pointing device. `Escape` closes,
+/// `Up`/`Down` move the selection, `Return` invokes, `Backspace` edits the
+/// query, and printable characters append to the query. The typed query is
+/// rendered as text (a palette search box does not need a blinking caret).
+export component CommandPalette inherits Rectangle {
+    in property <bool> open: false;
+    in property <[CommandPaletteItem]> commands: [];
+    in-out property <string> query: "";
+    in-out property <int> selected: 0;
+    callback command-invoked(int);
+    callback query-changed(string);
+    callback move-selection(int);
+    callback key-text(string);
+    callback backspace;
+    callback close-requested;
+
+    /// Move keyboard focus into the palette's focus scope. The host calls
+    /// this when opening the palette so the modal captures the next keypress.
+    public function grab-focus() {
+        focus-scope.focus();
+    }
+
+    background: transparent;
+    visible: root.open;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: Theme.palette().overlay;
+        opacity: 0.78;
+        touch := TouchArea {
+            clicked => { root.close-requested(); }
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - Math.min(560px, parent.width - 48px)) / 2;
+        y: Math.max(64px, parent.height / 5);
+        width: Math.min(560px, parent.width - 48px);
+        // Size the palette to its useful content while keeping a bounded
+        // viewport for large command sets. A fixed 430px body made a single
+        // result look lost in a large empty modal; the floor leaves room for
+        // the search row and one command, and the cap preserves scrolling.
+        height: Math.min(
+            430px,
+            Math.min(parent.height - 140px, Math.max(136px, 102px + root.commands.length * 34px))
+        );
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+        background: Theme.palette().surface-raised;
+        // Keep a long command list inside the modal surface. The previous
+        // layout let repeated rows expand past this fixed-height panel and
+        // paint over the workspace below it.
+        clip: true;
+        accessible-role: list;
+        accessible-label: "Command palette";
+
+        focus-scope := FocusScope {
+            key-pressed(event) => {
+                if (!root.open) { return reject; }
+                if (event.modifiers.control || event.modifiers.alt || event.modifiers.shift) { return reject; }
+                if (event.text == Key.Escape) { root.close-requested(); return accept; }
+                if (event.text == Key.UpArrow) { root.move-selection(-1); return accept; }
+                if (event.text == Key.DownArrow) { root.move-selection(1); return accept; }
+                if (event.text == Key.PageUp) { root.move-selection(-8); return accept; }
+                if (event.text == Key.PageDown) { root.move-selection(8); return accept; }
+                if (event.text == Key.Return) {
+                    root.command-invoked(root.selected);
+                    return accept;
+                }
+                if (event.text == Key.Backspace) { root.backspace(); return accept; }
+                root.key-text(event.text);
+                return accept;
+            }
+        }
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    height: 32px;
+                    horizontal-stretch: 1;
+                    border-radius: 7px;
+                    border-width: 1px;
+                    border-color: focus-scope.has-focus ? Theme.palette().focus : Theme.palette().border-strong;
+                    background: Theme.palette().surface;
+                    Text {
+                        x: 12px;
+                        vertical-alignment: center;
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink;
+                        text: root.query == "" ? "Search commands…" : "> " + root.query;
+                        width: parent.width - 24px;
+                        overflow: clip;
+                    }
+                }
+                Text {
+                    text: "↑↓ select  ↵ run  esc close";
+                    font-size: Theme.tokens.typography.caption;
+                    color: Theme.palette().ink-disabled;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.palette().border;
+            }
+
+            list-viewport := Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                min-height: 1px;
+                preferred-height: 100%;
+                clip: true;
+                border-radius: 6px;
+
+                Flickable {
+                    // The list owns the viewport, while the repeated rows
+                    // remain a fixed-height content surface. Keyboard moves
+                    // update `selected`; this offset keeps that row visible.
+                    width: parent.width;
+                    height: parent.height;
+                    preferred-height: 100%;
+                    viewport-width: parent.width;
+                    viewport-height: Math.max(parent.height, root.commands.length * 34px);
+                    viewport-y: -Math.min(
+                        Math.max(0px, Math.max(0, root.selected) * 34px - (parent.height - 34px)),
+                        Math.max(0px, root.commands.length * 34px - parent.height)
+                    );
+
+                    VerticalLayout {
+                        width: parent.width;
+                        height: root.commands.length * 34px;
+                        for item[idx] in root.commands : Rectangle {
+                            height: 34px;
+                            border-radius: 6px;
+                            background: idx == root.selected ? Theme.palette().selection-soft
+                                : row-touch.has-hover ? Theme.palette().surface-sunken : transparent;
+                            border-width: 1px;
+                            border-color: idx == root.selected ? Theme.palette().accent : transparent;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: item.label;
+                                    font-size: Theme.tokens.typography.body;
+                                    color: item.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: item.shortcut;
+                                    font-size: Theme.tokens.typography.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            row-touch := TouchArea {
+                                clicked => {
+                                    focus-scope.focus();
+                                    root.selected = idx;
+                                    if (item.enabled) { root.command-invoked(idx); }
+                                }
+                            }
+                            accessible-role: button;
+                            accessible-label: item.label;
+                            accessible-action-default => {
+                                focus-scope.focus();
+                                root.selected = idx;
+                                if (item.enabled) { root.command-invoked(idx); }
+                            }
+                        }
+                    }
+                }
+
+                // A slim, non-interactive rail makes the clipped list's
+                // scrollable state discoverable without stealing row clicks.
+                if root.commands.length * 34px > parent.height : Rectangle {
+                    x: parent.width - 3px;
+                    y: 4px;
+                    width: 2px;
+                    height: parent.height - 8px;
+                    border-radius: 1px;
+                    background: Theme.palette().border;
+                }
+            }
+        }
+    }
+}
+
+// Slint's default Rust component selection only emits roots that inherit
+// Window. Keep the production palette as a Rectangle so applications can
+// embed it in their own windows, and expose a tiny Window root solely for
+// deterministic shared-component tests. The harness forwards the palette's
+// real state and callbacks; it does not duplicate palette rendering.
+export component CommandPaletteTestWindow inherits Window {
+    in property <bool> open: false;
+    in property <[CommandPaletteItem]> commands: [];
+    in-out property <string> query: "";
+    in-out property <int> selected: 0;
+    callback command-invoked(int);
+    callback query-changed(string);
+    callback move-selection(int);
+    callback key-text(string);
+    callback backspace;
+    callback close-requested;
+
+    background: transparent;
+
+    palette := CommandPalette {
+        width: parent.width;
+        height: parent.height;
+        open: root.open;
+        commands: root.commands;
+        query <=> root.query;
+        selected <=> root.selected;
+        command-invoked(index) => { root.command-invoked(index); }
+        query-changed(value) => { root.query-changed(value); }
+        move-selection(delta) => { root.move-selection(delta); }
+        key-text(value) => { root.key-text(value); }
+        backspace => { root.backspace(); }
+        close-requested => { root.close-requested(); }
+    }
+}
+
+// Re-export the canonical shared primitives for legacy consumers of
+// components.slint. There is one implementation for each primitive; these
+// exports are compatibility names, not alternate geometry or state logic.
+export {
+    DirectionalLayout, Toolbar, ToolbarGroup, ToolbarSpacer, ToolbarButton, ToolbarIconButton,
+    AppleToolbarItem, ToolbarOverflowButton, OverflowMenuButton, PanelHeader, SidebarSurface,
+    InspectorSurface, SearchField, SegmentedControl, Toggle, RangeSlider,
+    TabStrip, ToolkitStatusBar, TitleChrome, IconOnlyToolbarItem,
+    IconOverLabelToolbarItem, SheetTabStrip, FormulaBar, InspectorSection,
+    PropertyRow, Field, StatusBar, Overflow, ContextToolbar, LabeledToolbar
+} from "toolkit.slint";

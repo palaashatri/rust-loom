@@ -1,0 +1,196 @@
+import {
+    LoomTextField, LoomSearchField, LoomTabStrip,
+    LoomPanel, LoomSectionHeader, LoomToggle, LoomButton, LoomIconButton,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+component SheetPropertyRow inherits HorizontalLayout {
+    in property <string> label: "";
+    spacing: Theme.tokens.space.sm;
+    cross-axis-alignment: center;
+    Text {
+        text: root.label;
+        width: 70px;
+        font-size: Theme.tokens.typography.caption;
+        color: Theme.palette().ink-secondary;
+        overflow: elide;
+    }
+    @children
+}
+
+export component SheetInspector inherits LoomPanel {
+    in property <string> selection-range: "A1";
+    in property <string> selection-value: "";
+    in property <string> selection-formula: "";
+    in property <string> sheet-name: "Untitled";
+    in property <string> table-rows-label: "1";
+    in property <string> table-cols-label: "1";
+    in property <string> selected-row-height: "24 px";
+    in property <string> selected-col-width: "80 px";
+    in-out property <string> inspector-search: "";
+    in-out property <int> inspector-tab: 0;
+    in property <bool> inspector-show-table: true;
+    in property <bool> inspector-show-cell: true;
+    in property <int> cell-format: 0;
+    in property <int> cell-alignment: 0;
+    callback inspector-search-edited(string);
+    callback inspector-context-changed(int);
+    callback rename-sheet(string);
+    callback add-table-row;
+    callback delete-table-row;
+    callback add-table-col;
+    callback delete-table-col;
+    callback adjust-row-height(int);
+    callback adjust-col-width(int);
+    callback set-cell-format(int);
+    callback set-cell-alignment(int);
+
+    title: root.selection-range + " selection";
+    width: 320px;
+
+    VerticalLayout {
+        spacing: Theme.tokens.space.md;
+        padding: Theme.tokens.space.md;
+
+        LoomSearchField {
+            placeholder: "Search properties…";
+            value <=> root.inspector-search;
+            edited(text) => { root.inspector-search-edited(text); }
+        }
+
+        LoomTabStrip {
+            items: ["Table", "Cell"];
+            current <=> root.inspector-tab;
+            selected(idx) => { root.inspector-context-changed(idx); }
+        }
+
+        Flickable {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: parent.width;
+            viewport-height: max(parent.height, 460px);
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: Theme.tokens.space.lg;
+
+                if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSectionHeader { title: "Table"; }
+                    SheetPropertyRow {
+                        label: "Name";
+                        LoomTextField {
+                            label: "Table name";
+                            value: root.sheet-name;
+                            edited(name) => { root.rename-sheet(name); }
+                        }
+                    }
+                    SheetPropertyRow {
+                        label: "Rows";
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "plus"; tooltip: "Add row"; clicked => { root.add-table-row(); } }
+                            LoomIconButton { icon: "minus"; tooltip: "Delete row"; clicked => { root.delete-table-row(); } }
+                        }
+                    }
+                    SheetPropertyRow {
+                        label: "Columns";
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "plus"; tooltip: "Add column"; clicked => { root.add-table-col(); } }
+                            LoomIconButton { icon: "minus"; tooltip: "Delete column"; clicked => { root.delete-table-col(); } }
+                        }
+                    }
+                }
+
+                if root.inspector-tab == 1 && root.inspector-show-cell : VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    LoomSectionHeader { title: "Cell"; }
+                    SheetPropertyRow {
+                        label: "Selection";
+                        LoomTextField { label: "Selected range"; value: root.selection-range; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Value";
+                        LoomTextField { label: "Displayed value"; value: root.selection-value == "" ? "Empty" : root.selection-value; enabled: false; }
+                    }
+                    SheetPropertyRow {
+                        label: "Formula";
+                        LoomTextField { label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; enabled: false; }
+                    }
+                    LoomSectionHeader { title: "Data Format"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "123";
+                            variant: root.cell-format == 0 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(0); }
+                        }
+                        LoomButton {
+                            label: "$";
+                            variant: root.cell-format == 1 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(1); }
+                        }
+                        LoomButton {
+                            label: "%";
+                            variant: root.cell-format == 2 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(2); }
+                        }
+                    }
+                    LoomSectionHeader { title: "Alignment"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "Left";
+                            variant: root.cell-alignment == 0 ? "primary" : "ghost";
+                            clicked => { root.set-cell-alignment(0); }
+                        }
+                        LoomButton {
+                            label: "Center";
+                            variant: root.cell-alignment == 1 ? "primary" : "ghost";
+                            clicked => { root.set-cell-alignment(1); }
+                        }
+                        LoomButton {
+                            label: "Right";
+                            variant: root.cell-alignment == 2 ? "primary" : "ghost";
+                            clicked => { root.set-cell-alignment(2); }
+                        }
+                    }
+                    SheetPropertyRow {
+                        label: "Row height";
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Selected row height"; value: root.selected-row-height; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "minus"; tooltip: "Decrease row height"; clicked => { root.adjust-row-height(-4); } }
+                            LoomIconButton { icon: "plus"; tooltip: "Increase row height"; clicked => { root.adjust-row-height(4); } }
+                        }
+                    }
+                    SheetPropertyRow {
+                        label: "Column width";
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Selected column width"; value: root.selected-col-width; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "minus"; tooltip: "Decrease column width"; clicked => { root.adjust-col-width(-10); } }
+                            LoomIconButton { icon: "plus"; tooltip: "Increase column width"; clicked => { root.adjust-col-width(10); } }
+                        }
+                    }
+                }
+
+                if (root.inspector-tab == 0 && !root.inspector-show-table)
+                    || (root.inspector-tab == 1 && !root.inspector-show-cell) : Rectangle {
+                    height: 72px;
+                    Text {
+                        text: "No matching properties";
+                        color: Theme.palette().ink-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; background: transparent; }
+            }
+        }
+    }
+}

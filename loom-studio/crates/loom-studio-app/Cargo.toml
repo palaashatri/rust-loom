@@ -1,0 +1,27 @@
+[package]
+name = "loom-studio-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loom-studio"
+path = "src/main.rs"
+
+[dependencies]
+loom-studio-core = { path = "../loom-studio-core" }
+loom-desktop = { path = "../../../loom-core/crates/loom-desktop" }
+loom-production = { path = "../../../loom-core/crates/loom-production" }
+loom-storage = { path = "../../../loom-core/crates/loom-storage" }
+loom-test-support.workspace = true
+loom-ui.workspace = true
+slint = "1.7"
+cpal.workspace = true
+midir.workspace = true
+arc-swap.workspace = true
+crossbeam-queue.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+slint-build = "1.7"

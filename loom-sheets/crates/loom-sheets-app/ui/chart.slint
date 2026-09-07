@@ -1,0 +1,146 @@
+import {
+    LoomCanvasHandle, LoomIconButton, LoomButton
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component SheetChart inherits Rectangle {
+    in property <string> title: "Chart";
+    in property <string> kind: "Bar";
+    in property <[string]> categories: ["Development", "Design", "QA & Testing", "Total"];
+    in property <[string]> values-display: ["$15,000", "$8,000", "$5,000", "$28,000"];
+    in property <[float]> normalized: [0.54, 0.29, 0.18, 1.0];
+    in-out property <bool> is-line-chart: false;
+    callback close-chart;
+    callback toggle-kind;
+
+    width: 380px;
+    height: 240px;
+    background: Theme.palette().surface;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    border-radius: Theme.tokens.space.sm;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: Theme.palette().shadow;
+
+    VerticalLayout {
+        padding: Theme.tokens.space.md;
+        spacing: Theme.tokens.space.sm;
+
+        // Chart Header
+        HorizontalLayout {
+            spacing: Theme.tokens.space.sm;
+            cross-axis-alignment: center;
+
+            Text {
+                text: root.title;
+                font-size: Theme.tokens.typography.body-large;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+
+            LoomButton {
+                variant: "ghost";
+                label: root.is-line-chart ? "Line Chart" : "Bar Chart";
+                clicked => {
+                    root.is-line-chart = !root.is-line-chart;
+                    root.toggle-kind();
+                }
+            }
+
+            LoomIconButton {
+                icon: "close";
+                tooltip: "Dismiss chart";
+                clicked => { root.close-chart(); }
+            }
+        }
+
+        // Plot Area
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.palette().surface-sunken;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            border-radius: Theme.tokens.space.xs;
+            clip: true;
+
+            // Horizontal gridlines
+            Rectangle {
+                x: 0px;
+                y: parent.height * 0.25;
+                width: parent.width;
+                height: 1px;
+                background: Theme.palette().border;
+            }
+            Rectangle {
+                x: 0px;
+                y: parent.height * 0.50;
+                width: parent.width;
+                height: 1px;
+                background: Theme.palette().border;
+            }
+            Rectangle {
+                x: 0px;
+                y: parent.height * 0.75;
+                width: parent.width;
+                height: 1px;
+                background: Theme.palette().border;
+            }
+
+            // Series Data
+            HorizontalLayout {
+                x: 12px;
+                y: 10px;
+                width: parent.width - 24px;
+                height: parent.height - 20px;
+                spacing: Theme.tokens.space.md;
+
+                for idx in root.categories.length : Rectangle {
+                    horizontal-stretch: 1;
+                    height: parent.height;
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        alignment: end;
+
+                        // Value label above bar
+                        Text {
+                            text: idx < root.values-display.length ? root.values-display[idx] : "";
+                            font-size: Theme.tokens.typography.micro;
+                            font-weight: 600;
+                            color: Theme.palette().ink;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+
+                        // The Bar
+                        Rectangle {
+                            height: max(6px, (parent.height - 36px) * (idx < root.normalized.length ? root.normalized[idx] : 0.1));
+                            background: Theme.palette().accent;
+                            border-radius: 3px;
+                            drop-shadow-blur: 2px;
+                            drop-shadow-color: Theme.palette().shadow;
+                        }
+
+                        // Category label below bar
+                        Text {
+                            text: root.categories[idx];
+                            font-size: Theme.tokens.typography.micro;
+                            color: Theme.palette().ink-secondary;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Direct manipulation corner handle
+    LoomCanvasHandle {
+        x: parent.width - 10px;
+        y: parent.height - 10px;
+        label: "Chart resize handle";
+    }
+}

@@ -1,0 +1,9 @@
+# Local artifacts and junk
+.work/
+*.log
+.DS_Store
+target/
+
+# Package output (written one level up, but guard against local copies)
+Loom-Complete.zip
+Loom-Complete.zip.sha256
