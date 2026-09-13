@@ -6,9 +6,9 @@
 
 Loom is a local-first Rust + Slint creative-suite **functional alpha** with eight desktop applications, substantial domain engines, persistence/history infrastructure, native project formats, cross-platform packaging machinery, and a large amount of unfinished product/UI code.
 
-It is **not** yet a professional replacement for mature office, image, motion, video, audio, or encoding software. No application currently passes the acceptance definition in `AGENTS.MD`.
+It is **not** yet a professional replacement for mature office, image, motion, video, audio, or encoding software. One application (Sheets) passes the acceptance definition in `AGENTS.MD`; Writer has verified evidence toward it; the remaining six do not.
 
-Current complete-suite readiness is approximately **30/100**, raised from 29 only for Writer's verified user-facing capability: four document features replaced facade controls with real, persisted, undoable workflows and passed an end-to-end journey plus a judge-reviewed viewport/theme acceptance pass.
+Current complete-suite readiness is approximately **38/100**, raised from 30 for Sheets' verified acceptance: the first application to pass all 14 gate items — real multi-sheet persistence, undoable tab operations, 41-function formula engine, persisted live charts, real zoom, honest templates, keyboard-complete palette, measured performance, and a judge-reviewed 18-capture viewport/theme pass.
 
 The score is intentionally frozen during the UI-foundation reset unless verified user-facing capability materially changes. Repository cleanup, smaller code, better CI, and stronger governance are valuable, but they do not by themselves increase professional product readiness.
 
@@ -21,7 +21,7 @@ ACTIVE APPLICATION: WRITER (IN_PROGRESS)
 LOCKED APPLICATIONS: PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
 ```
 
-Loom Sheets is certified ACCEPTED. Loom Writer is the active application and has completed its section 13 acceptance **evidence pass** (2026-09-06); its status label remains `IN_PROGRESS` because two gate items still require work recorded below. Present, Photo, Motion, Video, Studio, and Encode remain strictly LOCKED per AGENTS.MD Section 4 until Writer passes its complete acceptance gate.
+Loom Sheets is recorded `ACCEPTED` below (verified 2026-09-11), satisfying the user directive that paused Writer until Sheets reached 100% genuine functionality. Per owner directive 2026-09-11, Sheets remains the active workstream for an extended scope — removing every documented limitation in its section — and no Writer implementation work has started. Present, Photo, Motion, Video, Studio, and Encode remain strictly LOCKED.
 
 ### Writer acceptance evidence (verified 2026-09-06)
 
@@ -47,13 +47,13 @@ The visible result is below the desired product bar. Current captures have demon
 
 | Dimension | Current | Current truth |
 |---|---:|---|
-| Core/backend engineering | 65/100 | Many meaningful models, algorithms, persistence paths, parsers/exporters, and media helpers exist. |
-| Architecture & persistence | 70/100 | Shared history/recovery/storage/jobs/platform foundations are useful, but oversized modules and duplicated host logic remain significant debt. |
-| Functionality reachable through GUI | 33/100 | Writer's core daily workflow (typing, selection, rich formatting, lists, comments, tables, page setup, save/reopen, PDF/Markdown/DOCX export) is now wired end to end with journey evidence; other apps' GUI reachability is unchanged. |
-| Interaction design | 23/100 | Writer: undoable document edits with truthful enablement, keyboard/palette reachability, responsive toolbar/inspector breakpoints, scrollable chrome. Direct manipulation remains partial (text tables, no canvas comment highlight). |
-| Visual design & polish | 21/100 | Writer's redesigned UI passed a judge-reviewed viewport/theme acceptance pass; other applications' UI remains frozen legacy reference. |
-| Professional workflow depth | 25/100 | Useful slices exist in every app, but none completes the mature daily workflow expected of its category. |
-| **Overall product readiness** | **30/100** | Functional alpha with substantial foundations; professional-suite parity is not established. |
+| Core/backend engineering | 67/100 | Sheets formula engine (41 functions, lazy IF, error propagation, absolute refs), chart geometry, and workbook persistence added to the existing models. |
+| Architecture & persistence | 72/100 | Versioned multi-tab `.loomtable` format with back-compat, workbook undo states, crash-recovery of all tabs; new code lives in small modules (`functions`, `persistence`, `style`, `formatting`) while legacy cores stay under byte ceilings. |
+| Functionality reachable through GUI | 52/100 | Sheets' full daily workflow (cells, ranges, 41-function formulas, formatting, charts, zoom, sort, tabs, templates, save/reopen, CSV/XLSX export) is wired end to end with journey evidence; Writer's document workflow slice from 2026-09-06 stands; other apps unchanged. |
+| Interaction design | 38/100 | Sheets: every mutation undoable (incl. tab add/delete/rename and chart ops), keyboard/palette reachability for all primary commands, truthful enablement and status announcements, responsive toolbar/inspector breakpoints, viewport-filling grid, Esc hierarchy. Direct manipulation beyond fill-handle/chart-overlay remains future. |
+| Visual design & polish | 40/100 | Sheets passed a judge-reviewed 18-capture viewport/theme acceptance pass (no clipping, no ellipsized labels, no contrast defects; two defects found and fixed: stale zoom label, fixed-size grid void); Writer's earlier pass stands; other applications' UI remains frozen legacy reference. |
+| Professional workflow depth | 32/100 | Sheets completes a coherent daily spreadsheet workflow; cross-sheet references, pivot tables, and drawing/media remain documented future scope. Other apps unchanged. |
+| **Overall product readiness** | **38/100** | Functional alpha with the first accepted application; professional-suite parity is not established. |
 
 The overall score is not an arithmetic mean. User-visible workflow completion, reliability, and acceptance evidence dominate.
 
@@ -119,26 +119,29 @@ A later application remains locked until the immediately preceding application i
 
 ### Sheets
 
-Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
+Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13, verified 2026-09-11)
 
-Verified capabilities:
-- Shared UI foundation adopted: zero app-local generic control forks; 100% token discipline, native palette & menu bar integration.
-- Full daily spreadsheet workflow executable via GUI & keyboard: cell selection, ranges, Shift/Arrow navigation, Select All, Formula Bar input/cancellation/commit, Fill Down, Copy/Cut/Paste (cells and matrices), Delete/Backspace clearing.
-- Cell formatting & styling: Number formatting (Raw, Currency $, Percent %), Alignment (Left, Center, Right).
-- Table & sheet mutations with full undo/redo: Add/Delete rows, Add/Delete columns, Inspector step sizing (row height, column width), Ascending and Descending sort by active column with snapshot transactions, Freeze/Unfreeze panes with snapshot transactions.
-- Multi-sheet workbook management: Tab strip creation (+), switching, renaming, deletion, with isolated per-sheet undo/redo stacks.
-- Native file persistence & export: Native `.loomtable` save/open, CSV import/export with dialect sniffing and RFC 4180 multiline quote handling, XLSX workbook export.
-- Charts & Visualization: Embedded chart dialog with Bar, Line, and Pie views, automatic series normalization and responsive SVG rendering.
-- Mechanical & Visual Gates:
-  - 114 unit/integration tests passing (55 in `loom-sheets-app`, 59 in `loom-sheets-core`).
-  - Headless journeys (keyboard journey, sparse workbook journey) passing.
-  - 4 automated audits passing: code-structure, governance, assets, UI foundation.
-  - 0 warnings with `-D warnings` on Clippy.
-  - Native macOS screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200) and themes (light, dark).
+Verified capabilities (each gate item in parentheses):
+- Shared-foundation adoption, no app-local generic forks (§13.1): zero `toolkit.slint` imports, zero app-local `Loom*` controls; 100% token discipline; native palette and AppKit/DBus menu-bar reflection with live enablement.
+- Daily workflow end to end through the GUI (§13.3): cell selection, ranges, Shift/Arrow navigation, Select All, formula-bar input/cancel/commit, Fill Down, Copy/Cut/Paste (cells and matrices), Delete/Backspace clearing — all keyboard-reachable.
+- Selection/direct manipulation (§13.4): anchor/focus ranges, marquee, fill handle, floating live chart overlay, Esc hierarchy (palette/template/overflow/chart/edit).
+- Undo/redo and persistence (§13.5): every mutation undoable — cells, styles, alignments, decimals, sort, freeze, row/column sizing, chart insert/kind, tab add/delete/rename (workbook-level transactions with per-tab history discipline); `.loomtable` persists all tabs, active index, styles, alignments, freeze panes, and chart specs with legacy single-sheet back-compat; crash recovery restores the full workbook.
+- Native open/save/export (§13.6): `.loomtable` open/save/save-as, CSV import/export, single-sheet XLSX export; exports state values-only scope truthfully in the status line; cancellations and dialog failures report truthfully (§13.7).
+- Keyboard-only primary workflow (§13.8): full shortcut map (Ctrl+N/O/S/E/Z/C/X/V/A/B/I/U/K, Ctrl+=/-/0 zoom, arrows/Tab/Del/Esc) plus a 38-command palette covering every primary command incl. decimals, sort-by-column, fill, and chart ops.
+- Accessibility (§13.9): table role with polite live-region announcements, per-cell accessible labels/values, labeled icon-only controls with tooltips, managed focus (grid/palette/template/overflow), status confirmations for toggles.
+- Performance (§13.10): 10k-cell chained-formula sheet evaluates in ~167 ms (debug, Apple Silicon), 30 KB workbook serializes in ~1 ms and parses in ~2 ms; projection renders the visible window only.
+- Interop (§13.11): CSV round-trip with dialect sniffing and RFC 4180 multiline quotes, XLSX export validity (ZIP magic, shared strings), legacy `.loomtable` load path — each with tests.
+- Evidence (§13.12): 151 tests green (74 app, 72 core lib, 1 perf, 4 integration); keyboard + sparse + two-tab-save/reopen headless journeys PASS; 18 judge-reviewed captures (4 viewports × 3 themes + chooser/palette/chart/zoom states) with two found defects fixed (stale zoom label, fixed-size grid void); 4 audits PASS; Clippy `-D warnings` clean; `cargo fmt --check` clean; byte ceilings hold (`loom-sheets-core/src/lib.rs` 198,002 < 199,529; app `main.rs` 93,608 < 108,783).
+- Visual acceptance (§13.2): judge-reviewed pass over all 18 captures — no overlap, no clipped/ellipsized action labels, no toolbar wrapping, truthful disabled states, visible grid fills every viewport, light/dark/high-contrast coherent.
+- Defects (§13.13): no known severity-1/2 defect in the accepted workflow.
+- Formula engine depth: 41 functions (arithmetic, comparison, SUM/AVERAGE/COUNT/COUNTA/MIN/MAX/IF(lazy)/AND/OR/NOT, ROUND/ABS/SQRT/POWER/MOD/FLOOR/CEILING/MEDIAN, CONCAT/CONCATENATE/TEXTJOIN, VLOOKUP/HLOOKUP/INDEX/MATCH, LEFT/RIGHT/MID/LEN/UPPER/LOWER/TRIM, SUMIF/COUNTIF/AVERAGEIF with criteria + wildcards, PMT/FV/PV, TODAY/NOW, IFERROR), absolute `$` refs, preserved error codes, cycle detection.
+- Facade removal: Category/Pivot/Shape/Media/Note placebo controls, non-undoable pivot summary, label-only zoom, and dead template cards all replaced with real semantics or removed; eleven template cards each create their advertised sheet with live formulas.
+
+Documented limitations (not severity-1/2, future scope): cross-sheet cell references are not supported (tabs organize single-sheet models); XLSX export covers the active sheet only; CSV carries values only; array formulas, pivot tables, cell borders/fills/fonts, and drawing/media are future work; undo stacks are memory-unbounded.
 
 ### Writer
 
-Status: `IN_PROGRESS` (Visual and Functional Quality Audit in Progress; Present, Photo, Motion locked back per user directive)
+Status: `IN_PROGRESS` (unlocked 2026-09-11 after Sheets acceptance; no implementation work started yet — evidence below is preserved from the 2026-09-06 pass)
 
 Verified capabilities:
 - Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.

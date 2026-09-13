@@ -10,6 +10,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use loom_package::zip::PackageArchive;
 use serde::{Deserialize, Serialize};
 
+pub mod functions;
+pub mod persistence;
+pub mod refs;
+pub mod style;
+pub mod workbook;
+pub use persistence::{
+    sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
+};
+pub use style::{CellAlignment, CellStyle};
+
 /// Default width of a worksheet column in the desktop editor, in pixels.
 ///
 /// Keeping this value in the core model gives the headless engine and the
@@ -249,6 +259,10 @@ pub enum Value {
     Empty,
     /// An error value produced by evaluation.
     Error(CalcError),
+    /// Array result of a spill function: flat row-major values plus
+    /// dimensions. Displays as its top-left element; neighbors show spilled
+    /// elements, and array input outside aggregations is `#VALUE!`.
+    Array(Vec<Value>, usize, usize),
 }
 
 impl Value {
@@ -266,6 +280,10 @@ impl Value {
             Self::Bool(b) => b.to_string(),
             Self::Empty => String::new(),
             Self::Error(e) => format!("#{}", e.code()),
+            Self::Array(values, _, _) => values
+                .first()
+                .map(|first| first.display())
+                .unwrap_or_default(),
         }
     }
 }
@@ -283,6 +301,8 @@ pub enum CalcError {
     Name,
     /// Formula references its own cell (cycle).
     Ref,
+    /// Spill range blocked by content.
+    Spill,
     /// Parse error.
     Parse,
 }
@@ -296,6 +316,7 @@ impl CalcError {
             Self::Value => "VALUE!",
             Self::Name => "NAME?",
             Self::Ref => "REF!",
+            Self::Spill => "SPILL!",
             Self::Parse => "PARSE!",
         }
     }
@@ -371,16 +392,6 @@ impl RawCellEdit {
     }
 }
 
-/// Text alignment within a spreadsheet cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CellAlignment {
-    #[default]
-    General,
-    Left,
-    Center,
-    Right,
-}
-
 /// A single worksheet.
 #[derive(Debug, Clone, Default)]
 pub struct Sheet {
@@ -388,6 +399,8 @@ pub struct Sheet {
     pub cells: BTreeMap<CellRef, Cell>,
     /// Alignment styles keyed by cell coordinate.
     pub alignments: BTreeMap<CellRef, CellAlignment>,
+    /// Cell formatting styles keyed by cell coordinate.
+    pub styles: BTreeMap<CellRef, CellStyle>,
     /// Sheet name.
     pub name: String,
     /// Frozen top rows count.
@@ -398,6 +411,8 @@ pub struct Sheet {
     pub col_widths: BTreeMap<u32, f32>,
     /// Custom row heights in pixels keyed by row index.
     pub row_heights: BTreeMap<u32, f32>,
+    /// Embedded live-linked chart overlay, if the user inserted one.
+    pub chart: Option<SheetChart>,
 }
 
 impl Sheet {
@@ -407,10 +422,12 @@ impl Sheet {
             name: name.to_string(),
             cells: BTreeMap::new(),
             alignments: BTreeMap::new(),
+            styles: BTreeMap::new(),
             freeze_rows: 0,
             freeze_cols: 0,
             col_widths: BTreeMap::new(),
             row_heights: BTreeMap::new(),
+            chart: None,
         }
     }
 
@@ -475,6 +492,33 @@ impl Sheet {
         self.alignments.get(&r).copied().unwrap_or_default()
     }
 
+    /// Gets style for a cell (defaulting to unstyled).
+    pub fn cell_style(&self, r: CellRef) -> CellStyle {
+        self.styles.get(&r).copied().unwrap_or_default()
+    }
+
+    /// Sets style for a single cell.
+    pub fn set_cell_style(&mut self, r: CellRef, style: CellStyle) {
+        if style.is_default() {
+            self.styles.remove(&r);
+        } else {
+            self.styles.insert(r, style);
+        }
+    }
+
+    /// Sets style across a rectangular range of cells.
+    pub fn set_range_style(&mut self, start: CellRef, end: CellRef, style: CellStyle) {
+        let min_col = start.col.min(end.col);
+        let max_col = start.col.max(end.col);
+        let min_row = start.row.min(end.row);
+        let max_row = start.row.max(end.row);
+        for col in min_col..=max_col {
+            for row in min_row..=max_row {
+                self.set_cell_style(CellRef { col, row }, style);
+            }
+        }
+    }
+
     /// Freeze a number of top rows and left columns.
     pub fn freeze_panes(&mut self, rows: u32, cols: u32) {
         self.freeze_rows = rows;
@@ -528,6 +572,7 @@ pub enum NumberFormat {
     General,
     Currency,
     Percentage,
+    Number,
     Scientific,
     DateIso,
     PlainText,
@@ -550,6 +595,13 @@ pub fn format_cell_display(raw: &str, format: NumberFormat) -> String {
         NumberFormat::Percentage => {
             if let Ok(num) = raw.parse::<f64>() {
                 format_number_percentage(num, 1)
+            } else {
+                raw.to_string()
+            }
+        }
+        NumberFormat::Number => {
+            if let Ok(num) = raw.parse::<f64>() {
+                format!("{num:.2}")
             } else {
                 raw.to_string()
             }
@@ -616,103 +668,9 @@ pub fn sort_range_rows(rows: &[Vec<String>], col_idx: usize, ascending: bool) ->
     sorted
 }
 
-/// Shifts cell references within a formula string by `delta_cols` and `delta_rows`,
-/// respecting absolute `$` anchors (e.g. `$A$1`, `A$1`, `$A1`, `A1`).
+/// Shifts cell references within a formula string — see [`refs`].
 pub fn shift_formula_references(formula: &str, delta_cols: i32, delta_rows: i32) -> String {
-    if !formula.starts_with('=') {
-        return formula.to_string();
-    }
-
-    let mut result = String::with_capacity(formula.len());
-    let chars: Vec<char> = formula.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        // Check for start of cell reference (optional '$' followed by letters then optional '$' then digits)
-        let is_ref_start = if chars[i] == '$' {
-            i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic()
-        } else if chars[i].is_ascii_alphabetic() {
-            // Must not be preceded by alphanumeric or underscore (which would make it a function name like SUM)
-            !(i > 0 && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_'))
-        } else {
-            false
-        };
-
-        if is_ref_start {
-            let start = i;
-            let mut col_abs = false;
-            if chars[i] == '$' {
-                col_abs = true;
-                i += 1;
-            }
-
-            let col_start = i;
-            while i < chars.len() && chars[i].is_ascii_alphabetic() {
-                i += 1;
-            }
-            let col_str: String = chars[col_start..i].iter().collect();
-
-            let mut row_abs = false;
-            if i < chars.len() && chars[i] == '$' {
-                row_abs = true;
-                i += 1;
-            }
-
-            let row_start = i;
-            while i < chars.len() && chars[i].is_ascii_digit() {
-                i += 1;
-            }
-            let row_str: String = chars[row_start..i].iter().collect();
-
-            // Check if this formed a valid cell reference (e.g., has digits for row)
-            if !col_str.is_empty() && !row_str.is_empty() {
-                // Parse column index (0-based)
-                let mut col_idx: u32 = 0;
-                for c in col_str.to_ascii_uppercase().chars() {
-                    col_idx = col_idx * 26 + (c as u32 - 'A' as u32 + 1);
-                }
-                let mut col_num = (col_idx - 1) as i32;
-
-                // Parse row index (0-based)
-                let mut row_num = row_str.parse::<i32>().unwrap_or(1) - 1;
-
-                if !col_abs {
-                    col_num = (col_num + delta_cols).max(0);
-                }
-                if !row_abs {
-                    row_num = (row_num + delta_rows).max(0);
-                }
-
-                // Re-encode column string
-                let mut new_col = String::new();
-                let mut cn = col_num + 1;
-                while cn > 0 {
-                    let rem = ((cn - 1) % 26) as u8;
-                    new_col.insert(0, (b'A' + rem) as char);
-                    cn = (cn - 1) / 26;
-                }
-
-                if col_abs {
-                    result.push('$');
-                }
-                result.push_str(&new_col);
-                if row_abs {
-                    result.push('$');
-                }
-                result.push_str(&(row_num + 1).to_string());
-            } else {
-                // Not a valid cell reference, push original matched substring
-                for ch in &chars[start..i] {
-                    result.push(*ch);
-                }
-            }
-        } else {
-            result.push(chars[i]);
-            i += 1;
-        }
-    }
-
-    result
+    refs::shift_formula_references(formula, delta_cols, delta_rows)
 }
 
 /// Dependency graph tracking precedent and dependent relationships between cells.
@@ -1436,6 +1394,10 @@ enum Token {
     String(String),
     Cell(CellRef),
     Ident(String),
+    /// Quoted sheet name for cross-sheet references (`'My Sheet'!A1`).
+    SheetName(String),
+    /// `!` separating a sheet name from a cell reference.
+    Bang,
     Plus,
     Minus,
     Star,
@@ -1495,9 +1457,52 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
                 tokens.push(Token::Comma);
                 i += 1;
             }
+            '!' => {
+                tokens.push(Token::Bang);
+                i += 1;
+            }
+            '\'' => {
+                // Quoted sheet name for cross-sheet references: `'My Sheet'!A1`
+                // with '' as an escaped quote. Only meaningful directly before
+                // a `!`; anything else fails at parse time.
+                i += 1;
+                let mut name = String::new();
+                let mut closed = false;
+                while i < bytes.len() {
+                    let ch = bytes[i] as char;
+                    if ch == '\'' {
+                        if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                            name.push('\'');
+                            i += 2;
+                        } else {
+                            i += 1;
+                            closed = true;
+                            break;
+                        }
+                    } else {
+                        name.push(ch);
+                        i += 1;
+                    }
+                }
+                if !closed || name.is_empty() {
+                    return Err(CalcError::Parse);
+                }
+                tokens.push(Token::SheetName(name));
+            }
             ':' => {
                 tokens.push(Token::Colon);
                 i += 1;
+            }
+            // Absolute-reference marker: `$A$1` pins column/row during
+            // fill/copy shifting (see `shift_formula_references`). The marker
+            // carries no evaluation semantics, so only a `$` directly
+            // attached to a cell coordinate is accepted here.
+            '$' => {
+                if i + 1 < bytes.len() && (bytes[i + 1] as char).is_ascii_alphabetic() {
+                    i += 1;
+                } else {
+                    return Err(CalcError::Parse);
+                }
             }
             '=' => {
                 if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
@@ -1572,12 +1577,19 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
                 tokens.push(Token::Number(num));
             }
             c if c.is_ascii_alphabetic() => {
-                // Could be a cell ref (e.g. A1), function name, or bare name.
+                // Could be a cell ref (e.g. A1, $A$1), function name, or bare name.
                 let letters_start = i;
                 while i < bytes.len() && (bytes[i] as char).is_ascii_alphabetic() {
                     i += 1;
                 }
                 let letters = &input[letters_start..i];
+                // Optional row-absolute marker between column and row (`A$1`).
+                if i + 1 < bytes.len()
+                    && bytes[i] == b'$'
+                    && (bytes[i + 1] as char).is_ascii_digit()
+                {
+                    i += 1;
+                }
                 if i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
                     // A cell reference: letters followed by digits, e.g. A1 or AA10.
                     let num_start = i;
@@ -1602,10 +1614,21 @@ fn lex(input: &str) -> Result<Vec<Token>, CalcError> {
 
 /// AST expression.
 #[derive(Debug, Clone, PartialEq)]
-enum Expr {
+pub(crate) enum Expr {
     Number(f64),
     Text(String),
     Cell(CellRef),
+    /// Cross-sheet cell reference (`Sheet2!A1`); sheet name as written.
+    SheetCell {
+        sheet: String,
+        cell: CellRef,
+    },
+    /// Cross-sheet range (`Sheet2!A1:B2`).
+    SheetRange {
+        sheet: String,
+        start: CellRef,
+        end: CellRef,
+    },
     Unary(Box<Expr>),
     Binary {
         lhs: Box<Expr>,
@@ -1782,6 +1805,11 @@ impl Parser {
                 Ok(Expr::Cell(r))
             }
             Some(Token::Ident(name)) => {
+                // Cross-sheet reference: Name!A1 or Name!A1:B2.
+                if let Some(Token::Bang) = self.peek() {
+                    self.pos += 1;
+                    return self.parse_sheet_ref(name);
+                }
                 // Function call or bare name.
                 if let Some(Token::LParen) = self.peek() {
                     self.pos += 1;
@@ -1810,6 +1838,14 @@ impl Parser {
                     }
                 }
             }
+            Some(Token::SheetName(name)) => {
+                // Quoted cross-sheet reference: 'My Sheet'!A1.
+                if let Some(Token::Bang) = self.peek() {
+                    self.pos += 1;
+                    return self.parse_sheet_ref(name);
+                }
+                Err(CalcError::Parse)
+            }
             Some(Token::LParen) => {
                 let e = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
@@ -1817,6 +1853,24 @@ impl Parser {
             }
             _ => Err(CalcError::Parse),
         }
+    }
+
+    /// Parse the cell or range half of a cross-sheet reference after the
+    /// sheet name and `!` were consumed.
+    fn parse_sheet_ref(&mut self, sheet: String) -> Result<Expr, CalcError> {
+        let start = match self.next() {
+            Some(Token::Cell(cell)) => cell,
+            _ => return Err(CalcError::Parse),
+        };
+        if let Some(Token::Colon) = self.peek() {
+            self.pos += 1;
+            let end = match self.next() {
+                Some(Token::Cell(cell)) => cell,
+                _ => return Err(CalcError::Parse),
+            };
+            return Ok(Expr::SheetRange { sheet, start, end });
+        }
+        Ok(Expr::SheetCell { sheet, cell: start })
     }
 }
 
@@ -1834,7 +1888,7 @@ impl Expr {
 /// A parsed formula ready for evaluation.
 #[derive(Debug)]
 pub struct Formula {
-    root: Expr,
+    pub(crate) root: Expr,
 }
 
 /// Parse a formula body (without leading `=`).
@@ -1849,7 +1903,7 @@ pub fn parse_formula(body: &str) -> Result<Formula, CalcError> {
 }
 
 /// Collect all cell references touched by an expression (for the dependency graph).
-fn collect_refs(e: &Expr, out: &mut HashSet<CellRef>) {
+pub(crate) fn collect_refs(e: &Expr, out: &mut HashSet<CellRef>) {
     match e {
         Expr::Cell(r) => {
             out.insert(*r);
@@ -1876,12 +1930,15 @@ fn collect_refs(e: &Expr, out: &mut HashSet<CellRef>) {
 }
 
 /// Evaluate an expression against a resolved-cell lookup.
-fn eval_expr(e: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> Value {
+pub(crate) fn eval_expr(e: &Expr, lookup: &dyn Fn(CellRef) -> Value) -> Value {
     match e {
         Expr::Number(n) => Value::Number(*n),
         Expr::Text(s) => Value::Text(s.clone()),
         Expr::Bool(b) => Value::Bool(*b),
         Expr::Cell(r) => lookup(*r),
+        // Cross-sheet nodes need workbook context (see `workbook::evaluate_workbook`).
+        // In a single-sheet context they are unresolvable references.
+        Expr::SheetCell { .. } | Expr::SheetRange { .. } => Value::Error(CalcError::Ref),
         Expr::Range { start, end: _ } => {
             // Range used directly where a scalar is expected -> take top-left.
             lookup(*start)
@@ -1910,6 +1967,14 @@ fn num(v: &Value) -> Result<f64, CalcError> {
 }
 
 fn eval_binary(l: &Value, op: BinOp, r: &Value) -> Value {
+    // Errors propagate unchanged so `#DIV/0!`, `#N/A`, and `#REF!` survive
+    // through arithmetic instead of collapsing to a generic `#VALUE!`.
+    if let Value::Error(_) = l {
+        return l.clone();
+    }
+    if let Value::Error(_) = r {
+        return r.clone();
+    }
     // Comparison with text/bool/error semantics.
     if matches!(
         op,
@@ -1957,8 +2022,25 @@ fn eval_binary(l: &Value, op: BinOp, r: &Value) -> Value {
     }
 }
 
+/// Push a value onto flattened function arguments, recursing into array
+/// results so scalar aggregations compose over spills.
+fn push_flattened(value: Value, out: &mut Vec<Value>) {
+    match value {
+        Value::Array(items, _, _) => {
+            for item in items {
+                push_flattened(item, out);
+            }
+        }
+        scalar => out.push(scalar),
+    }
+}
+
 fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -> Value {
-    // Flatten each argument: ranges expand to individual cell lookups.
+    if let Some(res) = functions::eval_extended_function(name, args, lookup) {
+        return res;
+    }
+    // Flatten each argument: ranges expand to individual cell lookups, and
+    // array results flatten to their elements so aggregations compose.
     let mut values: Vec<Value> = Vec::new();
     for a in args {
         match a {
@@ -1969,7 +2051,7 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                     }
                 }
             }
-            _ => values.push(eval_expr(a, lookup)),
+            _ => push_flattened(eval_expr(a, lookup), &mut values),
         }
     }
     match name {
@@ -2054,7 +2136,7 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                 _ => Value::Error(CalcError::Value),
             }
         }
-        "CONCAT" => {
+        "CONCAT" | "CONCATENATE" => {
             let mut s = String::new();
             for v in &values {
                 match v {
@@ -2062,6 +2144,8 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
                     Value::Number(n) => s.push_str(&Value::Number(*n).display()),
                     Value::Bool(b) => s.push_str(&b.to_string()),
                     Value::Empty => {}
+                    // Arguments flatten above, so arrays never arrive here.
+                    Value::Array(_, _, _) => return Value::Error(CalcError::Value),
                     Value::Error(_) => return v.clone(),
                 }
             }
@@ -2086,20 +2170,23 @@ fn eval_function(name: &str, args: &[Expr], lookup: &dyn Fn(CellRef) -> Value) -
             Value::Number(count)
         }
         "IF" => {
-            if values.len() < 2 || values.len() > 3 {
+            // Lazy branches: only the taken branch evaluates, so an error in
+            // the untaken branch (e.g. `IF(A1=0, "n/a", 1/A1)`) does not leak.
+            if args.len() < 2 || args.len() > 3 {
                 return Value::Error(CalcError::Value);
             }
-            let condition = match &values[0] {
-                Value::Bool(b) => *b,
-                Value::Number(n) => *n != 0.0,
+            let condition = match eval_expr(&args[0], lookup) {
+                Value::Bool(b) => b,
+                Value::Number(n) => n != 0.0,
                 Value::Text(s) => !s.is_empty(),
                 Value::Empty => false,
-                Value::Error(_) => return values[0].clone(),
+                Value::Array(_, _, _) => return Value::Error(CalcError::Value),
+                Value::Error(e) => return Value::Error(e),
             };
             if condition {
-                values[1].clone()
-            } else if values.len() == 3 {
-                values[2].clone()
+                eval_expr(&args[1], lookup)
+            } else if args.len() == 3 {
+                eval_expr(&args[2], lookup)
             } else {
                 Value::Bool(false)
             }
@@ -2249,104 +2336,14 @@ pub struct EvaluatedCell {
 }
 
 /// Evaluate a sheet, returning a map of raw -> resolved value for every cell.
+///
+/// Shares the workbook evaluator (single-sheet workbook): identical ordering,
+/// cycle, and error semantics; unqualified formulas behave exactly as before.
 pub fn evaluate(sheet: &Sheet) -> HashMap<CellRef, Value> {
-    let mut result: HashMap<CellRef, Value> = HashMap::new();
-
-    // First pass: literal cells (non-formula).
-    let mut formula_cells: Vec<CellRef> = Vec::new();
-    for (r, c) in &sheet.cells {
-        if c.is_formula() {
-            formula_cells.push(*r);
-        } else {
-            result.insert(*r, parse_literal(&c.raw));
-        }
-    }
-
-    // Build dependency graph among formula cells only.
-    let mut deps: HashMap<CellRef, HashSet<CellRef>> = HashMap::new();
-    let mut parsed: HashMap<CellRef, Formula> = HashMap::new();
-    for r in &formula_cells {
-        let body = sheet.raw(*r).unwrap()[1..].trim();
-        match parse_formula(body) {
-            Ok(f) => {
-                let mut refs = HashSet::new();
-                collect_refs(&f.root, &mut refs);
-                // Only keep refs that are formula cells (literal deps need no ordering).
-                let formula_refs: HashSet<CellRef> = refs
-                    .iter()
-                    .copied()
-                    .filter(|rr| sheet.cells.get(rr).map(|c| c.is_formula()).unwrap_or(false))
-                    .collect();
-                deps.insert(*r, formula_refs);
-                parsed.insert(*r, f);
-            }
-            Err(e) => {
-                result.insert(*r, Value::Error(e));
-            }
-        }
-    }
-
-    // Topological order (Kahn's algorithm) with cycle detection.
-    let mut in_degree: HashMap<CellRef, usize> = HashMap::new();
-    for r in &formula_cells {
-        in_degree.insert(*r, deps.get(r).map(|d| d.len()).unwrap_or(0));
-    }
-    let mut ready: Vec<CellRef> = in_degree
-        .iter()
-        .filter(|(_, &deg)| deg == 0)
-        .map(|(r, _)| *r)
-        .collect();
-    // Deterministic order.
-    ready.sort();
-
-    let mut evaluated_count = 0usize;
-    let visited: &mut HashSet<CellRef> = &mut HashSet::new();
-    while let Some(r) = ready.first().copied() {
-        ready.remove(0);
-        if visited.contains(&r) {
-            continue;
-        }
-        visited.insert(r);
-        // Evaluate.
-        if let Some(f) = parsed.get(&r) {
-            let lookup = |cr: CellRef| -> Value {
-                if let Some(v) = result.get(&cr) {
-                    v.clone()
-                } else {
-                    Value::Empty
-                }
-            };
-            result.insert(r, eval_expr(&f.root, &lookup));
-        }
-        evaluated_count += 1;
-        // Decrease in-degree of dependents.
-        let dependents: Vec<CellRef> = formula_cells
-            .iter()
-            .copied()
-            .filter(|other| deps.get(other).map(|d| d.contains(&r)).unwrap_or(false))
-            .collect();
-        for d in dependents {
-            if let Some(deg) = in_degree.get_mut(&d) {
-                *deg = deg.saturating_sub(1);
-                if *deg == 0 && !visited.contains(&d) {
-                    ready.push(d);
-                }
-            }
-        }
-        ready.sort();
-    }
-
-    // Cycles or incomplete -> mark remaining formula cells as REF error.
-    let total_formulas = formula_cells.len();
-    if evaluated_count < total_formulas {
-        for r in &formula_cells {
-            if !visited.contains(r) {
-                result.insert(*r, Value::Error(CalcError::Ref));
-            }
-        }
-    }
-
-    result
+    workbook::evaluate_workbook(std::slice::from_ref(sheet))
+        .into_iter()
+        .next()
+        .unwrap_or_default()
 }
 
 /// Parse a literal cell value (numbers, bools, text, empty).
@@ -2367,7 +2364,15 @@ pub fn parse_literal(s: &str) -> Value {
 
 /// Export a sheet to CSV.
 pub fn to_csv(sheet: &Sheet) -> String {
-    let vals = evaluate(sheet);
+    to_csv_with_values(sheet, &evaluate(sheet))
+}
+
+/// Export a sheet to CSV from precomputed values (e.g. workbook-resolved so
+/// cross-sheet references export their displayed values, not `#REF!`).
+pub fn to_csv_with_values(
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+) -> String {
     let mut max_row = 0u32;
     let mut max_col = 0u32;
     for r in sheet.cells.keys() {
@@ -2561,127 +2566,8 @@ pub fn from_csv(name: &str, csv: &str) -> Sheet {
     sheet
 }
 
-/// Serialize a sheet to the `.loomtable` content JSON.
-pub fn sheet_to_json(sheet: &Sheet) -> String {
-    let mut s = String::with_capacity(128);
-    s.push('{');
-    s.push_str("\"name\":\"");
-    s.push_str(&sheet.name.replace('"', "\\\""));
-    s.push_str("\",\"cells\":[");
-    let mut first = true;
-    for (r, c) in &sheet.cells {
-        if !first {
-            s.push(',');
-        }
-        first = false;
-        s.push('{');
-        s.push_str("\"ref\":\"");
-        s.push_str(&r.to_a1());
-        s.push_str("\",\"raw\":\"");
-        s.push_str(
-            &c.raw
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('\n', "\\n"),
-        );
-        s.push_str("\"}");
-    }
-    s.push(']');
-    s.push_str(",\"col_widths\":{");
-    let mut first_width = true;
-    for (col, width) in &sheet.col_widths {
-        if !first_width {
-            s.push(',');
-        }
-        first_width = false;
-        s.push('"');
-        s.push_str(&col.to_string());
-        s.push_str("\":");
-        s.push_str(&width.to_string());
-    }
-    s.push_str("},\"row_heights\":{");
-    let mut first_height = true;
-    for (row, height) in &sheet.row_heights {
-        if !first_height {
-            s.push(',');
-        }
-        first_height = false;
-        s.push('"');
-        s.push_str(&row.to_string());
-        s.push_str("\":");
-        s.push_str(&height.to_string());
-    }
-    s.push('}');
-    s.push('}');
-    s
-}
-
-/// Parse sheet JSON back.
-pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
-    // Extract name and cells using a minimal parser (name is up to first "cells").
-    let mut name = String::new();
-    if let Some(prefix) = s.split("\"cells\"").next() {
-        if let Some(n) = prefix.split("\"name\":\"").nth(1) {
-            // Cut at the closing quote that precedes `,"cells"`.
-            let end = n.find('"').unwrap_or(n.len());
-            name = n[..end].replace("\\\"", "\"").replace("\\\\", "\\");
-        }
-    }
-    let mut sheet = Sheet::new(&name);
-    // Parse each {"ref":"A1","raw":"..."}.
-    let body = s.split("\"cells\":").nth(1).unwrap_or("[]");
-    for frag in body.split("{\"ref\":\"") {
-        if frag.is_empty() {
-            continue;
-        }
-        let Some(end) = frag.find("\",\"raw\":\"") else {
-            continue;
-        };
-        let a1 = &frag[..end];
-        let rest = &frag[end + "\",\"raw\":\"".len()..];
-        let Some(end2) = rest.find("\"}") else {
-            continue;
-        };
-        let raw = &rest[..end2];
-        let raw = raw
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
-            .replace("\\n", "\n");
-        sheet.set_str(a1, &raw);
-    }
-    for (index, width) in parse_dimension_map(s, "col_widths") {
-        sheet.set_col_width(index, width);
-    }
-    for (index, height) in parse_dimension_map(s, "row_heights") {
-        sheet.set_row_height(index, height);
-    }
-    Ok(sheet)
-}
-
-/// Parse the optional numeric dimension maps emitted by [`sheet_to_json`].
-///
-/// Older workbook packages do not contain these fields, so a missing or
-/// malformed map simply yields an empty result and leaves the model defaults
-/// in place.  This intentionally small parser matches the hand-rolled sheet
-/// serializer above while keeping backwards compatibility with existing
-/// `.loomtable` content.
-fn parse_dimension_map(s: &str, key: &str) -> BTreeMap<u32, f32> {
-    let marker = format!("\"{key}\":{{");
-    let Some(start) = s.find(&marker).map(|index| index + marker.len()) else {
-        return BTreeMap::new();
-    };
-    let rest = &s[start..];
-    let body = rest.split('}').next().unwrap_or_default();
-    body.split(',')
-        .filter_map(|entry| {
-            let (raw_index, raw_value) = entry.split_once(':')?;
-            let index = raw_index.trim().trim_matches('"').parse::<u32>().ok()?;
-            let value = raw_value.trim().parse::<f32>().ok()?;
-            value.is_finite().then_some((index, value))
-        })
-        .collect()
-}
-
+// Sheet JSON persistence lives in `persistence`; see
+// `persistence::sheet_to_json` and `persistence::sheet_from_json`.
 /// Inclusive rectangular cell range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellRange {
@@ -3433,6 +3319,52 @@ pub enum ChartKind {
     Scatter,
 }
 
+impl ChartKind {
+    /// Canonical lowercase name used in sheet JSON and the GUI.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChartKind::Bar => "bar",
+            ChartKind::Line => "line",
+            ChartKind::Pie => "pie",
+            ChartKind::Scatter => "scatter",
+        }
+    }
+
+    /// Parse a kind name; unknown values map to Bar.
+    pub fn parse_kind(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "line" => ChartKind::Line,
+            "pie" => ChartKind::Pie,
+            "scatter" => ChartKind::Scatter,
+            _ => ChartKind::Bar,
+        }
+    }
+
+    /// Next kind for the overlay kind control (Bar -> Line -> Pie -> Bar).
+    /// Scatter stays available to the model but out of the GUI cycle.
+    pub fn cycle(self) -> Self {
+        match self {
+            ChartKind::Bar => ChartKind::Line,
+            ChartKind::Line => ChartKind::Pie,
+            _ => ChartKind::Bar,
+        }
+    }
+}
+
+/// A chart embedded in a worksheet: live-linked kind/title plus the source
+/// columns it derives from (re-derived on every render, persisted as-is).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SheetChart {
+    /// Rendered chart kind.
+    pub kind: ChartKind,
+    /// Overlay title.
+    pub title: String,
+    /// Zero-based category (label) column.
+    pub cat_col: u32,
+    /// Zero-based numeric value column.
+    pub val_col: u32,
+}
+
 /// One data series: category/value pairs plus display metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ChartSeries {
@@ -3873,22 +3805,160 @@ const MAX_XLSX_DENSE_CELLS: usize = 10_000_000;
 /// namespaces are not interpreted. An out-of-range or malformed shared-string index
 /// errs, as does a used range beyond [`MAX_XLSX_DENSE_CELLS`]. A sheet with no cells
 /// yields an empty grid.
-/// Exports a dense grid into a minimal valid `.xlsx` archive. Every cell is written as a
-/// shared-string reference (numbers export in their display form); empty strings become
-/// cell gaps and fully empty rows are dropped (absence is not content). Round-trips
-/// losslessly through [`extract_xlsx_grid`] for all populated rows.
+/// Exports a dense grid into a minimal valid `.xlsx` archive with
+/// Excel-native value types: numbers write as numeric `<v>` cells, booleans
+/// as `t="b"`, errors as `t="e"`, and text as shared strings. Empty strings
+/// become cell gaps and fully empty rows are dropped (absence is not
+/// content). Round-trips through [`extract_xlsx_grid`] for all populated rows.
 pub fn export_xlsx_from_grid(grid: &[Vec<String>]) -> Result<Vec<u8>, String> {
+    let sheet = XlsxSheetData {
+        name: "Sheet1".to_string(),
+        grid: grid
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| XlsxCellData {
+                        display: value.clone(),
+                        formula: None,
+                        number: value.parse::<f64>().ok(),
+                        boolean: match value.as_str() {
+                            "TRUE" => Some(true),
+                            "FALSE" => Some(false),
+                            _ => None,
+                        },
+                    })
+                    .collect()
+            })
+            .collect(),
+    };
+    export_xlsx_workbook(std::slice::from_ref(&sheet))
+}
+
+/// One cell for XLSX export.
+pub struct XlsxCellData {
+    /// Displayed text (cached value for formula cells).
+    pub display: String,
+    /// Formula without the leading `=`; Loom syntax matches Excel for plain
+    /// names, `$` absolutes, cross-sheet qualifiers, and common functions.
+    pub formula: Option<String>,
+    /// Native numeric cached value, when numeric.
+    pub number: Option<f64>,
+    /// Boolean cached value, when boolean.
+    pub boolean: Option<bool>,
+}
+
+/// One worksheet for XLSX export: dense display grid with formulas.
+pub struct XlsxSheetData {
+    /// Desired tab name (sanitized to Excel rules on export).
+    pub name: String,
+    /// Dense rows of cells; empty displays without formulas become gaps.
+    pub grid: Vec<Vec<XlsxCellData>>,
+}
+
+/// Build export cells for a sheet from evaluated values: display text plus
+/// the raw formula and typed cached values underneath.
+pub fn sheet_to_xlsx_data(
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+) -> XlsxSheetData {
+    let mut max_row = 0u32;
+    let mut max_col = 0u32;
+    for cell in sheet.cells.keys() {
+        max_row = max_row.max(cell.row);
+        max_col = max_col.max(cell.col);
+    }
+    let mut grid = Vec::new();
+    for row in 0..=max_row {
+        let mut row_vec = Vec::new();
+        for col in 0..=max_col {
+            let cell = CellRef { row, col };
+            let value = vals.get(&cell).cloned().unwrap_or(Value::Empty);
+            let formula = sheet
+                .raw(cell)
+                .filter(|raw| raw.starts_with('='))
+                .map(|raw| raw[1..].to_string());
+            let (number, boolean) = match &value {
+                Value::Number(n) if n.is_finite() => (Some(*n), None),
+                Value::Bool(b) => (None, Some(*b)),
+                _ => (None, None),
+            };
+            row_vec.push(XlsxCellData {
+                display: value.display(),
+                formula,
+                number,
+                boolean,
+            });
+        }
+        grid.push(row_vec);
+    }
+    XlsxSheetData {
+        name: sheet.name.clone(),
+        grid,
+    }
+}
+
+/// Sanitize a tab name to Excel sheet-name rules: strip `[]:*?/\` and `"`,
+/// trim, truncate to 31 characters, fall back to `Sheet{N}` when empty.
+pub fn sanitize_xlsx_sheet_name(name: &str, fallback_index: usize) -> String {
+    let mut clean: String = name
+        .chars()
+        .filter(|c| !matches!(c, '[' | ']' | ':' | '*' | '?' | '/' | '\\' | '"'))
+        .collect::<String>()
+        .trim()
+        .to_string();
+    while clean.chars().count() > 31 {
+        clean.pop();
+    }
+    if clean.is_empty() {
+        format!("Sheet{}", fallback_index + 1)
+    } else {
+        clean
+    }
+}
+
+/// Escape XML attribute text (element text plus both quote styles).
+fn xml_escape_attr(value: &str) -> String {
+    xml_escape_cell(value).replace('"', "&quot;")
+}
+
+/// Exports whole workbooks into a minimal valid `.xlsx` archive: one
+/// worksheet part per tab (names sanitized), a global shared-string table,
+/// native numeric/boolean/error cached values, and preserved formulas.
+pub fn export_xlsx_workbook(sheets: &[XlsxSheetData]) -> Result<Vec<u8>, String> {
     use std::collections::BTreeMap;
 
+    if sheets.is_empty() {
+        return Err("xlsx export needs at least one sheet".to_string());
+    }
+    let names: Vec<String> = sheets
+        .iter()
+        .enumerate()
+        .map(|(index, sheet)| sanitize_xlsx_sheet_name(&sheet.name, index))
+        .collect();
+
+    // Shared strings carry text displays only; numbers, booleans, and errors
+    // write inline, and error displays never enter the table.
     let mut table: BTreeMap<&str, usize> = BTreeMap::new();
     let mut ordered: Vec<&str> = Vec::new();
-    for row in grid {
-        for value in row {
-            if !value.is_empty() && !table.contains_key(value.as_str()) {
-                table.insert(value, ordered.len());
-                ordered.push(value);
+    for sheet in sheets {
+        for row in &sheet.grid {
+            for cell in row {
+                if cell.number.is_some() || cell.boolean.is_some() {
+                    continue;
+                }
+                if cell.display.is_empty() || cell.display.starts_with('#') {
+                    continue;
+                }
+                if !table.contains_key(cell.display.as_str()) {
+                    table.insert(&cell.display, ordered.len());
+                    ordered.push(&cell.display);
+                }
             }
         }
+    }
+
+    fn is_error_display(display: &str) -> bool {
+        display.starts_with('#')
     }
 
     let column_letters = |mut col: usize| -> String {
@@ -3903,26 +3973,54 @@ pub fn export_xlsx_from_grid(grid: &[Vec<String>]) -> Result<Vec<u8>, String> {
         letters
     };
 
-    let mut sheet_rows = String::new();
-    for (row_index_zero_based, row) in grid.iter().enumerate() {
-        if row.iter().all(|value| value.is_empty()) {
-            continue;
-        }
-        let row_index = row_index_zero_based;
-        let mut cells = String::new();
-        for (col_index, value) in row.iter().enumerate() {
-            if value.is_empty() {
+    let mut sheet_parts: Vec<String> = Vec::new();
+    for sheet in sheets {
+        let mut sheet_rows = String::new();
+        for (row_index_zero_based, row) in sheet.grid.iter().enumerate() {
+            if row
+                .iter()
+                .all(|cell| cell.display.is_empty() && cell.formula.is_none())
+            {
                 continue;
             }
-            let index = table[value.as_str()];
-            let letter = column_letters(col_index);
-            let row_no = row_index + 1;
-            cells.push_str(&format!(
-                "<c r=\"{letter}{row_no}\" t=\"s\"><v>{index}</v></c>"
-            ));
+            let mut cells = String::new();
+            for (col_index, cell) in row.iter().enumerate() {
+                if cell.display.is_empty() && cell.formula.is_none() {
+                    continue;
+                }
+                let reference =
+                    format!("{}{}", column_letters(col_index), row_index_zero_based + 1);
+                let mut open = format!("<c r=\"{reference}\"");
+                if cell.boolean.is_some() {
+                    open.push_str(" t=\"b\"");
+                } else if is_error_display(&cell.display) {
+                    open.push_str(" t=\"e\"");
+                } else if cell.number.is_none() && !cell.display.is_empty() {
+                    open.push_str(" t=\"s\"");
+                }
+                open.push('>');
+                cells.push_str(&open);
+                if let Some(formula) = cell.formula.as_deref() {
+                    cells.push_str(&format!("<f>{}</f>", xml_escape_cell(formula)));
+                }
+                if let Some(number) = cell.number {
+                    cells.push_str(&format!("<v>{number}</v>"));
+                } else if let Some(boolean) = cell.boolean {
+                    cells.push_str(&format!("<v>{}</v>", if boolean { 1 } else { 0 }));
+                } else if is_error_display(&cell.display) {
+                    cells.push_str(&format!("<v>{}</v>", xml_escape_cell(&cell.display)));
+                } else if !cell.display.is_empty() {
+                    let index = table[cell.display.as_str()];
+                    cells.push_str(&format!("<v>{index}</v>"));
+                }
+                cells.push_str("</c>");
+            }
+            let row_no = row_index_zero_based + 1;
+            sheet_rows.push_str(&format!("<row r=\"{row_no}\">{cells}</row>"));
         }
-        let row_no = row_index + 1;
-        sheet_rows.push_str(&format!("<row r=\"{row_no}\">{cells}</row>"));
+        sheet_parts.push(format!(
+            "<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>{sheet_rows}</sheetData></worksheet>"
+        ));
     }
 
     let shared_strings: String = ordered
@@ -3935,34 +4033,52 @@ pub fn export_xlsx_from_grid(grid: &[Vec<String>]) -> Result<Vec<u8>, String> {
         })
         .collect();
 
-    let content_types = "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/></Types>";
+    let mut content_overrides = String::new();
+    let mut workbook_sheets = String::new();
+    let mut workbook_relationships = String::new();
+    for (index, name) in names.iter().enumerate() {
+        let part = index + 1;
+        content_overrides.push_str(&format!("<Override PartName=\"/xl/worksheets/sheet{part}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"));
+        workbook_sheets.push_str(&format!(
+            "<sheet name=\"{}\" sheetId=\"{part}\" r:id=\"rId{part}\"/>",
+            xml_escape_attr(name)
+        ));
+        workbook_relationships.push_str(&format!("<Relationship Id=\"rId{part}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{part}.xml\"/>"));
+    }
+    let shared_id = sheets.len() + 1;
+    workbook_relationships.push_str(&format!("<Relationship Id=\"rId{shared_id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/>"));
+
+    let content_types = format!("<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>{content_overrides}<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/></Types>");
     let root_rels = "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>";
-    let workbook = "<?xml version=\"1.0\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
-    let workbook_rels = "<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>";
+    let workbook = format!("<?xml version=\"1.0\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>{workbook_sheets}</sheets></workbook>");
+    let workbook_rels = format!("<?xml version=\"1.0\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{workbook_relationships}</Relationships>");
     let shared_xml = format!(
         "<?xml version=\"1.0\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{0}\" uniqueCount=\"{0}\">{shared_strings}</sst>",
         ordered.len()
     );
-    let sheet_xml = format!(
-        "<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>{sheet_rows}</sheetData></worksheet>"
-    );
-
-    let parts: Vec<(&str, Vec<u8>)> = vec![
-        ("[Content_Types].xml", content_types.as_bytes().to_vec()),
-        ("_rels/.rels", root_rels.as_bytes().to_vec()),
-        ("xl/workbook.xml", workbook.as_bytes().to_vec()),
-        (
-            "xl/_rels/workbook.xml.rels",
-            workbook_rels.as_bytes().to_vec(),
-        ),
-        ("xl/sharedStrings.xml", shared_xml.into_bytes()),
-        ("xl/worksheets/sheet1.xml", sheet_xml.into_bytes()),
-    ];
 
     let mut archive = PackageArchive::new();
-    for (path, data) in &parts {
+    archive
+        .add("[Content_Types].xml", content_types.into_bytes())
+        .map_err(|e| format!("xlsx export failed: {e}"))?;
+    archive
+        .add("_rels/.rels", root_rels.as_bytes().to_vec())
+        .map_err(|e| format!("xlsx export failed: {e}"))?;
+    archive
+        .add("xl/workbook.xml", workbook.into_bytes())
+        .map_err(|e| format!("xlsx export failed: {e}"))?;
+    archive
+        .add("xl/_rels/workbook.xml.rels", workbook_rels.into_bytes())
+        .map_err(|e| format!("xlsx export failed: {e}"))?;
+    archive
+        .add("xl/sharedStrings.xml", shared_xml.into_bytes())
+        .map_err(|e| format!("xlsx export failed: {e}"))?;
+    for (index, part) in sheet_parts.iter().enumerate() {
         archive
-            .add(path, data.clone())
+            .add(
+                &format!("xl/worksheets/sheet{}.xml", index + 1),
+                part.clone().into_bytes(),
+            )
             .map_err(|e| format!("xlsx export failed: {e}"))?;
     }
     archive
@@ -4497,51 +4613,6 @@ mod tests {
     }
 
     #[test]
-    fn functions() {
-        let mut sheet = Sheet::new("t");
-        sheet.set_str("A1", "1");
-        sheet.set_str("A2", "2");
-        sheet.set_str("A3", "3");
-        sheet.set_str("B1", "=SUM(A1:A3)");
-        sheet.set_str("B2", "=AVERAGE(A1:A3)");
-        sheet.set_str("B3", "=ABS(-42)");
-        sheet.set_str("B4", "=ROUND(1.567,2)");
-        let vals = evaluate(&sheet);
-        assert_eq!(
-            vals.get(&CellRef::parse("B1").unwrap()),
-            Some(&Value::Number(6.0))
-        );
-        assert_eq!(
-            vals.get(&CellRef::parse("B2").unwrap()),
-            Some(&Value::Number(2.0))
-        );
-        assert_eq!(
-            vals.get(&CellRef::parse("B3").unwrap()),
-            Some(&Value::Number(42.0))
-        );
-        assert_eq!(
-            vals.get(&CellRef::parse("B4").unwrap()),
-            Some(&Value::Number(1.57))
-        );
-    }
-
-    #[test]
-    fn comparison_and_text() {
-        let mut sheet = Sheet::new("t");
-        sheet.set_str("A1", "=1<2");
-        sheet.set_str("A2", "=CONCAT(\"loom\",\"-\",\"sheets\")");
-        let vals = evaluate(&sheet);
-        assert_eq!(
-            vals.get(&CellRef::parse("A1").unwrap()),
-            Some(&Value::Bool(true))
-        );
-        assert_eq!(
-            vals.get(&CellRef::parse("A2").unwrap()),
-            Some(&Value::Text("loom-sheets".to_string()))
-        );
-    }
-
-    #[test]
     fn parse_error_reports() {
         let mut sheet = Sheet::new("t");
         sheet.set_str("A1", "=1+");
@@ -4792,43 +4863,6 @@ mod tests {
     }
 
     #[test]
-    fn math_and_statistical_functions_evaluate_correctly() {
-        let mut sheet = Sheet::new("Math");
-        sheet.set_str("A1", "=SQRT(16)");
-        sheet.set_str("A2", "=POWER(2, 8)");
-        sheet.set_str("A3", "=MOD(17, 5)");
-        sheet.set_str("A4", "=FLOOR(3.7)");
-        sheet.set_str("A5", "=CEILING(3.2)");
-        sheet.set_str("A6", "=MEDIAN(10, 20, 30, 40, 50)");
-
-        let evaluated = evaluate(&sheet);
-        assert_eq!(
-            evaluated.get(&CellRef::parse("A1").unwrap()),
-            Some(&Value::Number(4.0))
-        );
-        assert_eq!(
-            evaluated.get(&CellRef::parse("A2").unwrap()),
-            Some(&Value::Number(256.0))
-        );
-        assert_eq!(
-            evaluated.get(&CellRef::parse("A3").unwrap()),
-            Some(&Value::Number(2.0))
-        );
-        assert_eq!(
-            evaluated.get(&CellRef::parse("A4").unwrap()),
-            Some(&Value::Number(3.0))
-        );
-        assert_eq!(
-            evaluated.get(&CellRef::parse("A5").unwrap()),
-            Some(&Value::Number(4.0))
-        );
-        assert_eq!(
-            evaluated.get(&CellRef::parse("A6").unwrap()),
-            Some(&Value::Number(30.0))
-        );
-    }
-
-    #[test]
     fn parse_csv_records_handles_multiline_quotes_and_custom_delimiters() {
         let csv_text =
             "Name,Description,Value\n\"Item 1\",\"Line 1\nLine 2\",100\n\"Item 2\",\"Simple\",200";
@@ -5044,147 +5078,6 @@ mod tests {
     }
 
     #[test]
-    fn vlookup_hlookup_and_index_match() {
-        let table = vec![
-            vec!["ID".into(), "Name".into(), "Price".into()],
-            vec!["P101".into(), "Widget".into(), "9.99".into()],
-            vec!["P102".into(), "Gadget".into(), "19.99".into()],
-            vec!["P103".into(), "Doohickey".into(), "4.99".into()],
-        ];
-
-        // VLOOKUP P102 -> Col 2 (Name) = "Gadget"
-        assert_eq!(vlookup("P102", &table, 2, true).unwrap(), "Gadget");
-        // VLOOKUP P103 -> Col 3 (Price) = "4.99"
-        assert_eq!(vlookup("P103", &table, 3, true).unwrap(), "4.99");
-        assert!(vlookup("P999", &table, 2, true).is_err());
-
-        // HLOOKUP Price -> Row 3 (P102's price) = "19.99"
-        assert_eq!(hlookup("Price", &table, 3, true).unwrap(), "19.99");
-
-        // MATCH Gadget in Col 2
-        let names = vec!["Widget".into(), "Gadget".into(), "Doohickey".into()];
-        assert_eq!(match_lookup("Gadget", &names, true).unwrap(), 2);
-
-        // INDEX table row 2 (P101), col 2 (Name) = "Widget"
-        assert_eq!(index_lookup(&table, 2, 2).unwrap(), "Widget");
-    }
-
-    #[test]
-    fn text_manipulation_formulas() {
-        assert_eq!(text_concatenate(&["Hello", " ", "World"]), "Hello World");
-        assert_eq!(text_left("Quarterly Report", 9), "Quarterly");
-        assert_eq!(text_right("Quarterly Report", 6), "Report");
-        assert_eq!(text_mid("Loom Studio 2026", 6, 6), "Studio");
-        assert_eq!(text_len("Supercalifragilistic"), 20);
-        assert_eq!(text_trim("   Too   many   spaces   "), "Too many spaces");
-        assert_eq!(text_upper("loom sheets"), "LOOM SHEETS");
-        assert_eq!(text_lower("LOOM SHEETS"), "loom sheets");
-        assert_eq!(text_proper("the quick brown fox"), "The Quick Brown Fox");
-    }
-
-    #[test]
-    fn sumproduct_and_conditional_aggregations() {
-        let quantities = vec![2.0, 5.0, 10.0];
-        let unit_prices = vec![10.0, 20.0, 5.0];
-
-        // SUMPRODUCT: (2*10) + (5*20) + (10*5) = 20 + 100 + 50 = 170.0
-        let total = sumproduct(&[&quantities, &unit_prices]).unwrap();
-        assert_eq!(total, 170.0);
-
-        let sales = vec![100.0, 250.0, 50.0, 400.0, 150.0];
-
-        // SUMIF sales > 100 -> 250 + 400 + 150 = 800.0
-        assert_eq!(sumif(&sales, |v| v > 100.0), 800.0);
-
-        // COUNTIF sales >= 200 -> 2
-        assert_eq!(countif(&sales, |v| v >= 200.0), 2);
-
-        // AVERAGEIF sales < 200 -> (100 + 50 + 150) / 3 = 100.0
-        assert_eq!(averageif(&sales, |v| v < 200.0), Some(100.0));
-    }
-
-    #[test]
-    fn financial_formula_pmt_fv_pv() {
-        // Loan of $10,000 at 5% annual interest (0.05/12 per month) for 36 months
-        let monthly_rate = 0.05 / 12.0;
-        let monthly_payment = pmt(monthly_rate, 36.0, 10000.0, 0.0, true).unwrap();
-        // PMT should be approximately -$299.71
-        assert!((monthly_payment - (-299.71)).abs() < 0.1);
-
-        // Future value of $100/mo at 6% annual for 10 years (120 months)
-        let rate_6 = 0.06 / 12.0;
-        let future_val = fv(rate_6, 120.0, -100.0, 0.0, true).unwrap();
-        // FV should be approximately $16,387.93
-        assert!((future_val - 16387.93).abs() < 1.0);
-
-        // Present value of $10,000 in 5 years at 5%
-        let present_val = pv(0.05, 5.0, 0.0, 10000.0, true).unwrap();
-        // PV should be approximately -$7,835.26
-        assert!((present_val - (-7835.26)).abs() < 1.0);
-    }
-
-    #[test]
-    fn statistical_formulas_mode_stdev_var() {
-        let dataset = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
-
-        // Mode of dataset is 4.0
-        assert_eq!(mode_single(&dataset).unwrap(), 4.0);
-
-        // Population variance & stdev: mean = 5.0, sum((x-5)^2) = 9+1+1+1+0+0+4+16 = 32. var = 32/8 = 4.0. stdev = 2.0
-        assert_eq!(var_p(&dataset).unwrap(), 4.0);
-        assert_eq!(stdev_p(&dataset).unwrap(), 2.0);
-
-        // Sample variance: 32 / 7 = 4.5714...
-        let v_s = var_s(&dataset).unwrap();
-        assert!((v_s - (32.0 / 7.0)).abs() < 1e-5);
-        assert!((stdev_s(&dataset).unwrap() - (32.0 / 7.0f64).sqrt()).abs() < 1e-5);
-    }
-
-    #[test]
-    fn pivot_grouping_and_aggregation() {
-        let keys = vec![
-            "East".to_string(),
-            "West".to_string(),
-            "East".to_string(),
-            "South".to_string(),
-            "West".to_string(),
-        ];
-        let values = vec![10.0, 20.0, 15.0, 30.0, 5.0];
-
-        // SUM: East = 10+15 = 25, South = 30, West = 20+5 = 25.
-        // Results are sorted by group key ascending: East < South < West.
-        assert_eq!(
-            compute_pivot(&keys, &values, PivotAggregation::Sum).unwrap(),
-            vec![
-                ("East".to_string(), 25.0),
-                ("South".to_string(), 30.0),
-                ("West".to_string(), 25.0),
-            ]
-        );
-
-        // AVERAGE: East = (10+15)/2 = 12.5
-        let averages = compute_pivot(&keys, &values, PivotAggregation::Average).unwrap();
-        assert_eq!(averages[0], ("East".to_string(), 12.5));
-
-        // MIN/MAX/COUNT for the East group: min = 10, max = 15, count = 2.
-        let mins = compute_pivot(&keys, &values, PivotAggregation::Min).unwrap();
-        let maxes = compute_pivot(&keys, &values, PivotAggregation::Max).unwrap();
-        let counts = compute_pivot(&keys, &values, PivotAggregation::Count).unwrap();
-        assert_eq!(mins[0], ("East".to_string(), 10.0));
-        assert_eq!(maxes[0], ("East".to_string(), 15.0));
-        assert_eq!(counts[0], ("East".to_string(), 2.0));
-
-        // Mismatched lengths must be rejected.
-        assert!(compute_pivot(&keys[..1], &values, PivotAggregation::Sum).is_err());
-
-        // Empty input yields an empty result.
-        let empty: Vec<String> = Vec::new();
-        assert!(compute_pivot(&empty, &[], PivotAggregation::Sum)
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
     fn chart_spec_validation_and_normalization() {
         let series_a = ChartSeries {
             name: "Revenue".to_string(),
@@ -5371,102 +5264,6 @@ mod tests {
     }
 
     #[test]
-    fn goal_seek_solves_equations() {
-        let x = goal_seek_bisection(|v| v * v, 0.0, 10.0, 25.0, 1e-6, 200).unwrap();
-        assert!((x - 5.0).abs() < 1e-6, "x^2=25 gave {x}");
-
-        let r = goal_seek_bisection(
-            |rate| 100.0 * (1.0 + rate).powi(10),
-            0.0,
-            0.2,
-            200.0,
-            1e-6,
-            200,
-        )
-        .unwrap();
-        let expected_r = 2f64.powf(0.1) - 1.0;
-        assert!((r - expected_r).abs() < 1e-6, "rate solve gave {r}");
-
-        // Linear function whose first midpoint is the exact root: returns after
-        // only the two bracket evaluations plus one midpoint evaluation.
-        let calls = std::cell::Cell::new(0u32);
-        let hit = goal_seek_bisection(
-            |v| {
-                calls.set(calls.get() + 1);
-                v - 4.0
-            },
-            0.0,
-            8.0,
-            0.0,
-            1e-9,
-            1000,
-        )
-        .unwrap();
-        assert_eq!(hit, 4.0);
-        assert_eq!(calls.get(), 3);
-
-        let same_signs = goal_seek_bisection(|v| v + 10.0, -1.0, 1.0, 0.0, 1e-6, 64).unwrap_err();
-        assert!(same_signs.contains("no sign change"), "{same_signs}");
-
-        let inverted = goal_seek_bisection(|v| v * v, 10.0, 0.0, 25.0, 1e-6, 64).unwrap_err();
-        assert!(inverted.contains("hi > lo"), "{inverted}");
-
-        let constant = goal_seek_bisection(|_| 7.0, 0.0, 5.0, 3.0, 1e-6, 64).unwrap_err();
-        assert!(constant.contains("no sign change"), "{constant}");
-    }
-
-    #[test]
-    fn text_join_split_substitute_repeat() {
-        // TEXTJOIN with and without skipping empties
-        let values = vec!["a".to_string(), String::new(), "b".to_string()];
-        assert_eq!(text_join("-", false, &values), "a--b");
-        assert_eq!(text_join("-", true, &values), "a-b");
-        assert_eq!(text_join(",", true, &[]), "");
-
-        // SPLIT keeps empty fields from consecutive delimiters
-        let fields = split_text_to_columns("a,,b", ",").unwrap();
-        assert_eq!(
-            fields,
-            vec!["a".to_string(), String::new(), "b".to_string()]
-        );
-        assert_eq!(
-            split_text_to_columns("x|y", "|").unwrap(),
-            vec!["x".to_string(), "y".to_string()]
-        );
-        assert!(split_text_to_columns("abc", "").is_err());
-
-        // REPT
-        assert_eq!(text_repeat("ab", 3), "ababab");
-        assert_eq!(text_repeat("ab", 0), "");
-
-        // SUBSTITUTE
-        // "Banana" contains "na" at bytes 2 and 4; replacing all yields Ba|ny|ny
-        assert_eq!(
-            text_substitute("Banana", "na", "ny", true, 0).unwrap(),
-            "Banyny"
-        );
-        assert_eq!(
-            text_substitute("Banana", "NA", "ny", false, 0).unwrap(),
-            "Banyny"
-        );
-        assert_eq!(
-            text_substitute("Banana", "NA", "ny", true, 0).unwrap(),
-            "Banana"
-        );
-        // Only the second instance replaced
-        assert_eq!(
-            text_substitute("Banana", "na", "X", true, 2).unwrap(),
-            "BanaX"
-        );
-        // Out-of-range instance leaves the text unchanged
-        assert_eq!(
-            text_substitute("Banana", "na", "X", true, 9).unwrap(),
-            "Banana"
-        );
-        assert!(text_substitute("abc", "", "x", true, 0).is_err());
-    }
-
-    #[test]
     fn date_arithmetic_civil_calendar() {
         // Leap years: divisible by 4, except centuries unless divisible by 400.
         assert!(is_leap_year(2024));
@@ -5635,15 +5432,61 @@ mod tests {
         assert_eq!(parsed[0], grid[0]);
 
         // Repeated strings share one shared-string entry (structural check).
+        // Numbers and booleans write inline (native `<v>` / `t="b"`), so only
+        // the five text displays land in the table.
         let archive = PackageArchive::from_bytes(&xlsx).unwrap();
         let sst = std::str::from_utf8(archive.get("xl/sharedStrings.xml").unwrap()).unwrap();
         let unique = sst.matches("<si>").count();
         let referenced = sst.matches("count=\"").count() > 0;
-        assert!(referenced && unique == 7, "unique={unique}");
+        assert!(referenced && unique == 5, "unique={unique}");
 
         // Empty grids export an empty sheet and import back empty.
         let empty = export_xlsx_from_grid(&[]).unwrap();
         assert!(extract_xlsx_grid(&empty).unwrap().is_empty());
+    }
+
+    #[test]
+    fn xlsx_workbook_export_preserves_sheets_and_formulas() {
+        let mut first = Sheet::new("First");
+        first.set_str("A1", "10");
+        first.set_str("B1", "=A1*2");
+        let mut second = Sheet::new("Second");
+        second.set_str("A1", "=First!B1+5");
+        let evaluated = workbook::evaluate_workbook(&[first.clone(), second.clone()]);
+        let sheets = [&first, &second]
+            .iter()
+            .zip(evaluated.iter())
+            .map(|(sheet, vals)| sheet_to_xlsx_data(sheet, vals))
+            .collect::<Vec<_>>();
+        let bytes = export_xlsx_workbook(&sheets).expect("workbook export");
+        let text = String::from_utf8_lossy(&bytes);
+
+        // Both tabs ship as worksheet parts with sanitized names.
+        assert!(text.contains("worksheets/sheet1.xml"));
+        assert!(text.contains("worksheets/sheet2.xml"));
+        assert!(text.contains("name=\"First\""));
+        assert!(text.contains("name=\"Second\""));
+        // Formulas ship as <f> elements with cached display values.
+        assert!(text.contains("<f>A1*2</f>"));
+        assert!(text.contains("<f>First!B1+5</f>"));
+        // Numeric cached values are native, not shared strings.
+        assert!(text.contains("<v>20</v>"));
+
+        // First-sheet import still reads displayed values.
+        let grid = extract_xlsx_grid(&bytes).expect("re-import");
+        assert_eq!(grid[0][0], "10");
+        assert_eq!(grid[0][1], "20");
+    }
+
+    #[test]
+    fn xlsx_sheet_names_sanitize_to_excel_rules() {
+        assert_eq!(sanitize_xlsx_sheet_name("Data", 0), "Data");
+        assert_eq!(sanitize_xlsx_sheet_name("A/B:C", 1), "ABC");
+        assert_eq!(sanitize_xlsx_sheet_name("  ", 2), "Sheet3");
+        assert_eq!(sanitize_xlsx_sheet_name("\"Q\"", 0), "Q");
+        let long = "x".repeat(40);
+        assert_eq!(sanitize_xlsx_sheet_name(&long, 0).chars().count(), 31);
+        assert!(export_xlsx_workbook(&[]).is_err());
     }
 
     #[test]
@@ -5745,101 +5588,5 @@ mod tests {
         assert_eq!(collapsed.anchor, CellRef::parse("B2").unwrap());
         assert_eq!(collapsed.focus, CellRef::parse("B2").unwrap());
         assert_eq!(collapsed.label(), "B2");
-    }
-
-    #[test]
-    fn range_edit_fills_formulas_and_reverts_without_losing_absent_cells() {
-        let mut sheet = Sheet::new("fill");
-        sheet.set_str("A1", "10");
-        sheet.set_str("B1", "=A1+1");
-        sheet.set_str("A2", "20");
-
-        let copy = RangeEdit::copy(
-            &sheet,
-            CellRange::parse("B1").unwrap(),
-            CellRef::parse("C1").unwrap(),
-        );
-        copy.apply(&mut sheet);
-        assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), Some("=B1+1"));
-        copy.revert(&mut sheet);
-        assert_eq!(sheet.raw(CellRef::parse("C1").unwrap()), None);
-
-        let fill = RangeEdit::fill(
-            &sheet,
-            CellRange::parse("A1:A2").unwrap(),
-            CellRange::parse("A3:A6").unwrap(),
-        );
-        fill.apply(&mut sheet);
-        assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), Some("10"));
-        assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), Some("20"));
-        assert_eq!(sheet.raw(CellRef::parse("A5").unwrap()), Some("10"));
-        assert_eq!(sheet.raw(CellRef::parse("A6").unwrap()), Some("20"));
-        fill.revert(&mut sheet);
-        for row in 3..=6 {
-            assert_eq!(
-                sheet.raw(CellRef {
-                    row: row - 1,
-                    col: 0
-                }),
-                None
-            );
-        }
-    }
-
-    #[test]
-    fn range_edit_copy_handles_multi_cell_formulas_and_noop_detection() {
-        let mut sheet = Sheet::new("copy");
-        sheet.set_str("A1", "10");
-        sheet.set_str("B1", "=A1+1");
-        sheet.set_str("A2", "20");
-
-        let source = CellRange::parse("A1:B2").unwrap();
-        let copy = RangeEdit::copy(&sheet, source, CellRef::parse("D3").unwrap());
-        assert_eq!(copy.len(), 4);
-        assert!(!copy.is_noop());
-        copy.apply(&mut sheet);
-        assert_eq!(sheet.raw(CellRef::parse("D3").unwrap()), Some("10"));
-        assert_eq!(sheet.raw(CellRef::parse("E3").unwrap()), Some("=D3+1"));
-        assert_eq!(sheet.raw(CellRef::parse("D4").unwrap()), Some("20"));
-        assert_eq!(sheet.raw(CellRef::parse("E4").unwrap()), None);
-
-        copy.revert(&mut sheet);
-        assert_eq!(sheet.raw(CellRef::parse("D3").unwrap()), None);
-        assert_eq!(sheet.raw(CellRef::parse("E3").unwrap()), None);
-        assert_eq!(sheet.raw(CellRef::parse("D4").unwrap()), None);
-        assert_eq!(sheet.raw(CellRef::parse("E4").unwrap()), None);
-
-        let noop = RangeEdit::copy(
-            &sheet,
-            CellRange::parse("A1").unwrap(),
-            CellRef::parse("A1").unwrap(),
-        );
-        assert!(noop.is_noop());
-    }
-
-    #[test]
-    fn range_edit_replace_preserves_present_empty_and_absent_raw_values() {
-        let mut sheet = Sheet::new("replace");
-        let cell = CellRef::parse("A1").unwrap();
-
-        let insert_empty = RangeEdit::replace(&sheet, cell, Some(String::new()));
-        assert!(!insert_empty.is_noop());
-        insert_empty.apply(&mut sheet);
-        assert_eq!(sheet.raw(cell), Some(""));
-        insert_empty.revert(&mut sheet);
-        assert_eq!(sheet.raw(cell), None);
-
-        sheet.set_raw(cell, "old");
-        let clear_to_empty = RangeEdit::replace(&sheet, cell, Some(String::new()));
-        clear_to_empty.apply(&mut sheet);
-        assert_eq!(sheet.raw(cell), Some(""));
-        clear_to_empty.revert(&mut sheet);
-        assert_eq!(sheet.raw(cell), Some("old"));
-
-        let remove = RangeEdit::replace(&sheet, cell, None);
-        remove.apply(&mut sheet);
-        assert_eq!(sheet.raw(cell), None);
-        remove.revert(&mut sheet);
-        assert_eq!(sheet.raw(cell), Some("old"));
     }
 }

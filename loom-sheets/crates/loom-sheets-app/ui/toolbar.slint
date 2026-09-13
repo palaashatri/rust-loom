@@ -14,22 +14,24 @@ export component SheetActionToolbar inherits LoomToolbar {
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in property <string> zoom-level: "125%";
-    callback new-sheet;
-    callback open-sheet;
-    callback save-sheet;
+    in property <bool> cell-bold: false;
+    in property <bool> cell-italic: false;
+    in property <bool> cell-underline: false;
+    in property <int> cell-alignment: 0;
+
     callback undo;
     callback redo;
     callback toggle-inspector;
     callback export-csv;
     callback overflow-requested;
     callback zoom-clicked;
-    callback add-category;
-    callback pivot-table;
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback set-cell-alignment(int);
     callback add-row;
+    callback add-col;
     callback insert-chart;
-    callback edit-text;
-    callback add-shape;
-    callback add-comment;
     callback organize;
 
     LoomToolbarGroup {
@@ -57,65 +59,76 @@ export component SheetActionToolbar inherits LoomToolbar {
 
     LoomToolbarDivider { }
 
-    if root.wide : LoomToolbarGroup {
-        LoomButton {
-            icon: "slider";
-            label: "Category";
-            variant: "ghost";
-            clicked => { root.add-category(); }
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "bold";
+            label: "Bold";
+            tooltip: "Bold (Cmd+B)";
+            selected: root.cell-bold;
+            clicked => { root.toggle-bold(); }
         }
-        LoomButton {
-            icon: "grid";
-            label: "Pivot";
-            variant: "ghost";
-            clicked => { root.pivot-table(); }
+        LoomIconButton {
+            icon: "italic";
+            label: "Italic";
+            tooltip: "Italic (Cmd+I)";
+            selected: root.cell-italic;
+            clicked => { root.toggle-italic(); }
+        }
+        LoomIconButton {
+            icon: "underline";
+            label: "Underline";
+            tooltip: "Underline (Cmd+U)";
+            selected: root.cell-underline;
+            clicked => { root.toggle-underline(); }
         }
     }
 
-    if root.wide : LoomToolbarDivider { }
+    LoomToolbarDivider { }
+
+    LoomToolbarGroup {
+        LoomIconButton {
+            icon: "align-left";
+            label: "Align Left";
+            tooltip: "Align Left";
+            selected: root.cell-alignment == 0;
+            clicked => { root.set-cell-alignment(0); }
+        }
+        LoomIconButton {
+            icon: "align-center";
+            label: "Align Center";
+            tooltip: "Align Center";
+            selected: root.cell-alignment == 1;
+            clicked => { root.set-cell-alignment(1); }
+        }
+        LoomIconButton {
+            icon: "align-right";
+            label: "Align Right";
+            tooltip: "Align Right";
+            selected: root.cell-alignment == 2;
+            clicked => { root.set-cell-alignment(2); }
+        }
+    }
+
+    LoomToolbarDivider { }
 
     LoomToolbarGroup {
         LoomButton {
             icon: "plus";
-            label: "Insert";
-            variant: "ghost";
-            clicked => { root.new-sheet(); }
-        }
-        LoomButton {
-            icon: "table";
             label: "Row";
             variant: "ghost";
             clicked => { root.add-row(); }
+        }
+        LoomButton {
+            icon: "plus";
+            label: "Col";
+            variant: "ghost";
+            clicked => { root.add-col(); }
         }
         LoomButton {
             icon: "chart";
             label: "Chart";
             variant: "ghost";
             clicked => { root.insert-chart(); }
-        }
-        LoomButton {
-            icon: "text";
-            label: "Text";
-            variant: "ghost";
-            clicked => { root.edit-text(); }
-        }
-        LoomButton {
-            icon: "shape";
-            label: "Shape";
-            variant: "ghost";
-            clicked => { root.add-shape(); }
-        }
-        LoomButton {
-            icon: "image";
-            label: "Media";
-            variant: "ghost";
-            clicked => { root.open-sheet(); }
-        }
-        LoomButton {
-            icon: "comment";
-            label: "Note";
-            variant: "ghost";
-            clicked => { root.add-comment(); }
         }
     }
 

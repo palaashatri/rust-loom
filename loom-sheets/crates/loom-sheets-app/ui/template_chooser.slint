@@ -497,9 +497,8 @@ export component TemplateChooserModal inherits Rectangle {
                                         BlankPreview {}
                                     }
                                     SheetsTemplateCard {
-                                        title: "Blank Black";
+                                        title: "Checklist";
                                         selected: root.template-selected == 3;
-                                        preview-background: #18181b;
                                         clicked => { root.template-selected = 3; }
                                         BlankBlackPreview {}
                                     }
@@ -510,13 +509,13 @@ export component TemplateChooserModal inherits Rectangle {
                                         TableChartPreview {}
                                     }
                                     SheetsTemplateCard {
-                                        title: "Pivot Table Basics";
+                                        title: "Expense Summary";
                                         selected: root.template-selected == 5;
                                         clicked => { root.template-selected = 5; }
                                         PivotPreview {}
                                     }
                                     SheetsTemplateCard {
-                                        title: "Charting Basics";
+                                        title: "Sales Chart";
                                         selected: root.template-selected == 6;
                                         clicked => { root.template-selected = 6; }
                                         ChartingPreview {}
@@ -624,7 +623,7 @@ export component TemplateChooserModal inherits Rectangle {
                                         TableChartPreview {}
                                     }
                                     SheetsTemplateCard {
-                                        title: "Pivot Table Basics";
+                                        title: "Expense Summary";
                                         selected: root.template-selected == 5;
                                         clicked => { root.template-selected = 5; }
                                         PivotPreview {}
@@ -644,7 +643,7 @@ export component TemplateChooserModal inherits Rectangle {
                                 HorizontalLayout {
                                     spacing: Theme.tokens.space.lg;
                                     SheetsTemplateCard {
-                                        title: "Charting Basics";
+                                        title: "Sales Chart";
                                         selected: root.template-selected == 6;
                                         clicked => { root.template-selected = 6; }
                                         ChartingPreview {}

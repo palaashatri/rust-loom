@@ -7,19 +7,20 @@ Loom Sheets is a fast, local-first analytical spreadsheet application with Apple
 
 ## Core Capabilities
 
-- **Numbers-Style Sheet & Tab Navigation**: Multi-sheet workbook tabs (`[ ▦ Sheet 1 ] [ + ]`) and structured document chrome.
-- **Action Toolbar & Formula Bar**: Primary action group, centered tool insertion, formula bar with cell coordinates badge (`[ A1 ]`), formula function chips (`SUM`, `AVG`, `COUNT`), and commit/cancel controls.
-- **Spreadsheet Canvas**: Styled sheet tables with headers, column letters (A–H), row numbers, alternating row shading, and cell selection with corner circular drag handles.
-- **4-Tab Inspector**: `Table` (styles, headers & footers, gridlines), `Cell` (number formatting, decimals, fills), `Text` (typography & alignments), and `Arrange` (sizing & row/column fit).
-- **Template Chooser**: Categorized spreadsheet chooser modal with grid layout cards (`Blank`, `Monthly Budget`, `Invoice & Expenses`).
-- **Global Menu Bar**: Native macOS NSMenu and Linux DBusMenu global desktop menus.
-- **Storage & Interoperability**: Versioned `.loomtable` packages and standard CSV import/export.
+- **Workbook Tabs & Navigation**: Multi-sheet workbook tabs with add/switch/rename/delete (all undoable), persisted with the active tab in versioned `.loomtable` packages.
+- **Action Toolbar & Formula Bar**: Undo/redo, Bold/Italic/Underline, alignment, row/column insert, live-linked charts (Bar/Line/Pie), CSV/XLSX export, zoom (75–150%), sort, overflow menu; formula bar with cell badge, SUM/AVG/COUNT quick formulas, commit/cancel, and Fill down.
+- **Spreadsheet Canvas**: Viewport-filling sheet grid with headers, live selection/range marquee, keyboard navigation (arrows/Tab/Shift-extend), real zoom scaling, and a floating live chart overlay.
+- **Inspector**: `Table` tab (name, rows/columns add/remove) and `Cell` tab (raw formula, font style, data format incl. Number, decimals stepper, alignment, row/column sizing) — every control undoable and persisted.
+- **Template Chooser**: Categorized chooser (Basic, Personal Finance, Personal, Business, Education) with eleven seeded templates, each creating its advertised sheet with live formulas.
+- **Command Palette & Menus**: Ctrl+K palette covering every primary command; native macOS NSMenu / Linux DBusMenu with live enablement (incl. View zoom commands).
+- **Storage & Interoperability**: Versioned `.loomtable` packages (all tabs, styles, alignments, freeze panes, charts; legacy single-sheet files still open), CSV import/export and single-sheet XLSX export (evaluated values, stated in the status line).
 
 ## Visual QA Status
 
-- **Status**: **PASS** (Toolkit & Design System Compliant).
-- **Canvas**: Clean table viewport with responsive column expansion.
-- **Formulas**: Live formula evaluation with undo/redo transaction history.
+- **Status**: **PASS** (shared-foundation adopted, zero app-local generic controls).
+- **Canvas**: Viewport-filling grid at every contract viewport; no wrapping, clipping, or dead fixed-size surfaces.
+- **Formulas**: Live evaluation (41 functions) with undo/redo transaction history.
+- **Evidence**: `loom-sheets/.work/acceptance/` holds 18 judge-reviewed captures (4 viewports × 3 themes + chooser/palette/chart/zoom states).
 
 ## Development
 

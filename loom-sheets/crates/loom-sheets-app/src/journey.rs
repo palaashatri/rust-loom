@@ -9,9 +9,9 @@ use slint::{ComponentHandle, Model, PhysicalSize};
 
 use crate::palette::{rebuild_palette, wire_palette};
 use crate::{
-    apply_headless_viewport_size, apply_layout_breakpoints, apply_sheet,
-    apply_sheet_without_reveal, apply_theme, commit_formula_edit, configure_direction,
-    fill_selection_down, fill_target_range, load_sheet, save_sheet, starter_workbook,
+    apply_headless_viewport_size, apply_layout_breakpoints, apply_theme, commit_formula_edit,
+    configure_direction, fill_selection_down, fill_target_range, load_sheet, load_workbook,
+    project_sheet, project_sheet_without_reveal, save_sheet, save_workbook, starter_workbook,
     update_selection, update_selection_range, Args, SheetsApp,
 };
 
@@ -53,7 +53,7 @@ pub fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
     apply_headless_viewport_size(&app, args.size.0, args.size.1);
-    apply_sheet(&app, &sheet);
+    project_sheet(&app, &sheet);
     let report = record_keyboard_palette_journey(&app, "sheets", Path::new(out_dir), "save")
         .map_err(|e| format!("journey failed: {e}"))?;
     println!(
@@ -96,13 +96,13 @@ pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String
     let mut undo = Vec::new();
     let mut redo = Vec::new();
 
-    apply_sheet(&app, &sheet);
+    project_sheet(&app, &sheet);
     capture_journey_frame(&app, out_dir, "01-start", args.size)?;
 
     // Scroll to the sparse tail. The negative Flickable viewport coordinate
     // is the same value that touchpad/mouse wheel gestures update.
     app.set_grid_scroll_y(-26_600.0);
-    apply_sheet_without_reveal(&app, &sheet);
+    project_sheet_without_reveal(&app, &sheet);
     capture_journey_frame(&app, out_dir, "02-scroll", args.size)?;
 
     let tail_selection = GridSelection::new(
@@ -110,7 +110,7 @@ pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String
         CellRef::parse("A996").expect("valid source coordinate"),
     );
     update_selection_range(&app, &sheet, &evaluate(&sheet), tail_selection);
-    apply_sheet(&app, &sheet);
+    project_sheet(&app, &sheet);
     capture_journey_frame(&app, out_dir, "03-range", args.size)?;
 
     // Enter a formula in the active cell's adjacent column, then restore the
@@ -125,7 +125,7 @@ pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String
         "=A995+1",
     ));
     update_selection(&app, &sheet, &evaluate(&sheet), formula_cell);
-    apply_sheet(&app, &sheet);
+    project_sheet(&app, &sheet);
     capture_journey_frame(&app, out_dir, "04-formula", args.size)?;
 
     update_selection_range(&app, &sheet, &evaluate(&sheet), tail_selection);
@@ -147,7 +147,7 @@ pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String
         &evaluate(&sheet),
         GridSelection::new(filled_range.start, filled_range.end),
     );
-    apply_sheet(&app, &sheet);
+    project_sheet(&app, &sheet);
     capture_journey_frame(&app, out_dir, "05-fill", args.size)?;
     if sheet.raw(CellRef::parse("A997").unwrap()) != Some("10")
         || sheet.raw(CellRef::parse("A998").unwrap()) != Some("20")
@@ -160,7 +160,7 @@ pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String
     };
     edit.revert(&mut sheet);
     redo.push(edit);
-    apply_sheet(&app, &sheet);
+    project_sheet(&app, &sheet);
     capture_journey_frame(&app, out_dir, "06-undo", args.size)?;
     if sheet.raw(CellRef::parse("A997").unwrap()).is_some()
         || sheet.raw(CellRef::parse("A998").unwrap()).is_some()
@@ -176,8 +176,22 @@ pub fn run_sparse_edit_journey(args: &Args, out_dir: &Path) -> Result<(), String
     {
         return Err("sparse save/reopen changed workbook semantics".to_string());
     }
-    apply_sheet(&app, &reopened);
+    project_sheet(&app, &reopened);
     capture_journey_frame(&app, out_dir, "07-save-reopen", args.size)?;
+
+    // Multi-tab round-trip: every tab and the active tab index survive.
+    let mut second = Sheet::new("Second");
+    second.set_str("A1", "tab-two");
+    let tab_path = out_dir.join("two-tabs.loomtable");
+    save_workbook(&tab_path, &[sheet.clone(), second], 1)?;
+    let tabs = load_workbook(&tab_path)?;
+    if tabs.sheets.len() != 2
+        || tabs.active != 1
+        || tabs.sheets[0].raw(CellRef::parse("B995").unwrap()) != Some("=A995+1")
+        || tabs.sheets[1].raw(CellRef::parse("A1").unwrap()) != Some("tab-two")
+    {
+        return Err("workbook save/reopen lost tabs".to_string());
+    }
 
     let evidence = format!(
         "rows={} cells={} selection={} formula={} undo={} save={}\n",

@@ -7,12 +7,15 @@ use loom_desktop::{
     MenuItem, MenuShortcut, NativeMenuBar, ScriptedFileDialogs,
 };
 use loom_sheets_core::{
-    evaluate, export_xlsx_from_grid, from_csv, shift_formula_references, to_csv, CalcError,
-    CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec, PivotAggregation, Sheet,
-    SheetModel, Value,
+    compute_pivot, evaluate, export_xlsx_from_grid, from_csv, shift_formula_references, to_csv,
+    CalcError, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
+    PivotAggregation, Sheet, SheetModel, Value,
 };
 
 use super::*;
+use crate::analysis::{
+    line_path_commands, pie_wedge_commands, plan_chart, plan_pivot_sheet, unique_sheet_name,
+};
 use crate::starter_workbook;
 
 fn make_test_state() -> Rc<GuiState> {
@@ -26,6 +29,80 @@ fn make_test_state() -> Rc<GuiState> {
         FileFilter::new("CSV", ["csv"]).unwrap(),
         FileFilter::new("Excel", ["xlsx"]).unwrap(),
     ))
+}
+
+#[test]
+fn test_workbook_tab_add_undo_redo() {
+    let state = make_test_state();
+    assert_eq!(state.sheets.borrow().len(), 1);
+
+    let mut after = state.sheets.borrow().clone();
+    after.push(Sheet::new("Second"));
+    commit_workbook_transaction(&state, after, 1, None);
+    assert_eq!(state.sheets.borrow().len(), 2);
+    assert_eq!(*state.active_sheet_index.borrow(), 1);
+    assert_eq!(state.current.borrow().name, "Second");
+    assert_eq!(state.undo_stack.borrow().len(), 1);
+
+    // Undo restores the single-tab workbook.
+    let tx = state.undo_stack.borrow_mut().pop().unwrap();
+    match &tx {
+        SheetTransaction::Workbook { before, .. } => before.restore(&state),
+        _ => panic!("expected workbook transaction"),
+    }
+    state.redo_stack.borrow_mut().push(tx);
+    assert_eq!(state.sheets.borrow().len(), 1);
+    assert_eq!(*state.active_sheet_index.borrow(), 0);
+    assert_eq!(state.current.borrow().name, "Budget");
+
+    // Redo re-applies the added tab.
+    let tx = state.redo_stack.borrow_mut().pop().unwrap();
+    match &tx {
+        SheetTransaction::Workbook { after, .. } => after.restore(&state),
+        _ => panic!("expected workbook transaction"),
+    }
+    state.undo_stack.borrow_mut().push(tx);
+    assert_eq!(state.sheets.borrow().len(), 2);
+    assert_eq!(state.current.borrow().name, "Second");
+}
+
+#[test]
+fn test_workbook_tab_delete_and_rename_undo() {
+    let state = make_test_state();
+    let mut second = Sheet::new("Keep");
+    second.set_str("A1", "precious");
+    state.sheets.borrow_mut().push(second);
+    *state.active_sheet_index.borrow_mut() = 1;
+    *state.current.borrow_mut() = state.sheets.borrow()[1].clone();
+
+    // Delete the second tab, then undo: content must come back.
+    let mut after = state.sheets.borrow().clone();
+    after.remove(1);
+    commit_workbook_transaction(&state, after, 0, Some(1));
+    assert_eq!(state.sheets.borrow().len(), 1);
+    let tx = state.undo_stack.borrow_mut().pop().unwrap();
+    match &tx {
+        SheetTransaction::Workbook { before, .. } => before.restore(&state),
+        _ => panic!("expected workbook transaction"),
+    }
+    assert_eq!(state.sheets.borrow().len(), 2);
+    assert_eq!(
+        state.sheets.borrow()[1].raw(CellRef::parse("A1").unwrap()),
+        Some("precious")
+    );
+
+    // Rename the active tab, then undo: the old name returns.
+    let active = *state.active_sheet_index.borrow();
+    let mut renamed = state.sheets.borrow().clone();
+    renamed[active].name = "Renamed".to_string();
+    commit_workbook_transaction(&state, renamed, active, None);
+    assert_eq!(state.current.borrow().name, "Renamed");
+    let tx = state.undo_stack.borrow_mut().pop().unwrap();
+    match &tx {
+        SheetTransaction::Workbook { before, .. } => before.restore(&state),
+        _ => panic!("expected workbook transaction"),
+    }
+    assert_eq!(state.current.borrow().name, "Keep");
 }
 
 #[test]
@@ -985,4 +1062,211 @@ fn test_deep_audit_native_macos_global_menu_bar() {
             .label(),
         Some("Save Workbook")
     );
+}
+
+#[test]
+fn test_plan_chart_validates_source_columns() {
+    let mut sheet = Sheet::new("Sales");
+    sheet.set_str("A1", "Quarter");
+    sheet.set_str("B1", "Revenue");
+    sheet.set_str("A2", "Q1");
+    sheet.set_str("B2", "15000");
+
+    let chart = plan_chart(&sheet, 0, 1).expect("plannable chart");
+    assert_eq!(chart.kind, ChartKind::Bar);
+    assert_eq!(chart.title, "Sales Chart");
+    assert_eq!((chart.cat_col, chart.val_col), (0, 1));
+
+    let empty = Sheet::new("Empty");
+    let err = plan_chart(&empty, 0, 1).expect_err("needs data rows");
+    assert!(err.contains("data row"), "unexpected hint: {err}");
+
+    let mut text_only = Sheet::new("Text");
+    text_only.set_str("A1", "Name");
+    text_only.set_str("A2", "Alice");
+    let err = plan_chart(&text_only, 0, 0).expect_err("needs numbers");
+    assert!(err.contains('A'), "hint names columns: {err}");
+}
+
+#[test]
+fn test_chart_path_builders_and_snapshot_undo() {
+    let norm = vec![0.0f32, 0.5, 1.0];
+    let line = line_path_commands(&norm);
+    assert!(line.starts_with('M'));
+    assert_eq!(line.matches('L').count(), 2);
+    assert!(line_path_commands(&[]).is_empty());
+
+    let wedges = pie_wedge_commands(&[1.0, 1.0, 2.0]);
+    assert_eq!(wedges.len(), 3);
+    for wedge in &wedges {
+        assert!(wedge.starts_with("M50,50"), "wedge: {wedge}");
+        assert!(wedge.contains('A'), "wedge: {wedge}");
+    }
+    let empty_pie = pie_wedge_commands(&[0.0, -1.0]);
+    assert_eq!(empty_pie.len(), 1);
+
+    // Inserting a chart is one Snapshot transaction: revert removes it.
+    let mut sheet = Sheet::new("Snap");
+    sheet.set_str("A2", "Q1");
+    sheet.set_str("B2", "5");
+    let before = sheet.clone();
+    let mut after = before.clone();
+    after.chart = Some(plan_chart(&before, 0, 1).expect("plan"));
+    let mut undo = Vec::new();
+    let mut redo = Vec::new();
+    commit_transaction(
+        &mut sheet,
+        &mut undo,
+        &mut redo,
+        SheetTransaction::Snapshot {
+            before: Box::new(before),
+            after: Box::new(after),
+        },
+    );
+    assert!(sheet.chart.is_some());
+    let tx = undo.pop().expect("chart tx");
+    tx.revert(&mut sheet);
+    assert!(sheet.chart.is_none());
+}
+
+#[test]
+fn test_plan_pivot_sheet_builds_live_cross_sheet_formulas() {
+    let mut data = Sheet::new("Data");
+    for (c, v) in [
+        ("A1", "Category"),
+        ("B1", "Amount"),
+        ("A2", "Food"),
+        ("B2", "10"),
+        ("A3", "Rent"),
+        ("B3", "20"),
+        ("A4", "Food"),
+        ("B4", "30"),
+    ] {
+        data.set_str(c, v);
+    }
+
+    let (pivot, groups) = plan_pivot_sheet(&data, 0, 1, PivotAggregation::Sum).expect("plan");
+    assert_eq!(groups, 2);
+    assert_eq!(pivot.name, "Pivot of Data");
+    // Live SUMIF formulas against the source tab, first-appearance order.
+    assert_eq!(
+        pivot.raw(CellRef::parse("B2").unwrap()),
+        Some("=SUMIF(Data!$A$2:$A$4,\"Food\",Data!$B$2:$B$4)")
+    );
+    assert_eq!(
+        pivot.raw(CellRef::parse("B3").unwrap()),
+        Some("=SUMIF(Data!$A$2:$A$4,\"Rent\",Data!$B$2:$B$4)")
+    );
+    let evaluated = loom_sheets_core::workbook::evaluate_workbook(&[data.clone(), pivot]);
+    assert_eq!(
+        evaluated[1]
+            .get(&CellRef::parse("B2").unwrap())
+            .map(|v| v.display())
+            .as_deref(),
+        Some("40")
+    );
+    assert_eq!(
+        evaluated[1]
+            .get(&CellRef::parse("B3").unwrap())
+            .map(|v| v.display())
+            .as_deref(),
+        Some("20")
+    );
+
+    let (count_pivot, count_groups) =
+        plan_pivot_sheet(&data, 0, 1, PivotAggregation::Count).expect("count plan");
+    assert_eq!(count_groups, 2);
+    assert_eq!(
+        count_pivot.raw(CellRef::parse("B2").unwrap()),
+        Some("=COUNTIF(Data!$A$2:$A$4,\"Food\")")
+    );
+    let counted = loom_sheets_core::workbook::evaluate_workbook(&[data.clone(), count_pivot]);
+    assert_eq!(
+        counted[1]
+            .get(&CellRef::parse("B2").unwrap())
+            .map(|v| v.display())
+            .as_deref(),
+        Some("2")
+    );
+}
+
+#[test]
+fn test_plan_pivot_validates_and_names_uniquely() {
+    let empty = Sheet::new("Empty");
+    let err = plan_pivot_sheet(&empty, 0, 1, PivotAggregation::Sum).expect_err("needs rows");
+    assert!(err.contains("data row"), "unexpected hint: {err}");
+
+    let mut text_only = Sheet::new("Text");
+    text_only.set_str("A1", "Name");
+    text_only.set_str("A2", "Alice");
+    let err = plan_pivot_sheet(&text_only, 0, 0, PivotAggregation::Sum).expect_err("needs numbers");
+    assert!(err.contains('A'), "hint names columns: {err}");
+
+    let existing = vec![Sheet::new("Pivot of Data")];
+    assert_eq!(
+        unique_sheet_name("Pivot of Data", &existing),
+        "Pivot of Data 2"
+    );
+    assert_eq!(unique_sheet_name("Fresh", &existing), "Fresh");
+}
+
+#[test]
+fn test_borders_fill_and_font_size_toggle_undo() {
+    use crate::formatting::{
+        adjust_selection_font_size, cycle_selection_fill, set_selection_fill,
+        toggle_selection_borders,
+    };
+    use loom_sheets_core::style::FillColor;
+
+    let mut sheet = Sheet::new("style");
+    let range = CellRange::parse("A1:B2").unwrap();
+    let mut undo = Vec::new();
+    let mut redo = Vec::new();
+    let cell = CellRef::parse("A1").unwrap();
+
+    assert!(toggle_selection_borders(
+        &mut sheet, &mut undo, &mut redo, range
+    ));
+    assert!(sheet.cell_style(cell).border);
+    assert!(toggle_selection_borders(
+        &mut sheet, &mut undo, &mut redo, range
+    ));
+    assert!(!sheet.cell_style(cell).border);
+    assert_eq!(undo.len(), 2);
+
+    assert!(cycle_selection_fill(
+        &mut sheet, &mut undo, &mut redo, range
+    ));
+    assert_eq!(sheet.cell_style(cell).fill, FillColor::Red);
+    assert!(set_selection_fill(
+        &mut sheet,
+        &mut undo,
+        &mut redo,
+        range,
+        FillColor::Blue
+    ));
+    assert_eq!(sheet.cell_style(cell).fill, FillColor::Blue);
+    assert!(!set_selection_fill(
+        &mut sheet,
+        &mut undo,
+        &mut redo,
+        range,
+        FillColor::Blue
+    ));
+
+    assert!(adjust_selection_font_size(
+        &mut sheet, &mut undo, &mut redo, range, 1
+    ));
+    assert_eq!(sheet.cell_style(cell).font_size, Some(15));
+    assert!(adjust_selection_font_size(
+        &mut sheet, &mut undo, &mut redo, range, -1
+    ));
+    // Stepping back onto the theme size clears the override.
+    assert_eq!(sheet.cell_style(cell).font_size, None);
+
+    // Undo restores defaults in reverse order.
+    while let Some(tx) = undo.pop() {
+        tx.revert(&mut sheet);
+    }
+    assert!(sheet.cell_style(cell).is_default());
 }

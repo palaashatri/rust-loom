@@ -4,16 +4,27 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use loom_desktop::{CommandAction, DesktopError, NativeMenuBar};
+use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
-    compute_pivot, evaluate, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
-    PivotAggregation, RangeEdit, Sheet, SheetModel,
+    CellAlignment, CellRange, CellRef, ChartSeries, ChartSpec, NumberFormat, PivotAggregation,
+    RangeEdit, Sheet, SheetChart, SheetModel,
 };
 use slint::{ComponentHandle, SharedString, VecModel};
 
+use crate::analysis::{
+    chart_points, label_value_columns, line_path_commands, pie_wedge_commands, plan_chart,
+    plan_pivot_sheet, unique_sheet_name,
+};
+use crate::formatting::{
+    adjust_selection_font_size, cycle_selection_fill, set_selection_decimal_places,
+    set_selection_fill, set_selection_number_format, toggle_selection_bold,
+    toggle_selection_borders, toggle_selection_italic, toggle_selection_underline,
+};
 use crate::{
-    apply_sheet, cell_value, clear_selection, commit_formula_edit, commit_transaction, select_cell,
-    selection_from_app, set_selection_alignment, sync_menu_state, update_selection_range,
-    GridSelection, GuiState, SheetTransaction, SheetsApp,
+    apply_sheet, clear_selection, commit_formula_edit, commit_transaction,
+    commit_workbook_transaction, evaluate_current, project_current, select_cell,
+    selection_from_app, set_selection_alignment, sync_current_to_tabs, sync_menu_state,
+    update_selection_range, GridSelection, GuiState, SheetTransaction, SheetsApp,
 };
 
 /// Synchronize the sheet tab labels and active selection with the Slint UI.
@@ -30,62 +41,112 @@ pub(crate) fn sync_sheet_tabs(app: &SheetsApp, state: &GuiState) {
 
 /// Synchronize active chart data from the worksheet model to the Slint UI.
 pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
+    let Some(chart) = sheet.chart.clone() else {
+        app.set_chart_visible(false);
+        return;
+    };
     if !app.get_chart_visible() {
         return;
     }
-    let vals = evaluate(sheet);
-    let dims = sheet.dimensions();
-    let mut categories = Vec::new();
-    let mut values = Vec::new();
-    let mut display_values = Vec::new();
-    for r in 1..dims.rows {
-        let cat = cell_value(sheet, &vals, r, 0);
-        let val_str = cell_value(sheet, &vals, r, 1);
-        let clean = val_str.trim().trim_start_matches('$').trim_end_matches('%');
-        if let Ok(num) = clean.parse::<f64>() {
-            categories.push(cat);
-            values.push(num);
-            display_values.push(val_str);
-        }
-    }
-    if categories.is_empty() {
+    let points = chart_points(sheet, &chart);
+    if points.is_empty() {
+        // Source data was deleted after the chart was inserted: hide rather
+        // than show a stale or empty plot.
+        app.set_chart_visible(false);
         return;
     }
+    let categories: Vec<SharedString> = points
+        .iter()
+        .map(|(cat, _, _)| SharedString::from(cat))
+        .collect();
+    let values: Vec<f64> = points.iter().map(|(_, num, _)| *num).collect();
+    let display_values: Vec<SharedString> = points
+        .iter()
+        .map(|(_, _, raw)| SharedString::from(raw))
+        .collect();
     let spec = ChartSpec {
-        kind: ChartKind::Bar,
-        title: format!("{} Chart", sheet.name),
+        kind: chart.kind,
+        title: chart.title.clone(),
         series: vec![ChartSeries {
             name: "Series 1".into(),
-            categories: categories.clone(),
-            values: values.clone(),
+            categories: points.iter().map(|(cat, _, _)| cat.clone()).collect(),
+            values,
         }],
     };
-    if let Ok(normalized_series) = spec.normalized_points() {
-        let norm = normalized_series[0]
-            .iter()
-            .map(|&v| v as f32)
-            .collect::<Vec<f32>>();
-        app.set_chart_title(SharedString::from(spec.title));
-        app.set_chart_categories(
-            Rc::new(VecModel::from(
-                categories
-                    .into_iter()
-                    .map(SharedString::from)
-                    .collect::<Vec<_>>(),
-            ))
-            .into(),
-        );
-        app.set_chart_values_display(
-            Rc::new(VecModel::from(
-                display_values
-                    .into_iter()
-                    .map(SharedString::from)
-                    .collect::<Vec<_>>(),
-            ))
-            .into(),
-        );
-        app.set_chart_normalized(Rc::new(VecModel::from(norm)).into());
-    }
+    let Ok(normalized_series) = spec.normalized_points() else {
+        app.set_chart_visible(false);
+        return;
+    };
+    let norm = normalized_series[0]
+        .iter()
+        .map(|&v| v as f32)
+        .collect::<Vec<f32>>();
+    app.set_chart_title(SharedString::from(chart.title));
+    app.set_chart_kind(SharedString::from(chart.kind.as_str()));
+    app.set_chart_categories(Rc::new(VecModel::from(categories)).into());
+    app.set_chart_values_display(Rc::new(VecModel::from(display_values)).into());
+    app.set_chart_normalized(Rc::new(VecModel::from(norm.clone())).into());
+    app.set_chart_line_commands(SharedString::from(line_path_commands(&norm)));
+    let wedges: Vec<SharedString> =
+        pie_wedge_commands(&points.iter().map(|(_, num, _)| *num).collect::<Vec<_>>())
+            .into_iter()
+            .map(SharedString::from)
+            .collect();
+    app.set_chart_pie_commands(Rc::new(VecModel::from(wedges)).into());
+    let opacities: Vec<f32> = (0..points.len())
+        .map(|i| 1.0 - (i % 5) as f32 * 0.15)
+        .collect();
+    app.set_chart_pie_opacities(Rc::new(VecModel::from(opacities)).into());
+}
+
+/// Apply a zoom level: factor drives geometry, label drives the toolbar.
+/// View-only (like scrolling): no undo transaction, but the projection and
+/// menu state refresh so the new scale renders immediately.
+pub(crate) fn set_zoom(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    factor: f32,
+) {
+    let factor = factor.clamp(0.5, 3.0);
+    app.set_zoom_factor(factor);
+    let label = format!("{}%", (factor * 100.0).round() as i32);
+    app.set_zoom_level(label.clone().into());
+    apply_sheet(app, state);
+    sync_menu_state(menu_service, app, state);
+    app.set_status_left(SharedString::from(format!("Zoom set to {label}")));
+}
+
+/// Build a template workbook into fresh single-tab state. Creating from a
+/// template is not an undoable edit (matching New/Open): stacks reset.
+pub(crate) fn create_template_workbook(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    idx: i32,
+) {
+    let sheet = crate::template_sheet(idx);
+    *state.current.borrow_mut() = sheet.clone();
+    *state.sheets.borrow_mut() = vec![sheet];
+    *state.active_sheet_index.borrow_mut() = 0;
+    *state.save_path.borrow_mut() = None;
+    state.undo_stack.borrow_mut().clear();
+    state.redo_stack.borrow_mut().clear();
+    *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
+    apply_sheet(app, state);
+    sync_sheet_tabs(app, state);
+    sync_menu_state(menu_service, app, state);
+    app.set_template_chooser_open(false);
+    app.set_status_left("Created template workbook".into());
+}
+
+/// Status-line confirmation for a style toggle, read back from the focused
+/// cell so screen-reader and keyboard users learn the applied state.
+fn announce_toggle(app: &SheetsApp, label: &str, on: bool) {
+    app.set_status_left(SharedString::from(format!(
+        "{label} {}",
+        if on { "on" } else { "off" }
+    )));
 }
 
 /// Register all toolbar, sheet-tab, and menu actions on the Slint window.
@@ -94,6 +155,24 @@ pub(crate) fn register_sheet_actions(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_create_template(move |idx| {
+            if let Some(app) = app_ref.upgrade() {
+                create_template_workbook(&app, &state, &menu_service, idx);
+            }
+        });
+    }
+    {
+        let app_ref = app.as_weak();
+        app.on_cancel_template(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_template_chooser_open(false);
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -133,7 +212,7 @@ pub(crate) fn register_sheet_actions(
                     *state.undo_stack.borrow_mut() = target_undo;
                     *state.redo_stack.borrow_mut() = target_redo;
 
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_sheet_tabs(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!(
@@ -151,33 +230,19 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_add_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                let cur = state.current.borrow().clone();
-                let active_idx = *state.active_sheet_index.borrow();
-                state.sheets.borrow_mut()[active_idx] = cur;
-
-                // Preserve current sheet's undo/redo history
-                let cur_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
-                let cur_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
-                if active_idx >= state.sheet_histories.borrow().len() {
-                    state
-                        .sheet_histories
-                        .borrow_mut()
-                        .resize_with(active_idx + 1, || (Vec::new(), Vec::new()));
+                sync_current_to_tabs(&state);
+                let mut after_sheets = state.sheets.borrow().clone();
+                // Generated tab names stay unique even after deletions.
+                let mut count = after_sheets.len() + 1;
+                while after_sheets
+                    .iter()
+                    .any(|sheet| sheet.name.eq_ignore_ascii_case(&format!("Sheet {count}")))
+                {
+                    count += 1;
                 }
-                state.sheet_histories.borrow_mut()[active_idx] = (cur_undo, cur_redo);
-
-                let count = state.sheets.borrow().len() + 1;
-                let new_sheet = Sheet::new(&format!("Sheet {count}"));
-                state.sheets.borrow_mut().push(new_sheet.clone());
-                state
-                    .sheet_histories
-                    .borrow_mut()
-                    .push((Vec::new(), Vec::new()));
-                *state.active_sheet_index.borrow_mut() = count - 1;
-                *state.current.borrow_mut() = new_sheet;
-                *state.undo_stack.borrow_mut() = Vec::new();
-                *state.redo_stack.borrow_mut() = Vec::new();
-                apply_sheet(&app, &state.current.borrow());
+                after_sheets.push(Sheet::new(&format!("Sheet {count}")));
+                commit_workbook_transaction(&state, after_sheets, count - 1, None);
+                apply_sheet(&app, &state);
                 sync_sheet_tabs(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left(SharedString::from(format!("Created Sheet {count}")));
@@ -206,7 +271,7 @@ pub(crate) fn register_sheet_actions(
                 );
                 if committed {
                     select_cell(&app, &state.current.borrow(), next_row as i32, 0);
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!("Added row {}", next_row + 1)));
                 }
@@ -228,7 +293,7 @@ pub(crate) fn register_sheet_actions(
                     sel.anchor.col,
                     true,
                 ) {
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left("Sorted table rows ascending".into());
                 }
@@ -237,29 +302,18 @@ pub(crate) fn register_sheet_actions(
     }
 
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_cycle_zoom(move || {
             if let Some(app) = app_ref.upgrade() {
-                let next = match app.get_zoom_level().as_str() {
-                    "100%" => "125%",
-                    "125%" => "150%",
-                    "150%" => "75%",
-                    _ => "100%",
+                let next = match (app.get_zoom_factor() * 100.0).round() as i32 {
+                    75 => 1.0,
+                    100 => 1.25,
+                    125 => 1.5,
+                    _ => 0.75,
                 };
-                app.set_zoom_level(next.into());
-                app.set_status_left(SharedString::from(format!("Zoom set to {next}")));
-            }
-        });
-    }
-
-    {
-        let app_ref = app.as_weak();
-        app.on_add_comment(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let cell = app.get_selected_cell();
-                app.set_formula_edit_buffer(SharedString::from(format!("// Note on {cell}: ")));
-                app.invoke_focus_formula_bar();
-                app.set_formula_feedback(SharedString::from(format!("Add note to {cell}")));
+                set_zoom(&app, &state, &menu_service, next);
             }
         });
     }
@@ -267,16 +321,280 @@ pub(crate) fn register_sheet_actions(
     {
         let state = state.clone();
         let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_zoom_in(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current = crate::zoom_factor(&app);
+                set_zoom(&app, &state, &menu_service, (current + 0.25).min(3.0));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_zoom_out(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let current = crate::zoom_factor(&app);
+                set_zoom(&app, &state, &menu_service, (current - 0.25).max(0.5));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_zoom_actual(move || {
+            if let Some(app) = app_ref.upgrade() {
+                set_zoom(&app, &state, &menu_service, 1.0);
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_toggle_bold(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if toggle_selection_bold(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                ) {
+                    let on = state.current.borrow().cell_style(sel.anchor).bold;
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    announce_toggle(&app, "Bold", on);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_toggle_italic(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if toggle_selection_italic(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                ) {
+                    let on = state.current.borrow().cell_style(sel.anchor).italic;
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    announce_toggle(&app, "Italic", on);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_toggle_underline(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if toggle_selection_underline(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                ) {
+                    let on = state.current.borrow().cell_style(sel.anchor).underline;
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    announce_toggle(&app, "Underline", on);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_adjust_decimals(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if set_selection_decimal_places(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                    delta,
+                ) {
+                    let decimals = state
+                        .current
+                        .borrow()
+                        .cell_style(sel.anchor)
+                        .decimal_places
+                        .unwrap_or(2);
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Decimals: {decimals}")));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_toggle_borders(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if toggle_selection_borders(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                ) {
+                    let on = state.current.borrow().cell_style(sel.anchor).border;
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    announce_toggle(&app, "Borders", on);
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_cycle_fill(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if cycle_selection_fill(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                ) {
+                    let fill = state.current.borrow().cell_style(sel.anchor).fill;
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Fill {}", fill.as_str())));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_adjust_font(move |delta| {
+            if let Some(app) = app_ref.upgrade() {
+                let sel = selection_from_app(&app);
+                if adjust_selection_font_size(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                    delta,
+                ) {
+                    let size = crate::formatting::effective_font_size(
+                        state.current.borrow().cell_style(sel.anchor),
+                    );
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Font size {size}")));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_set_fill(move |swatch_idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let fill = match swatch_idx {
+                    0 => FillColor::Red,
+                    1 => FillColor::Orange,
+                    2 => FillColor::Yellow,
+                    3 => FillColor::Green,
+                    4 => FillColor::Blue,
+                    5 => FillColor::Purple,
+                    6 => FillColor::Gray,
+                    _ => FillColor::None,
+                };
+                let sel = selection_from_app(&app);
+                if set_selection_fill(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                    fill,
+                ) {
+                    apply_sheet(&app, &state);
+                    sync_menu_state(&menu_service, &app, &state);
+                    app.set_status_left(SharedString::from(format!("Fill {}", fill.as_str())));
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
         app.on_insert_chart(move || {
             if let Some(app) = app_ref.upgrade() {
-                let sheet = state.current.borrow();
-                app.set_chart_visible(true);
-                sync_chart_to_app(&app, &sheet);
-                app.set_status_left(SharedString::from(format!(
-                    "Inserted {} (Bar)",
-                    app.get_chart_title()
-                )));
-                app.set_formula_feedback("Chart rendered on worksheet".into());
+                if let Some(existing) = state.current.borrow().chart.clone() {
+                    app.set_chart_visible(true);
+                    sync_chart_to_app(&app, &state.current.borrow());
+                    app.set_status_left(SharedString::from(format!(
+                        "Showing {} ({})",
+                        existing.title,
+                        existing.kind.as_str()
+                    )));
+                    return;
+                }
+                // Prefer the selection's columns when it spans a label/value
+                // pair; otherwise fall back to columns A (labels) and B.
+                let (cat_col, val_col) = label_value_columns(&app, &state.current.borrow());
+                match plan_chart(&state.current.borrow(), cat_col, val_col) {
+                    Ok(chart) => {
+                        let before = state.current.borrow().clone();
+                        let mut after = before.clone();
+                        after.chart = Some(chart.clone());
+                        commit_transaction(
+                            &mut state.current.borrow_mut(),
+                            &mut state.undo_stack.borrow_mut(),
+                            &mut state.redo_stack.borrow_mut(),
+                            SheetTransaction::Snapshot {
+                                before: Box::new(before),
+                                after: Box::new(after),
+                            },
+                        );
+                        app.set_chart_visible(true);
+                        sync_chart_to_app(&app, &state.current.borrow());
+                        apply_sheet(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Inserted {} ({})",
+                            chart.title,
+                            chart.kind.as_str()
+                        )));
+                    }
+                    Err(hint) => {
+                        app.set_status_left(SharedString::from(hint));
+                    }
+                }
             }
         });
     }
@@ -285,17 +603,95 @@ pub(crate) fn register_sheet_actions(
         let app_ref = app.as_weak();
         app.on_close_chart(move || {
             if let Some(app) = app_ref.upgrade() {
+                // Hiding is session state only; the persisted spec survives
+                // and Insert Chart restores it.
                 app.set_chart_visible(false);
-                app.set_status_left("Chart dismissed".into());
+                app.set_status_left("Chart hidden".into());
             }
         });
     }
 
     {
+        let state = state.clone();
         let app_ref = app.as_weak();
-        app.on_toggle_chart_kind(move || {
+        let menu_service = menu_service.clone();
+        app.on_cycle_chart_kind(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_status_left("Toggled chart display style".into());
+                let before = state.current.borrow().clone();
+                let Some(current) = before.chart.clone() else {
+                    app.set_status_left("Insert a chart first".into());
+                    return;
+                };
+                let mut after = before.clone();
+                after.chart = Some(SheetChart {
+                    kind: current.kind.cycle(),
+                    ..current
+                });
+                commit_transaction(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    SheetTransaction::Snapshot {
+                        before: Box::new(before),
+                        after: Box::new(after),
+                    },
+                );
+                sync_chart_to_app(&app, &state.current.borrow());
+                apply_sheet(&app, &state);
+                sync_menu_state(&menu_service, &app, &state);
+                app.set_status_left(SharedString::from(format!(
+                    "Chart kind: {}",
+                    state
+                        .current
+                        .borrow()
+                        .chart
+                        .as_ref()
+                        .map(|chart| chart.kind.as_str())
+                        .unwrap_or("bar")
+                )));
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_pivot_summary(move |agg_idx| {
+            if let Some(app) = app_ref.upgrade() {
+                let aggregation = match agg_idx {
+                    1 => PivotAggregation::Count,
+                    2 => PivotAggregation::Average,
+                    3 => PivotAggregation::Min,
+                    4 => PivotAggregation::Max,
+                    _ => PivotAggregation::Sum,
+                };
+                let (cat_col, val_col) = label_value_columns(&app, &state.current.borrow());
+                let source_name = state.current.borrow().name.clone();
+                match plan_pivot_sheet(&state.current.borrow(), cat_col, val_col, aggregation) {
+                    Ok((pivot, groups)) => {
+                        sync_current_to_tabs(&state);
+                        let mut after_sheets = state.sheets.borrow().clone();
+                        let mut pivot = pivot;
+                        pivot.name = unique_sheet_name(&pivot.name, &after_sheets);
+                        after_sheets.push(pivot);
+                        commit_workbook_transaction(
+                            &state,
+                            after_sheets,
+                            state.sheets.borrow().len(),
+                            None,
+                        );
+                        apply_sheet(&app, &state);
+                        sync_sheet_tabs(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Pivot summary: {groups} groups from {source_name} (live formulas)"
+                        )));
+                    }
+                    Err(hint) => {
+                        app.set_status_left(SharedString::from(hint));
+                    }
+                }
             }
         });
     }
@@ -306,17 +702,43 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_rename_sheet(move |new_name| {
             if let Some(app) = app_ref.upgrade() {
-                let trimmed = new_name.trim();
-                if !trimmed.is_empty() {
-                    let active_idx = *state.active_sheet_index.borrow();
-                    state.current.borrow_mut().name = trimmed.to_string();
-                    if active_idx < state.sheets.borrow().len() {
-                        state.sheets.borrow_mut()[active_idx].name = trimmed.to_string();
-                    }
-                    sync_sheet_tabs(&app, &state);
-                    sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left(SharedString::from(format!("Renamed sheet to {trimmed}")));
+                let trimmed = new_name.trim().to_string();
+                sync_current_to_tabs(&state);
+                let active_idx = *state.active_sheet_index.borrow();
+                let after_sheets = state.sheets.borrow().clone();
+                if active_idx >= after_sheets.len() {
+                    return;
                 }
+                let siblings: Vec<&str> = after_sheets
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != active_idx)
+                    .map(|(_, sheet)| sheet.name.as_str())
+                    .collect();
+                if let Err(reason) =
+                    loom_sheets_core::refs::validate_sheet_name(&trimmed, &siblings)
+                {
+                    app.set_status_left(SharedString::from(reason));
+                    return;
+                }
+                let old_name = after_sheets[active_idx].name.clone();
+                let mut after_sheets = after_sheets;
+                after_sheets[active_idx].name = trimmed.clone();
+                // Keep cross-sheet references pointing at the renamed tab.
+                for sheet in &mut after_sheets {
+                    for cell in sheet.cells.values_mut() {
+                        if cell.is_formula() {
+                            cell.raw = loom_sheets_core::refs::rename_sheet_in_formula(
+                                &cell.raw, &old_name, &trimmed,
+                            );
+                        }
+                    }
+                }
+                commit_workbook_transaction(&state, after_sheets, active_idx, None);
+                apply_sheet(&app, &state);
+                sync_sheet_tabs(&app, &state);
+                sync_menu_state(&menu_service, &app, &state);
+                app.set_status_left(SharedString::from(format!("Renamed sheet to {trimmed}")));
             }
         });
     }
@@ -343,7 +765,7 @@ pub(crate) fn register_sheet_actions(
                 );
                 if committed {
                     select_cell(&app, &state.current.borrow(), 0, next_col as i32);
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!("Added column {col_letter}")));
                 }
@@ -357,148 +779,26 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_set_cell_format(move |fmt_idx| {
             if let Some(app) = app_ref.upgrade() {
-                if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
-                    let current_raw = state
-                        .current
-                        .borrow()
-                        .raw(cell)
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    let clean = current_raw
-                        .trim()
-                        .trim_start_matches('$')
-                        .trim_end_matches('%');
-                    if let Ok(num) = clean.parse::<f64>() {
-                        let new_val = match fmt_idx {
-                            1 => format!("${num:.2}"),
-                            2 => format!("{:.1}%", num * 100.0),
-                            _ => format!("{num}"),
-                        };
-                        let committed = commit_formula_edit(
-                            &mut state.current.borrow_mut(),
-                            &mut state.undo_stack.borrow_mut(),
-                            &mut state.redo_stack.borrow_mut(),
-                            cell,
-                            &new_val,
-                        );
-                        if committed {
-                            app.set_cell_format(fmt_idx);
-                            apply_sheet(&app, &state.current.borrow());
-                            sync_menu_state(&menu_service, &app, &state);
-                            app.set_status_left(SharedString::from(format!(
-                                "Formatted cell {} as {}",
-                                cell.to_a1(),
-                                new_val
-                            )));
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_add_shape(move || {
-            if let Some(app) = app_ref.upgrade() {
-                if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
-                    let committed = commit_formula_edit(
-                        &mut state.current.borrow_mut(),
-                        &mut state.undo_stack.borrow_mut(),
-                        &mut state.redo_stack.borrow_mut(),
-                        cell,
-                        "◆",
-                    );
-                    if committed {
-                        apply_sheet(&app, &state.current.borrow());
-                        sync_menu_state(&menu_service, &app, &state);
-                        app.set_formula_feedback(SharedString::from(format!(
-                            "Inserted shape ◆ into {}",
-                            cell.to_a1()
-                        )));
-                    }
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_add_category(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let cur = state.current.borrow().clone();
-                let dims = cur.dimensions();
-                if dims.rows > 1 {
-                    let range = CellRange::new(
-                        CellRef { row: 1, col: 0 },
-                        CellRef {
-                            row: dims.rows.saturating_sub(1),
-                            col: dims.cols.saturating_sub(1),
-                        },
-                    );
-                    let mut model = SheetModel::new(cur);
-                    if model.sort_rows(range, 0, true).is_ok() {
-                        *state.current.borrow_mut() = model.sheet;
-                        apply_sheet(&app, &state.current.borrow());
-                        sync_menu_state(&menu_service, &app, &state);
-                        app.set_status_left("Grouped rows by category (Column A)".into());
-                    }
-                }
-            }
-        });
-    }
-
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_pivot_table(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let sheet = state.current.borrow();
-                let vals = evaluate(&sheet);
-                let dims = sheet.dimensions();
-                let mut keys = Vec::new();
-                let mut values = Vec::new();
-                for r in 1..dims.rows {
-                    let k = cell_value(&sheet, &vals, r, 0);
-                    let v_str = cell_value(&sheet, &vals, r, 1);
-                    if let Ok(num) = v_str.trim().parse::<f64>() {
-                        keys.push(k);
-                        values.push(num);
-                    }
-                }
-                if let Ok(pivot) = compute_pivot(&keys, &values, PivotAggregation::Sum) {
-                    let mut p_sheet = Sheet::new("Pivot Summary");
-                    p_sheet.set_str("A1", "Category");
-                    p_sheet.set_str("B1", "Total");
-                    for (i, (k, v)) in pivot.iter().enumerate() {
-                        let r = i + 2;
-                        p_sheet.set_str(&format!("A{r}"), k);
-                        p_sheet.set_str(&format!("B{r}"), &format!("{v:.2}"));
-                    }
-                    drop(sheet);
-                    let cur = state.current.borrow().clone();
-                    let active = *state.active_sheet_index.borrow();
-                    state.sheets.borrow_mut()[active] = cur;
-                    state.sheets.borrow_mut().push(p_sheet.clone());
-                    let new_idx = state.sheets.borrow().len() - 1;
-                    *state.active_sheet_index.borrow_mut() = new_idx;
-                    *state.current.borrow_mut() = p_sheet;
-                    apply_sheet(&app, &state.current.borrow());
-                    sync_sheet_tabs(&app, &state);
+                let fmt = match fmt_idx {
+                    1 => NumberFormat::Currency,
+                    2 => NumberFormat::Percentage,
+                    3 => NumberFormat::Number,
+                    _ => NumberFormat::General,
+                };
+                let sel = selection_from_app(&app);
+                if set_selection_number_format(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    sel.range(),
+                    fmt,
+                ) {
+                    app.set_cell_format(fmt_idx);
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!(
-                        "Generated Pivot Summary ({} groups)",
-                        pivot.len()
+                        "Set number format to {fmt:?}"
                     )));
-                } else {
-                    app.set_status_left(
-                        "Pivot table: requires labels in Col A and numbers in Col B".into(),
-                    );
                 }
             }
         });
@@ -518,7 +818,7 @@ pub(crate) fn register_sheet_actions(
                     sel.range(),
                 );
                 if changed {
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!("Cleared {}", sel.label())));
                 }
@@ -547,7 +847,7 @@ pub(crate) fn register_sheet_actions(
                 );
                 if changed {
                     app.set_cell_alignment(align_idx);
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     let name = match align {
                         CellAlignment::Center => "Center",
@@ -599,7 +899,7 @@ pub(crate) fn register_sheet_actions(
                     sel.range(),
                 );
                 if changed {
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                 }
                 app.set_status_left(SharedString::from(format!(
@@ -628,7 +928,7 @@ pub(crate) fn register_sheet_actions(
                         &data,
                     );
                     if pasted > 0 {
-                        apply_sheet(&app, &state.current.borrow());
+                        apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_status_left(SharedString::from(format!(
                             "Pasted {} cells at {}",
@@ -648,9 +948,9 @@ pub(crate) fn register_sheet_actions(
             if let Some(app) = app_ref.upgrade() {
                 let sheet = state.current.borrow();
                 let sel = select_all_range(&sheet);
-                let vals = evaluate(&sheet);
+                let vals = evaluate_current(&state);
                 update_selection_range(&app, &sheet, &vals, sel);
-                apply_sheet(&app, &sheet);
+                project_current(&app, &state);
                 app.set_status_left(SharedString::from(format!(
                     "Selected all ({})",
                     sel.label()
@@ -686,7 +986,7 @@ pub(crate) fn register_sheet_actions(
                             target_row as i32,
                             cell.col as i32,
                         );
-                        apply_sheet(&app, &state.current.borrow());
+                        apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_status_left(SharedString::from(format!(
                             "Deleted row {}",
@@ -728,7 +1028,7 @@ pub(crate) fn register_sheet_actions(
                             cell.row as i32,
                             target_col as i32,
                         );
-                        apply_sheet(&app, &state.current.borrow());
+                        apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_status_left(SharedString::from(format!(
                             "Deleted column {col_letter}"
@@ -766,7 +1066,7 @@ pub(crate) fn register_sheet_actions(
                     sel.anchor.col,
                     true,
                 ) {
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left("Sorted rows ascending".into());
                 }
@@ -788,7 +1088,7 @@ pub(crate) fn register_sheet_actions(
                     sel.anchor.col,
                     false,
                 ) {
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left("Sorted rows descending".into());
                 }
@@ -814,7 +1114,7 @@ pub(crate) fn register_sheet_actions(
                         after: Box::new(after),
                     },
                 );
-                apply_sheet(&app, &state.current.borrow());
+                apply_sheet(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left("Frozen header row".into());
             }
@@ -839,7 +1139,7 @@ pub(crate) fn register_sheet_actions(
                         after: Box::new(after),
                     },
                 );
-                apply_sheet(&app, &state.current.borrow());
+                apply_sheet(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left("Unfrozen panes".into());
             }
@@ -868,7 +1168,7 @@ pub(crate) fn register_sheet_actions(
                             after: Box::new(after),
                         },
                     );
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!(
                         "Row {} height: {:.0} px",
@@ -902,7 +1202,7 @@ pub(crate) fn register_sheet_actions(
                             after: Box::new(after),
                         },
                     );
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!(
                         "Column width: {:.0} px",
@@ -1038,6 +1338,19 @@ pub(crate) fn delete_row(sheet: &Sheet, target_row: u32) -> Option<Sheet> {
             );
         }
     }
+    for (cell, style) in &sheet.styles {
+        if cell.row < target_row {
+            new_sheet.styles.insert(*cell, *style);
+        } else if cell.row > target_row {
+            new_sheet.styles.insert(
+                CellRef {
+                    row: cell.row - 1,
+                    col: cell.col,
+                },
+                *style,
+            );
+        }
+    }
     Some(new_sheet)
 }
 
@@ -1083,6 +1396,19 @@ pub(crate) fn delete_col(sheet: &Sheet, target_col: u32) -> Option<Sheet> {
                     col: cell.col - 1,
                 },
                 *align,
+            );
+        }
+    }
+    for (cell, style) in &sheet.styles {
+        if cell.col < target_col {
+            new_sheet.styles.insert(*cell, *style);
+        } else if cell.col > target_col {
+            new_sheet.styles.insert(
+                CellRef {
+                    row: cell.row,
+                    col: cell.col - 1,
+                },
+                *style,
             );
         }
     }
@@ -1140,16 +1466,12 @@ pub(crate) fn delete_active_sheet(
         return false;
     }
     let active_idx = *state.active_sheet_index.borrow();
-    state.sheets.borrow_mut().remove(active_idx);
-    let new_idx = active_idx.min(state.sheets.borrow().len() - 1);
-    *state.active_sheet_index.borrow_mut() = new_idx;
-    let next_sheet = state.sheets.borrow()[new_idx].clone();
-    *state.current.borrow_mut() = next_sheet;
-    if active_idx < state.sheet_histories.borrow().len() {
-        state.sheet_histories.borrow_mut().remove(active_idx);
-    }
+    let mut after_sheets = state.sheets.borrow().clone();
+    after_sheets.remove(active_idx);
+    let new_idx = active_idx.min(after_sheets.len() - 1);
+    commit_workbook_transaction(state, after_sheets, new_idx, Some(active_idx));
     sync_sheet_tabs(app, state);
-    apply_sheet(app, &state.current.borrow());
+    apply_sheet(app, state);
     sync_menu_state(menu_service, app, state);
     app.set_status_left(SharedString::from(format!(
         "Deleted sheet. Active: {}",
@@ -1179,6 +1501,9 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
         "app.palette" => app.invoke_open_palette(),
         "view.inspector" => app.invoke_toggle_inspector(),
+        "view.zoom_in" => app.invoke_zoom_in(),
+        "view.zoom_out" => app.invoke_zoom_out(),
+        "view.zoom_actual" => app.invoke_zoom_actual(),
         "table.add_row" => app.invoke_add_row(),
         "table.delete_row" => app.invoke_delete_row(),
         "table.add_col" | "sheets.add-col" => app.invoke_add_table_col(),
@@ -1189,6 +1514,30 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.unfreeze_panes" | "sheets.unfreeze-panes" => app.invoke_unfreeze_panes(),
         "sheets.delete_sheet" => app.invoke_delete_sheet(),
         "sheets.organize" => app.invoke_organize(),
+        "format.bold" | "sheets.bold" => app.invoke_toggle_bold(),
+        "format.italic" | "sheets.italic" => app.invoke_toggle_italic(),
+        "format.underline" | "sheets.underline" => app.invoke_toggle_underline(),
+        "format.align_left" | "sheets.align-left" => app.invoke_set_cell_alignment(0),
+        "format.align_center" | "sheets.align-center" => app.invoke_set_cell_alignment(1),
+        "format.align_right" | "sheets.align-right" => app.invoke_set_cell_alignment(2),
+        "format.general" => app.invoke_set_cell_format(0),
+        "format.currency" => app.invoke_set_cell_format(1),
+        "format.percentage" => app.invoke_set_cell_format(2),
+        "format.number" => app.invoke_set_cell_format(3),
+        "table.adjust_decimals_increase" => app.invoke_adjust_decimals(1),
+        "table.adjust_decimals_decrease" => app.invoke_adjust_decimals(-1),
+        "format.borders" | "sheets.borders" => app.invoke_toggle_borders(),
+        "format.fill_cycle" | "sheets.fill-cycle" => app.invoke_cycle_fill(),
+        "format.font_increase" => app.invoke_adjust_font(1),
+        "format.font_decrease" => app.invoke_adjust_font(-1),
+        "table.fill_down" => app.invoke_fill_selection(),
+        "sheets.insert_chart" => app.invoke_insert_chart(),
+        "sheets.cycle_chart_kind" => app.invoke_cycle_chart_kind(),
+        "table.pivot_sum" => app.invoke_pivot_summary(0),
+        "table.pivot_count" => app.invoke_pivot_summary(1),
+        "table.pivot_average" => app.invoke_pivot_summary(2),
+        "table.pivot_min" => app.invoke_pivot_summary(3),
+        "table.pivot_max" => app.invoke_pivot_summary(4),
         _ => return false,
     }
     true

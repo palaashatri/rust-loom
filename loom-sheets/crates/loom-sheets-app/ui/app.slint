@@ -59,6 +59,21 @@ export component SheetsApp inherits Window {
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
     in property <[int]> cell-alignments: [];
+    in property <[bool]> cell-bolds: [];
+    in property <[bool]> cell-italics: [];
+    in property <[bool]> cell-underlines: [];
+    in property <[bool]> cell-borders: [];
+    in property <[int]> cell-fills: [];
+    in property <[int]> cell-font-sizes: [];
+    in property <bool> cell-bold: false;
+    in property <bool> cell-italic: false;
+    in property <bool> cell-underline: false;
+    in property <bool> cell-border: false;
+    in property <int> cell-fill: -1;
+    in property <int> cell-font-size: 14;
+    in property <string> cell-font-label: "14";
+    in property <int> cell-decimals: 2;
+    in property <string> cell-decimals-label: "2";
     // The grid renders a bounded slice of the sparse workbook. These are
     // zero-based worksheet coordinates, not visual row/column indexes.
     in property <int> view-row-origin: 0;
@@ -103,7 +118,8 @@ export component SheetsApp inherits Window {
     in-out property <bool> is-editing: false;
     in-out property <[string]> sheet-names: ["Sheet 1"];
     in-out property <int> active-sheet-index: 0;
-    in-out property <string> zoom-level: "125%";
+    in-out property <string> zoom-level: "100%";
+    in-out property <float> zoom-factor: 1.0;
 
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
@@ -137,11 +153,10 @@ export component SheetsApp inherits Window {
     callback add-row;
     callback organize;
     callback cycle-zoom;
-    callback add-comment;
+    callback zoom-in;
+    callback zoom-out;
+    callback zoom-actual;
     callback insert-chart;
-    callback add-shape;
-    callback add-category;
-    callback pivot-table;
     callback rename-sheet(string);
     callback add-table-col;
     callback delete-row;
@@ -155,19 +170,32 @@ export component SheetsApp inherits Window {
     callback adjust-col-width(int);
     callback set-cell-format(int);
     callback set-cell-alignment(int);
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback toggle-borders;
+    callback cycle-fill;
+    callback set-fill(int);
+    callback adjust-font(int);
+    callback adjust-decimals(int);
     callback clear-selected-cells;
     callback copy-selection;
     callback cut-selection;
     callback paste-selection;
     callback select-all;
     callback close-chart;
-    callback toggle-chart-kind;
+    callback cycle-chart-kind;
+    callback pivot-summary(int);
 
     in-out property <bool> chart-visible: false;
     in-out property <string> chart-title: "Chart";
+    in-out property <string> chart-kind: "bar";
     in-out property <[string]> chart-categories: [];
     in-out property <[string]> chart-values-display: [];
     in-out property <[float]> chart-normalized: [];
+    in-out property <string> chart-line-commands: "";
+    in-out property <[string]> chart-pie-commands: [];
+    in-out property <[float]> chart-pie-opacities: [];
     in-out property <int> cell-format: 0;
     in-out property <int> cell-alignment: 0;
 
@@ -294,10 +322,44 @@ export component SheetsApp inherits Window {
                     root.select-all();
                     return accept;
                 }
+                if (event.text == "b" || event.text == "B") {
+                    root.toggle-bold();
+                    return accept;
+                }
+                if (event.text == "i" || event.text == "I") {
+                    root.toggle-italic();
+                    return accept;
+                }
+                if (event.text == "u" || event.text == "U") {
+                    root.toggle-underline();
+                    return accept;
+                }
+                if (event.text == "=" || event.text == "+") {
+                    root.zoom-in();
+                    return accept;
+                }
+                if (event.text == "-") {
+                    root.zoom-out();
+                    return accept;
+                }
+                if (event.text == "0") {
+                    root.zoom-actual();
+                    return accept;
+                }
             }
             if (event.text == Key.Backspace || event.text == Key.Delete) {
                 root.clear-selected-cells();
                 return accept;
+            }
+            if (event.text == Key.Escape) {
+                // Dismiss the chart overlay when one is showing; formula-bar
+                // editing handles its own Escape closer to the focus.
+                if (root.chart-visible) {
+                    root.chart-visible = false;
+                    root.close-chart();
+                    return accept;
+                }
+                return reject;
             }
             if (event.text == Key.LeftArrow) {
                 if (event.modifiers.shift) { root.extend-selection(0, -1); } else { root.navigate-selection(0, -1); }
@@ -333,21 +395,22 @@ export component SheetsApp inherits Window {
                 can-undo: root.can-undo;
                 can-redo: root.can-redo;
                 zoom-level: root.zoom-level;
-                new-sheet => { root.add-sheet(); }
-                open-sheet => { root.open-sheet(); }
-                save-sheet => { root.save-sheet(); }
+                cell-bold: root.cell-bold;
+                cell-italic: root.cell-italic;
+                cell-underline: root.cell-underline;
+                cell-alignment: root.cell-alignment;
                 undo => { root.undo(); }
                 redo => { root.redo(); }
                 toggle-inspector => { root.toggle-inspector(); }
                 export-csv => { root.export-csv(); }
                 zoom-clicked => { root.cycle-zoom(); }
-                add-category => { root.add-category(); }
-                pivot-table => { root.pivot-table(); }
+                toggle-bold => { root.toggle-bold(); }
+                toggle-italic => { root.toggle-italic(); }
+                toggle-underline => { root.toggle-underline(); }
+                set-cell-alignment(align) => { root.set-cell-alignment(align); }
                 add-row => { root.add-row(); }
+                add-col => { root.add-table-col(); }
                 insert-chart => { root.insert-chart(); }
-                edit-text => { root.begin-edit(root.selection-formula); }
-                add-shape => { root.add-shape(); }
-                add-comment => { root.add-comment(); }
                 organize => { root.organize(); }
                 overflow-requested => {
                     if (root.toolbar-overflow-open) {
@@ -403,6 +466,14 @@ export component SheetsApp inherits Window {
                     selected-col-width: root.selected-col-width;
                     cell-format: root.cell-format;
                     cell-alignment: root.cell-alignment;
+                    cell-bold: root.cell-bold;
+                    cell-italic: root.cell-italic;
+                    cell-underline: root.cell-underline;
+                    cell-border: root.cell-border;
+                    cell-fill: root.cell-fill;
+                    cell-font-size: root.cell-font-size;
+                    cell-font-label: root.cell-font-label;
+                    cell-decimals-label: root.cell-decimals-label;
                     inspector-search <=> root.inspector-search;
                     inspector-tab <=> root.inspector-tab;
                     inspector-show-table: root.inspector-show-table;
@@ -418,6 +489,14 @@ export component SheetsApp inherits Window {
                     adjust-col-width(delta) => { root.adjust-col-width(delta); }
                     set-cell-format(fmt) => { root.set-cell-format(fmt); }
                     set-cell-alignment(align) => { root.set-cell-alignment(align); }
+                    toggle-bold => { root.toggle-bold(); }
+                    toggle-italic => { root.toggle-italic(); }
+                    toggle-underline => { root.toggle-underline(); }
+                    toggle-borders => { root.toggle-borders(); }
+                    cycle-fill => { root.cycle-fill(); }
+                    set-fill(idx) => { root.set-fill(idx); }
+                    adjust-font(delta) => { root.adjust-font(delta); }
+                    adjust-decimals(delta) => { root.adjust-decimals(delta); }
                 }
 
                 Rectangle {
@@ -428,6 +507,7 @@ export component SheetsApp inherits Window {
                         width: parent.width;
                         height: parent.height;
                         sheet-name: root.sheet-name;
+                        zoom-factor: root.zoom-factor;
                         selection-formula: root.selection-formula;
                         rows: root.rows;
                         cols: root.cols;
@@ -435,6 +515,12 @@ export component SheetsApp inherits Window {
                         row-headers: root.row-headers;
                         cells: root.cells;
                         cell-alignments: root.cell-alignments;
+                        cell-bolds: root.cell-bolds;
+                        cell-italics: root.cell-italics;
+                        cell-underlines: root.cell-underlines;
+                        cell-borders: root.cell-borders;
+                        cell-fills: root.cell-fills;
+                        cell-font-sizes: root.cell-font-sizes;
                         view-row-origin: root.view-row-origin;
                         view-col-origin: root.view-col-origin;
                         selected-row: root.selected-row;
@@ -475,11 +561,15 @@ export component SheetsApp inherits Window {
                         x: min(parent.width - 400px, 120px);
                         y: min(parent.height - 260px, 180px);
                         title: root.chart-title;
+                        kind: root.chart-kind;
                         categories: root.chart-categories;
                         values-display: root.chart-values-display;
                         normalized: root.chart-normalized;
+                        line-commands: root.chart-line-commands;
+                        pie-commands: root.chart-pie-commands;
+                        pie-opacities: root.chart-pie-opacities;
                         close-chart => { root.chart-visible = false; root.close-chart(); }
-                        toggle-kind => { root.toggle-chart-kind(); }
+                        cycle-kind => { root.cycle-chart-kind(); }
                     }
                 }
 
@@ -494,6 +584,14 @@ export component SheetsApp inherits Window {
                     selected-col-width: root.selected-col-width;
                     cell-format: root.cell-format;
                     cell-alignment: root.cell-alignment;
+                    cell-bold: root.cell-bold;
+                    cell-italic: root.cell-italic;
+                    cell-underline: root.cell-underline;
+                    cell-border: root.cell-border;
+                    cell-fill: root.cell-fill;
+                    cell-font-size: root.cell-font-size;
+                    cell-font-label: root.cell-font-label;
+                    cell-decimals-label: root.cell-decimals-label;
                     inspector-search <=> root.inspector-search;
                     inspector-tab <=> root.inspector-tab;
                     inspector-show-table: root.inspector-show-table;
@@ -509,6 +607,14 @@ export component SheetsApp inherits Window {
                     adjust-col-width(delta) => { root.adjust-col-width(delta); }
                     set-cell-format(fmt) => { root.set-cell-format(fmt); }
                     set-cell-alignment(align) => { root.set-cell-alignment(align); }
+                    toggle-bold => { root.toggle-bold(); }
+                    toggle-italic => { root.toggle-italic(); }
+                    toggle-underline => { root.toggle-underline(); }
+                    toggle-borders => { root.toggle-borders(); }
+                    cycle-fill => { root.cycle-fill(); }
+                    set-fill(idx) => { root.set-fill(idx); }
+                    adjust-font(delta) => { root.adjust-font(delta); }
+                    adjust-decimals(delta) => { root.adjust-decimals(delta); }
                 }
             }
 

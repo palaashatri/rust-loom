@@ -296,12 +296,19 @@ export component SheetScrollbars inherits Rectangle {
 
 export component SheetTable inherits Rectangle {
     in property <string> sheet-name: "Untitled";
+    in property <float> zoom-factor: 1.0;
     in property <[int]> rows: [];
     in property <[int]> cols: [];
     in property <[string]> column-headers: [];
     in property <[string]> row-headers: [];
     in property <[string]> cells: [];
     in property <[int]> cell-alignments: [];
+    in property <[bool]> cell-bolds: [];
+    in property <[bool]> cell-italics: [];
+    in property <[bool]> cell-underlines: [];
+    in property <[bool]> cell-borders: [];
+    in property <[int]> cell-fills: [];
+    in property <[int]> cell-font-sizes: [];
     in property <int> view-row-origin: 0;
     in property <int> view-col-origin: 0;
     in property <int> selected-row: 0;
@@ -342,7 +349,7 @@ export component SheetTable inherits Rectangle {
 
             Text {
                 text: root.sheet-name == "" ? "Table 1" : root.sheet-name;
-                font-size: Theme.tokens.typography.title;
+                font-size: Theme.tokens.typography.title * root.zoom-factor;
                 font-weight: 700;
                 color: Theme.palette().ink;
                 horizontal-alignment: center;
@@ -378,8 +385,8 @@ export component SheetTable inherits Rectangle {
                         // Top-Left Corner Box
                         Rectangle {
                             width: 36px;
-                            min-height: 24px;
-                            max-height: 24px;
+                            min-height: 24px * root.zoom-factor;
+                            max-height: 24px * root.zoom-factor;
                             background: Theme.palette().surface-sunken;
                             border-width: 1px;
                             border-color: Theme.palette().border;
@@ -393,8 +400,8 @@ export component SheetTable inherits Rectangle {
                         for c in root.cols : Rectangle {
                             min-width: root.grid-column-widths[c];
                             max-width: root.grid-column-widths[c];
-                            min-height: 24px;
-                            max-height: 24px;
+                            min-height: 24px * root.zoom-factor;
+                            max-height: 24px * root.zoom-factor;
                             property <bool> is-col-selected: c + root.view-col-origin == root.selected-col;
                             property <bool> in-col-range: c + root.view-col-origin >= root.selection-start-col && c + root.view-col-origin <= root.selection-end-col;
                             background: in-col-range ? Theme.palette().selection-soft : Theme.palette().surface-sunken;
@@ -402,7 +409,7 @@ export component SheetTable inherits Rectangle {
                             border-color: is-col-selected ? Theme.palette().selection : Theme.palette().border;
                             Text {
                                 text: root.column-headers[c];
-                                font-size: Theme.tokens.typography.caption;
+                                font-size: Theme.tokens.typography.caption * root.zoom-factor;
                                 font-weight: is-col-selected ? 700 : 500;
                                 color: is-col-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
@@ -423,7 +430,7 @@ export component SheetTable inherits Rectangle {
                             border-color: is-row-selected ? Theme.palette().selection : Theme.palette().border;
                             Text {
                                 text: root.row-headers[r];
-                                font-size: Theme.tokens.typography.caption;
+                                font-size: Theme.tokens.typography.caption * root.zoom-factor;
                                 font-weight: is-row-selected ? 700 : 500;
                                 color: is-row-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
@@ -445,12 +452,26 @@ export component SheetTable inherits Rectangle {
                             property <bool> is-active: global-row == root.selected-row && global-col == root.selected-col;
                             property <bool> is-header-row: global-row == 0;
 
-                            background: in-selection && !is-active
-                                ? Theme.palette().paper-line
+                            property <int> cell-idx: r * root.cols.length + c;
+                            property <bool> is-bold: cell-idx < root.cell-bolds.length && root.cell-bolds[cell-idx];
+                            property <bool> is-italic: cell-idx < root.cell-italics.length && root.cell-italics[cell-idx];
+                            property <bool> is-underline: cell-idx < root.cell-underlines.length && root.cell-underlines[cell-idx];
+                            property <bool> is-bordered: cell-idx < root.cell-borders.length && root.cell-borders[cell-idx];
+                            property <int> fill-idx: cell-idx < root.cell-fills.length ? root.cell-fills[cell-idx] : -1;
+                            property <int> font-px: cell-idx < root.cell-font-sizes.length ? root.cell-font-sizes[cell-idx] : 14;
+
+                            background: fill-idx == 0 ? #FECACA
+                                : fill-idx == 1 ? #FED7AA
+                                : fill-idx == 2 ? #FEF08A
+                                : fill-idx == 3 ? #BBF7D0
+                                : fill-idx == 4 ? #BFDBFE
+                                : fill-idx == 5 ? #DDD6FE
+                                : fill-idx == 6 ? #E5E7EB
+                                : in-selection && !is-active ? Theme.palette().paper-line
                                 : is-header-row ? Theme.palette().paper-line
                                 : Theme.palette().paper;
-                            border-width: 1px;
-                            border-color: Theme.palette().paper-line;
+                            border-width: is-bordered ? 2px : 1px;
+                            border-color: is-bordered ? Theme.palette().ink : Theme.palette().paper-line;
                             accessible-role: text;
                             accessible-label: root.column-headers[c] + root.row-headers[r];
                             accessible-value: root.cells[r * root.cols.length + c];
@@ -460,8 +481,9 @@ export component SheetTable inherits Rectangle {
                                 width: parent.width - 16px;
                                 height: parent.height;
                                 text: root.cells[r * root.cols.length + c];
-                                font-size: Theme.tokens.typography.body;
-                                font-weight: is-header-row ? 600 : 400;
+                                font-size: font-px * 1px * root.zoom-factor;
+                                font-weight: is-bold ? 700 : (is-header-row ? 600 : 400);
+                                font-italic: is-italic;
                                 color: Theme.palette().paper-ink;
                                 horizontal-alignment: (r * root.cols.length + c < root.cell-alignments.length ? root.cell-alignments[r * root.cols.length + c] : 0) == 1
                                     ? TextHorizontalAlignment.center
@@ -470,6 +492,14 @@ export component SheetTable inherits Rectangle {
                                         : TextHorizontalAlignment.left);
                                 vertical-alignment: center;
                                 overflow: elide;
+                            }
+
+                            if is-underline : Rectangle {
+                                x: 8px;
+                                y: parent.height - 3px;
+                                width: parent.width - 16px;
+                                height: 1px;
+                                background: Theme.palette().paper-ink;
                             }
 
                             SheetSelectionOverlay {
@@ -516,6 +546,7 @@ export component SheetTable inherits Rectangle {
 /// table's dominant surface separate from the surrounding app chrome.
 export component SheetGridSurface inherits Rectangle {
     in property <string> sheet-name: "Untitled";
+    in property <float> zoom-factor: 1.0;
     in property <string> selection-formula: "";
     in property <[int]> rows: [];
     in property <[int]> cols: [];
@@ -542,6 +573,12 @@ export component SheetGridSurface inherits Rectangle {
     in-out property <length> grid-scroll-x: 0px;
     in-out property <length> grid-scroll-y: 0px;
     in property <[int]> cell-alignments: [];
+    in property <[bool]> cell-bolds: [];
+    in property <[bool]> cell-italics: [];
+    in property <[bool]> cell-underlines: [];
+    in property <[bool]> cell-borders: [];
+    in property <[int]> cell-fills: [];
+    in property <[int]> cell-font-sizes: [];
     callback cell-clicked(int, int);
     callback fill-selection;
     callback clear-selected;
@@ -632,12 +669,19 @@ export component SheetGridSurface inherits Rectangle {
         width: max(1px, parent.width - 48px);
         height: max(1px, parent.height - 40px);
         sheet-name: root.sheet-name;
+        zoom-factor: root.zoom-factor;
         rows: root.rows;
         cols: root.cols;
         column-headers: root.column-headers;
         row-headers: root.row-headers;
         cells: root.cells;
         cell-alignments: root.cell-alignments;
+        cell-bolds: root.cell-bolds;
+        cell-italics: root.cell-italics;
+        cell-underlines: root.cell-underlines;
+        cell-borders: root.cell-borders;
+        cell-fills: root.cell-fills;
+        cell-font-sizes: root.cell-font-sizes;
         view-row-origin: root.view-row-origin;
         view-col-origin: root.view-col-origin;
         selected-row: root.selected-row;

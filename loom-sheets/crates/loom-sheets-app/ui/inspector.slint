@@ -18,6 +18,25 @@ component SheetPropertyRow inherits HorizontalLayout {
     @children
 }
 
+// Fill color swatch: pointer shortcut for direct color choice. Every fill
+// state stays keyboard-reachable through the palette's Fill cycle command.
+component FillSwatch inherits Rectangle {
+    in property <color> swatch-color: transparent;
+    in property <bool> selected: false;
+    in property <string> swatch-label: "";
+    in property <int> swatch-index: -1;
+    callback pick(int);
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: root.swatch-color;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.palette().accent : Theme.palette().border;
+    accessible-role: button;
+    accessible-label: root.swatch-label;
+    TouchArea { clicked => { root.pick(root.swatch-index); } }
+}
+
 export component SheetInspector inherits LoomPanel {
     in property <string> selection-range: "A1";
     in property <string> selection-value: "";
@@ -33,6 +52,14 @@ export component SheetInspector inherits LoomPanel {
     in property <bool> inspector-show-cell: true;
     in property <int> cell-format: 0;
     in property <int> cell-alignment: 0;
+    in property <bool> cell-bold: false;
+    in property <bool> cell-italic: false;
+    in property <bool> cell-underline: false;
+    in property <bool> cell-border: false;
+    in property <int> cell-fill: -1;
+    in property <int> cell-font-size: 14;
+    in property <string> cell-font-label: "14";
+    in property <string> cell-decimals-label: "2";
     callback inspector-search-edited(string);
     callback inspector-context-changed(int);
     callback rename-sheet(string);
@@ -44,6 +71,14 @@ export component SheetInspector inherits LoomPanel {
     callback adjust-col-width(int);
     callback set-cell-format(int);
     callback set-cell-alignment(int);
+    callback toggle-bold;
+    callback toggle-italic;
+    callback toggle-underline;
+    callback toggle-borders;
+    callback cycle-fill;
+    callback set-fill(int);
+    callback adjust-font(int);
+    callback adjust-decimals(int);
 
     title: root.selection-range + " selection";
     width: 320px;
@@ -120,6 +155,60 @@ export component SheetInspector inherits LoomPanel {
                         label: "Formula";
                         LoomTextField { label: "Raw formula"; value: root.selection-formula == "" ? "—" : root.selection-formula; enabled: false; }
                     }
+                    LoomSectionHeader { title: "Font Style"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomIconButton {
+                            icon: "bold";
+                            label: "Bold";
+                            tooltip: "Bold (Cmd+B)";
+                            selected: root.cell-bold;
+                            clicked => { root.toggle-bold(); }
+                        }
+                        LoomIconButton {
+                            icon: "italic";
+                            label: "Italic";
+                            tooltip: "Italic (Cmd+I)";
+                            selected: root.cell-italic;
+                            clicked => { root.toggle-italic(); }
+                        }
+                        LoomIconButton {
+                            icon: "underline";
+                            label: "Underline";
+                            tooltip: "Underline (Cmd+U)";
+                            selected: root.cell-underline;
+                            clicked => { root.toggle-underline(); }
+                        }
+                    }
+                    LoomSectionHeader { title: "Borders & Fill"; }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            label: "Border";
+                            variant: root.cell-border ? "primary" : "ghost";
+                            clicked => { root.toggle-borders(); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        FillSwatch { swatch-color: #FECACA; selected: root.cell-fill == 0; swatch-label: "Fill red"; swatch-index: 0; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: #FED7AA; selected: root.cell-fill == 1; swatch-label: "Fill orange"; swatch-index: 1; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: #FEF08A; selected: root.cell-fill == 2; swatch-label: "Fill yellow"; swatch-index: 2; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: #BBF7D0; selected: root.cell-fill == 3; swatch-label: "Fill green"; swatch-index: 3; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: #BFDBFE; selected: root.cell-fill == 4; swatch-label: "Fill blue"; swatch-index: 4; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: #DDD6FE; selected: root.cell-fill == 5; swatch-label: "Fill purple"; swatch-index: 5; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: #E5E7EB; selected: root.cell-fill == 6; swatch-label: "Fill gray"; swatch-index: 6; pick(idx) => { root.set-fill(idx); } }
+                        FillSwatch { swatch-color: transparent; selected: root.cell-fill == -1; swatch-label: "No fill"; swatch-index: -1; pick(idx) => { root.set-fill(idx); } }
+                    }
+                    SheetPropertyRow {
+                        label: "Font size";
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Font size in points"; value: root.cell-font-label; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "minus"; tooltip: "Decrease font size"; clicked => { root.adjust-font(-1); } }
+                            LoomIconButton { icon: "plus"; tooltip: "Increase font size"; clicked => { root.adjust-font(1); } }
+                        }
+                    }
                     LoomSectionHeader { title: "Data Format"; }
                     HorizontalLayout {
                         spacing: Theme.tokens.space.xs;
@@ -137,6 +226,20 @@ export component SheetInspector inherits LoomPanel {
                             label: "%";
                             variant: root.cell-format == 2 ? "primary" : "ghost";
                             clicked => { root.set-cell-format(2); }
+                        }
+                        LoomButton {
+                            label: "1.23";
+                            variant: root.cell-format == 3 ? "primary" : "ghost";
+                            clicked => { root.set-cell-format(3); }
+                        }
+                    }
+                    SheetPropertyRow {
+                        label: "Decimals";
+                        HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            LoomTextField { label: "Decimals count"; value: root.cell-decimals-label; enabled: false; horizontal-stretch: 1; }
+                            LoomIconButton { icon: "minus"; tooltip: "Decrease decimals"; clicked => { root.adjust-decimals(-1); } }
+                            LoomIconButton { icon: "plus"; tooltip: "Increase decimals"; clicked => { root.adjust-decimals(1); } }
                         }
                     }
                     LoomSectionHeader { title: "Alignment"; }

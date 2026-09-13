@@ -18,16 +18,25 @@ use loom_desktop::{
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 #[cfg(test)]
+use loom_sheets_core::sheet_to_json;
+use loom_sheets_core::style::CellStyle;
+use loom_sheets_core::workbook::evaluate_workbook;
+#[cfg(test)]
 use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, export_xlsx_from_grid, from_csv, sheet_from_json, sheet_to_json, to_csv,
-    CellAlignment, CellRange, CellRef, GridSelection, RangeEdit, Sheet, SheetDimensions,
-    SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, from_csv, sheet_from_json, to_csv_with_values, workbook_from_json, workbook_to_json,
+    CellAlignment, CellRange, CellRef, GridSelection, NumberFormat, RangeEdit, Sheet,
+    SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
+
+pub mod formatting;
+
+mod analysis;
+use analysis::plan_chart;
 
 mod palette;
 use palette::*;
@@ -65,6 +74,7 @@ pub(crate) struct Args {
     pub(crate) rtl: bool,
     pub(crate) open: Option<String>,
     pub(crate) template_chooser: bool,
+    pub(crate) zoom: Option<f32>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -87,6 +97,7 @@ where
         rtl: false,
         open: None,
         template_chooser: false,
+        zoom: None,
     };
     let mut it = raw_args.into_iter().map(Into::into);
     while let Some(a) = it.next() {
@@ -115,6 +126,17 @@ where
             }
             "--rtl" => args.rtl = true,
             "--template-chooser" => args.template_chooser = true,
+            "--zoom" => {
+                let v: f32 = it
+                    .next()
+                    .ok_or("--zoom needs a factor")?
+                    .parse()
+                    .map_err(|_| "bad --zoom factor")?;
+                if !(0.5..=3.0).contains(&v) {
+                    return Err("--zoom must be between 0.5 and 3.0".to_string());
+                }
+                args.zoom = Some(v);
+            }
             "--open" => args.open = Some(it.next().ok_or("--open needs a path")?),
             other if !other.starts_with('-') && args.open.is_none() => {
                 args.open = Some(other.to_string())
@@ -155,7 +177,228 @@ pub(crate) fn starter_workbook() -> Sheet {
     sheet
 }
 
+/// Build the workbook for a template-chooser card index. Every advertised
+/// card (0-10) produces its named sheet with live formulas; unknown indices
+/// fall back to a blank sheet.
+pub(crate) fn template_sheet(idx: i32) -> Sheet {
+    match idx {
+        1 => seeded_sheet(
+            "Monthly Budget",
+            &[
+                ("A1", "Category"),
+                ("B1", "Projected"),
+                ("C1", "Actual"),
+                ("A2", "Housing"),
+                ("B2", "1200"),
+                ("C2", "1200"),
+                ("A3", "Food"),
+                ("B3", "400"),
+                ("C3", "450"),
+                ("A4", "Total"),
+                ("B4", "=SUM(B2:B3)"),
+                ("C4", "=SUM(C2:C3)"),
+            ],
+        ),
+        2 => seeded_sheet(
+            "Invoice",
+            &[
+                ("A1", "Description"),
+                ("B1", "Hours"),
+                ("C1", "Rate"),
+                ("D1", "Amount"),
+                ("A2", "Design Work"),
+                ("B2", "20"),
+                ("C2", "85"),
+                ("D2", "=B2*C2"),
+            ],
+        ),
+        3 => seeded_sheet(
+            "Checklist",
+            &[
+                ("A1", "Task"),
+                ("B1", "Done"),
+                ("A2", "Review budget"),
+                ("B2", "x"),
+                ("A3", "Pay rent"),
+                ("B3", "x"),
+                ("A4", "Book flights"),
+                ("B4", ""),
+                ("A5", "Call bank"),
+                ("B5", ""),
+                ("A7", "Done"),
+                ("B7", "=COUNTIF(B2:B5, \"x\")"),
+                ("A8", "Total"),
+                ("B8", "=COUNTA(A2:A5)"),
+            ],
+        ),
+        4 => seeded_sheet(
+            "Table and Chart",
+            &[
+                ("A1", "Quarter"),
+                ("B1", "Revenue"),
+                ("C1", "Expenses"),
+                ("A2", "Q1"),
+                ("B2", "15000"),
+                ("C2", "9200"),
+                ("A3", "Q2"),
+                ("B3", "18500"),
+                ("C3", "11000"),
+                ("A4", "Total"),
+                ("B4", "=SUM(B2:B3)"),
+                ("C4", "=SUM(C2:C3)"),
+            ],
+        ),
+        5 => seeded_sheet(
+            "Expense Summary",
+            &[
+                ("A1", "Category"),
+                ("B1", "Amount"),
+                ("A2", "Food"),
+                ("B2", "320"),
+                ("A3", "Travel"),
+                ("B3", "150"),
+                ("A4", "Food"),
+                ("B4", "85"),
+                ("A5", "Utilities"),
+                ("B5", "120"),
+                ("A7", "Total"),
+                ("B7", "=SUM(B2:B5)"),
+                ("A8", "Food total"),
+                ("B8", "=SUMIF(A2:A5, \"Food\", B2:B5)"),
+            ],
+        ),
+        6 => seeded_sheet(
+            "Sales Chart",
+            &[
+                ("A1", "Month"),
+                ("B1", "Sales"),
+                ("A2", "Jan"),
+                ("B2", "4200"),
+                ("A3", "Feb"),
+                ("B3", "5100"),
+                ("A4", "Mar"),
+                ("B4", "4800"),
+                ("A5", "Apr"),
+                ("B5", "6300"),
+                ("A6", "Total"),
+                ("B6", "=SUM(B2:B5)"),
+            ],
+        ),
+        7 => seeded_sheet(
+            "Budget",
+            &[
+                ("A1", "Category"),
+                ("B1", "Budget"),
+                ("C1", "Spent"),
+                ("A2", "Housing"),
+                ("B2", "1500"),
+                ("C2", "1500"),
+                ("A3", "Food"),
+                ("B3", "600"),
+                ("C3", "520"),
+                ("A4", "Total"),
+                ("B4", "=SUM(B2:B3)"),
+                ("C4", "=SUM(C2:C3)"),
+            ],
+        ),
+        8 => seeded_sheet(
+            "Monthly Goal",
+            &[
+                ("A1", "Goal"),
+                ("B1", "Target"),
+                ("C1", "Saved"),
+                ("D1", "Progress"),
+                ("A2", "Emergency fund"),
+                ("B2", "5000"),
+                ("C2", "3250"),
+                ("D2", "=C2/B2"),
+                ("A3", "Vacation"),
+                ("B3", "2000"),
+                ("C3", "2000"),
+                ("D3", "=C3/B3"),
+                ("A4", "Totals"),
+                ("B4", "=SUM(B2:B3)"),
+                ("C4", "=SUM(C2:C3)"),
+            ],
+        ),
+        9 => seeded_sheet(
+            "Portfolio",
+            &[
+                ("A1", "Holding"),
+                ("B1", "Shares"),
+                ("C1", "Price"),
+                ("D1", "Value"),
+                ("A2", "LOOM"),
+                ("B2", "100"),
+                ("C2", "42.5"),
+                ("D2", "=B2*C2"),
+                ("A3", "ACME"),
+                ("B3", "50"),
+                ("C3", "18"),
+                ("D3", "=B3*C3"),
+                ("A4", "Total"),
+                ("D4", "=SUM(D2:D3)"),
+            ],
+        ),
+        10 => seeded_sheet(
+            "Net Worth",
+            &[
+                ("A1", "Item"),
+                ("B1", "Amount"),
+                ("A2", "Savings"),
+                ("B2", "12000"),
+                ("A3", "Investments"),
+                ("B3", "8500"),
+                ("A4", "Total assets"),
+                ("B4", "=SUM(B2:B3)"),
+                ("A5", "Credit card"),
+                ("B5", "1200"),
+                ("A6", "Net worth"),
+                ("B6", "=B4-B5"),
+            ],
+        ),
+        _ => blank_sheet(),
+    }
+}
+
+/// Fill a named sheet from (cell, raw) pairs.
+fn seeded_sheet(name: &str, cells: &[(&str, &str)]) -> Sheet {
+    let mut sheet = Sheet::new(name);
+    for (cell, raw) in cells {
+        sheet.set_str(cell, raw);
+    }
+    sheet
+}
+
+/// Restore a crash-recovery payload: current workbook shape first, then the
+/// legacy single-sheet shape written by older builds.
+fn restore_workbook_from_snapshot(
+    json: &str,
+) -> Option<loom_sheets_core::persistence::WorkbookFile> {
+    use loom_sheets_core::persistence::WorkbookFile;
+    workbook_from_json(json).ok().or_else(|| {
+        sheet_from_json(json).ok().map(|sheet| WorkbookFile {
+            sheets: vec![sheet],
+            active: 0,
+        })
+    })
+}
+
 pub(crate) fn load_sheet(path: &Path) -> Result<Sheet, String> {
+    let workbook = load_workbook(path)?;
+    Ok(workbook
+        .sheets
+        .get(workbook.active)
+        .cloned()
+        .unwrap_or_else(|| Sheet::new("Untitled")))
+}
+
+/// Load a workbook: all tabs plus the active tab index. Legacy single-sheet
+/// packages (`content/sheet.json`) load as a one-tab workbook.
+pub(crate) fn load_workbook(
+    path: &Path,
+) -> Result<loom_sheets_core::persistence::WorkbookFile, String> {
+    use loom_sheets_core::persistence::WorkbookFile;
     let bytes = std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
     if path
         .extension()
@@ -163,7 +406,10 @@ pub(crate) fn load_sheet(path: &Path) -> Result<Sheet, String> {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
     {
         let csv = std::str::from_utf8(&bytes).map_err(|e| format!("csv utf8: {e}"))?;
-        return Ok(from_csv("imported", csv));
+        return Ok(WorkbookFile {
+            sheets: vec![from_csv("imported", csv)],
+            active: 0,
+        });
     }
     let arch = PackageArchive::from_bytes(&bytes).map_err(|e| format!("archive: {e}"))?;
     let manifest_bytes = arch
@@ -178,26 +424,46 @@ pub(crate) fn load_sheet(path: &Path) -> Result<Sheet, String> {
     }
     arch.validate_manifest(&manifest)
         .map_err(|e| format!("validation: {e}"))?;
+    if let Some(content) = arch.get("content/workbook.json") {
+        let s = std::str::from_utf8(content).map_err(|_| "workbook not utf8".to_string())?;
+        return workbook_from_json(s).map_err(|e| format!("workbook: {e}"));
+    }
     let content = arch
         .get("content/sheet.json")
         .ok_or_else(|| "missing sheet.json".to_string())?;
     let s = std::str::from_utf8(content).map_err(|_| "sheet not utf8".to_string())?;
-    sheet_from_json(s).map_err(|e| format!("sheet: {e}"))
+    let sheet = sheet_from_json(s).map_err(|e| format!("sheet: {e}"))?;
+    Ok(WorkbookFile {
+        sheets: vec![sheet],
+        active: 0,
+    })
 }
 
 pub(crate) fn save_sheet(path: &Path, sheet: &Sheet) -> Result<(), String> {
+    save_workbook(path, std::slice::from_ref(sheet), 0)
+}
+
+/// Save every tab plus the active tab index as `content/workbook.json`.
+pub(crate) fn save_workbook(path: &Path, sheets: &[Sheet], active: usize) -> Result<(), String> {
+    if sheets.is_empty() {
+        return Err("cannot save an empty workbook".to_string());
+    }
     let mut arch = PackageArchive::new();
-    let json = sheet_to_json(sheet);
-    arch.add("content/sheet.json", json.clone().into_bytes())
+    let json = workbook_to_json(sheets, active);
+    arch.add("content/workbook.json", json.clone().into_bytes())
         .map_err(|e| e.to_string())?;
+    let title = sheets
+        .get(active.min(sheets.len() - 1))
+        .map(|sheet| sheet.name.clone())
+        .unwrap_or_else(|| "Untitled".to_string());
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Sheets,
         id: "sheets-doc".to_string(),
-        title: sheet.name.clone(),
+        title,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         entries: vec![ManifestEntry {
-            path: "content/sheet.json".into(),
+            path: "content/workbook.json".into(),
             mime: MimeType::parse("application/vnd.loom.sheet-content")
                 .map_err(|e| format!("invalid built-in sheets MIME type: {e}"))?,
             size: json.len() as u64,
@@ -237,6 +503,12 @@ struct ProjectedSheetGrid {
     row_headers: Vec<String>,
     cells: Vec<String>,
     cell_alignments: Vec<i32>,
+    cell_bolds: Vec<bool>,
+    cell_italics: Vec<bool>,
+    cell_underlines: Vec<bool>,
+    cell_borders: Vec<bool>,
+    cell_fills: Vec<i32>,
+    cell_font_sizes: Vec<i32>,
 }
 
 fn project_sheet_grid_with_values(
@@ -262,9 +534,15 @@ fn project_sheet_grid_with_values(
         .filter_map(|index| viewport.row_at(index))
         .map(|row| (row + 1).to_string())
         .collect();
-    let mut cells = Vec::with_capacity((viewport.visible_rows * viewport.visible_cols) as usize);
-    let mut cell_alignments =
-        Vec::with_capacity((viewport.visible_rows * viewport.visible_cols) as usize);
+    let cap = (viewport.visible_rows * viewport.visible_cols) as usize;
+    let mut cells = Vec::with_capacity(cap);
+    let mut cell_alignments = Vec::with_capacity(cap);
+    let mut cell_bolds = Vec::with_capacity(cap);
+    let mut cell_italics = Vec::with_capacity(cap);
+    let mut cell_underlines = Vec::with_capacity(cap);
+    let mut cell_borders = Vec::with_capacity(cap);
+    let mut cell_fills = Vec::with_capacity(cap);
+    let mut cell_font_sizes = Vec::with_capacity(cap);
     for local_row in 0..viewport.visible_rows {
         for local_col in 0..viewport.visible_cols {
             let Some(row) = viewport.row_at(local_row) else {
@@ -274,13 +552,22 @@ fn project_sheet_grid_with_values(
                 continue;
             };
             let cell = CellRef { row, col };
+            let style = sheet.cell_style(cell);
             let align_code = match sheet.cell_alignment(cell) {
                 CellAlignment::General | CellAlignment::Left => 0,
                 CellAlignment::Center => 1,
                 CellAlignment::Right => 2,
             };
-            cells.push(cell_value(sheet, values, row, col));
+            let raw_val = cell_value(sheet, values, row, col);
+            let display_val = style.format_value(&raw_val);
+            cells.push(display_val);
             cell_alignments.push(align_code);
+            cell_bolds.push(style.bold);
+            cell_italics.push(style.italic);
+            cell_underlines.push(style.underline);
+            cell_borders.push(style.border);
+            cell_fills.push(style.fill.swatch_index());
+            cell_font_sizes.push(formatting::effective_font_size(style) as i32);
         }
     }
 
@@ -291,6 +578,12 @@ fn project_sheet_grid_with_values(
         row_headers,
         cells,
         cell_alignments,
+        cell_bolds,
+        cell_italics,
+        cell_underlines,
+        cell_borders,
+        cell_fills,
+        cell_font_sizes,
     }
 }
 
@@ -300,31 +593,51 @@ fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetG
     project_sheet_grid_with_values(sheet, &values, viewport)
 }
 
-fn editor_dimensions(sheet: &Sheet, selected: CellRef) -> SheetDimensions {
+/// Addressable grid size: used cells and selection always fit, and the grid
+/// fills the viewport plus a scroll-ahead margin so tall/wide windows show a
+/// live worksheet (not a fixed 15x8 card on dead canvas) and the void beyond
+/// content stays navigable. `fill` is `None` in unit tests without a window.
+fn editor_dimensions(
+    sheet: &Sheet,
+    selected: CellRef,
+    fill: Option<(u32, u32)>,
+) -> SheetDimensions {
+    const SCROLL_AHEAD_COLS: u32 = 12;
+    const SCROLL_AHEAD_ROWS: u32 = 30;
     let dimensions = sheet.dimensions();
-    // Keep an empty/new sheet navigable beyond A1 while retaining sparse
-    // workbook dimensions for populated sheets.
+    // Unit tests without a window keep the legacy 15x8 minimum exactly.
+    let (fill_cols, fill_rows) = fill.unwrap_or((DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS));
+    let (ahead_cols, ahead_rows) = if fill.is_some() {
+        (SCROLL_AHEAD_COLS, SCROLL_AHEAD_ROWS)
+    } else {
+        (0, 0)
+    };
     SheetDimensions::new(
         dimensions
             .rows
             .max(selected.row.saturating_add(1))
-            .max(DEFAULT_VISIBLE_ROWS),
+            .max(DEFAULT_VISIBLE_ROWS)
+            .max(fill_rows + ahead_rows),
         dimensions
             .cols
             .max(selected.col.saturating_add(1))
-            .max(DEFAULT_VISIBLE_COLS),
+            .max(DEFAULT_VISIBLE_COLS)
+            .max(fill_cols + ahead_cols),
     )
 }
 
-/// Return the default width used by the projected grid. Small workbooks use
-/// the available table width (up to a comfortable cap); larger/sparse sheets
-/// retain the persisted 80px default so horizontal scrolling remains useful.
-fn grid_default_col_width(sheet: &Sheet, dimensions: SheetDimensions, viewport_width: f32) -> f32 {
-    if !sheet.col_widths.is_empty() || dimensions.cols > DEFAULT_VISIBLE_COLS {
+/// Return the default width used by the projected grid. Small workbooks (at
+/// most 8 used columns, no custom widths) stretch to the available table
+/// width up to a comfortable cap; everything else keeps the persisted 80px
+/// default so horizontal scrolling stays useful. The fit keys off *used*
+/// columns (not the fill-expanded addressable grid) so navigating or
+/// auto-filling the void never fattens cells.
+fn grid_default_col_width(sheet: &Sheet, viewport_width: f32) -> f32 {
+    if !sheet.col_widths.is_empty() || sheet.dimensions().cols > DEFAULT_VISIBLE_COLS {
         return GRID_COL_WIDTH;
     }
     let available = (viewport_width - GRID_ROW_HEADER_WIDTH).max(0.0);
-    let fitted = available / dimensions.cols.max(1) as f32;
+    let fitted = available / DEFAULT_VISIBLE_COLS as f32;
     fitted.clamp(GRID_COL_WIDTH, FIT_COLUMN_MAX_WIDTH)
 }
 
@@ -345,14 +658,6 @@ fn dimension_size(
         custom.get(&index).copied().unwrap_or(default_size),
         default_size,
     )
-}
-
-fn column_width(sheet: &Sheet, col: u32, default_width: f32) -> f32 {
-    dimension_size(col, default_width, &sheet.col_widths)
-}
-
-fn row_height(sheet: &Sheet, row: u32) -> f32 {
-    dimension_size(row, GRID_ROW_HEIGHT, &sheet.row_heights)
 }
 
 fn dimension_extent(
@@ -538,30 +843,45 @@ fn grid_geometry(
     dimensions: SheetDimensions,
     viewport: SheetViewport,
     viewport_width: f32,
+    zoom: f32,
 ) -> GridGeometry {
-    let default_col_width = grid_default_col_width(sheet, dimensions, viewport_width);
+    // Zoom scales rendered pixels uniformly; the persisted model keeps
+    // unscaled pixels (see `viewport_from_app`).
+    let fit_col_width = grid_default_col_width(sheet, viewport_width);
+    let default_col_width = fit_col_width * zoom;
+    let default_row_height = GRID_ROW_HEIGHT * zoom;
+    let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
+        .col_widths
+        .iter()
+        .map(|(&col, &width)| (col, width * zoom))
+        .collect();
+    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
     let column_widths: Vec<f32> = (0..viewport.visible_cols)
         .filter_map(|index| viewport.column_at(index))
-        .map(|col| column_width(sheet, col, default_col_width))
+        .map(|col| dimension_size(col, default_col_width, &scaled_cols))
         .collect();
     let row_heights: Vec<f32> = (0..viewport.visible_rows)
         .filter_map(|index| viewport.row_at(index))
-        .map(|row| row_height(sheet, row))
+        .map(|row| dimension_size(row, default_row_height, &scaled_rows))
         .collect();
     let visible_width = column_widths.iter().sum();
     let visible_height = row_heights.iter().sum();
     let content_width = if sheet.col_widths.is_empty() {
         dimensions.cols as f32 * default_col_width
     } else {
-        dimension_extent(dimensions.cols, default_col_width, &sheet.col_widths)
+        dimension_extent(dimensions.cols, default_col_width, &scaled_cols)
     };
-    let content_height = dimension_extent(dimensions.rows, GRID_ROW_HEIGHT, &sheet.row_heights);
+    let content_height = dimension_extent(dimensions.rows, default_row_height, &scaled_rows);
     GridGeometry {
         default_col_width,
         column_widths,
         row_heights,
-        col_offset: dimension_offset(viewport.first_col, default_col_width, &sheet.col_widths),
-        row_offset: dimension_offset(viewport.first_row, GRID_ROW_HEIGHT, &sheet.row_heights),
+        col_offset: dimension_offset(viewport.first_col, default_col_width, &scaled_cols),
+        row_offset: dimension_offset(viewport.first_row, default_row_height, &scaled_rows),
         visible_width,
         visible_height,
         content_width,
@@ -569,9 +889,25 @@ fn grid_geometry(
     }
 }
 
+/// Visible grid capacity in cells for filling the addressable dimensions.
+/// `None` while the window has no measured viewport yet (unit tests), which
+/// keeps the legacy minimum and avoids projecting a phantom window.
+fn window_fill(app: &SheetsApp, zoom: f32) -> Option<(u32, u32)> {
+    let width = app.get_grid_viewport_width();
+    let height = app.get_grid_viewport_height();
+    if width > 1.0 && height > 1.0 {
+        Some((
+            ((width - GRID_ROW_HEADER_WIDTH).max(0.0) / (GRID_COL_WIDTH * zoom)) as u32,
+            ((height - GRID_COLUMN_HEADER_HEIGHT).max(0.0) / (GRID_ROW_HEIGHT * zoom)) as u32,
+        ))
+    } else {
+        None
+    }
+}
+
 fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
     let selected = selection_from_app(app).focus;
-    let dimensions = editor_dimensions(sheet, selected);
+    let zoom = zoom_factor(app);
     let viewport_width = if app.get_grid_viewport_width() > 1.0 {
         app.get_grid_viewport_width()
     } else {
@@ -582,36 +918,123 @@ fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
     } else {
         GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
     };
-    let default_col_width = grid_default_col_width(sheet, dimensions, viewport_width);
+    let dimensions = editor_dimensions(sheet, selected, window_fill(app, zoom));
+    let default_col_width = grid_default_col_width(sheet, viewport_width) * zoom;
+    let default_row_height = GRID_ROW_HEIGHT * zoom;
+    // Zoom scales rendered geometry uniformly; the persisted model keeps
+    // unscaled pixels so Save/Set-140px round-trips are zoom-independent.
+    let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
+        .col_widths
+        .iter()
+        .map(|(&col, &width)| (col, width * zoom))
+        .collect();
+    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
     let scroll_x = (-app.get_grid_scroll_x()).max(0.0);
     let scroll_y = (-app.get_grid_scroll_y()).max(0.0);
     viewport_from_dimensions(
         (scroll_x, scroll_y),
         (
             (viewport_width - GRID_ROW_HEADER_WIDTH).max(default_col_width),
-            (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(GRID_ROW_HEIGHT),
+            (viewport_height - GRID_COLUMN_HEADER_HEIGHT).max(default_row_height),
         ),
         dimensions,
         default_col_width,
-        &sheet.row_heights,
-        &sheet.col_widths,
+        &scaled_rows,
+        &scaled_cols,
     )
 }
 
-pub(crate) fn apply_sheet(app: &SheetsApp, sheet: &Sheet) {
-    apply_sheet_inner(app, sheet, true);
+/// Rendered zoom scale from the window (1.0 = 100%). Clamped so corrupt or
+/// extreme values cannot collapse or explode grid geometry.
+pub(crate) fn zoom_factor(app: &SheetsApp) -> f32 {
+    let factor = app.get_zoom_factor();
+    if factor.is_finite() {
+        factor.clamp(0.5, 3.0)
+    } else {
+        1.0
+    }
 }
 
-pub(crate) fn apply_sheet_without_reveal(app: &SheetsApp, sheet: &Sheet) {
-    apply_sheet_inner(app, sheet, false);
+pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
+    let sheet = state.current.borrow().clone();
+    let vals = evaluate_current(state);
+    project_sheet_inner(app, &sheet, &vals, true);
+    record_workbook_snapshot(state);
 }
 
-fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
+/// Re-project the live tab with workbook-resolved values, without recording
+/// a recovery snapshot (selection/scroll/view-only refreshes).
+pub(crate) fn project_current(app: &SheetsApp, state: &GuiState) {
+    let sheet = state.current.borrow().clone();
+    let vals = evaluate_current(state);
+    project_sheet_inner(app, &sheet, &vals, true);
+}
+
+/// Re-project without revealing the selection and without snapshotting.
+pub(crate) fn project_current_without_reveal(app: &SheetsApp, state: &GuiState) {
+    let sheet = state.current.borrow().clone();
+    let vals = evaluate_current(state);
+    project_sheet_inner(app, &sheet, &vals, false);
+}
+
+pub(crate) fn project_sheet(app: &SheetsApp, sheet: &Sheet) {
     let vals = evaluate(sheet);
+    project_sheet_inner(app, sheet, &vals, true);
+}
+
+pub(crate) fn project_sheet_without_reveal(app: &SheetsApp, sheet: &Sheet) {
+    let vals = evaluate(sheet);
+    project_sheet_inner(app, sheet, &vals, false);
+}
+
+/// Snapshot the full workbook (all tabs, active sheet first-class) so crash
+/// recovery restores tabs, not just the visible sheet.
+pub(crate) fn record_workbook_snapshot(state: &GuiState) {
+    let (siblings, active) = workbook_sheets(state);
+    let _ = record_snapshot_recovery(
+        "sheets state",
+        workbook_to_json(&siblings, active).into_bytes(),
+    );
+}
+
+/// All tabs with the live current sheet synced into its slot, plus the
+/// clamped active index. Backs workbook evaluation, saving, and snapshots.
+pub(crate) fn workbook_sheets(state: &GuiState) -> (Vec<Sheet>, usize) {
+    let mut siblings = state.sheets.borrow().clone();
+    let active = (*state.active_sheet_index.borrow()).min(siblings.len().saturating_sub(1));
+    if siblings.is_empty() {
+        siblings.push(state.current.borrow().clone());
+    } else {
+        siblings[active] = state.current.borrow().clone();
+    }
+    (siblings, active)
+}
+
+/// Evaluate the active tab with cross-sheet references resolved against all
+/// tabs. Single-sheet callers keep using `evaluate`.
+pub(crate) fn evaluate_current(state: &GuiState) -> std::collections::HashMap<CellRef, Value> {
+    let (siblings, active) = workbook_sheets(state);
+    evaluate_workbook(&siblings)
+        .into_iter()
+        .nth(active)
+        .unwrap_or_default()
+}
+
+fn project_sheet_inner(
+    app: &SheetsApp,
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+    reveal_selection: bool,
+) {
     let selection = selection_from_app(app);
     let selected = selection.focus;
     let dimensions = sheet.dimensions();
-    let editor_dimensions = editor_dimensions(sheet, selected);
+    let zoom = zoom_factor(app);
+    let editor_dimensions = editor_dimensions(sheet, selected, window_fill(app, zoom));
     // Set content extents before touching Flickable offsets.  The two-way
     // viewport binding clamps offsets against these extents, so updating them
     // first preserves a requested tail scroll on a newly loaded sparse sheet.
@@ -626,11 +1049,17 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
     }
     app.set_view_row_origin(viewport.first_row as i32);
     app.set_view_col_origin(viewport.first_col as i32);
+    app.set_zoom_factor(zoom);
+    app.set_zoom_level(SharedString::from(format!(
+        "{}%",
+        (zoom * 100.0).round() as i32
+    )));
     let geometry = grid_geometry(
         sheet,
         editor_dimensions,
         viewport,
         app.get_grid_viewport_width(),
+        zoom,
     );
     // Flickable coordinates are negative because its content is translated
     // opposite to the positive worksheet scroll offset. Preserve fractional
@@ -662,7 +1091,7 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
             (geometry.content_height + GRID_COLUMN_HEADER_HEIGHT - viewport_height).max(0.0);
         app.set_grid_scroll_y(-current_scroll_y.min(max_scroll_y));
     }
-    let grid = project_sheet_grid_with_values(sheet, &vals, viewport);
+    let grid = project_sheet_grid_with_values(sheet, vals, viewport);
 
     app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
     app.set_rows(ModelRc::new(VecModel::from(grid.rows)));
@@ -685,8 +1114,14 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
             .collect::<Vec<_>>(),
     )));
     app.set_cell_alignments(ModelRc::new(VecModel::from(grid.cell_alignments)));
+    app.set_cell_bolds(ModelRc::new(VecModel::from(grid.cell_bolds)));
+    app.set_cell_italics(ModelRc::new(VecModel::from(grid.cell_italics)));
+    app.set_cell_underlines(ModelRc::new(VecModel::from(grid.cell_underlines)));
+    app.set_cell_borders(ModelRc::new(VecModel::from(grid.cell_borders)));
+    app.set_cell_fills(ModelRc::new(VecModel::from(grid.cell_fills)));
+    app.set_cell_font_sizes(ModelRc::new(VecModel::from(grid.cell_font_sizes)));
     app.set_grid_col_width(geometry.default_col_width);
-    app.set_grid_row_height(GRID_ROW_HEIGHT);
+    app.set_grid_row_height(GRID_ROW_HEIGHT * zoom);
     app.set_grid_col_offset(geometry.col_offset);
     app.set_grid_row_offset(geometry.row_offset);
     app.set_grid_visible_width(geometry.visible_width);
@@ -695,7 +1130,7 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
     app.set_grid_content_height(geometry.content_height);
     app.set_grid_column_widths(ModelRc::new(VecModel::from(geometry.column_widths)));
     app.set_grid_row_heights(ModelRc::new(VecModel::from(geometry.row_heights)));
-    update_selection_range(app, sheet, &vals, selection);
+    update_selection_range(app, sheet, vals, selection);
     app.set_table_rows_label(SharedString::from(dimensions.rows.to_string()));
     app.set_table_cols_label(SharedString::from(dimensions.cols.to_string()));
     app.set_selected_row_height(SharedString::from(format!(
@@ -721,7 +1156,6 @@ fn apply_sheet_inner(app: &SheetsApp, sheet: &Sheet, reveal_selection: bool) {
         app.set_status_right("Offline".into());
     }
     actions::sync_chart_to_app(app, sheet);
-    let _ = record_snapshot_recovery("sheets state", sheet_to_json(sheet).into_bytes());
 }
 
 fn sync_history_controls(app: &SheetsApp, state: &GuiState) {
@@ -838,7 +1272,31 @@ pub(crate) fn update_selection_range(
         CellAlignment::Right => 2,
     };
     app.set_cell_alignment(align_code);
-    let display = cell_value(sheet, vals, selected.row, selected.col);
+    let style = sheet.cell_style(selected);
+    app.set_cell_bold(style.bold);
+    app.set_cell_italic(style.italic);
+    app.set_cell_underline(style.underline);
+    let fmt_code = match style.number_format {
+        NumberFormat::General
+        | NumberFormat::PlainText
+        | NumberFormat::Scientific
+        | NumberFormat::DateIso => 0,
+        NumberFormat::Currency => 1,
+        NumberFormat::Percentage => 2,
+        NumberFormat::Number => 3,
+    };
+    app.set_cell_format(fmt_code);
+    let decimals = style.decimal_places.unwrap_or(2);
+    app.set_cell_decimals(decimals as i32);
+    app.set_cell_decimals_label(SharedString::from(decimals.to_string()));
+    app.set_cell_border(style.border);
+    app.set_cell_fill(style.fill.swatch_index());
+    let font_size = formatting::effective_font_size(style);
+    app.set_cell_font_size(font_size as i32);
+    app.set_cell_font_label(SharedString::from(font_size.to_string()));
+
+    let raw_display = cell_value(sheet, vals, selected.row, selected.col);
+    let display = style.format_value(&raw_display);
     let formula_text = sheet.raw(selected).unwrap_or("");
     let value_text = if display.is_empty() {
         "Empty".to_string()
@@ -856,12 +1314,7 @@ pub(crate) fn update_selection_range(
         value_text,
         formula_suffix
     )));
-    app.set_selection_value(SharedString::from(cell_value(
-        sheet,
-        vals,
-        selected.row,
-        selected.col,
-    )));
+    app.set_selection_value(SharedString::from(display));
     let cell_count = range.cells().len();
     if cell_count > 1 {
         let mut sum = 0.0;
@@ -894,10 +1347,53 @@ pub(crate) enum SheetTransaction {
         before: Vec<(CellRef, CellAlignment)>,
         after: CellAlignment,
     },
+    Style {
+        before: Vec<(CellRef, CellStyle)>,
+        after: Vec<(CellRef, CellStyle)>,
+    },
     Snapshot {
         before: Box<Sheet>,
         after: Box<Sheet>,
     },
+    /// Workbook-level tab operation (add/delete/rename sheet). Boxed to keep
+    /// the enum size bounded; applied only via `restore_workbook_state`, never
+    /// through the single-sheet `apply`/`revert` below.
+    Workbook {
+        before: Box<WorkbookUndoState>,
+        after: Box<WorkbookUndoState>,
+    },
+}
+
+/// Full tab-strip state captured for workbook-level undo/redo.
+#[derive(Debug, Clone)]
+pub(crate) struct WorkbookUndoState {
+    sheets: Vec<Sheet>,
+    active: usize,
+    undo_stack: Vec<SheetTransaction>,
+    redo_stack: Vec<SheetTransaction>,
+    histories: Vec<(Vec<SheetTransaction>, Vec<SheetTransaction>)>,
+}
+
+impl WorkbookUndoState {
+    fn capture(state: &GuiState) -> Self {
+        Self {
+            sheets: state.sheets.borrow().clone(),
+            active: *state.active_sheet_index.borrow(),
+            undo_stack: state.undo_stack.borrow().clone(),
+            redo_stack: state.redo_stack.borrow().clone(),
+            histories: state.sheet_histories.borrow().clone(),
+        }
+    }
+
+    fn restore(&self, state: &GuiState) {
+        *state.sheets.borrow_mut() = self.sheets.clone();
+        *state.active_sheet_index.borrow_mut() = self.active;
+        let active = self.active.min(self.sheets.len().saturating_sub(1));
+        *state.current.borrow_mut() = self.sheets[active].clone();
+        *state.undo_stack.borrow_mut() = self.undo_stack.clone();
+        *state.redo_stack.borrow_mut() = self.redo_stack.clone();
+        *state.sheet_histories.borrow_mut() = self.histories.clone();
+    }
 }
 
 impl SheetTransaction {
@@ -912,9 +1408,17 @@ impl SheetTransaction {
             SheetTransaction::Alignment { range, after, .. } => {
                 sheet.set_range_alignment(range.start, range.end, *after);
             }
+            SheetTransaction::Style { after, .. } => {
+                for (cell, style) in after {
+                    sheet.set_cell_style(*cell, *style);
+                }
+            }
             SheetTransaction::Snapshot { after, .. } => {
                 *sheet = (**after).clone();
             }
+            // Workbook transactions span the whole tab strip and are applied
+            // only via `restore_workbook_state` at the undo/redo sites below.
+            SheetTransaction::Workbook { .. } => {}
         }
     }
 
@@ -931,9 +1435,16 @@ impl SheetTransaction {
                     sheet.set_cell_alignment(*cell, *align);
                 }
             }
+            SheetTransaction::Style { before, .. } => {
+                for (cell, style) in before {
+                    sheet.set_cell_style(*cell, *style);
+                }
+            }
             SheetTransaction::Snapshot { before, .. } => {
                 *sheet = (**before).clone();
             }
+            // See `apply`: workbook transactions restore via `restore_workbook_state`.
+            SheetTransaction::Workbook { .. } => {}
         }
     }
 }
@@ -945,9 +1456,21 @@ pub(crate) fn commit_transaction(
     tx: SheetTransaction,
 ) -> bool {
     tx.apply(sheet);
-    undo_stack.push(tx);
+    push_history(undo_stack, tx);
     redo_stack.clear();
     true
+}
+
+/// Maximum undo/redo entries per stack. Beyond this the oldest transaction
+/// drops, so long editing sessions cannot grow memory without bound.
+pub(crate) const MAX_HISTORY_ENTRIES: usize = 200;
+
+/// Push a transaction, evicting the oldest entry past the bound.
+pub(crate) fn push_history(stack: &mut Vec<SheetTransaction>, tx: SheetTransaction) {
+    stack.push(tx);
+    if stack.len() > MAX_HISTORY_ENTRIES {
+        stack.remove(0);
+    }
 }
 
 /// Apply one committed formula-bar edit and record one undo transaction.
@@ -976,6 +1499,84 @@ pub(crate) fn commit_range_edit(
         return false;
     }
     commit_transaction(sheet, undo_stack, redo_stack, SheetTransaction::Range(edit))
+}
+
+/// Record a workbook-level tab operation (add/delete/rename sheet) as one
+/// undoable transaction. The live current sheet is synced into its tab slot
+/// first so `before` captures unsaved cell edits. Per-tab undo/redo stacks
+/// follow the same stash-and-restore discipline as sheet switching, and
+/// `drop_history` removes the deleted tab's stashed stacks for deletions.
+pub(crate) fn commit_workbook_transaction(
+    state: &GuiState,
+    after_sheets: Vec<Sheet>,
+    after_active: usize,
+    drop_history: Option<usize>,
+) {
+    sync_current_to_tabs(state);
+    if after_sheets.is_empty() {
+        return;
+    }
+    let before = WorkbookUndoState::capture(state);
+    let old_active = *state.active_sheet_index.borrow();
+
+    // Stash the outgoing tab's live stacks, mirroring sheet switching.
+    let live_undo = std::mem::take(&mut *state.undo_stack.borrow_mut());
+    let live_redo = std::mem::take(&mut *state.redo_stack.borrow_mut());
+    {
+        let mut histories = state.sheet_histories.borrow_mut();
+        if histories.len() <= old_active {
+            histories.resize_with(old_active + 1, || (Vec::new(), Vec::new()));
+        }
+        histories[old_active] = (live_undo, live_redo);
+    }
+
+    let after_active = after_active.min(after_sheets.len().saturating_sub(1));
+    *state.sheets.borrow_mut() = after_sheets;
+    *state.active_sheet_index.borrow_mut() = after_active;
+    *state.current.borrow_mut() = state.sheets.borrow()[after_active].clone();
+    {
+        let mut histories = state.sheet_histories.borrow_mut();
+        let tabs = state.sheets.borrow().len();
+        if let Some(dropped) = drop_history {
+            if dropped < histories.len() {
+                histories.remove(dropped);
+            }
+        }
+        if histories.len() < tabs {
+            histories.resize_with(tabs, || (Vec::new(), Vec::new()));
+        }
+        if !histories.is_empty() {
+            let landed = after_active.min(histories.len() - 1);
+            let (landed_undo, landed_redo) = histories[landed].clone();
+            *state.undo_stack.borrow_mut() = landed_undo;
+            *state.redo_stack.borrow_mut() = landed_redo;
+        }
+    }
+
+    let after = WorkbookUndoState::capture(state);
+    push_history(
+        &mut state.undo_stack.borrow_mut(),
+        SheetTransaction::Workbook {
+            before: Box::new(before),
+            after: Box::new(after),
+        },
+    );
+    state.redo_stack.borrow_mut().clear();
+}
+
+/// Restore a workbook snapshot at the undo/redo sites and refresh the full
+/// window (tabs, grid, history controls) around it.
+pub(crate) fn restore_workbook_state(
+    app: &SheetsApp,
+    state: &GuiState,
+    snapshot: &WorkbookUndoState,
+    menu_service: &Arc<loom_desktop::NativeMenuBar>,
+) {
+    snapshot.restore(state);
+    apply_sheet(app, state);
+    sync_sheet_tabs(app, state);
+    sync_menu_state(menu_service, app, state);
+    sync_history_controls(app, state);
 }
 
 /// Clear selected cells or range with full undo/redo history.
@@ -1216,11 +1817,14 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     app.window().set_size(PhysicalSize::new(w, h));
     apply_layout_breakpoints(&app, w);
     apply_headless_viewport_size(&app, w, h);
-    let sheet = match &args.open {
+    let mut sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,
         None => starter_workbook(),
     };
-    apply_sheet(&app, &sheet);
+    if let Some(zoom) = args.zoom {
+        app.set_zoom_factor(zoom);
+    }
+    project_sheet(&app, &sheet);
     if args.palette {
         app.set_palette_query(SharedString::from("ex"));
         rebuild_palette(&app, "ex");
@@ -1234,8 +1838,11 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         app.set_template_chooser_open(true);
     }
     if args.chart {
-        app.set_chart_visible(true);
-        sync_chart_to_app(&app, &sheet);
+        if let Ok(chart) = plan_chart(&sheet, 0, 1) {
+            sheet.chart = Some(chart);
+            app.set_chart_visible(true);
+            sync_chart_to_app(&app, &sheet);
+        }
     }
     let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
     loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
@@ -1284,6 +1891,24 @@ impl GuiState {
             clipboard: RefCell::new(None),
         }
     }
+
+    /// Install a fully loaded workbook (all tabs + active index) into a fresh
+    /// single-sheet state. Histories start empty: loading is not an undoable
+    /// edit, matching open/new/template behavior.
+    pub(crate) fn install_workbook(&self, sheets: Vec<Sheet>, active: usize) {
+        let mut sheets = sheets;
+        if sheets.is_empty() {
+            sheets.push(blank_sheet());
+        }
+        let active = active.min(sheets.len() - 1);
+        *self.current.borrow_mut() = sheets[active].clone();
+        *self.sheets.borrow_mut() = sheets;
+        *self.active_sheet_index.borrow_mut() = active;
+        self.undo_stack.borrow_mut().clear();
+        self.redo_stack.borrow_mut().clear();
+        let tabs = self.sheets.borrow().len();
+        *self.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new()); tabs];
+    }
 }
 
 fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
@@ -1325,27 +1950,6 @@ fn export_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
-pub(crate) fn sheet_to_grid(sheet: &Sheet) -> Vec<Vec<String>> {
-    let vals = evaluate(sheet);
-    let mut max_row = 0u32;
-    let mut max_col = 0u32;
-    for r in sheet.cells.keys() {
-        max_row = max_row.max(r.row);
-        max_col = max_col.max(r.col);
-    }
-    let mut grid = Vec::new();
-    for row in 0..=max_row {
-        let mut row_vec = Vec::new();
-        for col in 0..=max_col {
-            let cr = CellRef { row, col };
-            let v = vals.get(&cr).cloned().unwrap_or(Value::Empty);
-            row_vec.push(v.display());
-        }
-        grid.push(row_vec);
-    }
-    grid
-}
-
 fn export_xlsx_request(state: &GuiState) -> SaveFileRequest {
     SaveFileRequest {
         title: "Export Excel Spreadsheet".into(),
@@ -1361,16 +1965,35 @@ fn is_native_workbook(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("loomtable"))
 }
 
-fn replace_opened_sheet(app: &SheetsApp, state: &GuiState, path: PathBuf, sheet: Sheet) {
-    *state.current.borrow_mut() = sheet.clone();
-    *state.sheets.borrow_mut() = vec![sheet];
-    *state.active_sheet_index.borrow_mut() = 0;
+fn replace_opened_workbook(
+    app: &SheetsApp,
+    state: &GuiState,
+    path: PathBuf,
+    sheets: Vec<Sheet>,
+    active: usize,
+) {
+    let active = active.min(sheets.len().saturating_sub(1));
+    *state.current.borrow_mut() = sheets[active].clone();
+    *state.sheets.borrow_mut() = sheets;
+    *state.active_sheet_index.borrow_mut() = active;
     *state.save_path.borrow_mut() = is_native_workbook(&path).then_some(path);
     state.undo_stack.borrow_mut().clear();
     state.redo_stack.borrow_mut().clear();
     *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
-    apply_sheet(app, &state.current.borrow());
+    apply_sheet(app, state);
     sync_sheet_tabs(app, state);
+}
+
+/// Copy the live current sheet back into its tab slot so multi-tab
+/// serialization always sees fresh edits.
+fn sync_current_to_tabs(state: &GuiState) {
+    let current = state.current.borrow().clone();
+    let active = *state.active_sheet_index.borrow();
+    let mut sheets = state.sheets.borrow_mut();
+    if active >= sheets.len() {
+        sheets.resize_with(active + 1, || Sheet::new("Untitled"));
+    }
+    sheets[active] = current;
 }
 
 fn save_current_sheet(
@@ -1392,9 +2015,12 @@ fn save_current_sheet(
         app.set_status_left("Save cancelled".into());
         return Ok(false);
     };
-    save_sheet(&path, &state.current.borrow())?;
+    sync_current_to_tabs(state);
+    let active = *state.active_sheet_index.borrow();
+    save_workbook(&path, &state.sheets.borrow(), active)?;
     *state.save_path.borrow_mut() = Some(path.clone());
-    match checkpoint_snapshot_recovery(sheet_to_json(&state.current.borrow()).into_bytes()) {
+    let checkpoint = workbook_to_json(&state.sheets.borrow(), active).into_bytes();
+    match checkpoint_snapshot_recovery(checkpoint) {
         Ok(()) => app.set_status_left(SharedString::from(format!("Saved {}", path.display()))),
         Err(error) => app.set_status_left(SharedString::from(format!(
             "Saved {}, but recovery checkpoint failed: {error}",
@@ -1417,13 +2043,16 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     apply_layout_breakpoints(&app, args.size.0);
 
     let recovered = initialize_snapshot_recovery()?;
-    let initial_sheet = match &args.open {
-        Some(path) => load_sheet(Path::new(path))?,
+    let initial = match &args.open {
+        Some(path) => load_workbook(Path::new(path))?,
         None => recovered
             .as_deref()
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
-            .and_then(|json| sheet_from_json(json).ok())
-            .unwrap_or_else(starter_workbook),
+            .and_then(restore_workbook_from_snapshot)
+            .unwrap_or_else(|| loom_sheets_core::persistence::WorkbookFile {
+                sheets: vec![starter_workbook()],
+                active: 0,
+            }),
     };
     let workbook_filter = FileFilter::new("Loom Sheets workbook", ["loomtable"])
         .map_err(|error| error.to_string())?;
@@ -1434,7 +2063,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         FileFilter::new("Excel Spreadsheet", ["xlsx"]).map_err(|error| error.to_string())?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
     let state = Rc::new(GuiState::new(
-        initial_sheet,
+        starter_workbook(),
         initial_path.filter(|path| is_native_workbook(path)),
         dialogs,
         workbook_filter,
@@ -1442,6 +2071,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         csv_filter,
         xlsx_filter,
     ));
+    state.install_workbook(initial.sheets, initial.active);
     // One menu adapter owns the application sink for its entire lifetime so
     // accepted native actions and toolbar/palette callbacks share a route.
     let menu_service = Arc::new(NativeMenuBar::new());
@@ -1471,7 +2101,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 *state.save_path.borrow_mut() = None;
                 state.undo_stack.borrow_mut().clear();
                 state.redo_stack.borrow_mut().clear();
-                apply_sheet(&app, &state.current.borrow());
+                apply_sheet(&app, &state);
                 sync_sheet_tabs(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
                 app.set_status_left("Created unsaved workbook".into());
@@ -1498,7 +2128,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         )
                     };
                     if committed {
-                        apply_sheet(&app, &state.current.borrow());
+                        apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_formula_feedback(SharedString::from(format!(
                             "Cell {} updated",
@@ -1551,7 +2181,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         commit_formula_edit(&mut current, &mut undo, &mut redo, cell, &formula_text)
                     };
                     if committed {
-                        apply_sheet(&app, &state.current.borrow());
+                        apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                         app.set_formula_feedback(SharedString::from(format!(
                             "Inserted {func} formula"
@@ -1568,10 +2198,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_open_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.open_file(&open_request(&state)) {
-                    Ok(Some(path)) => match load_sheet(&path) {
-                        Ok(sheet) => {
+                    Ok(Some(path)) => match load_workbook(&path) {
+                        Ok(workbook) => {
                             let imported = !is_native_workbook(&path);
-                            replace_opened_sheet(&app, &state, path.clone(), sheet);
+                            let tabs = workbook.sheets.len();
+                            replace_opened_workbook(
+                                &app,
+                                &state,
+                                path.clone(),
+                                workbook.sheets,
+                                workbook.active,
+                            );
                             sync_menu_state(&menu_service, &app, &state);
                             app.set_status_left(SharedString::from(if imported {
                                 format!(
@@ -1579,7 +2216,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                                     path.display()
                                 )
                             } else {
-                                format!("Opened {}", path.display())
+                                format!(
+                                    "Opened {} ({} {})",
+                                    path.display(),
+                                    tabs,
+                                    if tabs == 1 { "sheet" } else { "sheets" }
+                                )
                             }));
                         }
                         Err(error) => {
@@ -1623,10 +2265,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.save_file(&export_request(&state)) {
                     Ok(Some(path)) => {
-                        let csv = to_csv(&state.current.borrow());
+                        let sheet = state.current.borrow().clone();
+                        let vals = evaluate_current(&state);
+                        let csv = to_csv_with_values(&sheet, &vals);
+                        let name = sheet.name.clone();
                         match loom_storage::atomic_write(&path, csv.as_bytes()) {
                             Ok(()) => app.set_status_left(SharedString::from(format!(
-                                "Exported {}",
+                                "Exported {name} to {} (values only)",
                                 path.display()
                             ))),
                             Err(error) => app.set_status_left(SharedString::from(format!(
@@ -1649,11 +2294,20 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             if let Some(app) = app_ref.upgrade() {
                 match state.dialogs.save_file(&export_xlsx_request(&state)) {
                     Ok(Some(path)) => {
-                        let grid = sheet_to_grid(&state.current.borrow());
-                        match export_xlsx_from_grid(&grid) {
+                        let (siblings, _) = workbook_sheets(&state);
+                        let evaluated = loom_sheets_core::workbook::evaluate_workbook(&siblings);
+                        let sheets_data: Vec<loom_sheets_core::XlsxSheetData> = siblings
+                            .iter()
+                            .zip(evaluated.iter())
+                            .map(|(sheet, vals)| loom_sheets_core::sheet_to_xlsx_data(sheet, vals))
+                            .collect();
+                        let tabs = sheets_data.len();
+                        match loom_sheets_core::export_xlsx_workbook(&sheets_data) {
                             Ok(bytes) => match loom_storage::atomic_write(&path, &bytes) {
                                 Ok(()) => app.set_status_left(SharedString::from(format!(
-                                    "Exported {}",
+                                    "Exported {} {} to {} (formulas kept)",
+                                    tabs,
+                                    if tabs == 1 { "sheet" } else { "sheets" },
                                     path.display()
                                 ))),
                                 Err(error) => app.set_status_left(SharedString::from(format!(
@@ -1679,12 +2333,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Some(edit) = state.undo_stack.borrow_mut().pop() {
-                    let mut sheet = state.current.borrow_mut();
-                    edit.revert(&mut sheet);
-                    state.redo_stack.borrow_mut().push(edit);
-                    apply_sheet(&app, &sheet);
-                    sync_menu_state(&menu_service, &app, &state);
+                let popped = state.undo_stack.borrow_mut().pop();
+                if let Some(edit) = popped {
+                    if let SheetTransaction::Workbook { before, .. } = &edit {
+                        restore_workbook_state(&app, &state, before, &menu_service);
+                    } else {
+                        {
+                            let mut sheet = state.current.borrow_mut();
+                            edit.revert(&mut sheet);
+                        }
+                        apply_sheet(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                    }
+                    push_history(&mut state.redo_stack.borrow_mut(), edit);
                 }
             }
         });
@@ -1695,12 +2356,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Some(edit) = state.redo_stack.borrow_mut().pop() {
-                    let mut sheet = state.current.borrow_mut();
-                    edit.apply(&mut sheet);
-                    state.undo_stack.borrow_mut().push(edit);
-                    apply_sheet(&app, &sheet);
-                    sync_menu_state(&menu_service, &app, &state);
+                let popped = state.redo_stack.borrow_mut().pop();
+                if let Some(edit) = popped {
+                    if let SheetTransaction::Workbook { after, .. } = &edit {
+                        restore_workbook_state(&app, &state, after, &menu_service);
+                    } else {
+                        {
+                            let mut sheet = state.current.borrow_mut();
+                            edit.apply(&mut sheet);
+                        }
+                        apply_sheet(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                    }
+                    push_history(&mut state.undo_stack.borrow_mut(), edit);
                 }
             }
         });
@@ -1711,7 +2379,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_cell_clicked(move |r, c| {
             if let Some(app) = app_ref.upgrade() {
                 select_cell(&app, &state.current.borrow(), r, c);
-                apply_sheet(&app, &state.current.borrow());
+                project_current(&app, &state);
             }
         });
     }
@@ -1721,7 +2389,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_navigate_selection(move |row_delta, col_delta| {
             if let Some(app) = app_ref.upgrade() {
                 navigate_selection(&app, &state.current.borrow(), row_delta, col_delta);
-                apply_sheet(&app, &state.current.borrow());
+                project_current(&app, &state);
             }
         });
     }
@@ -1731,7 +2399,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_extend_selection(move |row_delta, col_delta| {
             if let Some(app) = app_ref.upgrade() {
                 extend_selection(&app, &state.current.borrow(), row_delta, col_delta);
-                apply_sheet(&app, &state.current.borrow());
+                project_current(&app, &state);
             }
         });
     }
@@ -1759,7 +2427,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                             GridSelection::new(source.start, expanded.end),
                         );
                     }
-                    apply_sheet(&app, &state.current.borrow());
+                    apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_formula_feedback(SharedString::from(format!(
                         "Filled {} down",
@@ -1774,7 +2442,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_grid_scrolled(move || {
             if let Some(app) = app_ref.upgrade() {
-                apply_sheet_without_reveal(&app, &state.current.borrow());
+                project_current_without_reveal(&app, &state);
             }
         });
     }
@@ -1788,7 +2456,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 if width > 1.0 && height > 1.0 {
                     app.set_grid_viewport_width(width);
                     app.set_grid_viewport_height(height);
-                    apply_sheet(&app, &state.current.borrow());
+                    project_current(&app, &state);
                 }
             }
         });
@@ -1841,113 +2509,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_create_template(move |idx| {
-            if let Some(app) = app_ref.upgrade() {
-                let sheet = match idx {
-                    1 => {
-                        let mut s = Sheet::new("Monthly Budget");
-                        for (c, v) in [
-                            ("A1", "Category"),
-                            ("B1", "Projected"),
-                            ("C1", "Actual"),
-                            ("A2", "Housing"),
-                            ("B2", "1200"),
-                            ("C2", "1200"),
-                            ("A3", "Food"),
-                            ("B3", "400"),
-                            ("C3", "450"),
-                            ("A4", "Total"),
-                            ("B4", "=SUM(B2:B3)"),
-                            ("C4", "=SUM(C2:C3)"),
-                        ] {
-                            s.set_str(c, v);
-                        }
-                        s
-                    }
-                    2 => {
-                        let mut s = Sheet::new("Invoice");
-                        for (c, v) in [
-                            ("A1", "Description"),
-                            ("B1", "Hours"),
-                            ("C1", "Rate"),
-                            ("D1", "Amount"),
-                            ("A2", "Design Work"),
-                            ("B2", "20"),
-                            ("C2", "85"),
-                            ("D2", "=B2*C2"),
-                        ] {
-                            s.set_str(c, v);
-                        }
-                        s
-                    }
-                    4 => {
-                        let mut s = Sheet::new("Table and Chart");
-                        for (c, v) in [
-                            ("A1", "Quarter"),
-                            ("B1", "Revenue"),
-                            ("C1", "Expenses"),
-                            ("A2", "Q1"),
-                            ("B2", "15000"),
-                            ("C2", "9200"),
-                            ("A3", "Q2"),
-                            ("B3", "18500"),
-                            ("C3", "11000"),
-                            ("A4", "Total"),
-                            ("B4", "=SUM(B2:B3)"),
-                            ("C4", "=SUM(C2:C3)"),
-                        ] {
-                            s.set_str(c, v);
-                        }
-                        s
-                    }
-                    7 => {
-                        let mut s = Sheet::new("Budget");
-                        for (c, v) in [
-                            ("A1", "Category"),
-                            ("B1", "Budget"),
-                            ("C1", "Spent"),
-                            ("A2", "Housing"),
-                            ("B2", "1500"),
-                            ("C2", "1500"),
-                            ("A3", "Food"),
-                            ("B3", "600"),
-                            ("C3", "520"),
-                            ("A4", "Total"),
-                            ("B4", "=SUM(B2:B3)"),
-                            ("C4", "=SUM(C2:C3)"),
-                        ] {
-                            s.set_str(c, v);
-                        }
-                        s
-                    }
-                    _ => blank_sheet(),
-                };
-                *state.current.borrow_mut() = sheet.clone();
-                *state.sheets.borrow_mut() = vec![sheet];
-                *state.active_sheet_index.borrow_mut() = 0;
-                *state.save_path.borrow_mut() = None;
-                state.undo_stack.borrow_mut().clear();
-                state.redo_stack.borrow_mut().clear();
-                apply_sheet(&app, &state.current.borrow());
-                sync_sheet_tabs(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
-                app.set_template_chooser_open(false);
-                app.set_status_left("Created template workbook".into());
-            }
-        });
-    }
-    {
-        let app_ref = app.as_weak();
-        app.on_cancel_template(move || {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_template_chooser_open(false);
-            }
-        });
-    }
+    // Template-chooser callbacks live in `register_sheet_actions` (actions.rs)
+    // alongside every other sheet callback; see `create_template_workbook`.
 
     let mut menu_bar = build_standard_menu_bar(
         "Loom Sheets",
@@ -1973,6 +2536,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 MenuItem::action("table.sort_desc", "Sort Descending"),
                 MenuItem::action("table.freeze_header", "Freeze Header Row"),
                 MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
+                MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
                 MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
             ],
         )],
@@ -1996,6 +2560,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         "edit.select_all",
         "app.palette",
         "view.inspector",
+        "view.zoom_in",
+        "view.zoom_out",
+        "view.zoom_actual",
         "table.add_row",
         "table.delete_row",
         "table.add_col",
@@ -2004,6 +2571,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         "table.sort_desc",
         "table.freeze_header",
         "table.unfreeze_panes",
+        "table.pivot_sum",
         "sheets.delete_sheet",
     ]);
     menu_service
@@ -2017,13 +2585,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
 
     register_sheet_actions(&app, &state, &menu_service);
-    apply_sheet(&app, &state.current.borrow());
+    if let Some(zoom) = args.zoom {
+        app.set_zoom_factor(zoom);
+    }
+    apply_sheet(&app, &state);
     sync_sheet_tabs(&app, &state);
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
     if args.chart {
-        app.set_chart_visible(true);
-        sync_chart_to_app(&app, &state.current.borrow());
+        if let Ok(chart) = plan_chart(&state.current.borrow(), 0, 1) {
+            state.current.borrow_mut().chart = Some(chart);
+            app.set_chart_visible(true);
+            sync_chart_to_app(&app, &state.current.borrow());
+        }
     }
     if args.template_chooser {
         app.set_template_chooser_open(true);
@@ -2055,870 +2629,5 @@ fn main() -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use slint::Model;
-
-    #[test]
-    fn rtl_argument_is_parsed_and_applied_to_the_root() {
-        let args = parse_args_from(["--rtl"] as [&str; 1]).expect("parse --rtl");
-        assert!(args.rtl);
-
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        configure_direction(&app, args.rtl);
-        assert!(app.get_rtl());
-    }
-
-    #[test]
-    fn new_workbook_is_blank_and_named_untitled() {
-        let sheet = blank_sheet();
-        assert!(sheet.cells.is_empty());
-        assert_eq!(sheet.name, "Untitled");
-    }
-
-    #[test]
-    fn scripted_dialog_request_uses_current_workbook_directory() {
-        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new(
-            [Some(PathBuf::from("/tmp/import.csv"))],
-            [Some(PathBuf::from("/tmp/workbook.loomtable"))],
-        ));
-        let state = GuiState::new(
-            starter_workbook(),
-            Some(PathBuf::from("/tmp/current.loomtable")),
-            dialogs,
-            FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
-            FileFilter::new("CSV", ["csv"]).expect("filter"),
-            FileFilter::new("CSV", ["csv"]).expect("filter"),
-            FileFilter::new("Excel", ["xlsx"]).expect("filter"),
-        );
-        let request = open_request(&state);
-        assert_eq!(request.initial_directory, Some(PathBuf::from("/tmp")));
-        assert_eq!(
-            state.dialogs.open_file(&request).expect("open"),
-            Some(PathBuf::from("/tmp/import.csv"))
-        );
-    }
-
-    #[test]
-    fn csv_import_does_not_become_native_save_target() {
-        assert!(!is_native_workbook(Path::new("budget.csv")));
-        assert!(is_native_workbook(Path::new("budget.loomtable")));
-    }
-
-    #[test]
-    fn formula_bar_draft_is_not_applied_before_commit() {
-        let mut sheet = Sheet::new("test");
-        let selected = CellRef::parse("B1").unwrap();
-        sheet.set_str("A1", "2");
-        sheet.set_str("B1", "3");
-
-        let mut edit = CellEditTransaction::begin(sheet.raw(selected));
-        edit.update("=A1+1");
-
-        assert_eq!(selected.to_a1(), "B1");
-        assert_eq!(edit.commit().unwrap().after(), "=A1+1");
-        assert_eq!(sheet.raw(selected), Some("3"));
-    }
-
-    #[test]
-    fn formula_bar_commit_preserves_formula_raw_and_selected_cell() {
-        let mut sheet = Sheet::new("test");
-        let selected = CellRef::parse("B1").unwrap();
-        sheet.set_str("A1", "2");
-        sheet.set_str("B1", "3");
-        let mut undo = Vec::new();
-        let mut redo = Vec::new();
-
-        assert!(commit_formula_edit(
-            &mut sheet, &mut undo, &mut redo, selected, "=A1+1",
-        ));
-
-        assert_eq!(selected.to_a1(), "B1");
-        assert_eq!(sheet.raw(selected), Some("=A1+1"));
-        assert_eq!(evaluate(&sheet).get(&selected), Some(&Value::Number(3.0)));
-    }
-
-    #[test]
-    fn formula_bar_commit_preserves_literal_and_empty_raw_text() {
-        let mut sheet = Sheet::new("test");
-        let literal = CellRef::parse("A1").unwrap();
-        let empty = CellRef::parse("B1").unwrap();
-        sheet.set_raw(literal, "old");
-        sheet.set_raw(empty, "old");
-        let mut undo = Vec::new();
-        let mut redo = Vec::new();
-
-        assert!(commit_formula_edit(
-            &mut sheet,
-            &mut undo,
-            &mut redo,
-            literal,
-            "  literal text  ",
-        ));
-        assert!(commit_formula_edit(
-            &mut sheet, &mut undo, &mut redo, empty, "",
-        ));
-
-        assert_eq!(sheet.raw(literal), Some("  literal text  "));
-        assert_eq!(sheet.raw(empty), Some(""));
-        assert_eq!(evaluate(&sheet).get(&empty), Some(&Value::Empty));
-    }
-
-    #[test]
-    fn formula_bar_commit_records_one_transaction_and_noop_records_none() {
-        let mut sheet = Sheet::new("test");
-        let selected = CellRef::parse("A1").unwrap();
-        sheet.set_str("A1", "old");
-        let mut undo = Vec::new();
-        let mut redo = vec![SheetTransaction::Range(RangeEdit::replace(
-            &sheet,
-            selected,
-            Some("redo".to_string()),
-        ))];
-
-        assert!(commit_formula_edit(
-            &mut sheet, &mut undo, &mut redo, selected, "new",
-        ));
-        assert_eq!(undo.len(), 1);
-        assert!(redo.is_empty());
-
-        assert!(!commit_formula_edit(
-            &mut sheet, &mut undo, &mut redo, selected, "new",
-        ));
-        assert_eq!(undo.len(), 1);
-    }
-
-    #[test]
-    fn sheet_grid_projection_uses_viewport_offsets_for_headers_and_cells() {
-        let mut sheet = Sheet::new("test");
-        sheet.set_str("C11", "Bottom right");
-        sheet.set_str("D12", "Tail");
-        let viewport = loom_sheets_core::SheetViewport {
-            first_row: 10,
-            first_col: 2,
-            visible_rows: 2,
-            visible_cols: 2,
-        };
-
-        let projection = project_sheet_grid(&sheet, viewport);
-
-        assert_eq!(projection.column_headers, ["C", "D"]);
-        assert_eq!(projection.row_headers, ["11", "12"]);
-        assert_eq!(projection.cells, ["Bottom right", "", "", "Tail"]);
-    }
-
-    #[test]
-    fn sparse_viewport_projection_tracks_scroll_and_dimensions() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        app.set_grid_viewport_width(360.0);
-        app.set_grid_viewport_height(280.0);
-        app.set_grid_scroll_x(-180.0);
-        app.set_grid_scroll_y(-672.0);
-
-        let mut sheet = Sheet::new("sparse");
-        sheet.set_str("AZ1000", "tail");
-        let viewport = viewport_from_app(&app, &sheet);
-
-        assert_eq!(sheet.dimensions(), SheetDimensions::new(1_000, 52));
-        assert_eq!(viewport.first_row, 28);
-        assert_eq!(viewport.first_col, 2);
-        assert_eq!(viewport.visible_rows, 11);
-        assert_eq!(viewport.visible_cols, 5);
-        assert!(viewport.contains(CellRef::parse("C29").unwrap()));
-        assert!(!viewport.contains(CellRef::parse("B29").unwrap()));
-    }
-
-    #[test]
-    fn custom_dimensions_drive_viewport_projection_and_offsets() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        app.set_grid_viewport_width(400.0);
-        app.set_grid_viewport_height(200.0);
-        app.set_grid_scroll_x(-170.0);
-        app.set_grid_scroll_y(-50.0);
-
-        let mut sheet = Sheet::new("custom viewport");
-        sheet.set_col_width(0, 160.0);
-        sheet.set_row_height(0, 48.0);
-        sheet.set_str("B2", "target");
-
-        apply_sheet_without_reveal(&app, &sheet);
-
-        assert_eq!(app.get_column_headers().row_data(0).as_deref(), Some("B"));
-        assert_eq!(app.get_row_headers().row_data(0).as_deref(), Some("2"));
-        assert_eq!(app.get_cells().row_data(0).as_deref(), Some("target"));
-        assert_eq!(app.get_grid_col_offset(), 160.0);
-        assert_eq!(app.get_grid_row_offset(), 48.0);
-    }
-
-    #[test]
-    fn sparse_tail_scroll_materializes_tail_headers_and_values() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        app.window().set_size(PhysicalSize::new(1280, 800));
-        apply_layout_breakpoints(&app, 1280);
-        apply_headless_viewport_size(&app, 1280, 800);
-        app.set_grid_scroll_y(-26_600.0);
-
-        let mut sheet = Sheet::new("Sparse 1000");
-        sheet.set_str("A995", "10");
-        sheet.set_str("A996", "20");
-        sheet.set_str("A1000", "tail");
-        apply_sheet_without_reveal(&app, &sheet);
-
-        let row_headers = app.get_row_headers();
-        assert_eq!(row_headers.row_data(0).as_deref(), Some("979"));
-        assert_eq!(row_headers.row_data(21).as_deref(), Some("1000"));
-        let cells = app.get_cells();
-        assert_eq!(cells.row_data(16 * 8).as_deref(), Some("10"));
-        assert_eq!(cells.row_data(17 * 8).as_deref(), Some("20"));
-        assert_eq!(cells.row_data(21 * 8).as_deref(), Some("tail"));
-        assert!((app.get_grid_scroll_y() + 23_478.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn reverse_shift_extension_keeps_anchor_and_normalizes_range() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let sheet = starter_workbook();
-        update_selection(
-            &app,
-            &sheet,
-            &evaluate(&sheet),
-            CellRef::parse("C3").unwrap(),
-        );
-
-        extend_selection(&app, &sheet, -1, -1);
-
-        assert_eq!(app.get_selected_cell().as_str(), "B2");
-        assert_eq!(app.get_selection_anchor_row(), 2);
-        assert_eq!(app.get_selection_anchor_col(), 2);
-        assert_eq!(app.get_selection_range().as_str(), "B2:C3");
-        assert_eq!(app.get_selection_count(), 4);
-
-        // Moving back through the anchor contracts the range without
-        // changing which cell was the original anchor.
-        extend_selection(&app, &sheet, 1, 1);
-        assert_eq!(app.get_selected_cell().as_str(), "C3");
-        assert_eq!(app.get_selection_anchor_row(), 2);
-        assert_eq!(app.get_selection_anchor_col(), 2);
-        assert_eq!(app.get_selection_range().as_str(), "C3");
-        assert_eq!(app.get_selection_count(), 1);
-    }
-
-    #[test]
-    fn fill_down_records_one_undo_operation_and_restores_sparse_cells() {
-        let mut sheet = Sheet::new("fill");
-        sheet.set_str("A1", "10");
-        sheet.set_str("A2", "20");
-        let mut undo = Vec::new();
-        let mut redo = Vec::new();
-        let selection =
-            GridSelection::new(CellRef::parse("A1").unwrap(), CellRef::parse("A2").unwrap());
-
-        assert!(fill_selection_down(
-            &mut sheet, &mut undo, &mut redo, selection
-        ));
-        assert_eq!(undo.len(), 1);
-        assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), Some("10"));
-        assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), Some("20"));
-
-        let previous = undo.pop().expect("fill undo operation");
-        previous.revert(&mut sheet);
-        assert_eq!(sheet.raw(CellRef::parse("A3").unwrap()), None);
-        assert_eq!(sheet.raw(CellRef::parse("A4").unwrap()), None);
-        assert!(!fill_selection_down(
-            &mut sheet,
-            &mut undo,
-            &mut redo,
-            GridSelection::new(CellRef::parse("A1").unwrap(), CellRef::parse("A1").unwrap()),
-        ));
-    }
-
-    #[test]
-    fn selection_announcement_and_inspector_values_follow_live_cell_state() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let mut sheet = Sheet::new("live");
-        sheet.set_str("A1", "2");
-        sheet.set_str("B1", "=A1+1");
-        let values = evaluate(&sheet);
-
-        update_selection_range(
-            &app,
-            &sheet,
-            &values,
-            GridSelection::new(CellRef::parse("B1").unwrap(), CellRef::parse("B1").unwrap()),
-        );
-        assert_eq!(app.get_selection_value().as_str(), "3");
-        assert_eq!(
-            app.get_selection_announcement().as_str(),
-            "B1 selected; value: 3; formula: =A1+1"
-        );
-        assert_eq!(app.get_selection_formula().as_str(), "=A1+1");
-
-        apply_sheet(&app, &sheet);
-        assert_eq!(app.get_sheet_name().as_str(), "live");
-        assert_eq!(app.get_table_rows_label().as_str(), "1");
-        assert_eq!(app.get_table_cols_label().as_str(), "2");
-        assert_eq!(app.get_selection_value().as_str(), "3");
-    }
-
-    #[test]
-    fn inspector_search_filters_table_and_cell_sections() {
-        assert_eq!(inspector_section_visibility(""), (true, true));
-        assert_eq!(inspector_section_visibility(" rows "), (true, false));
-        assert_eq!(inspector_section_visibility("formula"), (false, true));
-        assert_eq!(
-            inspector_section_visibility("does-not-exist"),
-            (false, false)
-        );
-    }
-
-    #[test]
-    fn inspector_context_switch_only_exposes_the_selected_context() {
-        assert_eq!(inspector_tab_index(-1), 0);
-        assert_eq!(inspector_tab_index(0), 0);
-        assert_eq!(inspector_tab_index(1), 1);
-        assert_eq!(inspector_tab_index(4), 1);
-
-        assert!(inspector_context_matches(0, "rows"));
-        assert!(!inspector_context_matches(1, "rows"));
-        assert!(!inspector_context_matches(0, "formula"));
-        assert!(inspector_context_matches(1, "formula"));
-        assert!(!inspector_context_matches(1, "unknown"));
-    }
-
-    #[test]
-    fn focused_grid_routes_arrow_keys_to_selection_navigation() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let calls = Rc::new(std::cell::Cell::new((0, 0)));
-        let calls_ref = calls.clone();
-        app.on_navigate_selection(move |row_delta, col_delta| {
-            calls_ref.set((row_delta, col_delta));
-        });
-
-        app.invoke_focus_grid();
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::DownArrow.into(),
-            });
-        assert_eq!(calls.get(), (1, 0));
-
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::RightArrow.into(),
-            });
-        assert_eq!(calls.get(), (0, 1));
-    }
-
-    #[test]
-    fn focused_grid_starts_formula_edits_and_tab_navigates_selection() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        app.set_selection_formula("=A1+1".into());
-        let app_ref = app.as_weak();
-        app.on_begin_edit(move |initial_text| {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_formula_edit_buffer(initial_text);
-                app.invoke_focus_formula_bar();
-            }
-        });
-        let cancels = Rc::new(std::cell::Cell::new(0));
-        let cancels_ref = cancels.clone();
-        app.on_cancel_selected_cell(move || cancels_ref.set(cancels_ref.get() + 1));
-        app.invoke_focus_grid();
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::Return.into(),
-            });
-        assert_eq!(app.get_formula_edit_buffer().as_str(), "=A1+1");
-
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::Escape.into(),
-            });
-        assert_eq!(cancels.get(), 1);
-
-        app.invoke_focus_grid();
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "x".into() });
-        assert_eq!(app.get_formula_edit_buffer().as_str(), "x");
-
-        let moves = Rc::new(std::cell::Cell::new((0, 0)));
-        let moves_ref = moves.clone();
-        app.on_navigate_selection(move |row_delta, col_delta| {
-            moves_ref.set((row_delta, col_delta));
-        });
-        app.invoke_focus_grid();
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::Tab.into(),
-            });
-        assert_eq!(moves.get(), (0, 1));
-    }
-
-    #[test]
-    fn focused_grid_rejects_non_printable_edit_keys() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let begins = Rc::new(std::cell::Cell::new(0));
-        let begins_ref = begins.clone();
-        app.on_begin_edit(move |_| begins_ref.set(begins_ref.get() + 1));
-        let moves = Rc::new(std::cell::Cell::new((0, 0)));
-        let moves_ref = moves.clone();
-        app.on_navigate_selection(move |row_delta, col_delta| {
-            moves_ref.set((row_delta, col_delta));
-        });
-
-        for text in [
-            slint::platform::Key::Backspace.into(),
-            slint::platform::Key::Delete.into(),
-            slint::platform::Key::F1.into(),
-            slint::platform::Key::Home.into(),
-            slint::platform::Key::PageUp.into(),
-        ] {
-            app.invoke_focus_grid();
-            app.window()
-                .dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
-        }
-        assert_eq!(begins.get(), 0);
-        assert_eq!(moves.get(), (0, 0));
-
-        app.invoke_focus_grid();
-        app.window()
-            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::Backtab.into(),
-            });
-        assert_eq!(begins.get(), 0);
-        assert_eq!(moves.get(), (0, -1));
-    }
-
-    #[test]
-    fn typed_history_undo_redo_restores_exact_raw_values() {
-        let mut sheet = Sheet::new("history");
-        let cell = CellRef::parse("A1").unwrap();
-        sheet.set_raw(cell, "old");
-        let mut undo = Vec::new();
-        let mut redo = Vec::new();
-
-        assert!(commit_formula_edit(
-            &mut sheet, &mut undo, &mut redo, cell, ""
-        ));
-        assert_eq!(sheet.raw(cell), Some(""));
-        let edit = undo.pop().expect("typed edit");
-        edit.revert(&mut sheet);
-        assert_eq!(sheet.raw(cell), Some("old"));
-        redo.push(edit);
-        let edit = redo.pop().expect("redo edit");
-        edit.apply(&mut sheet);
-        assert_eq!(sheet.raw(cell), Some(""));
-
-        let absent = CellRef::parse("B1").unwrap();
-        assert!(commit_formula_edit(
-            &mut sheet, &mut undo, &mut redo, absent, ""
-        ));
-        assert_eq!(sheet.raw(absent), Some(""));
-        undo.pop().expect("absent edit").revert(&mut sheet);
-        assert_eq!(sheet.raw(absent), None);
-    }
-
-    #[test]
-    fn quick_formula_insert_evaluation() {
-        let mut sheet = Sheet::new("test");
-        for (c, v) in [
-            ("A1", "10"),
-            ("A2", "20"),
-            ("A3", "30"),
-            ("A4", "40"),
-            ("A5", "50"),
-        ] {
-            sheet.set_str(c, v);
-        }
-
-        let target = CellRef::parse("B1").unwrap();
-        let mut undo = Vec::new();
-        let mut redo = Vec::new();
-
-        assert!(commit_formula_edit(
-            &mut sheet,
-            &mut undo,
-            &mut redo,
-            target,
-            "=SUM(A1:A5)",
-        ));
-
-        let vals = evaluate(&sheet);
-        assert_eq!(vals.get(&target), Some(&Value::Number(150.0)));
-    }
-
-    #[test]
-    fn layout_breakpoints_match_supported_width_boundaries() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let policy = ResponsivePolicy::get(&app);
-        assert_eq!(policy.get_priority_1_icon_only_below(), 1180.0);
-        assert_eq!(policy.get_priority_2_overflow_below(), 1320.0);
-        let expected = [
-            (1179, true, true, false),
-            (1180, false, true, false),
-            (1279, false, true, false),
-            (1280, false, true, false),
-            (1319, false, true, false),
-            (1320, false, false, true),
-        ];
-        for (width, icon_only, overflow, labeled) in expected {
-            assert_eq!(
-                layout_breakpoints(&app, width),
-                ResponsiveToolbarState {
-                    icon_only,
-                    overflow,
-                    labeled,
-                }
-            );
-            apply_layout_breakpoints(&app, width);
-            assert_eq!(app.get_icon_only_toolbar(), icon_only);
-            assert_eq!(app.get_overflow_toolbar(), overflow);
-            assert_eq!(app.get_labeled_toolbar(), labeled);
-        }
-    }
-
-    #[test]
-    fn sheets_inspector_is_open_by_default_for_reference_windows() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        assert!(app.get_show_inspector());
-        apply_layout_breakpoints(&app, 1024);
-        assert!(app.get_overflow_toolbar());
-        assert!(!app.get_inspector_available());
-        assert!(!app.get_show_inspector());
-        apply_layout_breakpoints(&app, 1180);
-        assert!(app.get_overflow_toolbar());
-        assert!(app.get_inspector_available());
-        assert!(app.get_show_inspector());
-        apply_layout_breakpoints(&app, 1280);
-        assert!(app.get_overflow_toolbar());
-        assert!(app.get_inspector_available() && app.get_show_inspector());
-        app.set_show_inspector(false);
-        apply_layout_breakpoints(&app, 1280);
-        assert!(!app.get_show_inspector());
-        apply_layout_breakpoints(&app, 1320);
-        assert!(!app.get_overflow_toolbar());
-    }
-
-    #[test]
-    fn grid_geometry_uses_core_defaults_and_fits_small_workbooks() {
-        assert_eq!(GRID_COL_WIDTH, DEFAULT_COL_WIDTH);
-        assert_eq!(GRID_ROW_HEIGHT, DEFAULT_ROW_HEIGHT);
-
-        let mut small = Sheet::new("small");
-        small.set_str("C3", "value");
-        let dimensions = editor_dimensions(&small, CellRef::parse("A1").unwrap());
-        assert_eq!(dimensions, SheetDimensions::new(15, 8));
-
-        let fitted = grid_default_col_width(&small, dimensions, 1_000.0);
-        assert_eq!(fitted, 120.5);
-        let viewport = SheetViewport::new(4, 8);
-        let geometry = grid_geometry(&small, dimensions, viewport, 1_000.0);
-        assert_eq!(geometry.column_widths.len(), 8);
-        assert!(geometry.column_widths.iter().all(|width| *width == fitted));
-        assert_eq!(geometry.content_width, 8.0 * fitted);
-
-        let mut sparse = Sheet::new("sparse");
-        sparse.set_str("AZ1000", "tail");
-        let sparse_dimensions = editor_dimensions(&sparse, CellRef::parse("A1").unwrap());
-        assert_eq!(sparse_dimensions, SheetDimensions::new(1_000, 52));
-        assert_eq!(
-            grid_default_col_width(&sparse, sparse_dimensions, 1_000.0),
-            GRID_COL_WIDTH
-        );
-    }
-
-    #[test]
-    fn grid_geometry_retains_persisted_row_and_column_dimensions() {
-        let mut sheet = Sheet::new("custom");
-        sheet.set_str("B3", "value");
-        sheet.set_col_width(1, 140.0);
-        sheet.set_row_height(2, 40.0);
-        let dimensions = editor_dimensions(&sheet, CellRef::parse("A1").unwrap());
-        let viewport = SheetViewport::new(4, 3);
-        let geometry = grid_geometry(&sheet, dimensions, viewport, 640.0);
-        assert_eq!(geometry.column_widths, vec![80.0, 140.0, 80.0]);
-        assert_eq!(geometry.row_heights, vec![24.0, 24.0, 40.0, 24.0]);
-        assert_eq!(geometry.content_width, 8.0 * 80.0 + 60.0);
-        assert_eq!(geometry.content_height, 15.0 * 24.0 + 16.0);
-
-        let json = sheet_to_json(&sheet);
-        let reopened = sheet_from_json(&json).expect("dimension metadata round-trips");
-        assert_eq!(reopened.col_width(1), 140.0);
-        assert_eq!(reopened.row_height(2), 40.0);
-    }
-
-    #[test]
-    fn native_menu_and_palette_share_sheets_callback_dispatch() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let calls = Rc::new(std::cell::Cell::new(0));
-        let calls_ref = calls.clone();
-        app.on_save_sheet(move || calls_ref.set(calls_ref.get() + 1));
-
-        assert!(dispatch_command(&app, "file.save"));
-        assert!(dispatch_palette_action(&app, PaletteAction::SaveSheet));
-
-        let menu = NativeMenuBar::new();
-        let bar = build_standard_menu_bar("Loom Sheets", vec![], vec![], vec![], vec![]);
-        menu.install_menu_bar(&bar).expect("install menu");
-        let app_ref = app.as_weak();
-        menu.register_action_sink(Arc::new(move |action: CommandAction| {
-            schedule_menu_action(&app_ref, action)
-        }))
-        .expect("register menu sink");
-        let error = menu
-            .dispatch_action("file.save")
-            .expect_err("capture platform has no event loop provider");
-        assert!(error
-            .to_string()
-            .contains("failed to schedule Sheets menu command"));
-
-        assert_eq!(calls.get(), 2);
-    }
-
-    #[test]
-    fn sheets_palette_undo_redo_follow_history_and_disabled_guard() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        app.set_can_undo(false);
-        app.set_can_redo(false);
-        rebuild_palette(&app, "undo");
-        assert_eq!(app.get_palette_commands().row_count(), 0);
-        rebuild_palette(&app, "redo");
-        assert_eq!(app.get_palette_commands().row_count(), 0);
-        assert!(!dispatch_palette_action(&app, PaletteAction::Undo));
-        assert!(!dispatch_palette_action(&app, PaletteAction::Redo));
-
-        let undo_calls = Rc::new(std::cell::Cell::new(0));
-        let undo_calls_ref = undo_calls.clone();
-        app.on_undo(move || undo_calls_ref.set(undo_calls_ref.get() + 1));
-        app.set_can_undo(true);
-        rebuild_palette(&app, "undo");
-        assert!(
-            app.get_palette_commands()
-                .row_data(0)
-                .expect("Undo command")
-                .enabled
-        );
-        assert!(dispatch_palette_action(&app, PaletteAction::Undo));
-        assert_eq!(undo_calls.get(), 1);
-    }
-
-    #[test]
-    fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let redo_calls = Rc::new(std::cell::Cell::new(0));
-        let redo_calls_ref = redo_calls.clone();
-        app.on_redo(move || redo_calls_ref.set(redo_calls_ref.get() + 1));
-
-        // Render both history commands, then invalidate Undo before the user
-        // presses Enter. The visible Redo row is still at index 6; resolving
-        // against a freshly filtered master list would incorrectly look at
-        // index 6 (out of range) or shift to the wrong command.
-        app.set_can_undo(true);
-        app.set_can_redo(true);
-        wire_palette(&app);
-        rebuild_palette(&app, "");
-        assert_eq!(app.get_palette_commands().row_count(), 22);
-        assert_eq!(
-            app.get_palette_commands()
-                .row_data(21)
-                .expect("rendered Redo row")
-                .id
-                .as_str(),
-            "sheets.redo"
-        );
-
-        app.set_can_undo(false);
-        app.invoke_palette_invoked(21);
-
-        assert_eq!(redo_calls.get(), 1);
-        assert!(!app.get_palette_open());
-    }
-
-    #[test]
-    fn sheets_menu_disables_unhandled_controller_commands() {
-        set_platform();
-        let mut menu = build_standard_menu_bar(
-            "Loom Sheets",
-            vec![
-                MenuItem::action("file.new_template", "New from Template..."),
-                MenuItem::action("file.export_csv", "Export to CSV..."),
-                MenuItem::action("file.export_xlsx", "Export to Excel (.xlsx)..."),
-            ],
-            vec![],
-            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
-            vec![Menu::new(
-                "Table",
-                [
-                    MenuItem::action("table.add_row", "Add Row"),
-                    MenuItem::action("table.delete_row", "Delete Row"),
-                    MenuItem::action("table.add_col", "Add Column"),
-                    MenuItem::action("table.delete_col", "Delete Column"),
-                    MenuItem::action("table.sort_asc", "Sort Ascending"),
-                    MenuItem::action("table.sort_desc", "Sort Descending"),
-                    MenuItem::action("table.freeze_header", "Freeze Header Row"),
-                    MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
-                    MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
-                ],
-            )],
-        );
-        menu.disable_items_except([
-            "file.new",
-            "file.new_template",
-            "file.open",
-            "file.save",
-            "file.save_as",
-            "file.export_csv",
-            "file.export_xlsx",
-            "edit.undo",
-            "edit.redo",
-            "edit.cut",
-            "edit.copy",
-            "edit.paste",
-            "edit.select_all",
-            "app.palette",
-            "view.inspector",
-            "table.add_row",
-            "table.delete_row",
-            "table.add_col",
-            "table.delete_col",
-            "table.sort_asc",
-            "table.sort_desc",
-            "table.freeze_header",
-            "table.unfreeze_panes",
-            "sheets.delete_sheet",
-        ]);
-        for id in ["view.zoom_in", "view.zoom_out", "view.zoom_actual"] {
-            assert!(
-                !menu.find_item(id).expect("menu command").is_enabled(),
-                "unhandled Sheets command {id} must be disabled"
-            );
-        }
-        for id in [
-            "edit.cut",
-            "edit.copy",
-            "edit.paste",
-            "edit.select_all",
-            "table.add_row",
-            "table.delete_row",
-            "table.add_col",
-            "table.delete_col",
-            "table.sort_asc",
-            "table.sort_desc",
-            "table.freeze_header",
-            "table.unfreeze_panes",
-            "sheets.delete_sheet",
-        ] {
-            assert!(
-                menu.find_item(id).expect("menu command").is_enabled(),
-                "handled Sheets command {id} must be enabled"
-            );
-        }
-    }
-
-    #[test]
-    fn sheets_inspector_menu_check_tracks_live_window_state() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
-        let state = GuiState::new(
-            starter_workbook(),
-            None,
-            dialogs,
-            FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
-            FileFilter::new("CSV", ["csv"]).expect("filter"),
-            FileFilter::new("CSV", ["csv"]).expect("filter"),
-            FileFilter::new("Excel", ["xlsx"]).expect("filter"),
-        );
-        let menu = NativeMenuBar::new();
-        let bar = build_standard_menu_bar(
-            "Loom Sheets",
-            vec![],
-            vec![],
-            vec![MenuItem::check("view.inspector", "Format Inspector", false)],
-            vec![],
-        );
-        menu.install_menu_bar(&bar).expect("install menu");
-
-        app.set_inspector_available(true);
-        app.set_show_inspector(false);
-        sync_menu_state(&menu, &app, &state);
-        assert!(matches!(
-            menu.installed_menu_bar()
-                .and_then(|bar| bar.find_item("view.inspector").cloned()),
-            Some(MenuItem::Check {
-                checked: false,
-                enabled: true,
-                ..
-            })
-        ));
-
-        app.set_show_inspector(true);
-        sync_menu_state(&menu, &app, &state);
-        assert!(matches!(
-            menu.installed_menu_bar()
-                .and_then(|bar| bar.find_item("view.inspector").cloned()),
-            Some(MenuItem::Check {
-                checked: true,
-                enabled: true,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn expanding_past_overflow_breakpoint_closes_menu() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        apply_layout_breakpoints(&app, 1024);
-        assert!(app.get_overflow_toolbar());
-        app.set_toolbar_overflow_open(true);
-
-        apply_layout_breakpoints(&app, 1320);
-
-        assert!(!app.get_overflow_toolbar());
-        assert!(!app.get_toolbar_overflow_open());
-    }
-
-    #[test]
-    fn widening_window_preserves_palette_focus() {
-        set_platform();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        apply_layout_breakpoints(&app, 1024);
-        wire_responsive_layout(&app);
-        let _ = snapshot_component(&app, 1024.0, 800.0, 1.0).expect("render compact window");
-
-        app.invoke_open_palette();
-        let _ = snapshot_component(&app, 1024.0, 800.0, 1.0).expect("render open palette");
-        let focused_before =
-            slint::private_unstable_api::re_exports::WindowInner::from_pub(app.window())
-                .focus_item
-                .borrow()
-                .upgrade()
-                .expect("palette should own focus");
-
-        app.window().set_size(PhysicalSize::new(1280, 800));
-        let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render widened window");
-        let focused_after =
-            slint::private_unstable_api::re_exports::WindowInner::from_pub(app.window())
-                .focus_item
-                .borrow()
-                .upgrade()
-                .expect("palette focus should remain present");
-
-        assert_eq!(focused_after, focused_before);
-        assert!(app.get_palette_open());
-    }
-}
+#[path = "main_tests.rs"]
+mod tests;
