@@ -83,6 +83,12 @@ pub enum FailPoint {
     BeforeSync,
     /// Fail before atomic rename/replace.
     BeforeRename,
+    /// Fail before writing a recovery-journal entry.
+    JournalBeforeWrite,
+    /// Write half of a recovery-journal entry, then fail.
+    JournalPartialWrite,
+    /// Fail before syncing a recovery-journal entry.
+    JournalBeforeSync,
 }
 
 thread_local! {
@@ -102,9 +108,16 @@ fn check_fail_point(fp: FailPoint) -> Result<()> {
             FailPoint::DuringWrite => "DuringWrite",
             FailPoint::BeforeSync => "BeforeSync",
             FailPoint::BeforeRename => "BeforeRename",
+            FailPoint::JournalBeforeWrite => "JournalBeforeWrite",
+            FailPoint::JournalPartialWrite => "JournalPartialWrite",
+            FailPoint::JournalBeforeSync => "JournalBeforeSync",
         }));
     }
     Ok(())
+}
+
+fn active_fail_point() -> Option<FailPoint> {
+    FAIL_POINT.with(|cell| cell.get())
 }
 
 /// Atomically write bytes to `path` with durable fsync and unique temporary files:
@@ -219,7 +232,12 @@ impl RecoveryJournal {
                 atomic_write(path, verified_data)?;
             }
         }
-        let next_seq = entries.last().map(|e| e.seq + 1).unwrap_or(1);
+        let next_seq = match entries.last() {
+            Some(entry) => entry.seq.checked_add(1).ok_or_else(|| {
+                StorageError::Corruption("journal sequence is exhausted at u64::MAX".into())
+            })?,
+            None => 1,
+        };
         Ok(Self {
             path: path.to_path_buf(),
             entries,
@@ -229,6 +247,9 @@ impl RecoveryJournal {
 
     /// Append an operation entry and durably sync it to disk.
     pub fn append(&mut self, op: impl Into<String>, payload: Vec<u8>) -> Result<JournalEntry> {
+        let next_seq = self.next_seq.checked_add(1).ok_or_else(|| {
+            StorageError::Corruption("journal sequence is exhausted at u64::MAX".into())
+        })?;
         let checksum = sha256(&payload);
         let e = JournalEntry {
             seq: self.next_seq,
@@ -236,7 +257,6 @@ impl RecoveryJournal {
             payload,
             checksum,
         };
-        self.next_seq += 1;
 
         let mut encoded = Vec::new();
         encode_entry(&e, &mut encoded);
@@ -249,11 +269,53 @@ impl RecoveryJournal {
             .create(true)
             .append(true)
             .open(&self.path)?;
-        file.write_all(&encoded)?;
-        file.flush()?;
-        file.sync_all()?;
+
+        let original_len = file.metadata()?.len();
+        if let Err(error) = check_fail_point(FailPoint::JournalBeforeWrite) {
+            return Err(rollback_journal_append(&mut file, original_len, error));
+        }
+        if active_fail_point() == Some(FailPoint::JournalPartialWrite) {
+            let partial_len = (encoded.len() / 2).max(1).min(encoded.len());
+            if let Err(error) = file.write_all(&encoded[..partial_len]) {
+                return Err(rollback_journal_append(
+                    &mut file,
+                    original_len,
+                    StorageError::from(error),
+                ));
+            }
+            return Err(rollback_journal_append(
+                &mut file,
+                original_len,
+                StorageError::InjectedFailure("JournalPartialWrite"),
+            ));
+        }
+        if let Err(error) = file.write_all(&encoded) {
+            return Err(rollback_journal_append(
+                &mut file,
+                original_len,
+                StorageError::from(error),
+            ));
+        }
+        if let Err(error) = file.flush() {
+            return Err(rollback_journal_append(
+                &mut file,
+                original_len,
+                StorageError::from(error),
+            ));
+        }
+        if let Err(error) = check_fail_point(FailPoint::JournalBeforeSync) {
+            return Err(rollback_journal_append(&mut file, original_len, error));
+        }
+        if let Err(error) = file.sync_all() {
+            return Err(rollback_journal_append(
+                &mut file,
+                original_len,
+                StorageError::from(error),
+            ));
+        }
 
         self.entries.push(e.clone());
+        self.next_seq = next_seq;
         Ok(e)
     }
 
@@ -284,6 +346,20 @@ impl RecoveryJournal {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+/// Return the original append error after removing any bytes written by the
+/// failed attempt. The journal remains positioned at the same verified tail,
+/// so a caller can retry without consuming a sequence or appending behind a
+/// torn record.
+fn rollback_journal_append(
+    file: &mut File,
+    original_len: u64,
+    error: StorageError,
+) -> StorageError {
+    let _ = file.set_len(original_len);
+    let _ = file.sync_all();
+    error
 }
 
 fn encode_entry(e: &JournalEntry, out: &mut Vec<u8>) {
@@ -587,6 +663,59 @@ mod tests {
         assert_eq!(j2.entries()[0].op, "edit.bold");
         assert_eq!(j2.entries()[0].payload, vec![1, 2, 3]);
         assert_eq!(j2.entries()[1].seq, 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_journal_write_does_not_consume_sequence() {
+        let dir = temp_dir("journal-failed-write");
+        let p = dir.join("recovery.journal");
+        let mut journal = RecoveryJournal::open(&p).unwrap();
+
+        set_fail_point(Some(FailPoint::JournalBeforeWrite));
+        assert!(journal.append("edit", vec![1, 2, 3]).is_err());
+        set_fail_point(None);
+
+        let entry = journal.append("edit", vec![4, 5, 6]).unwrap();
+        assert_eq!(entry.seq, 1);
+        let reopened = RecoveryJournal::open(&p).unwrap();
+        assert_eq!(reopened.entries()[0].seq, 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn partial_journal_write_is_truncated_before_retry() {
+        let dir = temp_dir("journal-partial-write");
+        let p = dir.join("recovery.journal");
+        let mut journal = RecoveryJournal::open(&p).unwrap();
+
+        set_fail_point(Some(FailPoint::JournalPartialWrite));
+        let error = journal.append("edit", vec![1, 2, 3]).unwrap_err();
+        assert_eq!(error, StorageError::InjectedFailure("JournalPartialWrite"));
+        set_fail_point(None);
+
+        let entry = journal.append("edit", vec![4, 5, 6]).unwrap();
+        assert_eq!(entry.seq, 1);
+        let reopened = RecoveryJournal::open(&p).unwrap();
+        assert_eq!(reopened.entries()[0].payload, vec![4, 5, 6]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_journal_sync_is_truncated_before_retry() {
+        let dir = temp_dir("journal-failed-sync");
+        let p = dir.join("recovery.journal");
+        let mut journal = RecoveryJournal::open(&p).unwrap();
+
+        set_fail_point(Some(FailPoint::JournalBeforeSync));
+        let error = journal.append("edit", vec![1, 2, 3]).unwrap_err();
+        assert_eq!(error, StorageError::InjectedFailure("JournalBeforeSync"));
+        set_fail_point(None);
+
+        let entry = journal.append("edit", vec![4, 5, 6]).unwrap();
+        assert_eq!(entry.seq, 1);
+        let reopened = RecoveryJournal::open(&p).unwrap();
+        assert_eq!(reopened.entries()[0].payload, vec![4, 5, 6]);
         let _ = fs::remove_dir_all(&dir);
     }
 

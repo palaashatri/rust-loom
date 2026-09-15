@@ -105,7 +105,12 @@ impl SnapshotRecovery {
         if self.last_payload.as_deref() == Some(payload.as_slice()) {
             return Ok(false);
         }
-        let operation_id = format!("snapshot-{}", self.last_sequence.saturating_add(1));
+        let operation_id = format!(
+            "snapshot-{}",
+            self.last_sequence.checked_add(1).ok_or_else(|| {
+                ProductionError::InvalidData("snapshot sequence is exhausted at u64::MAX".into())
+            })?
+        );
         let record = self.journal.append(operation_id, label, payload.clone())?;
         self.last_sequence = record.sequence;
         self.last_payload = Some(payload);

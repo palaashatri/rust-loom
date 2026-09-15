@@ -23,6 +23,36 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const JOURNAL_FILE: &str = "operations.jsonl";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";
 const CHECKPOINT_META_FILE: &str = "checkpoint.json";
+const CHECKPOINT_GENERATION_PREFIX: &str = "checkpoint-generation-";
+const CHECKPOINT_GENERATION_PAYLOAD_SUFFIX: &str = ".bin";
+const CHECKPOINT_GENERATION_METADATA_SUFFIX: &str = ".json";
+const CHECKPOINT_COMMIT_PREFIX: &str = "checkpoint-commit-";
+const CHECKPOINT_COMMIT_SUFFIX: &str = ".json";
+
+/// The pointer is the one-file commit record for a checkpoint generation.
+///
+/// The generation payload and metadata are written and verified before this
+/// record is published. Older installations wrote [`CheckpointMetadata`]
+/// directly to `checkpoint.json`; recovery still accepts that legacy shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CheckpointPointer {
+    generation: u64,
+    last_sequence: u64,
+    sha256: String,
+    timestamp_ms: u128,
+    schema: String,
+}
+
+impl CheckpointPointer {
+    fn metadata(&self) -> CheckpointMetadata {
+        CheckpointMetadata {
+            last_sequence: self.last_sequence,
+            sha256: self.sha256.clone(),
+            timestamp_ms: self.timestamp_ms,
+            schema: self.schema.clone(),
+        }
+    }
+}
 
 /// Error returned by production-service operations.
 #[derive(Debug)]
@@ -145,10 +175,16 @@ impl RecoveryJournal {
         if read.skipped_tail {
             repair_journal(&directory, &read.records)?;
         }
-        let next_sequence = read
-            .records
-            .last()
-            .map_or(1, |record| record.sequence.saturating_add(1));
+        let journal_sequence = read.records.last().map(|record| record.sequence);
+        let checkpoint_sequence = read_checkpoint_sequence(&directory)?;
+        let highest_sequence = journal_sequence
+            .into_iter()
+            .chain(checkpoint_sequence)
+            .max();
+        let next_sequence = match highest_sequence {
+            Some(sequence) => checked_next_sequence(sequence)?,
+            None => 1,
+        };
         Ok(Self {
             directory,
             next_sequence,
@@ -167,6 +203,7 @@ impl RecoveryJournal {
         label: impl Into<String>,
         payload: Vec<u8>,
     ) -> Result<JournalRecord, ProductionError> {
+        let next_sequence = checked_next_sequence(self.next_sequence)?;
         let record = JournalRecord {
             sequence: self.next_sequence,
             operation_id: operation_id.into(),
@@ -184,7 +221,7 @@ impl RecoveryJournal {
         file.write_all(b"\n")?;
         file.flush()?;
         file.sync_data()?;
-        self.next_sequence = self.next_sequence.saturating_add(1);
+        self.next_sequence = next_sequence;
         Ok(record)
     }
 
@@ -208,38 +245,38 @@ impl RecoveryJournal {
         };
         let metadata_bytes = serde_json::to_vec_pretty(&metadata)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-        atomic_write(&self.directory.join(CHECKPOINT_FILE), bytes)?;
-        atomic_write(&self.directory.join(CHECKPOINT_META_FILE), &metadata_bytes)?;
+        let generation = next_checkpoint_generation(&self.directory)?;
+        let payload_path = checkpoint_generation_payload_path(&self.directory, generation);
+        let metadata_path = checkpoint_generation_metadata_path(&self.directory, generation);
+
+        // A generation is complete before its pointer is published. A failure
+        // in either write leaves the previous pointer and journal untouched.
+        atomic_write(&payload_path, bytes)?;
+        atomic_write(&metadata_path, &metadata_bytes)?;
+        let (verified_bytes, verified_metadata) =
+            read_checkpoint_generation(&self.directory, generation)?;
+        if verified_bytes != bytes || verified_metadata != metadata {
+            return Err(ProductionError::Integrity(
+                "checkpoint generation changed before publication".into(),
+            ));
+        }
+
+        let pointer = CheckpointPointer {
+            generation,
+            last_sequence,
+            sha256: metadata.sha256.clone(),
+            timestamp_ms: metadata.timestamp_ms,
+            schema: metadata.schema.clone(),
+        };
+        let pointer_bytes = serde_json::to_vec_pretty(&pointer)
+            .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
+        publish_checkpoint_pointer(&self.directory, generation, &pointer_bytes)?;
         Ok(metadata)
     }
 
     /// Load the last valid checkpoint and all operations after it.
     pub fn recover(&self) -> Result<RecoveryState, ProductionError> {
-        let metadata_path = self.directory.join(CHECKPOINT_META_FILE);
-        let checkpoint_path = self.directory.join(CHECKPOINT_FILE);
-        let (checkpoint, checkpoint_metadata) =
-            if metadata_path.exists() || checkpoint_path.exists() {
-                if !metadata_path.exists() || !checkpoint_path.exists() {
-                    return Err(ProductionError::Integrity(
-                        "checkpoint metadata and payload must both exist".into(),
-                    ));
-                }
-                let metadata: CheckpointMetadata =
-                    serde_json::from_slice(&fs::read(metadata_path)?).map_err(|error| {
-                        ProductionError::InvalidData(format!(
-                            "checkpoint metadata is not valid JSON: {error}"
-                        ))
-                    })?;
-                let bytes = fs::read(checkpoint_path)?;
-                if sha256_hex(&bytes) != metadata.sha256 {
-                    return Err(ProductionError::Integrity(
-                        "checkpoint digest mismatch".into(),
-                    ));
-                }
-                (Some(bytes), Some(metadata))
-            } else {
-                (None, None)
-            };
+        let (checkpoint, checkpoint_metadata) = read_checkpoint(&self.directory)?;
         let last_sequence = checkpoint_metadata
             .as_ref()
             .map_or(0, |metadata| metadata.last_sequence);
@@ -276,6 +313,276 @@ impl RecoveryJournal {
 struct JournalRead {
     records: Vec<JournalRecord>,
     skipped_tail: bool,
+}
+
+fn checked_next_sequence(sequence: u64) -> Result<u64, ProductionError> {
+    sequence.checked_add(1).ok_or_else(|| {
+        ProductionError::Integrity("journal sequence is exhausted at u64::MAX".into())
+    })
+}
+
+fn read_checkpoint_sequence(directory: &Path) -> Result<Option<u64>, ProductionError> {
+    #[cfg(windows)]
+    if let Some(pointer) = read_latest_commit_pointer(directory)? {
+        return Ok(Some(pointer.last_sequence));
+    }
+
+    let metadata_path = directory.join(CHECKPOINT_META_FILE);
+    if metadata_path.exists() {
+        let raw = fs::read(metadata_path)?;
+        let value: serde_json::Value = serde_json::from_slice(&raw).map_err(|error| {
+            ProductionError::InvalidData(format!("checkpoint metadata is not valid JSON: {error}"))
+        })?;
+        if value.get("generation").is_some() {
+            let pointer: CheckpointPointer = serde_json::from_value(value).map_err(|error| {
+                ProductionError::InvalidData(format!("checkpoint pointer is invalid: {error}"))
+            })?;
+            return Ok(Some(pointer.last_sequence));
+        }
+        let metadata: CheckpointMetadata = serde_json::from_value(value).map_err(|error| {
+            ProductionError::InvalidData(format!("checkpoint metadata is invalid: {error}"))
+        })?;
+        return Ok(Some(metadata.last_sequence));
+    }
+
+    Ok(None)
+}
+
+fn read_checkpoint(
+    directory: &Path,
+) -> Result<(Option<Vec<u8>>, Option<CheckpointMetadata>), ProductionError> {
+    #[cfg(windows)]
+    if let Some(pointer) = read_latest_commit_pointer(directory)? {
+        let (bytes, metadata) = read_checkpoint_generation(directory, pointer.generation)?;
+        if metadata != pointer.metadata() {
+            return Err(ProductionError::Integrity(format!(
+                "checkpoint generation {} does not match its commit record",
+                pointer.generation
+            )));
+        }
+        return Ok((Some(bytes), Some(metadata)));
+    }
+
+    let metadata_path = directory.join(CHECKPOINT_META_FILE);
+    let checkpoint_path = directory.join(CHECKPOINT_FILE);
+    if !metadata_path.exists() {
+        if checkpoint_path.exists() {
+            return Err(ProductionError::Integrity(
+                "checkpoint metadata and payload must both exist".into(),
+            ));
+        }
+        return Ok((None, None));
+    }
+
+    let raw = fs::read(&metadata_path)?;
+    let value: serde_json::Value = serde_json::from_slice(&raw).map_err(|error| {
+        ProductionError::InvalidData(format!("checkpoint metadata is not valid JSON: {error}"))
+    })?;
+    if value.get("generation").is_some() {
+        let pointer: CheckpointPointer = serde_json::from_value(value).map_err(|error| {
+            ProductionError::InvalidData(format!("checkpoint pointer is invalid: {error}"))
+        })?;
+        let (bytes, metadata) = read_checkpoint_generation(directory, pointer.generation)?;
+        if metadata != pointer.metadata() {
+            return Err(ProductionError::Integrity(format!(
+                "checkpoint generation {} does not match its commit record",
+                pointer.generation
+            )));
+        }
+        return Ok((Some(bytes), Some(metadata)));
+    }
+
+    if !checkpoint_path.exists() {
+        return Err(ProductionError::Integrity(
+            "checkpoint metadata and payload must both exist".into(),
+        ));
+    }
+
+    // Legacy format: checkpoint.json and checkpoint.bin were replaced
+    // independently. It remains readable for existing installations; all new
+    // checkpoints use a generation pair and a single commit pointer.
+    let metadata: CheckpointMetadata = serde_json::from_value(value).map_err(|error| {
+        ProductionError::InvalidData(format!("checkpoint metadata is invalid: {error}"))
+    })?;
+    let bytes = fs::read(checkpoint_path)?;
+    if sha256_hex(&bytes) != metadata.sha256 {
+        return Err(ProductionError::Integrity(
+            "checkpoint digest mismatch".into(),
+        ));
+    }
+    Ok((Some(bytes), Some(metadata)))
+}
+
+fn checkpoint_generation_payload_path(directory: &Path, generation: u64) -> PathBuf {
+    directory.join(format!(
+        "{CHECKPOINT_GENERATION_PREFIX}{generation}{CHECKPOINT_GENERATION_PAYLOAD_SUFFIX}"
+    ))
+}
+
+fn checkpoint_generation_metadata_path(directory: &Path, generation: u64) -> PathBuf {
+    directory.join(format!(
+        "{CHECKPOINT_GENERATION_PREFIX}{generation}{CHECKPOINT_GENERATION_METADATA_SUFFIX}"
+    ))
+}
+
+#[cfg(windows)]
+fn checkpoint_commit_path(directory: &Path, generation: u64) -> PathBuf {
+    directory.join(format!(
+        "{CHECKPOINT_COMMIT_PREFIX}{generation}{CHECKPOINT_COMMIT_SUFFIX}"
+    ))
+}
+
+fn parse_checkpoint_generation(name: &str, prefix: &str, suffix: &str) -> Option<u64> {
+    name.strip_prefix(prefix)
+        .and_then(|name| name.strip_suffix(suffix))
+        .and_then(|id| id.parse().ok())
+}
+
+fn next_checkpoint_generation(directory: &Path) -> Result<u64, ProductionError> {
+    let mut highest = 0;
+    if directory.exists() {
+        for entry in fs::read_dir(directory)? {
+            let name = entry?.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let generation = parse_checkpoint_generation(
+                name,
+                CHECKPOINT_GENERATION_PREFIX,
+                CHECKPOINT_GENERATION_PAYLOAD_SUFFIX,
+            )
+            .or_else(|| {
+                parse_checkpoint_generation(
+                    name,
+                    CHECKPOINT_GENERATION_PREFIX,
+                    CHECKPOINT_GENERATION_METADATA_SUFFIX,
+                )
+            })
+            .or_else(|| {
+                parse_checkpoint_generation(
+                    name,
+                    CHECKPOINT_COMMIT_PREFIX,
+                    CHECKPOINT_COMMIT_SUFFIX,
+                )
+            });
+            if let Some(generation) = generation {
+                highest = highest.max(generation);
+            }
+        }
+    }
+    highest.checked_add(1).ok_or_else(|| {
+        ProductionError::Integrity("checkpoint generation is exhausted at u64::MAX".into())
+    })
+}
+
+fn read_checkpoint_generation(
+    directory: &Path,
+    generation: u64,
+) -> Result<(Vec<u8>, CheckpointMetadata), ProductionError> {
+    let payload_path = checkpoint_generation_payload_path(directory, generation);
+    let metadata_path = checkpoint_generation_metadata_path(directory, generation);
+    if !payload_path.exists() || !metadata_path.exists() {
+        return Err(ProductionError::Integrity(format!(
+            "checkpoint generation {generation} is incomplete"
+        )));
+    }
+    let raw = fs::read(&metadata_path)?;
+    let metadata: CheckpointMetadata = serde_json::from_slice(&raw).map_err(|error| {
+        ProductionError::InvalidData(format!(
+            "checkpoint generation {generation} metadata is invalid: {error}"
+        ))
+    })?;
+    let bytes = fs::read(&payload_path)?;
+    if sha256_hex(&bytes) != metadata.sha256 {
+        return Err(ProductionError::Integrity(format!(
+            "checkpoint generation {generation} digest mismatch"
+        )));
+    }
+    Ok((bytes, metadata))
+}
+
+#[cfg(windows)]
+fn read_latest_commit_pointer(
+    directory: &Path,
+) -> Result<Option<CheckpointPointer>, ProductionError> {
+    let mut candidates = Vec::new();
+    if !directory.exists() {
+        return Ok(None);
+    }
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(generation) =
+            parse_checkpoint_generation(name, CHECKPOINT_COMMIT_PREFIX, CHECKPOINT_COMMIT_SUFFIX)
+        else {
+            continue;
+        };
+        candidates.push((generation, path));
+    }
+    candidates.sort_by_key(|(generation, _)| *generation);
+    let Some((generation, path)) = candidates.pop() else {
+        return Ok(None);
+    };
+    let pointer: CheckpointPointer = serde_json::from_slice(&fs::read(path)?).map_err(|error| {
+        ProductionError::InvalidData(format!(
+            "checkpoint commit record {generation} is invalid: {error}"
+        ))
+    })?;
+    if pointer.generation != generation {
+        return Err(ProductionError::Integrity(format!(
+            "checkpoint commit record {generation} names generation {}",
+            pointer.generation
+        )));
+    }
+    Ok(Some(pointer))
+}
+
+fn publish_checkpoint_pointer(
+    directory: &Path,
+    _generation: u64,
+    pointer_bytes: &[u8],
+) -> Result<(), ProductionError> {
+    // A leftover pointer temp means a previous publication did not finish.
+    // Keep the existing pointer authoritative until that obstruction is
+    // removed; this also makes the legacy temp-file failure mode explicit on
+    // platforms that publish through unique commit records.
+    let legacy_temporary = directory.join(format!(
+        ".{CHECKPOINT_META_FILE}.{}.tmp",
+        std::process::id()
+    ));
+    if legacy_temporary.exists() {
+        if legacy_temporary.is_dir() {
+            return Err(ProductionError::Io(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "checkpoint pointer temp is blocked: {}",
+                    legacy_temporary.display()
+                ),
+            )));
+        }
+        fs::remove_file(&legacy_temporary)?;
+    }
+
+    #[cfg(windows)]
+    {
+        // Windows std::fs::rename cannot replace an existing file. A unique,
+        // fully synced commit record gives startup the same atomic choice
+        // without deleting the previous pointer before publishing this one.
+        return atomic_write(
+            &checkpoint_commit_path(directory, _generation),
+            pointer_bytes,
+        );
+    }
+
+    #[cfg(not(windows))]
+    {
+        // On Unix rename replaces the old pointer atomically. The old pointer
+        // remains readable until this commit point, and the generation pair
+        // has already been verified above.
+        atomic_write(&directory.join(CHECKPOINT_META_FILE), pointer_bytes)
+    }
 }
 
 fn read_records(path: &Path) -> Result<Vec<JournalRecord>, ProductionError> {
@@ -357,16 +664,33 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProductionError> {
             .unwrap_or("loom"),
         std::process::id()
     ));
-    {
-        let mut file = File::create(&temporary)?;
+    let write_result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         file.write_all(bytes)?;
         file.flush()?;
         file.sync_all()?;
+        Ok::<(), io::Error>(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error.into());
     }
+
+    // Unix rename replaces the destination atomically. Windows does not
+    // expose that operation through std::fs; checkpoint publication therefore
+    // uses unique commit records there and never calls this branch for an
+    // existing checkpoint pointer.
+    #[cfg(windows)]
     if path.exists() {
         fs::remove_file(path)?;
     }
-    fs::rename(&temporary, path)?;
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error.into());
+    }
     sync_directory(parent)?;
     Ok(())
 }
@@ -793,6 +1117,82 @@ mod tests {
         bytes[position] = b'x';
         fs::write(journal_path, bytes).expect("tamper");
         assert!(RecoveryJournal::open(temporary.path()).is_err());
+    }
+
+    #[test]
+    fn checkpoint_generation_failure_preserves_previous_checkpoint_and_journal() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"old contents".to_vec())
+            .expect("append");
+        journal
+            .checkpoint(1, "loom.test/1", b"old contents")
+            .expect("checkpoint");
+        journal
+            .append("two", "Edit", b"latest contents".to_vec())
+            .expect("append");
+
+        // This is the legacy metadata-temp location. Publishing the new
+        // pointer must fail before it can replace the old pointer.
+        let blocker = temporary.path().join(format!(
+            ".{CHECKPOINT_META_FILE}.{}.tmp",
+            std::process::id()
+        ));
+        fs::create_dir(&blocker).expect("block metadata temp");
+        assert!(journal
+            .checkpoint(2, "loom.test/1", b"latest contents")
+            .is_err());
+        fs::remove_dir(&blocker).expect("remove metadata blocker");
+        drop(journal);
+
+        let reopened = RecoveryJournal::open(temporary.path()).expect("reopen");
+        let state = reopened.recover().expect("recover previous generation");
+        assert_eq!(
+            state.checkpoint.as_deref(),
+            Some(b"old contents".as_slice())
+        );
+        assert_eq!(state.operations.len(), 1);
+        assert_eq!(state.operations[0].payload, b"latest contents");
+    }
+
+    #[test]
+    fn journal_sequence_starts_after_checkpoint_sequence() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        {
+            let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+            journal
+                .append("one", "Edit", b"saved".to_vec())
+                .expect("append");
+            journal
+                .checkpoint(1, "loom.test/1", b"saved")
+                .expect("checkpoint");
+        }
+        let mut reopened = RecoveryJournal::open(temporary.path()).expect("reopen");
+        let record = reopened
+            .append("two", "Edit", b"unsaved".to_vec())
+            .expect("append after checkpoint");
+        assert_eq!(record.sequence, 2);
+        assert_eq!(reopened.recover().expect("recover").operations.len(), 1);
+    }
+
+    #[test]
+    fn journal_sequence_overflow_is_reported() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let metadata = CheckpointMetadata {
+            last_sequence: u64::MAX,
+            sha256: sha256_hex(b"checkpoint"),
+            timestamp_ms: unix_time_ms(),
+            schema: "loom.test/1".into(),
+        };
+        fs::write(
+            temporary.path().join(CHECKPOINT_META_FILE),
+            serde_json::to_vec(&metadata).expect("metadata"),
+        )
+        .expect("write metadata");
+        fs::write(temporary.path().join(CHECKPOINT_FILE), b"checkpoint").expect("write checkpoint");
+        let error = RecoveryJournal::open(temporary.path()).expect_err("overflow must fail");
+        assert!(format!("{error}").contains("exhausted"));
     }
 
     #[test]
