@@ -434,7 +434,9 @@ fn configure_responsive_width(app: &PhotoApp, width: u32) {
     app.set_icon_only_toolbar(state.icon_only);
     app.set_overflow_toolbar(state.overflow);
     app.set_labeled_toolbar(state.labeled);
-    app.set_inspector_available(!state.icon_only);
+    // Keep the Format/Review route usable in compact windows. The inspector
+    // remains optional chrome, but the button must not become a dead control.
+    app.set_inspector_available(true);
 }
 
 fn configure_direction(app: &PhotoApp, rtl: bool) {
@@ -2297,4 +2299,3 @@ fn wire_palette(app: &PhotoApp) {
 mod desktop_tests;
 #[cfg(test)]
 mod audit_tests;
-

@@ -47,7 +47,10 @@ export component MotionStage inherits Rectangle {
             y: 16px;
             width: parent.width - 32px;
             height: parent.height - 32px;
-            background: Theme.palette().canvas-alt;
+            // Composition artwork uses document colors shared with the SVG
+            // exporter. App themes style the surrounding chrome and handles;
+            // switching light/dark must not change the exported frame.
+            background: #101217;
             border-width: 1px;
             border-color: Theme.palette().grid-major;
             clip: true;
@@ -97,7 +100,7 @@ export component MotionStage inherits Rectangle {
                     x: 8px;
                     y: parent.height / 2 - 10px;
                     text: root.layer-labels.length > idx ? root.layer-labels[idx] : "Text layer";
-                    color: Theme.palette().ink;
+                    color: #f5f2eb;
                     font-size: Theme.tokens.typography.body-large;
                     font-weight: 650;
                     horizontal-alignment: center;
@@ -111,19 +114,19 @@ export component MotionStage inherits Rectangle {
                     border-radius: Theme.tokens.metrics.radius-large;
                     border-width: 1px;
                     border-color: Theme.palette().accent;
-                    background: Theme.palette().content-accent-soft;
+                    background: #b86f4b;
                 }
                 if self.layer-type != "Text" && self.layer-type != "VectorShape" : Rectangle {
                     border-radius: Theme.tokens.metrics.radius-large;
                     border-width: 1px;
-                    border-color: Theme.palette().border-strong;
-                    background: Theme.palette().surface-raised;
+                    border-color: #b86f4b;
+                    background: #303744;
                     Text {
                         width: parent.width - 16px;
                         x: 8px;
                         y: parent.height / 2 - 8px;
                         text: root.layer-labels.length > idx ? root.layer-labels[idx] : "Motion layer";
-                        color: Theme.palette().ink-secondary;
+                        color: #f5f2eb;
                         font-size: Theme.tokens.typography.caption;
                         horizontal-alignment: center;
                         overflow: elide;
@@ -142,7 +145,7 @@ export component MotionStage inherits Rectangle {
                 border-radius: Theme.tokens.metrics.radius-large;
                 border-width: root.layer-labels.length > 0 ? 2px : 1px;
                 border-color: drag.has-hover || transform-focus.has-focus ? Theme.palette().focus : root.layer-labels.length > 0 ? Theme.palette().accent : Theme.palette().border-strong;
-                background: self.selected-layer-type == "Text" || self.selected-layer-type == "VectorShape" ? transparent : Theme.palette().content-accent-soft;
+                background: self.selected-layer-type == "Text" || self.selected-layer-type == "VectorShape" ? transparent : #303744;
                 opacity: root.opacity-val / 100.0;
                 animate x, y, width, height { duration: drag.pressed || root.is-playing || Theme.tokens.reduced-motion ? 0ms : 190ms; easing: cubic-bezier(0.2, 0.9, 0.2, 1.0); }
                 animate border-color { duration: Theme.tokens.reduced-motion ? 0ms : 120ms; }
@@ -153,7 +156,7 @@ export component MotionStage inherits Rectangle {
                     x: 12px;
                     y: 0px;
                     text: root.layer-labels.length > root.active-layer-index ? root.layer-labels[root.active-layer-index] : "Text layer";
-                    color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().ink;
+                    color: #f5f2eb;
                     font-size: Theme.tokens.typography.body-large;
                     font-weight: 650;
                     horizontal-alignment: center;
@@ -168,21 +171,21 @@ export component MotionStage inherits Rectangle {
                     height: parent.height * 0.76;
                     border-radius: Theme.tokens.metrics.radius-large;
                     border-width: 1px;
-                    border-color: Theme.palette().accent;
-                    background: Theme.palette().content-accent-soft;
+                    border-color: #b86f4b;
+                    background: #b86f4b;
                 }
 
                 if self.selected-layer-type != "Text" && self.selected-layer-type != "VectorShape" : Rectangle {
                     border-radius: Theme.tokens.metrics.radius-large;
                     border-width: 1px;
-                    border-color: Theme.palette().border-strong;
-                    background: Theme.palette().surface-raised;
+                    border-color: #b86f4b;
+                    background: #303744;
                     Text {
                         width: parent.width - 16px;
                         x: 8px;
                         y: parent.height / 2 - 8px;
                         text: root.layer-labels.length > root.active-layer-index ? root.layer-labels[root.active-layer-index] : "Add a layer to begin";
-                        color: Theme.palette().ink-secondary;
+                        color: #f5f2eb;
                         font-size: Theme.tokens.typography.caption;
                         horizontal-alignment: center;
                         overflow: elide;

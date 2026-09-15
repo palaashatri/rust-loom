@@ -146,7 +146,7 @@ fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
   <rect width="1920" height="1080" fill="#101217"/>
 "##,
     );
-    for (index, layer) in doc.layers.iter().enumerate() {
+    for layer in &doc.layers {
         let sample = layer.sample(time_secs);
         if !sample.visible {
             continue;
@@ -168,9 +168,8 @@ fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
 "##
             )),
             _ => svg.push_str(&format!(
-                r##"  <g transform="{transform}" opacity="{opacity:.5}"><rect x="-160" y="-90" width="320" height="180" rx="16" fill="#303744" stroke="#b86f4b"/><text y="8" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="28">{name} {}</text></g>
-"##,
-                index + 1
+                r##"  <g transform="{transform}" opacity="{opacity:.5}"><rect x="-160" y="-90" width="320" height="180" rx="16" fill="#303744" stroke="#b86f4b"/><text y="8" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="28">{name}</text></g>
+"##
             )),
         }
     }
@@ -439,10 +438,13 @@ fn apply_motion_at(app: &MotionApp, doc: &CompositionDocument, time_secs: f32, f
     app.set_layer_opacity(ModelRc::new(VecModel::from(layer_opacity)));
     app.set_layer_visible(ModelRc::new(VecModel::from(layer_visible)));
     app.set_frame_rate(fps);
+    // Keep artwork text equal to the document's actual layer name. Type
+    // labels belong in the layer list and must not leak into the exported
+    // frame preview.
     let layer_labels: Vec<SharedString> = doc
         .layers
         .iter()
-        .map(|layer| SharedString::from(format!("{} ({})", layer.name, layer.layer_type)))
+        .map(|layer| SharedString::from(layer.name.clone()))
         .collect();
     let layer_types: Vec<SharedString> = doc
         .layers
@@ -1938,4 +1940,3 @@ mod desktop_tests;
 
 #[cfg(test)]
 mod audit_tests;
-

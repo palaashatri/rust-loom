@@ -725,7 +725,14 @@ fn photo_overflow_palette_exposes_zoom_and_inspector() {
 
     configure_responsive_width(&app, 1179);
     rebuild_palette(&app, "inspector");
-    assert_eq!(app.get_palette_commands().row_count(), 0);
+    assert_eq!(app.get_palette_commands().row_count(), 1);
+    assert_eq!(
+        app.get_palette_commands()
+            .row_data(0)
+            .expect("compact inspector command")
+            .id,
+        "photo.inspector"
+    );
 }
 
 #[test]

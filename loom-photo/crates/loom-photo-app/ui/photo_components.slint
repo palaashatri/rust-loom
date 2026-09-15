@@ -43,10 +43,13 @@ export component PhotoCanvas inherits Rectangle {
             property <length> scaled-width: max(120px, stage.width * root.zoom-value / 100.0);
             property <length> scaled-height: max(90px, stage.height * root.zoom-value / 100.0);
             property <float> document-aspect: root.document-height > 0 ? root.document-width / root.document-height : 1.0;
-            property <length> image-content-width: min(parent.width, parent.height * document-aspect);
-            property <length> image-content-height: min(parent.height, parent.width / document-aspect);
-            property <length> image-content-x: (parent.width - image-content-width) / 2;
-            property <length> image-content-y: (parent.height - image-content-height) / 2;
+            // Fit the image inside the scaled viewport. `parent` here is the
+            // larger canvas stage, which clipped the right and bottom edges
+            // whenever zoom made this rectangle smaller than the stage.
+            property <length> image-content-width: min(self.width, self.height * document-aspect);
+            property <length> image-content-height: min(self.height, self.width / document-aspect);
+            property <length> image-content-x: (self.width - image-content-width) / 2;
+            property <length> image-content-y: (self.height - image-content-height) / 2;
 
             x: (stage.width - self.scaled-width) / 2 + root.viewport-pan-x;
             y: (stage.height - self.scaled-height) / 2 + root.viewport-pan-y;
