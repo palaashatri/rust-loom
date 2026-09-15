@@ -3,6 +3,7 @@
 //! `.loomtable` keeps the original path as a useful fallback, but saves a
 //! copy of every image inside the package so a workbook remains portable.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use loom_package::PackageArchive;
@@ -19,6 +20,7 @@ pub(crate) fn prepare_workbook(
 ) -> Result<(Vec<Sheet>, Vec<EmbeddedAsset>), String> {
     let mut persisted = sheets.to_vec();
     let mut assets = Vec::new();
+    let mut asset_paths = BTreeMap::<[u8; 32], String>::new();
     for (sheet_index, sheet) in persisted.iter_mut().enumerate() {
         for (object_index, object) in sheet.objects.iter_mut().enumerate() {
             if object.kind != SheetObjectKind::Image {
@@ -32,11 +34,18 @@ pub(crate) fn prepare_workbook(
             let Some(bytes) = bytes else {
                 return Err(format!("image source is unavailable: {}", object.path));
             };
+            let digest = loom_package::zip::sha256(&bytes);
+            if let Some(asset_path) = asset_paths.get(&digest) {
+                object.asset = Some(asset_path.clone());
+                object.embedded = Some(bytes);
+                continue;
+            }
             let extension = image_extension(&object.path);
             let asset_path =
                 format!("content/assets/image-{sheet_index}-{object_index}.{extension}");
             object.asset = Some(asset_path.clone());
             object.embedded = Some(bytes.clone());
+            asset_paths.insert(digest, asset_path.clone());
             assets.push(EmbeddedAsset {
                 path: asset_path,
                 mime: image_mime(extension),
@@ -113,6 +122,24 @@ mod tests {
         assert_eq!(
             sheets[0].objects[0].asset.as_deref(),
             Some("content/assets/image-0-0.jpg")
+        );
+    }
+
+    #[test]
+    fn identical_image_bytes_share_one_package_asset() {
+        let mut sheet = Sheet::new("Assets");
+        for (row, path) in [(0, "/tmp/hero.png"), (1, "/tmp/hero-copy.png")] {
+            let mut image =
+                SheetObject::image(CellRef { row, col: 0 }, path).expect("image object");
+            image.embedded = Some(vec![137, 80, 78, 71]);
+            sheet.objects.push(image);
+        }
+
+        let (sheets, assets) = prepare_workbook(&[sheet]).expect("prepare assets");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(
+            sheets[0].objects[0].asset, sheets[0].objects[1].asset,
+            "duplicate payloads must reference one package entry"
         );
     }
 }

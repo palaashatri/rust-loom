@@ -846,6 +846,37 @@ fn loomsheet_embeds_image_payload_and_reopens_without_source_file() {
 }
 
 #[test]
+fn recovery_snapshot_restores_embedded_image_without_original_path() {
+    const PNG_BYTES: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let mut sheet = Sheet::new("Recovered images");
+    let mut image = loom_sheets_core::SheetObject::image(
+        CellRef { row: 1, col: 1 },
+        "/path/that/no-longer-exists/source.png",
+    )
+    .expect("image object");
+    image.embedded = Some(PNG_BYTES.to_vec());
+    sheet.objects.push(image);
+
+    let snapshot = workbook_package_bytes(&[sheet], 0).expect("build recovery package");
+    let recovered = restore_workbook_from_snapshot(&snapshot).expect("restore snapshot");
+    assert_eq!(
+        recovered.sheets[0].objects[0].embedded.as_deref(),
+        Some(PNG_BYTES)
+    );
+
+    // A recovered image can still be exported even though its original path
+    // cannot be read anymore.
+    let exported = loom_sheets_core::export_xlsx_sheets(&recovered.sheets)
+        .expect("recovered workbook exports");
+    let archive = PackageArchive::from_bytes(&exported).expect("xlsx archive");
+    assert_eq!(archive.get("xl/media/sheet1-object0.png"), Some(PNG_BYTES));
+}
+
+#[test]
 fn xlsx_workbook_load_imports_all_tabs_and_formulas() {
     let dir = std::env::temp_dir().join(format!(
         "loom-sheets-xlsx-import-test-{}",
@@ -1511,6 +1542,41 @@ fn rename_rewrites_qualifiers_and_rejects_collisions() {
         state.sheets.borrow()[1].raw(CellRef::parse("A1").unwrap()),
         Some("=Data!B1+5")
     );
+}
+
+#[test]
+fn repeated_workbook_renames_keep_document_snapshots_bounded() {
+    let state = cross_sheet_state();
+    for index in 0..100 {
+        let mut after = state.sheets.borrow().clone();
+        after[0].name = format!("Data {index}");
+        commit_workbook_transaction(&state, after, 0, None);
+    }
+
+    let undo = state.undo_stack.borrow();
+    assert_eq!(undo.len(), 100);
+    assert!(history_bytes(&undo) <= MAX_HISTORY_BYTES);
+    assert!(undo.iter().all(|transaction| matches!(
+        transaction,
+        SheetTransaction::Workbook { before, after }
+            if before.sheets.len() == 2 && after.sheets.len() == 2
+    )));
+    // WorkbookUndoState intentionally has only document fields. If history
+    // stacks were captured recursively, this source-level shape would be
+    // impossible and the byte count would grow as 1, 4, 13, ... instead.
+}
+
+#[test]
+fn dirty_state_clears_when_workbook_returns_to_last_saved_content() {
+    let state = cross_sheet_state();
+    state.mark_saved();
+    assert!(!state.is_dirty());
+
+    state.current.borrow_mut().set_str("A1", "unsaved");
+    assert!(state.is_dirty());
+
+    *state.current.borrow_mut() = state.sheets.borrow()[0].clone();
+    assert!(!state.is_dirty());
 }
 
 #[test]

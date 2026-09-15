@@ -5,7 +5,7 @@
 //! renderer and write a PNG, which is what the Docker visual-QA pipeline
 //! and the offline test mode exercise.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -380,12 +380,19 @@ fn seeded_sheet(name: &str, cells: &[(&str, &str)]) -> Sheet {
     sheet
 }
 
-/// Restore a crash-recovery payload: current workbook shape first, then the
-/// legacy single-sheet shape written by older builds.
+/// Restore a crash-recovery payload. New snapshots use the same validated
+/// package as a saved workbook, so embedded image bytes survive a source file
+/// disappearing. Older builds wrote plain JSON, which remains a fallback.
 fn restore_workbook_from_snapshot(
-    json: &str,
+    payload: &[u8],
 ) -> Option<loom_sheets_core::persistence::WorkbookFile> {
     use loom_sheets_core::persistence::WorkbookFile;
+    if let Ok(archive) = PackageArchive::from_bytes(payload) {
+        if let Ok(workbook) = workbook_from_package(&archive) {
+            return Some(workbook);
+        }
+    }
+    let json = std::str::from_utf8(payload).ok()?;
     workbook_from_json(json).ok().or_else(|| {
         sheet_from_json(json).ok().map(|sheet| WorkbookFile {
             sheets: vec![sheet],
@@ -433,39 +440,7 @@ pub(crate) fn load_workbook(
         return Ok(WorkbookFile { sheets, active: 0 });
     }
     let arch = PackageArchive::from_bytes(&bytes).map_err(|e| format!("archive: {e}"))?;
-    let manifest_bytes = arch
-        .get("manifest.json")
-        .ok_or_else(|| "missing manifest.json".to_string())?;
-    let manifest_str =
-        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest not utf8".to_string())?;
-    let manifest: Manifest =
-        pkg_json::parse_manifest(manifest_str).map_err(|e| format!("manifest: {e}"))?;
-    if manifest.kind != PackageKind::Sheets {
-        return Err("not a Sheets workbook".to_string());
-    }
-    arch.validate_manifest(&manifest)
-        .map_err(|e| format!("validation: {e}"))?;
-    if let Some(content) = arch.get("content/workbook.json") {
-        let s = std::str::from_utf8(content).map_err(|_| "workbook not utf8".to_string())?;
-        let mut workbook = workbook_from_json(s).map_err(|e| format!("workbook: {e}"))?;
-        assets::attach_workbook_assets(&mut workbook, &arch)?;
-        return Ok(workbook);
-    }
-    let content = arch
-        .get("content/sheet.json")
-        .ok_or_else(|| "missing sheet.json".to_string())?;
-    let s = std::str::from_utf8(content).map_err(|_| "sheet not utf8".to_string())?;
-    let mut sheet = sheet_from_json(s).map_err(|e| format!("sheet: {e}"))?;
-    let mut workbook = loom_sheets_core::persistence::WorkbookFile {
-        sheets: vec![sheet.clone()],
-        active: 0,
-    };
-    assets::attach_workbook_assets(&mut workbook, &arch)?;
-    sheet = workbook.sheets.remove(0);
-    Ok(WorkbookFile {
-        sheets: vec![sheet],
-        active: 0,
-    })
+    workbook_from_package(&arch)
 }
 
 pub(crate) fn save_sheet(path: &Path, sheet: &Sheet) -> Result<(), String> {
@@ -474,6 +449,15 @@ pub(crate) fn save_sheet(path: &Path, sheet: &Sheet) -> Result<(), String> {
 
 /// Save every tab plus the active tab index as `content/workbook.json`.
 pub(crate) fn save_workbook(path: &Path, sheets: &[Sheet], active: usize) -> Result<(), String> {
+    let bytes = workbook_package_bytes(sheets, active)?;
+    loom_storage::atomic_write(path, &bytes)
+        .map_err(|error| format!("atomic write {}: {error}", path.display()))
+}
+
+/// Build the complete native workbook package in memory. Recovery snapshots
+/// use this exact path so package assets, manifest checksums, and workbook
+/// JSON cannot drift apart from normal saves.
+fn workbook_package_bytes(sheets: &[Sheet], active: usize) -> Result<Vec<u8>, String> {
     if sheets.is_empty() {
         return Err("cannot save an empty workbook".to_string());
     }
@@ -517,9 +501,44 @@ pub(crate) fn save_workbook(path: &Path, sheets: &[Sheet], active: usize) -> Res
     let manifest_str = pkg_json::write(&manifest);
     arch.add("manifest.json", manifest_str.into_bytes())
         .map_err(|e| e.to_string())?;
-    let bytes = arch.to_bytes().map_err(|e| e.to_string())?;
-    loom_storage::atomic_write(path, &bytes)
-        .map_err(|error| format!("atomic write {}: {error}", path.display()))
+    arch.to_bytes().map_err(|e| e.to_string())
+}
+
+/// Decode and validate a native workbook package, including its embedded
+/// image assets. This is shared by disk loads and crash-recovery restores.
+fn workbook_from_package(
+    arch: &PackageArchive,
+) -> Result<loom_sheets_core::persistence::WorkbookFile, String> {
+    use loom_sheets_core::persistence::WorkbookFile;
+    let manifest_bytes = arch
+        .get("manifest.json")
+        .ok_or_else(|| "missing manifest.json".to_string())?;
+    let manifest_str =
+        std::str::from_utf8(manifest_bytes).map_err(|_| "manifest not utf8".to_string())?;
+    let manifest: Manifest =
+        pkg_json::parse_manifest(manifest_str).map_err(|e| format!("manifest: {e}"))?;
+    if manifest.kind != PackageKind::Sheets {
+        return Err("not a Sheets workbook".to_string());
+    }
+    arch.validate_manifest(&manifest)
+        .map_err(|e| format!("validation: {e}"))?;
+    if let Some(content) = arch.get("content/workbook.json") {
+        let s = std::str::from_utf8(content).map_err(|_| "workbook not utf8".to_string())?;
+        let mut workbook = workbook_from_json(s).map_err(|e| format!("workbook: {e}"))?;
+        assets::attach_workbook_assets(&mut workbook, arch)?;
+        return Ok(workbook);
+    }
+    let content = arch
+        .get("content/sheet.json")
+        .ok_or_else(|| "missing sheet.json".to_string())?;
+    let s = std::str::from_utf8(content).map_err(|_| "sheet not utf8".to_string())?;
+    let sheet = sheet_from_json(s).map_err(|e| format!("sheet: {e}"))?;
+    let mut workbook = WorkbookFile {
+        sheets: vec![sheet],
+        active: 0,
+    };
+    assets::attach_workbook_assets(&mut workbook, arch)?;
+    Ok(workbook)
 }
 
 pub(crate) fn cell_value(
@@ -1113,7 +1132,11 @@ pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
     let sheet = state.current.borrow().clone();
     let vals = evaluate_current(state);
     project_sheet_inner(app, &sheet, &vals, true);
-    record_workbook_snapshot(state);
+    if let Err(error) = record_workbook_snapshot(state) {
+        app.set_status_right(SharedString::from(format!(
+            "Recovery checkpoint unavailable: {error}"
+        )));
+    }
 }
 
 /// Re-project the live tab with workbook-resolved values, without recording
@@ -1143,12 +1166,10 @@ pub(crate) fn project_sheet_without_reveal(app: &SheetsApp, sheet: &Sheet) {
 
 /// Snapshot the full workbook (all tabs, active sheet first-class) so crash
 /// recovery restores tabs, not just the visible sheet.
-pub(crate) fn record_workbook_snapshot(state: &GuiState) {
+pub(crate) fn record_workbook_snapshot(state: &GuiState) -> Result<(), String> {
     let (siblings, active) = workbook_sheets(state);
-    let _ = record_snapshot_recovery(
-        "sheets state",
-        workbook_to_json(&siblings, active).into_bytes(),
-    );
+    let payload = workbook_package_bytes(&siblings, active)?;
+    record_snapshot_recovery("sheets state", payload)
 }
 
 /// All tabs with the live current sheet synced into its slot, plus the
@@ -1541,7 +1562,6 @@ pub(crate) enum SheetTransaction {
 pub(crate) struct WorkbookUndoState {
     sheets: Vec<Sheet>,
     active: usize,
-    histories: Vec<(Vec<SheetTransaction>, Vec<SheetTransaction>)>,
 }
 
 impl WorkbookUndoState {
@@ -1549,19 +1569,14 @@ impl WorkbookUndoState {
         Self {
             sheets: state.sheets.borrow().clone(),
             active: *state.active_sheet_index.borrow(),
-            histories: state.sheet_histories.borrow().clone(),
         }
     }
 
     fn restore(&self, state: &GuiState) {
         *state.sheets.borrow_mut() = self.sheets.clone();
-        *state.active_sheet_index.borrow_mut() = self.active;
         let active = self.active.min(self.sheets.len().saturating_sub(1));
+        *state.active_sheet_index.borrow_mut() = active;
         *state.current.borrow_mut() = self.sheets[active].clone();
-        *state.sheet_histories.borrow_mut() = self.histories.clone();
-        let (undo, redo) = self.histories.get(active).cloned().unwrap_or_default();
-        *state.undo_stack.borrow_mut() = undo;
-        *state.redo_stack.borrow_mut() = redo;
     }
 }
 
@@ -1634,10 +1649,74 @@ pub(crate) fn commit_transaction(
 /// drops, so long editing sessions cannot grow memory without bound.
 pub(crate) const MAX_HISTORY_ENTRIES: usize = 200;
 
+/// Maximum owned history data retained by one undo or redo stack.
+///
+/// Entries are full document snapshots for workbook operations and sparse
+/// deltas for cell operations. The byte cap is checked after every push so a
+/// long editing session cannot retain an unbounded amount of user data even
+/// when individual entries are large.
+pub(crate) const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
+
+fn sheet_history_bytes(sheet: &Sheet) -> usize {
+    let cells = sheet
+        .cells
+        .values()
+        .map(|cell| cell.raw.capacity())
+        .sum::<usize>();
+    let objects = sheet
+        .objects
+        .iter()
+        .map(|object| {
+            object.label.capacity()
+                + object.path.capacity()
+                + object.embedded.as_ref().map_or(0, Vec::capacity)
+                + object.asset.as_ref().map_or(0, String::capacity)
+        })
+        .sum::<usize>();
+    std::mem::size_of_val(sheet)
+        + sheet.name.capacity()
+        + cells
+        + objects
+        + sheet.col_widths.len() * std::mem::size_of::<(u32, f32)>()
+        + sheet.row_heights.len() * std::mem::size_of::<(u32, f32)>()
+        + sheet.alignments.len() * std::mem::size_of::<(CellRef, CellAlignment)>()
+        + sheet.styles.len() * std::mem::size_of::<(CellRef, CellStyle)>()
+}
+
+fn workbook_state_bytes(state: &WorkbookUndoState) -> usize {
+    std::mem::size_of_val(state) + state.sheets.iter().map(sheet_history_bytes).sum::<usize>()
+}
+
+fn transaction_bytes(tx: &SheetTransaction) -> usize {
+    match tx {
+        SheetTransaction::Range(edit) => edit.memory_bytes(),
+        SheetTransaction::Batch(edits) => edits.iter().map(RangeEdit::memory_bytes).sum(),
+        SheetTransaction::Alignment { before, .. } => {
+            std::mem::size_of_val(tx)
+                + before.capacity() * std::mem::size_of::<(CellRef, CellAlignment)>()
+        }
+        SheetTransaction::Style { before, after } => {
+            std::mem::size_of_val(tx)
+                + (before.capacity() + after.capacity())
+                    * std::mem::size_of::<(CellRef, CellStyle)>()
+        }
+        SheetTransaction::Snapshot { before, after } => {
+            std::mem::size_of_val(tx) + sheet_history_bytes(before) + sheet_history_bytes(after)
+        }
+        SheetTransaction::Workbook { before, after } => {
+            std::mem::size_of_val(tx) + workbook_state_bytes(before) + workbook_state_bytes(after)
+        }
+    }
+}
+
+pub(crate) fn history_bytes(stack: &[SheetTransaction]) -> usize {
+    stack.iter().map(transaction_bytes).sum()
+}
+
 /// Push a transaction, evicting the oldest entry past the bound.
 pub(crate) fn push_history(stack: &mut Vec<SheetTransaction>, tx: SheetTransaction) {
     stack.push(tx);
-    if stack.len() > MAX_HISTORY_ENTRIES {
+    while stack.len() > MAX_HISTORY_ENTRIES || history_bytes(stack) > MAX_HISTORY_BYTES {
         stack.remove(0);
     }
 }
@@ -1697,9 +1776,9 @@ pub(crate) fn commit_workbook_transaction(
         }
         histories[old_active] = (live_undo, live_redo);
     }
-    // Workbook snapshots keep per-tab histories as data, rather than taking
-    // a recursive copy of the live workbook undo/redo stacks. This keeps tab
-    // operations bounded even after long editing sessions.
+    // Workbook snapshots contain document state only. Histories stay in the
+    // live per-tab slots so a tab rename cannot copy all previous workbook
+    // transactions into the next transaction.
     let before = WorkbookUndoState::capture(state);
 
     let after_active = after_active.min(after_sheets.len().saturating_sub(1));
@@ -1744,7 +1823,32 @@ pub(crate) fn restore_workbook_state(
     snapshot: &WorkbookUndoState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) {
+    // The popped workbook transaction was held by the current tab. Preserve
+    // that tab's post-pop stacks before moving to the snapshot's active tab.
+    // The snapshot deliberately has no history fields, so this is the only
+    // place where per-tab history is transferred during workbook undo/redo.
+    let current_active = *state.active_sheet_index.borrow();
+    let current_history = (
+        state.undo_stack.borrow().clone(),
+        state.redo_stack.borrow().clone(),
+    );
+    {
+        let mut histories = state.sheet_histories.borrow_mut();
+        if histories.len() <= current_active {
+            histories.resize_with(current_active + 1, || (Vec::new(), Vec::new()));
+        }
+        histories[current_active] = current_history;
+    }
     snapshot.restore(state);
+    let active = *state.active_sheet_index.borrow();
+    let (undo, redo) = state
+        .sheet_histories
+        .borrow()
+        .get(active)
+        .cloned()
+        .unwrap_or_default();
+    *state.undo_stack.borrow_mut() = undo;
+    *state.redo_stack.borrow_mut() = redo;
     apply_sheet(app, state);
     sync_sheet_tabs(app, state);
     sync_menu_state(menu_service, app, state);
@@ -2025,11 +2129,22 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PendingReplacement {
+    NewWorkbook,
+    OpenWorkbook,
+}
+
 pub(crate) struct GuiState {
     pub(crate) current: RefCell<Sheet>,
     pub(crate) sheets: RefCell<Vec<Sheet>>,
     pub(crate) active_sheet_index: RefCell<usize>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
+    /// Workbook state from the last completed save/open/new operation.
+    /// Comparing document content, rather than undo depth, means undoing back
+    /// to the saved state clears the dirty flag.
+    pub(crate) last_saved: RefCell<Option<(Vec<Sheet>, usize)>>,
+    pub(crate) pending_replacement: Cell<Option<PendingReplacement>>,
     pub(crate) undo_stack: RefCell<Vec<SheetTransaction>>,
     pub(crate) redo_stack: RefCell<Vec<SheetTransaction>>,
     pub(crate) sheet_histories: RefCell<Vec<(Vec<SheetTransaction>, Vec<SheetTransaction>)>>,
@@ -2057,6 +2172,8 @@ impl GuiState {
             sheets: RefCell::new(vec![sheet]),
             active_sheet_index: RefCell::new(0),
             save_path: RefCell::new(path),
+            last_saved: RefCell::new(None),
+            pending_replacement: Cell::new(None),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
             sheet_histories: RefCell::new(vec![(Vec::new(), Vec::new())]),
@@ -2086,6 +2203,18 @@ impl GuiState {
         self.redo_stack.borrow_mut().clear();
         let tabs = self.sheets.borrow().len();
         *self.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new()); tabs];
+    }
+
+    pub(crate) fn mark_saved(&self) {
+        *self.last_saved.borrow_mut() = Some(workbook_sheets(self));
+    }
+
+    pub(crate) fn is_dirty(&self) -> bool {
+        let Some(saved) = self.last_saved.borrow().clone() else {
+            return true;
+        };
+        let current = workbook_sheets(self);
+        workbook_to_json(&current.0, current.1) != workbook_to_json(&saved.0, saved.1)
     }
 }
 
@@ -2176,6 +2305,104 @@ fn replace_opened_workbook(
         vec![(Vec::new(), Vec::new()); state.sheets.borrow().len()];
     apply_sheet(app, state);
     sync_sheet_tabs(app, state);
+    state.mark_saved();
+}
+
+fn begin_new_workbook(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &Arc<loom_desktop::NativeMenuBar>,
+) {
+    let sheet = blank_sheet();
+    *state.current.borrow_mut() = sheet.clone();
+    *state.sheets.borrow_mut() = vec![sheet];
+    *state.active_sheet_index.borrow_mut() = 0;
+    *state.save_path.borrow_mut() = None;
+    state.undo_stack.borrow_mut().clear();
+    state.redo_stack.borrow_mut().clear();
+    *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
+    apply_sheet(app, state);
+    sync_sheet_tabs(app, state);
+    state.mark_saved();
+    sync_menu_state(menu_service, app, state);
+    app.set_status_left("Created new unsaved workbook".into());
+}
+
+fn workbook_display_name(state: &GuiState) -> String {
+    state
+        .save_path
+        .borrow()
+        .as_deref()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "Untitled workbook".to_string())
+}
+
+/// Return true when the replacement was deferred behind the Save Changes
+/// dialog. Clean work can proceed immediately.
+fn request_workbook_replacement(
+    app: &SheetsApp,
+    state: &GuiState,
+    replacement: PendingReplacement,
+) -> bool {
+    if !state.is_dirty() {
+        return false;
+    }
+    state.pending_replacement.set(Some(replacement));
+    app.set_save_changes_document(SharedString::from(workbook_display_name(state)));
+    app.set_save_changes_open(true);
+    app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
+    true
+}
+
+fn open_workbook_from_picker(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &Arc<loom_desktop::NativeMenuBar>,
+) {
+    match state.dialogs.open_file(&open_request(state)) {
+        Ok(Some(path)) => match load_workbook(&path) {
+            Ok(workbook) => {
+                let imported = !is_native_workbook(&path);
+                let tabs = workbook.sheets.len();
+                replace_opened_workbook(app, state, path.clone(), workbook.sheets, workbook.active);
+                sync_menu_state(menu_service, app, state);
+                app.set_status_left(SharedString::from(if imported {
+                    format!(
+                        "Imported {}; use Save As for a Loom workbook",
+                        path.display()
+                    )
+                } else {
+                    format!(
+                        "Opened {} ({} {})",
+                        path.display(),
+                        tabs,
+                        if tabs == 1 { "sheet" } else { "sheets" }
+                    )
+                }));
+            }
+            Err(error) => app.set_status_left(SharedString::from(format!("Open failed: {error}"))),
+        },
+        Ok(None) => app.set_status_left("Open cancelled".into()),
+        Err(error) => {
+            app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
+        }
+    }
+}
+
+fn continue_pending_replacement(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &Arc<loom_desktop::NativeMenuBar>,
+) {
+    match state.pending_replacement.take() {
+        Some(PendingReplacement::NewWorkbook) => begin_new_workbook(app, state, menu_service),
+        Some(PendingReplacement::OpenWorkbook) => {
+            open_workbook_from_picker(app, state, menu_service)
+        }
+        None => {}
+    }
 }
 
 /// Copy the live current sheet back into its tab slot so multi-tab
@@ -2213,7 +2440,8 @@ fn save_current_sheet(
     let active = *state.active_sheet_index.borrow();
     save_workbook(&path, &state.sheets.borrow(), active)?;
     *state.save_path.borrow_mut() = Some(path.clone());
-    let checkpoint = workbook_to_json(&state.sheets.borrow(), active).into_bytes();
+    state.mark_saved();
+    let checkpoint = workbook_package_bytes(&state.sheets.borrow(), active)?;
     match checkpoint_snapshot_recovery(checkpoint) {
         Ok(()) => app.set_status_left(SharedString::from(format!("Saved {}", path.display()))),
         Err(error) => app.set_status_left(SharedString::from(format!(
@@ -2297,7 +2525,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         Some(path) => load_workbook(Path::new(path))?,
         None => recovered
             .as_deref()
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
             .and_then(restore_workbook_from_snapshot)
             .unwrap_or_else(|| loom_sheets_core::persistence::WorkbookFile {
                 sheets: vec![starter_workbook()],
@@ -2322,6 +2549,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         xlsx_filter,
     ));
     state.install_workbook(initial.sheets, initial.active);
+    state.mark_saved();
     if args.objects {
         let active = *state.active_sheet_index.borrow();
         let mut sheet = state.current.borrow_mut();
@@ -2351,18 +2579,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_new_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                let sheet = blank_sheet();
-                *state.current.borrow_mut() = sheet.clone();
-                *state.sheets.borrow_mut() = vec![sheet];
-                *state.active_sheet_index.borrow_mut() = 0;
-                *state.save_path.borrow_mut() = None;
-                state.undo_stack.borrow_mut().clear();
-                state.redo_stack.borrow_mut().clear();
-                *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
-                apply_sheet(&app, &state);
-                sync_sheet_tabs(&app, &state);
-                sync_menu_state(&menu_service, &app, &state);
-                app.set_status_left("Created unsaved workbook".into());
+                if !request_workbook_replacement(&app, &state, PendingReplacement::NewWorkbook) {
+                    begin_new_workbook(&app, &state, &menu_service);
+                }
             }
         });
     }
@@ -2455,41 +2674,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_open_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                match state.dialogs.open_file(&open_request(&state)) {
-                    Ok(Some(path)) => match load_workbook(&path) {
-                        Ok(workbook) => {
-                            let imported = !is_native_workbook(&path);
-                            let tabs = workbook.sheets.len();
-                            replace_opened_workbook(
-                                &app,
-                                &state,
-                                path.clone(),
-                                workbook.sheets,
-                                workbook.active,
-                            );
-                            sync_menu_state(&menu_service, &app, &state);
-                            app.set_status_left(SharedString::from(if imported {
-                                format!(
-                                    "Imported {}; use Save As for a Loom workbook",
-                                    path.display()
-                                )
-                            } else {
-                                format!(
-                                    "Opened {} ({} {})",
-                                    path.display(),
-                                    tabs,
-                                    if tabs == 1 { "sheet" } else { "sheets" }
-                                )
-                            }));
-                        }
-                        Err(error) => {
-                            app.set_status_left(SharedString::from(format!("Open failed: {error}")))
-                        }
-                    },
-                    Ok(None) => app.set_status_left("Open cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Open dialog failed: {error}"
-                    ))),
+                if !request_workbook_replacement(&app, &state, PendingReplacement::OpenWorkbook) {
+                    open_workbook_from_picker(&app, &state, &menu_service);
                 }
             }
         });
@@ -2513,6 +2699,47 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 if let Err(error) = save_current_sheet(&app, &state, true) {
                     app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
                 }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_save_changes_save(move || {
+            if let Some(app) = app_ref.upgrade() {
+                match save_current_sheet(&app, &state, false) {
+                    Ok(true) => {
+                        app.set_save_changes_open(false);
+                        continue_pending_replacement(&app, &state, &menu_service);
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!("Save failed: {error}")))
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_save_changes_discard(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_save_changes_open(false);
+                continue_pending_replacement(&app, &state, &menu_service);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_cancel(move || {
+            if let Some(app) = app_ref.upgrade() {
+                state.pending_replacement.set(None);
+                app.set_save_changes_open(false);
+                app.set_status_left("Replacement cancelled; your workbook is unchanged".into());
             }
         });
     }

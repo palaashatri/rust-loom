@@ -460,6 +460,13 @@ export component SheetTable inherits Rectangle {
                             property <int> fill-idx: cell-idx < root.cell-fills.length ? root.cell-fills[cell-idx] : -1;
                             property <int> font-px: cell-idx < root.cell-font-sizes.length ? root.cell-font-sizes[cell-idx] : 14;
 
+                            // High-contrast paper-line is black, so using it
+                            // behind black paper text makes header and
+                            // selected cells disappear. Keep those cells on
+                            // the white paper token in that theme.
+                            property <color> readable-line: Theme.active-theme == "high-contrast"
+                                ? Theme.palette().paper
+                                : Theme.palette().paper-line;
                             background: fill-idx == 0 ? #FECACA
                                 : fill-idx == 1 ? #FED7AA
                                 : fill-idx == 2 ? #FEF08A
@@ -467,8 +474,8 @@ export component SheetTable inherits Rectangle {
                                 : fill-idx == 4 ? #BFDBFE
                                 : fill-idx == 5 ? #DDD6FE
                                 : fill-idx == 6 ? #E5E7EB
-                                : in-selection && !is-active ? Theme.palette().paper-line
-                                : is-header-row ? Theme.palette().paper-line
+                                : in-selection && !is-active ? readable-line
+                                : is-header-row ? readable-line
                                 : Theme.palette().paper;
                             border-width: is-bordered ? 2px : 1px;
                             border-color: is-bordered ? Theme.palette().ink : Theme.palette().paper-line;

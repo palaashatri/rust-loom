@@ -1,15 +1,113 @@
 //! Sheet JSON persistence for `.loomtable` content.
 //!
-//! Hand-rolled serializer keeps the file format stable and backwards
-//! compatible: older packages without `alignments`/`styles` still load as
+//! The wire shape stays stable while serde_json provides complete escaping and
+//! validation: older packages without `alignments`/`styles` still load as
 //! unstyled sheets.
 
 use std::collections::BTreeMap;
 
 use crate::style::CellStyle;
 use crate::{CellAlignment, CellRef, NumberFormat, Sheet};
+use serde::{Deserialize, Serialize};
 
-/// Canonical string name for a cell alignment used in sheet JSON.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedCell {
+    #[serde(rename = "ref")]
+    reference: String,
+    raw: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedAlignment {
+    #[serde(rename = "ref")]
+    reference: String,
+    align: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedStyle {
+    #[serde(rename = "ref")]
+    reference: String,
+    #[serde(default)]
+    bold: bool,
+    #[serde(default)]
+    italic: bool,
+    #[serde(default)]
+    underline: bool,
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    decimals: Option<u8>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    border: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    font: Option<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedChart {
+    kind: String,
+    title: String,
+    cat_col: u32,
+    val_col: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedObject {
+    kind: String,
+    row: u32,
+    col: u32,
+    width: u32,
+    height: u32,
+    label: String,
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    asset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fill: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedSheet {
+    name: String,
+    cells: Vec<PersistedCell>,
+    #[serde(default)]
+    alignments: Vec<PersistedAlignment>,
+    #[serde(default)]
+    styles: Vec<PersistedStyle>,
+    #[serde(default)]
+    col_widths: BTreeMap<String, f32>,
+    #[serde(default)]
+    row_heights: BTreeMap<String, f32>,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    freeze_rows: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    freeze_cols: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chart: Option<PersistedChart>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    objects: Vec<PersistedObject>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedWorkbook {
+    #[serde(default)]
+    version: Option<u32>,
+    #[serde(default)]
+    active: usize,
+    sheets: Vec<PersistedSheet>,
+}
+
 fn alignment_as_str(align: CellAlignment) -> &'static str {
     match align {
         CellAlignment::General => "general",
@@ -19,17 +117,6 @@ fn alignment_as_str(align: CellAlignment) -> &'static str {
     }
 }
 
-/// Parse a cell alignment from sheet JSON; unknown values map to General.
-fn alignment_from_str(raw: &str) -> CellAlignment {
-    match raw {
-        "left" => CellAlignment::Left,
-        "center" => CellAlignment::Center,
-        "right" => CellAlignment::Right,
-        _ => CellAlignment::General,
-    }
-}
-
-/// Canonical string name for a number format used in sheet JSON.
 fn number_format_as_str(format: NumberFormat) -> &'static str {
     match format {
         NumberFormat::General => "general",
@@ -42,321 +129,242 @@ fn number_format_as_str(format: NumberFormat) -> &'static str {
     }
 }
 
-/// Parse a number format from sheet JSON; unknown values map to General.
-fn number_format_from_str(raw: &str) -> NumberFormat {
-    match raw {
-        "currency" => NumberFormat::Currency,
-        "percentage" => NumberFormat::Percentage,
-        "number" => NumberFormat::Number,
-        "scientific" => NumberFormat::Scientific,
-        "date-iso" => NumberFormat::DateIso,
-        "plain-text" => NumberFormat::PlainText,
-        _ => NumberFormat::General,
+impl From<&Sheet> for PersistedSheet {
+    fn from(sheet: &Sheet) -> Self {
+        Self {
+            name: sheet.name.clone(),
+            cells: sheet
+                .cells
+                .iter()
+                .map(|(reference, cell)| PersistedCell {
+                    reference: reference.to_a1(),
+                    raw: cell.raw.clone(),
+                })
+                .collect(),
+            alignments: sheet
+                .alignments
+                .iter()
+                .filter(|(_, alignment)| **alignment != CellAlignment::General)
+                .map(|(reference, alignment)| PersistedAlignment {
+                    reference: reference.to_a1(),
+                    align: alignment_as_str(*alignment).to_string(),
+                })
+                .collect(),
+            styles: sheet
+                .styles
+                .iter()
+                .filter(|(_, style)| !style.is_default())
+                .map(|(reference, style)| PersistedStyle {
+                    reference: reference.to_a1(),
+                    bold: style.bold,
+                    italic: style.italic,
+                    underline: style.underline,
+                    format: Some(number_format_as_str(style.number_format).to_string()),
+                    decimals: style.decimal_places,
+                    border: style.border,
+                    fill: (style.fill != crate::style::FillColor::None)
+                        .then(|| style.fill.as_str().to_string()),
+                    font: style.font_size,
+                })
+                .collect(),
+            col_widths: sheet
+                .col_widths
+                .iter()
+                .map(|(index, width)| (index.to_string(), *width))
+                .collect(),
+            row_heights: sheet
+                .row_heights
+                .iter()
+                .map(|(index, height)| (index.to_string(), *height))
+                .collect(),
+            freeze_rows: sheet.freeze_rows,
+            freeze_cols: sheet.freeze_cols,
+            chart: sheet.chart.as_ref().map(|chart| PersistedChart {
+                kind: chart.kind.as_str().to_string(),
+                title: chart.title.clone(),
+                cat_col: chart.cat_col,
+                val_col: chart.val_col,
+            }),
+            objects: sheet
+                .objects
+                .iter()
+                .map(|object| PersistedObject {
+                    kind: object.kind.as_str().to_string(),
+                    row: object.anchor.row,
+                    col: object.anchor.col,
+                    width: object.width,
+                    height: object.height,
+                    label: object.label.clone(),
+                    path: object.path.clone(),
+                    asset: object.asset.clone(),
+                    fill: Some(object.fill.as_str().to_string()),
+                })
+                .collect(),
+        }
     }
 }
 
-/// Serialize a sheet to the `.loomtable` content JSON.
+/// Serialize a sheet to the `.loomtable` content JSON with a standards-compliant encoder.
 pub fn sheet_to_json(sheet: &Sheet) -> String {
-    let mut s = String::with_capacity(256);
-    s.push('{');
-    s.push_str("\"name\":\"");
-    s.push_str(&json_escape(&sheet.name));
-    s.push_str("\",\"cells\":[");
-    let mut first = true;
-    for (r, c) in &sheet.cells {
-        if !first {
-            s.push(',');
-        }
-        first = false;
-        s.push('{');
-        s.push_str("\"ref\":\"");
-        s.push_str(&r.to_a1());
-        s.push_str("\",\"raw\":\"");
-        s.push_str(&json_escape(&c.raw));
-        s.push_str("\"}");
-    }
-    s.push(']');
-    s.push_str(",\"alignments\":[");
-    let mut first_align = true;
-    for (cell, align) in &sheet.alignments {
-        if *align == CellAlignment::General {
-            continue;
-        }
-        if !first_align {
-            s.push(',');
-        }
-        first_align = false;
-        s.push_str("{\"ref\":\"");
-        s.push_str(&cell.to_a1());
-        s.push_str("\",\"align\":\"");
-        s.push_str(alignment_as_str(*align));
-        s.push_str("\"}");
-    }
-    s.push(']');
-    s.push_str(",\"styles\":[");
-    let mut first_style = true;
-    for (cell, style) in &sheet.styles {
-        if style.is_default() {
-            continue;
-        }
-        if !first_style {
-            s.push(',');
-        }
-        first_style = false;
-        s.push_str("{\"ref\":\"");
-        s.push_str(&cell.to_a1());
-        s.push_str("\",\"bold\":");
-        s.push_str(if style.bold { "true" } else { "false" });
-        s.push_str(",\"italic\":");
-        s.push_str(if style.italic { "true" } else { "false" });
-        s.push_str(",\"underline\":");
-        s.push_str(if style.underline { "true" } else { "false" });
-        s.push_str(",\"format\":\"");
-        s.push_str(number_format_as_str(style.number_format));
-        s.push('"');
-        if let Some(decimals) = style.decimal_places {
-            s.push_str(",\"decimals\":");
-            s.push_str(&decimals.to_string());
-        }
-        if style.border {
-            s.push_str(",\"border\":true");
-        }
-        if style.fill != crate::style::FillColor::None {
-            s.push_str(",\"fill\":\"");
-            s.push_str(style.fill.as_str());
-            s.push('"');
-        }
-        if let Some(size) = style.font_size {
-            s.push_str(",\"font\":");
-            s.push_str(&size.to_string());
-        }
-        s.push('}');
-    }
-    s.push(']');
-    s.push_str(",\"col_widths\":{");
-    let mut first_width = true;
-    for (col, width) in &sheet.col_widths {
-        if !first_width {
-            s.push(',');
-        }
-        first_width = false;
-        s.push('"');
-        s.push_str(&col.to_string());
-        s.push_str("\":");
-        s.push_str(&width.to_string());
-    }
-    s.push_str("},\"row_heights\":{");
-    let mut first_height = true;
-    for (row, height) in &sheet.row_heights {
-        if !first_height {
-            s.push(',');
-        }
-        first_height = false;
-        s.push('"');
-        s.push_str(&row.to_string());
-        s.push_str("\":");
-        s.push_str(&height.to_string());
-    }
-    s.push('}');
-    if sheet.freeze_rows > 0 || sheet.freeze_cols > 0 {
-        s.push_str(",\"freeze_rows\":");
-        s.push_str(&sheet.freeze_rows.to_string());
-        s.push_str(",\"freeze_cols\":");
-        s.push_str(&sheet.freeze_cols.to_string());
-    }
-    if let Some(chart) = &sheet.chart {
-        s.push_str(",\"chart\":{\"kind\":\"");
-        s.push_str(chart.kind.as_str());
-        s.push_str("\",\"title\":\"");
-        s.push_str(&chart.title.replace('\\', "\\\\").replace('"', "\\\""));
-        s.push_str("\",\"cat_col\":");
-        s.push_str(&chart.cat_col.to_string());
-        s.push_str(",\"val_col\":");
-        s.push_str(&chart.val_col.to_string());
-        s.push('}');
-    }
-    if !sheet.objects.is_empty() {
-        s.push_str(",\"objects\":[");
-        for (index, object) in sheet.objects.iter().enumerate() {
-            if index > 0 {
-                s.push(',');
-            }
-            s.push_str("{\"kind\":\"");
-            s.push_str(object.kind.as_str());
-            s.push_str("\",\"row\":");
-            s.push_str(&object.anchor.row.to_string());
-            s.push_str(",\"col\":");
-            s.push_str(&object.anchor.col.to_string());
-            s.push_str(",\"width\":");
-            s.push_str(&object.width.to_string());
-            s.push_str(",\"height\":");
-            s.push_str(&object.height.to_string());
-            s.push_str(",\"label\":\"");
-            s.push_str(&json_escape(&object.label));
-            s.push_str("\",\"path\":\"");
-            s.push_str(&json_escape(&object.path));
-            if let Some(asset) = &object.asset {
-                s.push_str("\",\"asset\":\"");
-                s.push_str(&json_escape(asset));
-            }
-            s.push_str("\",\"fill\":\"");
-            s.push_str(object.fill.as_str());
-            s.push_str("\"}");
-        }
-        s.push(']');
-    }
-    s.push('}');
-    s
+    serde_json::to_string(&PersistedSheet::from(sheet)).expect("sheet model is JSON serializable")
 }
 
-/// Escape the JSON string subset emitted by the hand-rolled format.
-fn json_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+fn parse_alignment(raw: &str) -> Result<CellAlignment, String> {
+    match raw {
+        "general" => Ok(CellAlignment::General),
+        "left" => Ok(CellAlignment::Left),
+        "center" => Ok(CellAlignment::Center),
+        "right" => Ok(CellAlignment::Right),
+        other => Err(format!("unknown cell alignment {other:?}")),
+    }
 }
 
-/// Parse sheet JSON back.
-pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
-    let mut name = String::new();
-    if let Some(prefix) = s.split("\"cells\"").next() {
-        if let Some(n) = prefix.split("\"name\":\"").nth(1) {
-            let end = n.find('"').unwrap_or(n.len());
-            name = n[..end].replace("\\\"", "\"").replace("\\\\", "\\");
+fn parse_number_format(raw: Option<&str>) -> Result<NumberFormat, String> {
+    match raw.unwrap_or("general") {
+        "general" => Ok(NumberFormat::General),
+        "currency" => Ok(NumberFormat::Currency),
+        "percentage" => Ok(NumberFormat::Percentage),
+        "number" => Ok(NumberFormat::Number),
+        "scientific" => Ok(NumberFormat::Scientific),
+        "date-iso" => Ok(NumberFormat::DateIso),
+        "plain-text" => Ok(NumberFormat::PlainText),
+        other => Err(format!("unknown number format {other:?}")),
+    }
+}
+
+fn parse_fill(raw: Option<&str>) -> Result<crate::style::FillColor, String> {
+    match raw.unwrap_or("none") {
+        "none" => Ok(crate::style::FillColor::None),
+        "red" => Ok(crate::style::FillColor::Red),
+        "orange" => Ok(crate::style::FillColor::Orange),
+        "yellow" => Ok(crate::style::FillColor::Yellow),
+        "green" => Ok(crate::style::FillColor::Green),
+        "blue" => Ok(crate::style::FillColor::Blue),
+        "purple" => Ok(crate::style::FillColor::Purple),
+        "gray" | "grey" => Ok(crate::style::FillColor::Gray),
+        other => Err(format!("unknown fill color {other:?}")),
+    }
+}
+
+fn parse_chart_kind(raw: &str) -> Result<crate::ChartKind, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "bar" => Ok(crate::ChartKind::Bar),
+        "line" => Ok(crate::ChartKind::Line),
+        "pie" => Ok(crate::ChartKind::Pie),
+        "scatter" => Ok(crate::ChartKind::Scatter),
+        other => Err(format!("unknown chart kind {other:?}")),
+    }
+}
+
+fn decode_dimension_map(
+    values: BTreeMap<String, f32>,
+    label: &str,
+) -> Result<BTreeMap<u32, f32>, String> {
+    values
+        .into_iter()
+        .map(|(raw_index, value)| {
+            let index = raw_index
+                .parse::<u32>()
+                .map_err(|_| format!("{label} index {raw_index:?} is not a u32"))?;
+            if !value.is_finite() || value <= 0.0 {
+                return Err(format!("{label} {raw_index} must be finite and positive"));
+            }
+            Ok((index, value))
+        })
+        .collect()
+}
+
+fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
+    let mut sheet = Sheet::new(&raw.name);
+    for cell in raw.cells {
+        let reference = CellRef::parse(&cell.reference)
+            .ok_or_else(|| format!("invalid cell reference {:?}", cell.reference))?;
+        if sheet
+            .cells
+            .insert(reference, crate::Cell { raw: cell.raw })
+            .is_some()
+        {
+            return Err(format!("duplicate cell reference {:?}", cell.reference));
         }
     }
-    let mut sheet = Sheet::new(&name);
-    let body = s.split("\"cells\":").nth(1).unwrap_or("[]");
-    for frag in body.split("{\"ref\":\"") {
-        if frag.is_empty() {
-            continue;
+    for alignment in raw.alignments {
+        let reference = CellRef::parse(&alignment.reference)
+            .ok_or_else(|| format!("invalid alignment reference {:?}", alignment.reference))?;
+        let value = parse_alignment(&alignment.align)?;
+        if sheet.alignments.insert(reference, value).is_some() {
+            return Err(format!(
+                "duplicate alignment reference {:?}",
+                alignment.reference
+            ));
         }
-        let Some(end) = frag.find("\",\"raw\":\"") else {
-            continue;
+    }
+    for style in raw.styles {
+        let reference = CellRef::parse(&style.reference)
+            .ok_or_else(|| format!("invalid style reference {:?}", style.reference))?;
+        let value = CellStyle {
+            bold: style.bold,
+            italic: style.italic,
+            underline: style.underline,
+            number_format: parse_number_format(style.format.as_deref())?,
+            decimal_places: style.decimals,
+            border: style.border,
+            fill: parse_fill(style.fill.as_deref())?,
+            font_size: style.font,
         };
-        let a1 = &frag[..end];
-        let rest = &frag[end + "\",\"raw\":\"".len()..];
-        let Some(end2) = rest.find("\"}") else {
-            continue;
-        };
-        let raw = rest[..end2]
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
-            .replace("\\n", "\n");
-        sheet.set_str(a1, &raw);
+        if sheet.styles.insert(reference, value).is_some() {
+            return Err(format!("duplicate style reference {:?}", style.reference));
+        }
     }
-    for (index, width) in parse_dimension_map(s, "col_widths") {
-        sheet.set_col_width(index, width);
-    }
-    for (index, height) in parse_dimension_map(s, "row_heights") {
-        sheet.set_row_height(index, height);
-    }
-    for (cell, align) in parse_alignment_list(s) {
-        sheet.set_cell_alignment(cell, align);
-    }
-    for (cell, style) in parse_style_list(s) {
-        sheet.set_cell_style(cell, style);
-    }
-    sheet.freeze_rows = parse_u32_field(s, "freeze_rows");
-    sheet.freeze_cols = parse_u32_field(s, "freeze_cols");
-    if let Some(chart) = parse_chart(s) {
-        sheet.chart = Some(chart);
-    }
-    sheet.objects = parse_object_list(s);
+    sheet.col_widths = decode_dimension_map(raw.col_widths, "column width")?;
+    sheet.row_heights = decode_dimension_map(raw.row_heights, "row height")?;
+    sheet.freeze_rows = raw.freeze_rows;
+    sheet.freeze_cols = raw.freeze_cols;
+    sheet.chart = raw
+        .chart
+        .map(|chart| -> Result<crate::SheetChart, String> {
+            Ok(crate::SheetChart {
+                kind: parse_chart_kind(&chart.kind)?,
+                title: chart.title,
+                cat_col: chart.cat_col,
+                val_col: chart.val_col,
+            })
+        })
+        .transpose()?;
+    sheet.objects = raw
+        .objects
+        .into_iter()
+        .map(|object| {
+            let kind = crate::SheetObjectKind::parse(&object.kind)
+                .ok_or_else(|| format!("unknown sheet object kind {:?}", object.kind))?;
+            if object.width == 0 || object.height == 0 {
+                return Err(format!(
+                    "sheet object {:?} has zero dimensions",
+                    object.label
+                ));
+            }
+            Ok(crate::SheetObject {
+                kind,
+                anchor: CellRef {
+                    row: object.row,
+                    col: object.col,
+                },
+                width: object.width,
+                height: object.height,
+                label: object.label,
+                path: object.path,
+                embedded: None,
+                asset: object.asset,
+                fill: parse_fill(object.fill.as_deref())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     Ok(sheet)
 }
 
-/// Parse an optional `"chart":{...}` object; malformed entries load as none.
-fn parse_chart(s: &str) -> Option<crate::SheetChart> {
-    let marker = "\"chart\":{";
-    let start = s.find(marker)? + marker.len();
-    let rest = &s[start..];
-    // Balance braces outside strings to find the object end.
-    let mut depth = 1usize;
-    let mut end = None;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (i, ch) in rest.char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-        } else if ch == '"' {
-            in_string = true;
-        } else if ch == '{' {
-            depth += 1;
-        } else if ch == '}' {
-            depth -= 1;
-            if depth == 0 {
-                end = Some(i);
-                break;
-            }
-        }
-    }
-    let body = &rest[..end?];
-    let kind = body
-        .split("\"kind\":\"")
-        .nth(1)
-        .and_then(|tail| tail.split('"').next())
-        .map(crate::ChartKind::parse_kind)
-        .unwrap_or(crate::ChartKind::Bar);
-    let title = body
-        .split("\"title\":\"")
-        .nth(1)
-        .and_then(|tail| {
-            let mut out = String::new();
-            let mut chars = tail.chars();
-            loop {
-                let c = chars.next()?;
-                if c == '\\' {
-                    out.push(chars.next()?);
-                } else if c == '"' {
-                    break;
-                } else {
-                    out.push(c);
-                }
-            }
-            Some(out)
-        })
-        .unwrap_or_default();
-    let number_after = |key: &str| {
-        body.split(key)
-            .nth(1)
-            .and_then(|tail| {
-                tail.chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect::<String>()
-                    .parse::<u32>()
-                    .ok()
-            })
-            .unwrap_or(0)
-    };
-    Some(crate::SheetChart {
-        kind,
-        title,
-        cat_col: number_after("\"cat_col\":"),
-        val_col: number_after("\"val_col\":"),
-    })
-}
-
-/// Parse an optional top-level `"key":123` integer; missing or malformed is 0.
-fn parse_u32_field(s: &str, key: &str) -> u32 {
-    let marker = format!("\"{key}\":");
-    let Some(start) = s.find(&marker).map(|index| index + marker.len()) else {
-        return 0;
-    };
-    let digits: String = s[start..]
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-    digits.parse::<u32>().unwrap_or(0)
+/// Parse sheet JSON back using a complete JSON decoder.
+pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
+    let raw: PersistedSheet = serde_json::from_str(s).map_err(|error| error.to_string())?;
+    decode_sheet(raw)
 }
 
 /// A multi-sheet workbook file: ordered sheets plus the active tab index.
@@ -370,287 +378,32 @@ pub struct WorkbookFile {
 
 /// Serialize a workbook (all tabs + active index) to `.loomtable` content.
 pub fn workbook_to_json(sheets: &[Sheet], active: usize) -> String {
-    let mut s = String::with_capacity(512);
-    s.push_str("{\"version\":1,\"active\":");
-    s.push_str(&active.min(sheets.len().saturating_sub(1)).to_string());
-    s.push_str(",\"sheets\":[");
-    let mut first = true;
-    for sheet in sheets {
-        if !first {
-            s.push(',');
-        }
-        first = false;
-        s.push_str(&sheet_to_json(sheet));
-    }
-    s.push_str("]}");
-    s
+    let payload = PersistedWorkbook {
+        version: Some(1),
+        active: active.min(sheets.len().saturating_sub(1)),
+        sheets: sheets.iter().map(PersistedSheet::from).collect(),
+    };
+    serde_json::to_string(&payload).expect("workbook model is JSON serializable")
 }
 
 /// Parse workbook JSON back; unknown trailing keys are ignored.
 pub fn workbook_from_json(s: &str) -> Result<WorkbookFile, String> {
-    let Some(body) = extract_json_array(s, "sheets") else {
-        return Err("missing sheets array".to_string());
-    };
-    let mut sheets = Vec::new();
-    for obj in split_top_level_objects(body) {
-        sheets.push(sheet_from_json(obj)?);
+    let payload: PersistedWorkbook = serde_json::from_str(s).map_err(|error| error.to_string())?;
+    if let Some(version) = payload.version {
+        if version != 1 {
+            return Err(format!("unsupported workbook JSON version {version}"));
+        }
     }
+    let sheets = payload
+        .sheets
+        .into_iter()
+        .map(decode_sheet)
+        .collect::<Result<Vec<_>, String>>()?;
     if sheets.is_empty() {
         return Err("workbook must contain at least one sheet".to_string());
     }
-    let active = parse_u32_field(s, "active") as usize;
-    let active = active.min(sheets.len() - 1);
+    let active = payload.active.min(sheets.len() - 1);
     Ok(WorkbookFile { sheets, active })
-}
-
-/// Split a `[{...},{...}]` array body into its top-level object slices,
-/// respecting string escapes so nested braces inside cell text survive.
-fn split_top_level_objects(body: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let bytes = body.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'{' {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        let mut depth = 0usize;
-        let mut in_string = false;
-        let mut escaped = false;
-        while i < bytes.len() {
-            let b = bytes[i];
-            if in_string {
-                if escaped {
-                    escaped = false;
-                } else if b == b'\\' {
-                    escaped = true;
-                } else if b == b'"' {
-                    in_string = false;
-                }
-            } else if b == b'"' {
-                in_string = true;
-            } else if b == b'{' {
-                depth += 1;
-            } else if b == b'}' {
-                depth -= 1;
-                if depth == 0 {
-                    i += 1;
-                    break;
-                }
-            }
-            i += 1;
-        }
-        out.push(&body[start..i.min(body.len())]);
-    }
-    out
-}
-
-/// Extract the raw array body for a top-level `"key":[...]` entry.
-fn extract_json_array<'a>(s: &'a str, key: &str) -> Option<&'a str> {
-    let marker = format!("\"{key}\":[");
-    let start = s.find(&marker)? + marker.len();
-    let rest = &s[start..];
-    let mut depth = 1usize;
-    let mut end = None;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (i, ch) in rest.char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = Some(i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    end.map(|i| &rest[..i])
-}
-
-/// Parse `{"ref":"A1","align":"left"}` entries; unknown refs are skipped.
-fn parse_alignment_list(s: &str) -> Vec<(CellRef, CellAlignment)> {
-    let Some(body) = extract_json_array(s, "alignments") else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for frag in body.split("{\"ref\":\"") {
-        if frag.is_empty() {
-            continue;
-        }
-        let Some(end) = frag.find("\",\"align\":\"") else {
-            continue;
-        };
-        let a1 = &frag[..end];
-        let rest = &frag[end + "\",\"align\":\"".len()..];
-        let Some(end2) = rest.find('"') else {
-            continue;
-        };
-        let Some(cell) = CellRef::parse(a1) else {
-            continue;
-        };
-        out.push((cell, alignment_from_str(&rest[..end2])));
-    }
-    out
-}
-
-/// Parse `{"ref":"A1","bold":true,...,"format":"currency","decimals":2}` entries.
-fn parse_style_list(s: &str) -> Vec<(CellRef, CellStyle)> {
-    let Some(body) = extract_json_array(s, "styles") else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for frag in body.split("{\"ref\":\"") {
-        if frag.is_empty() {
-            continue;
-        }
-        let Some(end) = frag.find('"') else {
-            continue;
-        };
-        let a1 = &frag[..end];
-        let Some(cell) = CellRef::parse(a1) else {
-            continue;
-        };
-        let entry = &frag[end..];
-        let bold = entry.contains("\"bold\":true");
-        let italic = entry.contains("\"italic\":true");
-        let underline = entry.contains("\"underline\":true");
-        let format = entry
-            .split("\"format\":\"")
-            .nth(1)
-            .and_then(|rest| rest.split('"').next())
-            .map(number_format_from_str)
-            .unwrap_or(NumberFormat::General);
-        let decimals = entry.split("\"decimals\":").nth(1).and_then(|rest| {
-            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if digits.is_empty() {
-                None
-            } else {
-                digits.parse::<u8>().ok()
-            }
-        });
-        let border = entry.contains("\"border\":true");
-        let fill = entry
-            .split("\"fill\":\"")
-            .nth(1)
-            .and_then(|rest| rest.split('"').next())
-            .map(crate::style::FillColor::parse_kind)
-            .unwrap_or(crate::style::FillColor::None);
-        let font_size = entry.split("\"font\":").nth(1).and_then(|rest| {
-            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if digits.is_empty() {
-                None
-            } else {
-                digits.parse::<u8>().ok()
-            }
-        });
-        out.push((
-            cell,
-            CellStyle {
-                bold,
-                italic,
-                underline,
-                number_format: format,
-                decimal_places: decimals,
-                border,
-                fill,
-                font_size,
-            },
-        ));
-    }
-    out
-}
-
-/// Parse persisted worksheet objects; unknown object kinds are ignored so
-/// newer files remain readable by older-compatible loaders.
-fn parse_object_list(s: &str) -> Vec<crate::SheetObject> {
-    let Some(body) = extract_json_array(s, "objects") else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in split_top_level_objects(body) {
-        let Some(kind) = parse_json_string_field(entry, "kind")
-            .and_then(|raw| crate::SheetObjectKind::parse(&raw))
-        else {
-            continue;
-        };
-        let anchor = CellRef {
-            row: parse_u32_field(entry, "row"),
-            col: parse_u32_field(entry, "col"),
-        };
-        let width = parse_u32_field(entry, "width").max(1);
-        let height = parse_u32_field(entry, "height").max(1);
-        let label = parse_json_string_field(entry, "label").unwrap_or_default();
-        let path = parse_json_string_field(entry, "path").unwrap_or_default();
-        let fill = parse_json_string_field(entry, "fill")
-            .map(|raw| crate::style::FillColor::parse_kind(&raw))
-            .unwrap_or_default();
-        out.push(crate::SheetObject {
-            kind,
-            anchor,
-            width,
-            height,
-            label,
-            path,
-            embedded: None,
-            asset: parse_json_string_field(entry, "asset"),
-            fill,
-        });
-    }
-    out
-}
-
-/// Read one escaped JSON string field from a small object slice.
-fn parse_json_string_field(s: &str, key: &str) -> Option<String> {
-    let marker = format!("\"{key}\":\"");
-    let tail = s.split_once(&marker)?.1;
-    let mut out = String::new();
-    let mut chars = tail.chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\\' => match chars.next()? {
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                't' => out.push('\t'),
-                escaped => out.push(escaped),
-            },
-            '"' => return Some(out),
-            other => out.push(other),
-        }
-    }
-    None
-}
-
-/// Parse the optional numeric dimension maps emitted by [`sheet_to_json`].
-fn parse_dimension_map(s: &str, key: &str) -> BTreeMap<u32, f32> {
-    let marker = format!("\"{key}\":{{");
-    let Some(start) = s.find(&marker).map(|index| index + marker.len()) else {
-        return BTreeMap::new();
-    };
-    let rest = &s[start..];
-    let body = rest.split('}').next().unwrap_or_default();
-    body.split(',')
-        .filter_map(|entry| {
-            let (raw_index, raw_value) = entry.split_once(':')?;
-            let index = raw_index.trim().trim_matches('"').parse::<u32>().ok()?;
-            let value = raw_value.trim().parse::<f32>().ok()?;
-            value.is_finite().then_some((index, value))
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -833,5 +586,55 @@ mod tests {
 
         let legacy = r#"{"name":"old","cells":[],"col_widths":{},"row_heights":{}}"#;
         assert!(sheet_from_json(legacy).unwrap().objects.is_empty());
+    }
+
+    #[test]
+    fn json_roundtrip_escapes_control_chars_backslashes_quotes_and_unicode() {
+        let mut sheet = Sheet::new("My \"Sheet\"");
+        let values = [
+            ("A1", "one\ttwo"),
+            ("A2", "one\rtwo"),
+            ("A3", "one\ntwo"),
+            ("A4", r#"C:\new\notes"#),
+            ("A5", "before\"}after"),
+            ("A6", "नमस्ते 🌱"),
+        ];
+        for (reference, value) in values {
+            sheet.set_str(reference, value);
+        }
+
+        let json = sheet_to_json(&sheet);
+        assert!(serde_json::from_str::<serde_json::Value>(&json).is_ok());
+        let back = sheet_from_json(&json).expect("escaped sheet JSON must load");
+        assert_eq!(back.name, "My \"Sheet\"");
+        for (reference, value) in values {
+            let cell = CellRef::parse(reference).unwrap();
+            assert_eq!(back.raw(cell), Some(value));
+        }
+
+        let workbook_json = workbook_to_json(&[sheet], 0);
+        let workbook = workbook_from_json(&workbook_json).expect("escaped workbook JSON must load");
+        assert_eq!(workbook.sheets[0].name, "My \"Sheet\"");
+        assert_eq!(
+            workbook.sheets[0].raw(CellRef::parse("A5").unwrap()),
+            Some("before\"}after")
+        );
+    }
+
+    #[test]
+    fn json_load_rejects_duplicate_refs_unknown_enums_and_unsupported_versions() {
+        let duplicate =
+            r#"{"name":"x","cells":[{"ref":"A1","raw":"one"},{"ref":"A1","raw":"two"}]}"#;
+        assert!(sheet_from_json(duplicate).is_err());
+
+        let unknown_style =
+            r#"{"name":"x","cells":[],"styles":[{"ref":"A1","format":"not-a-format"}]}"#;
+        assert!(sheet_from_json(unknown_style).is_err());
+
+        let unknown_chart = r#"{"name":"x","cells":[],"chart":{"kind":"not-a-chart","title":"x","cat_col":0,"val_col":1}}"#;
+        assert!(sheet_from_json(unknown_chart).is_err());
+
+        let unsupported_version = r#"{"version":2,"active":0,"sheets":[{"name":"x","cells":[]}] }"#;
+        assert!(workbook_from_json(unsupported_version).is_err());
     }
 }

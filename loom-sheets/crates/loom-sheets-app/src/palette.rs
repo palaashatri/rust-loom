@@ -182,7 +182,12 @@ pub struct PaletteCommand {
 
 pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     [
-        (PaletteAction::NewSheet, "sheets.new", "New Sheet", "Ctrl+N"),
+        (
+            PaletteAction::NewSheet,
+            "sheets.new",
+            "New Workbook",
+            "Ctrl+N",
+        ),
         (
             PaletteAction::NewFromTemplate,
             "sheets.new-template",
@@ -192,19 +197,19 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
         (
             PaletteAction::OpenSheet,
             "sheets.open",
-            "Open Sheet",
+            "Open Workbook",
             "Ctrl+O",
         ),
         (
             PaletteAction::SaveSheet,
             "sheets.save",
-            "Save Sheet",
+            "Save Workbook",
             "Ctrl+S",
         ),
         (
             PaletteAction::SaveAsSheet,
             "sheets.save-as",
-            "Save Sheet As",
+            "Save Workbook As",
             "Ctrl+Shift+S",
         ),
         (

@@ -21,6 +21,11 @@ export component SheetActionToolbar inherits LoomToolbar {
 
     callback undo;
     callback redo;
+    callback new-sheet;
+    callback open-sheet;
+    callback save-sheet;
+    callback save-as-sheet;
+    callback open-palette;
     callback toggle-inspector;
     callback export-csv;
     callback overflow-requested;
@@ -33,6 +38,73 @@ export component SheetActionToolbar inherits LoomToolbar {
     callback add-col;
     callback insert-chart;
     callback organize;
+
+    // File commands stay on the local toolbar so Linux users can discover
+    // the core workflow without relying on a native menu host or shortcuts.
+    LoomToolbarGroup {
+        if root.wide : LoomButton {
+            icon: "plus";
+            label: "New";
+            variant: "ghost";
+            clicked => { root.new-sheet(); }
+        }
+        if !root.wide : LoomIconButton {
+            icon: "plus";
+            label: "New workbook";
+            tooltip: "New workbook";
+            clicked => { root.new-sheet(); }
+        }
+        if root.wide : LoomButton {
+            icon: "open";
+            label: "Open";
+            variant: "ghost";
+            clicked => { root.open-sheet(); }
+        }
+        if !root.wide : LoomIconButton {
+            icon: "open";
+            label: "Open workbook";
+            tooltip: "Open workbook";
+            clicked => { root.open-sheet(); }
+        }
+        if root.wide : LoomButton {
+            icon: "save";
+            label: "Save";
+            variant: "ghost";
+            clicked => { root.save-sheet(); }
+        }
+        if !root.wide : LoomIconButton {
+            icon: "save";
+            label: "Save workbook";
+            tooltip: "Save workbook";
+            clicked => { root.save-sheet(); }
+        }
+        if root.wide : LoomButton {
+            icon: "save-as";
+            label: "Save As";
+            variant: "ghost";
+            clicked => { root.save-as-sheet(); }
+        }
+        if !root.wide : LoomIconButton {
+            icon: "save-as";
+            label: "Save workbook as";
+            tooltip: "Save workbook as";
+            clicked => { root.save-as-sheet(); }
+        }
+        if root.wide : LoomButton {
+            icon: "search";
+            label: "Commands";
+            variant: "ghost";
+            clicked => { root.open-palette(); }
+        }
+        if !root.wide : LoomIconButton {
+            icon: "search";
+            label: "Command palette";
+            tooltip: "Command palette (Ctrl+K)";
+            clicked => { root.open-palette(); }
+        }
+    }
+
+    LoomToolbarDivider { }
 
     LoomToolbarGroup {
         LoomButton {
@@ -160,4 +232,3 @@ export component SheetActionToolbar inherits LoomToolbar {
         }
     }
 }
-

@@ -136,6 +136,8 @@ export component SheetsApp inherits Window {
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
+    in-out property <bool> save-changes-open: false;
+    in-out property <string> save-changes-document: "";
 
     callback new-sheet;
     callback open-sheet;
@@ -160,6 +162,9 @@ export component SheetsApp inherits Window {
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
+    callback save-changes-save;
+    callback save-changes-discard;
+    callback save-changes-cancel;
     callback select-sheet(int);
     callback add-sheet;
     callback add-row;
@@ -278,7 +283,7 @@ export component SheetsApp inherits Window {
     }
 
     template-chooser-focus := FocusScope {
-        enabled: root.template-chooser-open;
+        enabled: root.template-chooser-open && !root.save-changes-open;
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.cancel-template();
@@ -292,6 +297,27 @@ export component SheetsApp inherits Window {
         }
     }
 
+    save-changes-focus := FocusScope {
+        enabled: root.save-changes-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.save-changes-cancel();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    changed save-changes-open => {
+        if (root.save-changes-open) {
+            root.palette-open = false;
+            root.toolbar-overflow-open = false;
+            save-changes-focus.focus();
+        } else if (!root.template-chooser-open && !root.palette-open) {
+            app-focus.focus();
+        }
+    }
+
     changed template-chooser-open => {
         if (root.template-chooser-open) {
             template-chooser-focus.focus();
@@ -302,7 +328,7 @@ export component SheetsApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open) { return reject; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -421,6 +447,11 @@ export component SheetsApp inherits Window {
                 cell-italic: root.cell-italic;
                 cell-underline: root.cell-underline;
                 cell-alignment: root.cell-alignment;
+                new-sheet => { root.new-sheet(); }
+                open-sheet => { root.open-sheet(); }
+                save-sheet => { root.save-sheet(); }
+                save-as-sheet => { root.save-as-sheet(); }
+                open-palette => { root.open-palette(); }
                 undo => { root.undo(); }
                 redo => { root.redo(); }
                 toggle-inspector => { root.toggle-inspector(); }
@@ -663,8 +694,17 @@ export component SheetsApp inherits Window {
                     adjust-decimals(delta) => { root.adjust-decimals(delta); }
                 }
             }
-
-
+            LoomStatusBar {
+                LoomStatusText {
+                    text: root.status-left != "" ? root.status-left : "Ready";
+                    strong: true;
+                    horizontal-stretch: 1;
+                }
+                LoomStatusText {
+                    text: root.status-right;
+                    horizontal-alignment: right;
+                }
+            }
         }
     }
 
@@ -716,6 +756,70 @@ export component SheetsApp inherits Window {
         template-category <=> root.template-category;
         cancel-template => { root.cancel-template(); }
         create-template(selected) => { root.create-template(selected); }
+    }
+
+    if root.save-changes-open : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: Theme.palette().scrim;
+        accessible-role: groupbox;
+        accessible-label: "Save changes dialog";
+
+        TouchArea { clicked => { save-changes-focus.focus(); } }
+
+        Rectangle {
+            x: (root.width - min(520px, root.width - 32px)) / 2;
+            y: (root.height - 208px) / 2;
+            width: min(520px, root.width - 32px);
+            height: 208px;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.xl;
+
+                Text {
+                    text: "Save changes?";
+                    font-size: Theme.tokens.typography.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                }
+                Text {
+                    text: "Save changes to \"" + root.save-changes-document + "\" before replacing it?";
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink-secondary;
+                    wrap: word-wrap;
+                    vertical-stretch: 1;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    alignment: end;
+                    LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        clicked => { root.save-changes-cancel(); }
+                    }
+                    LoomButton {
+                        label: "Discard";
+                        variant: "danger";
+                        clicked => { root.save-changes-discard(); }
+                    }
+                    LoomButton {
+                        label: "Save";
+                        variant: "primary";
+                        clicked => { root.save-changes-save(); }
+                    }
+                }
+            }
+        }
     }
 
     palette := CommandPalette {

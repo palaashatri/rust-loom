@@ -2809,6 +2809,23 @@ impl RangeEdit {
         self.before == self.after
     }
 
+    /// Approximate owned heap bytes retained by this edit.
+    ///
+    /// History uses this value for its byte budget. Counting string capacity
+    /// (rather than only logical length) matches the memory released when the
+    /// maps and their owned values are dropped.
+    pub fn memory_bytes(&self) -> usize {
+        fn map_bytes(map: &BTreeMap<CellRef, Option<String>>) -> usize {
+            std::mem::size_of_val(map)
+                + map
+                    .values()
+                    .map(|value| value.as_ref().map_or(0, String::capacity))
+                    .sum::<usize>()
+                + map.len() * std::mem::size_of::<(CellRef, Option<String>)>()
+        }
+        map_bytes(&self.before) + map_bytes(&self.after)
+    }
+
     /// Number of target cells touched by this edit.
     pub fn len(&self) -> usize {
         self.after.len()
@@ -4248,7 +4265,21 @@ fn extract_sheet_grid_with_formulas_inner(
     shared: &[String],
     keep_formulas: bool,
 ) -> Result<Vec<Vec<String>>, String> {
-    let mut placed: Vec<(u32, u32, String)> = Vec::new();
+    #[derive(Debug)]
+    struct ParsedFormula {
+        shared_id: Option<u32>,
+        body: Option<String>,
+    }
+
+    #[derive(Debug)]
+    struct ParsedCell {
+        row: u32,
+        col: u32,
+        cached: String,
+        formula: Option<ParsedFormula>,
+    }
+
+    let mut parsed_cells = Vec::new();
     let mut max_row = 0u32;
     let mut max_col = 0u32;
     let mut rest = sheet_xml;
@@ -4278,8 +4309,8 @@ fn extract_sheet_grid_with_formulas_inner(
             continue;
         }
 
-        let cell_type = attribute_value(attrs, "t").unwrap_or("");
-        let text = match cell_type {
+        let cell_type = attribute_value(attrs, "t").unwrap_or("").to_string();
+        let cached = match cell_type.as_str() {
             "s" => {
                 let raw = first_element_text(body, "v")
                     .ok_or_else(|| "shared-string cell without <v>".to_string())?;
@@ -4308,21 +4339,69 @@ fn extract_sheet_grid_with_formulas_inner(
             },
             _ => first_element_text(body, "v").unwrap_or_default(),
         };
-        let text = if keep_formulas {
-            first_element_text(body, "f")
-                .map(|formula| format!("={formula}"))
-                .unwrap_or(text)
-        } else {
-            text
-        };
-        placed.push((row, col, text));
+        parsed_cells.push(ParsedCell {
+            row,
+            col,
+            cached,
+            formula: first_formula_descriptor(body)
+                .map(|(shared_id, body)| ParsedFormula { shared_id, body }),
+        });
         max_row = max_row.max(row);
         max_col = max_col.max(col);
     }
 
-    if placed.is_empty() {
+    if parsed_cells.is_empty() {
         return Ok(Vec::new());
     }
+
+    // OOXML permits a shared-formula member to appear before its master in
+    // the worksheet XML. Collect masters first so every member is resolved
+    // from the worksheet-local `(sheet, si)` index in a second pass.
+    let mut shared_formulas = crate::interop::SharedFormulaIndex::default();
+    for cell in &parsed_cells {
+        let Some(formula) = &cell.formula else {
+            continue;
+        };
+        if let (Some(shared_id), Some(body)) = (formula.shared_id, formula.body.as_deref()) {
+            shared_formulas.insert_master(
+                shared_id,
+                CellRef {
+                    row: cell.row,
+                    col: cell.col,
+                },
+                body,
+            );
+        }
+    }
+
+    let placed: Vec<(u32, u32, String)> = parsed_cells
+        .into_iter()
+        .map(|cell| {
+            let text = if !keep_formulas {
+                cell.cached
+            } else if let Some(formula) = cell.formula {
+                let reference = CellRef {
+                    row: cell.row,
+                    col: cell.col,
+                };
+                if let Some(shared_id) = formula.shared_id {
+                    shared_formulas
+                        .resolve(shared_id, reference)
+                        .or_else(|| formula.body.map(|body| format!("={body}")))
+                        .unwrap_or(cell.cached)
+                } else {
+                    formula
+                        .body
+                        .map(|body| format!("={body}"))
+                        .unwrap_or(cell.cached)
+                }
+            } else {
+                cell.cached
+            };
+            (cell.row, cell.col, text)
+        })
+        .collect();
+
     let n_rows = max_row as usize + 1;
     let n_cols = max_col as usize + 1;
     if n_rows.saturating_mul(n_cols) > MAX_XLSX_DENSE_CELLS {
@@ -4336,6 +4415,23 @@ fn extract_sheet_grid_with_formulas_inner(
         grid[row as usize][col as usize] = text;
     }
     Ok(grid)
+}
+
+/// Read the first worksheet formula, retaining the shared-formula ID and
+/// whether this cell carries the master formula body. XML text is unescaped
+/// here so the formula shifter receives the actual spreadsheet expression.
+fn first_formula_descriptor(body: &str) -> Option<(Option<u32>, Option<String>)> {
+    let offset = next_tag_open(body, "f")?;
+    let after_name = &body[offset + 1 + "f".len()..];
+    let tag_end = after_name.find('>')?;
+    let open_tag = &after_name[..tag_end];
+    let shared_id = attribute_value(open_tag, "si").and_then(|raw| raw.parse::<u32>().ok());
+    if open_tag.trim_end().ends_with('/') {
+        return Some((shared_id, None));
+    }
+    let inner = &after_name[tag_end + 1..];
+    let formula_end = inner.find("</f>")?;
+    Some((shared_id, Some(xml_unescape(&inner[..formula_end]))))
 }
 
 /// Builds the shared-string table by concatenating the `<t>` runs of every
@@ -5485,6 +5581,52 @@ mod tests {
                 vec!["42".to_string(), "TRUE".to_string(), String::new()],
                 vec![String::new(), String::new(), "Inline".to_string()],
             ]
+        );
+    }
+
+    #[test]
+    fn extract_xlsx_grid_resolves_shared_formula_members_with_relative_offsets() {
+        // The member appears before the master to cover the two-pass index.
+        let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+            <sheetData>
+                <row r="1">
+                    <c r="A1"><v>10</v></c>
+                    <c r="B1"><f t="shared" si="0" ref="B1:B3">A1*2</f><v>20</v></c>
+                </row>
+                <row r="2">
+                    <c r="A2"><v>50</v></c>
+                    <c r="B2"><f t="shared" si="0"/><v>100</v></c>
+                </row>
+                <row r="3">
+                    <c r="A3"><v>7</v></c>
+                    <c r="B3"><f t="shared" si="0"/><v>14</v></c>
+                </row>
+            </sheetData>
+        </worksheet>"#;
+
+        let formulas = extract_sheet_grid_with_formulas(sheet, &[]).expect("formula extraction");
+        assert_eq!(formulas[0][1], "=A1*2");
+        assert_eq!(formulas[1][1], "=A2*2");
+        assert_eq!(formulas[2][1], "=A3*2");
+
+        let mut imported = Sheet::new("Shared");
+        for (row, values) in formulas.iter().enumerate() {
+            for (col, value) in values.iter().enumerate() {
+                if !value.is_empty() {
+                    imported.set_raw(
+                        CellRef {
+                            row: row as u32,
+                            col: col as u32,
+                        },
+                        value,
+                    );
+                }
+            }
+        }
+        let evaluated = workbook::evaluate_workbook(std::slice::from_ref(&imported));
+        assert_eq!(
+            evaluated[0].get(&CellRef::parse("B2").unwrap()),
+            Some(&Value::Number(100.0))
         );
     }
 
