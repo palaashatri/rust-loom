@@ -1,6 +1,6 @@
 //! Loom Photo desktop application.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -676,6 +676,8 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 
 struct GuiState {
     session: RefCell<PhotoSession>,
+    last_saved: RefCell<Vec<u8>>,
+    pending_replacement: Cell<Option<PendingReplacement>>,
     save_path: RefCell<Option<PathBuf>>,
     dialogs: Rc<dyn FileDialogService>,
     project_filter: FileFilter,
@@ -683,6 +685,17 @@ struct GuiState {
     png_filter: FileFilter,
     jpeg_filter: FileFilter,
     menu_service: Option<Rc<NativeMenuBar>>,
+}
+
+#[derive(Clone, Copy)]
+enum PendingReplacement {
+    New,
+    Open,
+}
+
+fn photo_is_dirty(state: &GuiState) -> bool {
+    let current = save_photo_canvas(&state.session.borrow().canvas).ok();
+    current.as_deref() != Some(state.last_saved.borrow().as_slice())
 }
 
 fn build_photo_menu_bar(app: &PhotoApp) -> MenuBar {
@@ -863,6 +876,8 @@ fn new_gui_state(
     dialogs: Rc<dyn FileDialogService>,
 ) -> Result<GuiState, String> {
     Ok(GuiState {
+        last_saved: RefCell::new(save_photo_canvas(&session.canvas)?),
+        pending_replacement: Cell::new(None),
         session: RefCell::new(session),
         save_path: RefCell::new(save_path),
         dialogs,
@@ -965,6 +980,7 @@ fn save_current_project(
     loom_storage::atomic_write(&path, &bytes)
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
+    *state.last_saved.borrow_mut() = bytes.clone();
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
         Err(error) => set_status(
@@ -976,6 +992,45 @@ fn save_current_project(
         ),
     }
     Ok(true)
+}
+
+/// Replace the live project with a new blank canvas after the caller has
+/// already handled any dirty-work decision.
+fn replace_with_blank_project(app: &PhotoApp, state: &GuiState) -> Result<(), String> {
+    let canvas = blank_canvas()?;
+    let clean_snapshot = save_photo_canvas(&canvas)?;
+    *state.session.borrow_mut() = PhotoSession::new(canvas);
+    *state.save_path.borrow_mut() = None;
+    *state.last_saved.borrow_mut() = clean_snapshot;
+    refresh_photo_with_state(app, state)?;
+    set_status(app, "Created unsaved photo project");
+    Ok(())
+}
+
+/// Open and validate a candidate project before swapping it into the live
+/// session. A cancelled chooser or invalid file leaves the current project
+/// untouched.
+fn open_project_from_picker(app: &PhotoApp, state: &GuiState) {
+    match state.dialogs.open_file(&open_project_request(state)) {
+        Ok(Some(path)) => match load_project(&path) {
+            Ok(canvas) => match save_photo_canvas(&canvas) {
+                Ok(clean_snapshot) => {
+                    *state.session.borrow_mut() = PhotoSession::new(canvas);
+                    *state.save_path.borrow_mut() = Some(path.clone());
+                    *state.last_saved.borrow_mut() = clean_snapshot;
+                    if let Err(error) = refresh_photo_with_state(app, state) {
+                        set_status(app, format!("Open preview failed: {error}"));
+                    } else {
+                        set_status(app, format!("Opened {}", path.display()));
+                    }
+                }
+                Err(error) => set_status(app, format!("Open failed: {error}")),
+            },
+            Err(error) => set_status(app, format!("Open failed: {error}")),
+        },
+        Ok(None) => set_status(app, "Open cancelled"),
+        Err(error) => set_status(app, format!("Open dialog failed: {error}")),
+    }
 }
 
 fn export_current_image(
@@ -1993,17 +2048,14 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_new_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                match blank_canvas() {
-                    Ok(canvas) => {
-                        *state.session.borrow_mut() = PhotoSession::new(canvas);
-                        *state.save_path.borrow_mut() = None;
-                        if let Err(error) = refresh_photo_with_state(&app, &state) {
-                            set_status(&app, format!("New project failed: {error}"));
-                        } else {
-                            set_status(&app, "Created unsaved photo project");
-                        }
-                    }
-                    Err(error) => set_status(&app, format!("New project failed: {error}")),
+                if photo_is_dirty(&state) {
+                    state.pending_replacement.set(Some(PendingReplacement::New));
+                    app.set_save_changes_document(SharedString::from("Untitled Photo"));
+                    app.set_save_changes_open(true);
+                    return;
+                }
+                if let Err(error) = replace_with_blank_project(&app, &state) {
+                    set_status(&app, format!("New project failed: {error}"));
                 }
             }
         });
@@ -2014,26 +2066,80 @@ fn main() -> Result<(), String> {
         let app_ref = app.as_weak();
         app.on_open_project(move || {
             if let Some(app) = app_ref.upgrade() {
-                match state.dialogs.open_file(&open_project_request(&state)) {
-                    Ok(Some(path)) => match load_project(&path) {
-                        Ok(canvas) => {
-                            *state.session.borrow_mut() = PhotoSession::new(canvas);
-                            *state.save_path.borrow_mut() = Some(path.clone());
-                            if let Err(error) = refresh_photo_with_state(&app, &state) {
-                                set_status(&app, format!("Open preview failed: {error}"));
-                            } else {
-                                set_status(&app, format!("Opened {}", path.display()));
-                            }
-                        }
-                        Err(error) => set_status(&app, format!("Open failed: {error}")),
-                    },
-                    Ok(None) => set_status(&app, "Open cancelled"),
-                    Err(error) => set_status(&app, format!("Open dialog failed: {error}")),
+                if photo_is_dirty(&state) {
+                    state
+                        .pending_replacement
+                        .set(Some(PendingReplacement::Open));
+                    app.set_save_changes_document(SharedString::from("current photo"));
+                    app.set_save_changes_open(true);
+                    return;
                 }
+                open_project_from_picker(&app, &state);
             }
         });
     }
 
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_cancel(move || {
+            if let Some(app) = app_ref.upgrade() {
+                state.pending_replacement.set(None);
+                app.set_save_changes_open(false);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_discard(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let pending = state.pending_replacement.take();
+                app.set_save_changes_open(false);
+                match pending {
+                    Some(PendingReplacement::New) => {
+                        if let Err(error) = replace_with_blank_project(&app, &state) {
+                            set_status(&app, format!("New project failed: {error}"));
+                        }
+                    }
+                    Some(PendingReplacement::Open) => open_project_from_picker(&app, &state),
+                    None => {}
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_save(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let pending = state.pending_replacement.take();
+                match save_current_project(&app, &state, false) {
+                    Ok(true) => {
+                        app.set_save_changes_open(false);
+                        match pending {
+                            Some(PendingReplacement::New) => {
+                                if let Err(error) = replace_with_blank_project(&app, &state) {
+                                    set_status(&app, format!("New project failed: {error}"));
+                                }
+                            }
+                            Some(PendingReplacement::Open) => {
+                                open_project_from_picker(&app, &state)
+                            }
+                            None => {}
+                        }
+                    }
+                    Ok(false) => {
+                        state.pending_replacement.set(pending);
+                    }
+                    Err(error) => {
+                        state.pending_replacement.set(pending);
+                        set_status(&app, format!("Save failed: {error}"));
+                    }
+                }
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2296,6 +2402,6 @@ fn wire_palette(app: &PhotoApp) {
 }
 
 #[cfg(test)]
-mod desktop_tests;
-#[cfg(test)]
 mod audit_tests;
+#[cfg(test)]
+mod desktop_tests;

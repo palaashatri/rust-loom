@@ -3,6 +3,7 @@ import { Theme, ResponsivePolicy } from "theme.slint";
 import { PhotoActionToolbar } from "toolbar.slint";
 import { PhotoInspector } from "inspector.slint";
 import { PhotoCanvas, PhotoStatusBar, PhotoToolbarOverflow } from "photo_components.slint";
+import { LoomButton } from "foundation.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 
@@ -122,6 +123,11 @@ export component PhotoApp inherits Window {
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
+    in-out property <bool> save-changes-open: false;
+    in-out property <string> save-changes-document: "";
+    callback save-changes-cancel;
+    callback save-changes-discard;
+    callback save-changes-save;
     in-out property <string> palette-query: "";
     in-out property <int> palette-selected: 0;
     callback palette-invoked(int);
@@ -139,7 +145,7 @@ export component PhotoApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open) { return reject; }
+            if (root.palette-open || root.save-changes-open) { return reject; }
             if ((event.modifiers.control || event.modifiers.meta) && (event.text == Key.K || event.text == "k")) {
                 root.open-palette();
                 return accept;
@@ -330,6 +336,37 @@ export component PhotoApp inherits Window {
                 status-left: root.status-left;
                 status-right: root.status-right;
             }
+        }
+    }
+
+    if root.save-changes-open : Rectangle {
+        width: root.width; height: root.height; background: #00000066;
+        TouchArea { clicked => { save-changes-focus.focus(); } }
+        Rectangle {
+            width: min(440px, root.width - 48px); height: 220px;
+            x: (root.width - self.width) / 2; y: (root.height - self.height) / 2;
+            border-radius: Theme.tokens.metrics.radius-large; border-width: 1px;
+            border-color: Theme.palette().border; background: Theme.palette().surface;
+            VerticalLayout { spacing: Theme.tokens.space.md; padding: Theme.tokens.space.xl;
+                Text { text: "Save changes?"; font-size: Theme.tokens.typography.heading; font-weight: 700; color: Theme.palette().ink; }
+                Text { text: "Save changes to " + root.save-changes-document + " before replacing it?"; color: Theme.palette().ink-secondary; wrap: word-wrap; vertical-stretch: 1; }
+                HorizontalLayout { spacing: Theme.tokens.space.sm; alignment: end;
+                    LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
+                    LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
+                    LoomButton { label: "Save"; variant: "primary"; clicked => { root.save-changes-save(); } }
+                }
+            }
+        }
+    }
+    save-changes-focus := FocusScope {
+        enabled: root.save-changes-open;
+        key-pressed(event) => { if (event.text == Key.Escape) { root.save-changes-cancel(); return accept; } return reject; }
+    }
+    changed save-changes-open => {
+        if (root.save-changes-open) {
+            root.palette-open = false;
+            root.toolbar-overflow-open = false;
+            save-changes-focus.focus();
         }
     }
 

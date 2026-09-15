@@ -11,7 +11,9 @@ fn create_audit_state() -> GuiState {
             source.set_pixel(x, y, [(x * 20) as u8, (y * 20) as u8, 128, 255]);
         }
     }
-    canvas.set_layer_image("layer-bg", source).expect("set source image");
+    canvas
+        .set_layer_image("layer-bg", source)
+        .expect("set source image");
     new_gui_state(
         PhotoSession::new(canvas),
         None,
@@ -112,9 +114,7 @@ fn test_deep_audit_blend_modes_opacity_and_adjustments() {
 
     // Undo should restore previous values
     assert!(state.session.borrow_mut().undo());
-    assert!(
-        (state.session.borrow().canvas.document.layers[1].adjustment_value).abs() < 0.001
-    );
+    assert!((state.session.borrow().canvas.document.layers[1].adjustment_value).abs() < 0.001);
 }
 
 #[test]
@@ -134,7 +134,11 @@ fn test_deep_audit_transforms_crops_and_selection() {
     assert_ne!(transform, AffineTransform2D::identity());
 
     // Selection & canvas crop
-    state.session.borrow_mut().set_selection(Some(Rect::new(2.0, 2.0, 6.0, 6.0))).expect("set selection");
+    state
+        .session
+        .borrow_mut()
+        .set_selection(Some(Rect::new(2.0, 2.0, 6.0, 6.0)))
+        .expect("set selection");
     refresh_photo_with_state(&app, &state).expect("refresh selection");
     assert!(app.get_has_selection());
 
@@ -163,7 +167,10 @@ fn test_deep_audit_persistence_and_export_roundtrip() {
     assert_eq!(loaded_canvas.document.name, canvas.document.name);
     assert_eq!(loaded_canvas.document.width, canvas.document.width);
     assert_eq!(loaded_canvas.document.height, canvas.document.height);
-    assert_eq!(loaded_canvas.document.layers.len(), canvas.document.layers.len());
+    assert_eq!(
+        loaded_canvas.document.layers.len(),
+        canvas.document.layers.len()
+    );
 
     // Composite and export
     let composite = canvas.composite().expect("composite image");
@@ -183,16 +190,28 @@ fn test_deep_audit_macos_global_menu_bar_command_projection() {
     configure_responsive_layout(&app, (1280, 800));
     let state = create_audit_state();
     let menu = NativeMenuBar::new();
-    menu.install_menu_bar(&build_photo_menu_bar(&app)).expect("install menu bar");
+    menu.install_menu_bar(&build_photo_menu_bar(&app))
+        .expect("install menu bar");
     sync_menu_state(&menu, &app, &state);
 
     let installed = menu.installed_menu_bar().expect("get installed menu");
     let required_commands = [
-        "file.new", "file.open", "file.save", "file.save_as",
-        "file.import_image", "file.export_png", "file.export_jpeg",
-        "edit.undo", "edit.redo",
-        "layer.new", "layer.adjustment", "layer.delete", "layer.move_up", "layer.move_down",
-        "view.inspector", "app.palette",
+        "file.new",
+        "file.open",
+        "file.save",
+        "file.save_as",
+        "file.import_image",
+        "file.export_png",
+        "file.export_jpeg",
+        "edit.undo",
+        "edit.redo",
+        "layer.new",
+        "layer.adjustment",
+        "layer.delete",
+        "layer.move_up",
+        "layer.move_down",
+        "view.inspector",
+        "app.palette",
     ];
 
     for command in required_commands {

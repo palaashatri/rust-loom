@@ -319,9 +319,7 @@ fn photo_edit_callbacks_mutate_selection_transform_crop_and_adjustment() {
     );
 
     assert!(state.session.borrow_mut().undo());
-    assert!(
-        adjustment_value(&state.session.borrow().canvas.document, "brightness").abs() < 0.001
-    );
+    assert!(adjustment_value(&state.session.borrow().canvas.document, "brightness").abs() < 0.001);
     let bytes = save_photo_canvas(&state.session.borrow().canvas).expect("save edits");
     let reopened = load_photo_canvas(&bytes).expect("reopen edits");
     assert_eq!(
