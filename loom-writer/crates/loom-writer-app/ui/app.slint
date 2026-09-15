@@ -1,5 +1,6 @@
 import { TemplateChooserModal } from "template_chooser.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
@@ -27,7 +28,9 @@ export component WriterApp inherits Window {
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
-    property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
+    // The compact toolbar still exposes Format. Keep the panel available at
+    // every width so the button always does something when activated.
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
     callback window-resized(length);
     changed rtl => {
         Theme.rtl = root.rtl;
@@ -55,6 +58,9 @@ export component WriterApp inherits Window {
     in-out property <length> page-stack-height: 842px;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
+    in-out property <bool> document-dirty: false;
+    in-out property <bool> save-changes-open: false;
+    in-out property <string> save-changes-document: "";
 
     in-out property <bool> is-bold: false;
     in-out property <bool> is-italic: false;
@@ -121,6 +127,9 @@ export component WriterApp inherits Window {
     callback toggle-inspector;
     callback create-template(int);
     callback cancel-template;
+    callback save-changes-save;
+    callback save-changes-discard;
+    callback save-changes-cancel;
 
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
@@ -172,7 +181,7 @@ export component WriterApp inherits Window {
     }
 
     template-chooser-focus := FocusScope {
-        enabled: root.template-chooser-open;
+        enabled: root.template-chooser-open && !root.save-changes-open;
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.cancel-template();
@@ -194,6 +203,25 @@ export component WriterApp inherits Window {
         }
     }
 
+    save-changes-focus := FocusScope {
+        enabled: root.save-changes-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.save-changes-cancel();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    changed save-changes-open => {
+        if (root.save-changes-open) {
+            save-changes-focus.focus();
+        } else if (!root.template-chooser-open) {
+            app-focus.focus();
+        }
+    }
+
     changed palette-open => {
         if (!root.palette-open) {
             app-focus.focus();
@@ -202,7 +230,7 @@ export component WriterApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open) { return reject; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -418,6 +446,67 @@ export component WriterApp inherits Window {
         template-category <=> root.template-category;
         cancel-template => { root.cancel-template(); }
         create-template(idx) => { root.create-template(idx); }
+    }
+
+    if root.save-changes-open : Rectangle {
+        width: root.width;
+        height: root.height;
+        background: #00000066;
+
+        // This full-window hit target keeps clicks from reaching the editor.
+        TouchArea { clicked => { save-changes-focus.focus(); } }
+
+        Rectangle {
+            width: min(440px, root.width - 48px);
+            height: 220px;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: Theme.tokens.metrics.radius-large;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            background: Theme.palette().surface;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.palette().shadow;
+
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                padding: Theme.tokens.space.xl;
+
+                Text {
+                    text: "Save changes?";
+                    font-size: Theme.tokens.typography.heading;
+                    font-weight: 700;
+                    color: Theme.palette().ink;
+                }
+                Text {
+                    text: "Save changes to \"" + root.save-changes-document + "\" before replacing it?";
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink-secondary;
+                    wrap: word-wrap;
+                    vertical-stretch: 1;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    alignment: end;
+                    LoomButton {
+                        label: "Cancel";
+                        variant: "secondary";
+                        clicked => { root.save-changes-cancel(); }
+                    }
+                    LoomButton {
+                        label: "Discard";
+                        variant: "danger";
+                        clicked => { root.save-changes-discard(); }
+                    }
+                    LoomButton {
+                        label: "Save";
+                        variant: "primary";
+                        clicked => { root.save-changes-save(); }
+                    }
+                }
+            }
+        }
     }
 
     palette := CommandPalette {

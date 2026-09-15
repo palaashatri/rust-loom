@@ -12,11 +12,13 @@ fn test_state(
 ) -> (WriterApp, Rc<GuiState>) {
     set_platform();
     let app = WriterApp::new().expect("create WriterApp");
+    let saved_document = document.clone();
     let mut registry = build_writer_registry();
     let history = EditorHistory::new();
     sync_writer_registry_enablement(&mut registry, &document, &history);
     let state = Rc::new(GuiState {
         current: RefCell::new(document),
+        last_saved: RefCell::new(saved_document),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
@@ -24,6 +26,7 @@ fn test_state(
         history: RefCell::new(history),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
+        pending_replacement: Cell::new(None),
         dialogs,
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("document filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("PDF filter"),
@@ -115,8 +118,10 @@ fn scripted_dialog_request_uses_the_current_document_directory() {
         [Some(PathBuf::from("/tmp/next.loomdoc"))],
         [Some(PathBuf::from("/tmp/saved.loomdoc"))],
     ));
+    let document = text_document("hello");
     let state = GuiState {
-        current: RefCell::new(text_document("hello")),
+        current: RefCell::new(document.clone()),
+        last_saved: RefCell::new(document),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
@@ -124,6 +129,7 @@ fn scripted_dialog_request_uses_the_current_document_directory() {
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
+        pending_replacement: Cell::new(None),
         dialogs,
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
@@ -714,8 +720,10 @@ fn writer_inspector_menu_check_tracks_live_window_state() {
     set_platform();
     let app = WriterApp::new().expect("create WriterApp");
     let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let document = text_document("menu state");
     let state = GuiState {
-        current: RefCell::new(text_document("menu state")),
+        current: RefCell::new(document.clone()),
+        last_saved: RefCell::new(document),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
@@ -723,6 +731,7 @@ fn writer_inspector_menu_check_tracks_live_window_state() {
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
+        pending_replacement: Cell::new(None),
         dialogs,
         document_filter: FileFilter::new("Writer", ["loomdoc"]).expect("filter"),
         pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),

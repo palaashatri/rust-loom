@@ -34,9 +34,8 @@ use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{
-    Text,
     floor_grapheme_boundary, grapheme_boundaries, grapheme_count, PageStyle, PageViewport,
-    RichBlock, TextSelection, WriterDocument,
+    RichBlock, Text, TextSelection, WriterDocument,
 };
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
@@ -156,18 +155,22 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TemplateId {
     Blank,
+    BlankBlack,
     Report,
     Letter,
     Cv,
+    Newsletter,
 }
 
 impl TemplateId {
     fn as_str(self) -> &'static str {
         match self {
             Self::Blank => "blank",
+            Self::BlankBlack => "blank-black",
             Self::Report => "report",
             Self::Letter => "letter",
             Self::Cv => "cv",
+            Self::Newsletter => "newsletter",
         }
     }
 }
@@ -175,9 +178,11 @@ impl TemplateId {
 fn parse_template_id(value: &str) -> Option<TemplateId> {
     match value {
         "blank" => Some(TemplateId::Blank),
+        "blank-black" => Some(TemplateId::BlankBlack),
         "report" => Some(TemplateId::Report),
         "letter" => Some(TemplateId::Letter),
         "cv" => Some(TemplateId::Cv),
+        "newsletter" => Some(TemplateId::Newsletter),
         _ => None,
     }
 }
@@ -186,15 +191,16 @@ fn template_document(template: TemplateId) -> WriterDocument {
     let (id, title) = (
         format!("template-{}", template.as_str()),
         match template {
-            TemplateId::Blank => "Untitled Document",
+            TemplateId::Blank | TemplateId::BlankBlack => "Untitled Document",
             TemplateId::Report => "Untitled Report",
             TemplateId::Letter => "Untitled Letter",
             TemplateId::Cv => "Untitled CV",
+            TemplateId::Newsletter => "Untitled Newsletter",
         },
     );
     let mut document = WriterDocument::new(id, title);
     match template {
-        TemplateId::Blank => {}
+        TemplateId::Blank | TemplateId::BlankBlack => {}
         TemplateId::Report => {
             document.push(RichBlock::new(
                 document.next_id(),
@@ -250,6 +256,30 @@ fn template_document(template: TemplateId) -> WriterDocument {
                 document.next_id(),
                 "paragraph",
                 "Degree — Institution",
+            ));
+        }
+        TemplateId::Newsletter => {
+            document.push(RichBlock::new(
+                document.next_id(),
+                "heading1",
+                "Newsletter title",
+            ));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "A short introduction for your readers.",
+            ));
+            document.push(RichBlock::new(document.next_id(), "heading2", "Story one"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Write the first newsletter story here.",
+            ));
+            document.push(RichBlock::new(document.next_id(), "heading2", "Story two"));
+            document.push(RichBlock::new(
+                document.next_id(),
+                "paragraph",
+                "Add another useful update for your readers.",
             ));
         }
     }
@@ -1163,6 +1193,9 @@ impl EditorHistory {
 /// enablement guard and palette filtering goes through `registry.search`.
 struct GuiState {
     current: RefCell<WriterDocument>,
+    /// Last successfully saved document content. Selection changes are not
+    /// considered dirty because they do not change user-authored content.
+    last_saved: RefCell<WriterDocument>,
     viewport: RefCell<PageViewport>,
     pointer_anchor: Cell<Option<usize>>,
     pointer_active: Cell<bool>,
@@ -1170,10 +1203,33 @@ struct GuiState {
     history: RefCell<EditorHistory>,
     history_clock: Instant,
     syncing_editor: Cell<bool>,
+    pending_replacement: Cell<Option<PendingReplacement>>,
     dialogs: Rc<dyn FileDialogService>,
     document_filter: FileFilter,
     pdf_filter: FileFilter,
     registry: Arc<Mutex<CommandRegistry>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingReplacement {
+    NewDocument,
+    OpenDocument,
+}
+
+fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool {
+    let mut left = left.clone();
+    let mut right = right.clone();
+    // Selection is view state persisted for convenience, but moving a caret
+    // must not turn a clean document into a dirty one.
+    left.set_selection(TextSelection::caret(0));
+    right.set_selection(TextSelection::caret(0));
+    left.to_content_json() == right.to_content_json()
+}
+
+fn document_is_dirty(state: &GuiState) -> bool {
+    let current = state.current.borrow();
+    let saved = state.last_saved.borrow();
+    !document_content_equal(&current, &saved)
 }
 
 const MIN_PAGE_ZOOM: f32 = 0.5;
@@ -1240,6 +1296,7 @@ fn replace_opened_document(
     path: PathBuf,
     document: WriterDocument,
 ) {
+    *state.last_saved.borrow_mut() = document.clone();
     *state.current.borrow_mut() = document;
     *state.save_path.borrow_mut() = Some(path);
     *state.history.borrow_mut() = EditorHistory::new();
@@ -1267,11 +1324,13 @@ fn save_current_document(
         app.set_status_left("Save cancelled".into());
         return Ok(false);
     };
-    save_file(&path, &state.current.borrow())?;
+    let document = state.current.borrow().clone();
+    save_file(&path, &document)?;
     *state.save_path.borrow_mut() = Some(path.clone());
-    if let Ok(bytes) = loom_writer_core::save_document(&state.current.borrow()) {
+    if let Ok(bytes) = loom_writer_core::save_document(&document) {
         let _ = checkpoint_snapshot_recovery(bytes);
     }
+    *state.last_saved.borrow_mut() = document;
     app.set_status_left(SharedString::from(format!("Saved {}", path.display())));
     Ok(true)
 }
@@ -2004,6 +2063,7 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
         let _ = record_snapshot_recovery("writer state", bytes);
     }
     drop(current);
+    app.set_document_dirty(document_is_dirty(state));
     app.set_page_zoom(viewport.zoom);
     app.set_page_scroll_x(viewport.scroll_x);
     app.set_page_scroll_y(viewport.scroll_y);
@@ -2150,13 +2210,10 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     if !state.overflow {
         app.set_toolbar_overflow_open(false);
     }
-    // The inspector is optional chrome. Keep the page dominant at compact
-    // widths and allow it to be opened only once the contract's minimum
-    // primary-surface share can be preserved.
-    app.set_inspector_available(!state.icon_only);
-    if state.icon_only {
-        app.set_show_inspector(false);
-    }
+    // Format remains available in the compact toolbar. The panel can be
+    // opened after the user asks for it instead of silently disabling the
+    // only route to formatting controls at narrow widths.
+    app.set_inspector_available(true);
 }
 
 #[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
@@ -2195,8 +2252,7 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
                 .rev()
                 .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
             {
-                let mut table =
-                    loom_writer_core::parse_table_markdown(block.text.as_str());
+                let mut table = loom_writer_core::parse_table_markdown(block.text.as_str());
                 let sample = [
                     ["Region", "Sessions", "Change"],
                     ["North", "1,204", "+8.1%"],
@@ -2256,6 +2312,66 @@ fn sync_writer_menu_if_present(
     }
 }
 
+fn begin_new_document(app: &WriterApp) {
+    // Opening the chooser is safe: it does not replace the current document.
+    // Replacement happens only after the user presses Create Document.
+    app.set_template_selected(0);
+    app.set_template_category(0);
+    app.set_template_chooser_open(true);
+    app.set_status_left("Choose a document template".into());
+}
+
+fn open_document_from_picker(
+    app: &WriterApp,
+    state: &GuiState,
+    menu_service: &Option<Arc<NativeMenuBar>>,
+) {
+    match state.dialogs.open_file(&writer_open_request(state)) {
+        Ok(Some(path)) => match load_file(&path) {
+            Ok(document) => {
+                replace_opened_document(app, state, path.clone(), document);
+                sync_writer_menu_if_present(menu_service, app, state);
+                app.set_status_left(SharedString::from(format!("Opened {}", path.display())));
+            }
+            Err(error) => app.set_status_left(SharedString::from(format!("Open failed: {error}"))),
+        },
+        Ok(None) => app.set_status_left("Open cancelled".into()),
+        Err(error) => {
+            app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
+        }
+    }
+}
+
+fn request_document_replacement(
+    app: &WriterApp,
+    state: &GuiState,
+    operation: PendingReplacement,
+) -> bool {
+    if !document_is_dirty(state) {
+        return false;
+    }
+    state.pending_replacement.set(Some(operation));
+    let title = state.current.borrow().title.clone();
+    app.set_save_changes_document(SharedString::from(title));
+    app.set_save_changes_open(true);
+    app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
+    true
+}
+
+fn continue_pending_replacement(
+    app: &WriterApp,
+    state: &GuiState,
+    menu_service: &Arc<NativeMenuBar>,
+) {
+    match state.pending_replacement.take() {
+        Some(PendingReplacement::NewDocument) => begin_new_document(app),
+        Some(PendingReplacement::OpenDocument) => {
+            open_document_from_picker(app, state, &Some(menu_service.clone()))
+        }
+        None => {}
+    }
+}
+
 /// Register callbacks shared by the native GUI and deterministic journey.
 /// `menu_service` is optional so headless runs exercise the exact same
 /// document, history, selection, and file-operation paths without requiring a
@@ -2282,25 +2398,10 @@ fn wire_writer_shared_callbacks(
                 if guard.is_err() {
                     return;
                 }
-                match state.dialogs.open_file(&writer_open_request(&state)) {
-                    Ok(Some(path)) => match load_file(&path) {
-                        Ok(document) => {
-                            replace_opened_document(&app, &state, path.clone(), document);
-                            sync_writer_menu_if_present(&menu_service, &app, &state);
-                            app.set_status_left(SharedString::from(format!(
-                                "Opened {}",
-                                path.display()
-                            )));
-                        }
-                        Err(error) => {
-                            app.set_status_left(SharedString::from(format!("Open failed: {error}")))
-                        }
-                    },
-                    Ok(None) => app.set_status_left("Open cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Open dialog failed: {error}"
-                    ))),
+                if request_document_replacement(&app, &state, PendingReplacement::OpenDocument) {
+                    return;
                 }
+                open_document_from_picker(&app, &state, &menu_service);
             }
         });
     }
@@ -3031,8 +3132,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
 
+    // Every interactive editing session owns a recovery slot, including a
+    // document opened from the command line.  Opening a requested file only
+    // changes which document wins; it must never disable the safety net.
+    let recovered_payload = initialize_snapshot_recovery()?;
     let recovered = if args.open.is_none() {
-        take_snapshot_recovery().and_then(|payload| loom_writer_core::load_document(&payload).ok())
+        recovered_payload.and_then(|payload| loom_writer_core::load_document(&payload).ok())
     } else {
         None
     };
@@ -3061,8 +3166,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             &provisional_history,
         );
     }
+    let initial_saved_document = initial_document.clone();
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
+        last_saved: RefCell::new(initial_saved_document),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
@@ -3070,6 +3177,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         history: RefCell::new(EditorHistory::new()),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
+        pending_replacement: Cell::new(None),
         dialogs,
         document_filter,
         pdf_filter,
@@ -3262,12 +3370,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 if guard.is_err() {
                     return;
                 }
-                // Opening New must not mutate the current document until the
-                // user confirms a real template seed in the chooser.
-                app.set_template_selected(0);
-                app.set_template_category(0);
-                app.set_template_chooser_open(true);
-                app.set_status_left("Choose a document template".into());
+                if request_document_replacement(&app, &state, PendingReplacement::NewDocument) {
+                    return;
+                }
+                begin_new_document(&app);
             }
         });
     }
@@ -3290,16 +3396,20 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     return;
                 }
                 let template = match index {
-                    1 => TemplateId::Report,
-                    2 => TemplateId::Letter,
-                    3 => TemplateId::Cv,
+                    1 => TemplateId::BlankBlack,
+                    2 => TemplateId::Report,
+                    3 => TemplateId::Letter,
+                    4 => TemplateId::Cv,
+                    5 => TemplateId::Newsletter,
                     _ => TemplateId::Blank,
                 };
-                *state.current.borrow_mut() = if template == TemplateId::Blank {
+                let next = if matches!(template, TemplateId::Blank | TemplateId::BlankBlack) {
                     blank_document()
                 } else {
                     template_document(template)
                 };
+                *state.last_saved.borrow_mut() = next.clone();
+                *state.current.borrow_mut() = next;
                 *state.save_path.borrow_mut() = None;
                 *state.history.borrow_mut() = EditorHistory::new();
                 app.set_template_chooser_open(false);
@@ -3309,9 +3419,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                     "Created {} document",
                     match template {
                         TemplateId::Blank => "blank",
+                        TemplateId::BlankBlack => "blank black",
                         TemplateId::Report => "report",
                         TemplateId::Letter => "letter",
                         TemplateId::Cv => "CV",
+                        TemplateId::Newsletter => "newsletter",
                     }
                 )));
             }
@@ -3333,6 +3445,46 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 app.set_template_chooser_open(false);
                 app.set_status_left("New document cancelled".into());
             }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_save_changes_save(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            match save_current_document(&app, &state, false) {
+                Ok(true) => {
+                    app.set_save_changes_open(false);
+                    continue_pending_replacement(&app, &state, &menu_service);
+                }
+                Ok(false) => {
+                    app.set_status_left("Save cancelled; changes kept".into());
+                }
+                Err(error) => {
+                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_save_changes_discard(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            app.set_save_changes_open(false);
+            continue_pending_replacement(&app, &state, &menu_service);
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_cancel(move || {
+            let Some(app) = app_ref.upgrade() else { return };
+            state.pending_replacement.set(None);
+            app.set_save_changes_open(false);
+            app.set_status_left("Changes kept; replacement cancelled".into());
         });
     }
     {
@@ -3658,6 +3810,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     sync_writer_registry_enablement(&mut initial_registry, &initial_document, &initial_history);
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document.clone()),
+        last_saved: RefCell::new(initial_document.clone()),
         viewport: RefCell::new(PageViewport::default()),
         pointer_anchor: Cell::new(None),
         pointer_active: Cell::new(false),
@@ -3665,6 +3818,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         history: RefCell::new(initial_history),
         history_clock: Instant::now(),
         syncing_editor: Cell::new(false),
+        pending_replacement: Cell::new(None),
         dialogs,
         document_filter: FileFilter::new("Writer", ["loomdoc"])
             .map_err(|error| error.to_string())?,
