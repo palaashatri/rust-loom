@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod output_publish;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum JobStatus {
     Queued,
@@ -2076,7 +2078,7 @@ where
     execute_job_with_cancel(job, plan, duration_secs, &cancel, on_progress)
 }
 
-static NEXT_EXEC_TEMP: AtomicU64 = AtomicU64::new(0);
+pub(crate) static NEXT_EXEC_TEMP: AtomicU64 = AtomicU64::new(0);
 
 fn encode_temp_path(output: &Path) -> PathBuf {
     let parent = output
@@ -2136,40 +2138,6 @@ impl Drop for TemporaryEncodeOutput {
             let _ = std::fs::remove_file(&self.path);
         }
     }
-}
-
-fn commit_encode_output(
-    temporary: &Path,
-    output: &Path,
-    overwrite: bool,
-) -> Result<(), EncodeError> {
-    let backup = if overwrite && output.exists() {
-        let nonce = NEXT_EXEC_TEMP.fetch_add(1, Ordering::Relaxed);
-        Some(output.with_file_name(format!(
-            ".{}.loom-encode-backup-{}",
-            output
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("output"),
-            nonce
-        )))
-    } else {
-        None
-    };
-    if let Some(backup) = backup.as_deref() {
-        let _ = std::fs::remove_file(backup);
-        std::fs::rename(output, backup).map_err(EncodeError::Io)?;
-    }
-    if let Err(error) = std::fs::rename(temporary, output) {
-        if let Some(backup) = backup.as_deref() {
-            let _ = std::fs::rename(backup, output);
-        }
-        return Err(EncodeError::Io(error));
-    }
-    if let Some(backup) = backup {
-        let _ = std::fs::remove_file(backup);
-    }
-    Ok(())
 }
 
 /// Executes one job with a cooperative cancellation signal.
@@ -2383,7 +2351,9 @@ where
             job.status = JobStatus::Failed(error.to_string());
             return Err(error);
         }
-        if let Err(error) = commit_encode_output(&temporary, &plan.output, overwrite) {
+        if let Err(error) =
+            output_publish::commit_encode_output(&temporary, &plan.output, overwrite)
+        {
             job.status = JobStatus::Failed(error.to_string());
             return Err(error);
         }

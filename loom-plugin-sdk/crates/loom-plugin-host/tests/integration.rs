@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use loom_plugin_host::{check_permission, HostError, InstalledPlugin, PluginStore};
+use loom_plugin_host::{check_permission, write_file, HostError, InstalledPlugin, PluginStore};
 use loom_plugin_manifest::{parse_manifest, Capability};
 use sha2::{Digest, Sha256};
 
@@ -455,6 +455,66 @@ fn check_permission_create_mode_satisfies_write() {
 
     let read_target = tmp.path().join("demo-actions@0.1.0/outbox/new.txt");
     assert!(check_permission(&installed, &Capability::ReadFile, Some(&read_target)).is_err());
+}
+
+#[test]
+fn write_file_stays_inside_granted_directory() {
+    let tmp = TempDir::new("write");
+    let store = PluginStore::open(tmp.path()).unwrap();
+    let json = manifest_json()
+        .replace(
+            r#""capabilities": ["read-file", "http-request"]"#,
+            r#""capabilities": ["write-file"]"#,
+        )
+        .replace(
+            r#"{ "resource": "file", "mode": "read", "path_prefix": "assets" }"#,
+            r#"{ "resource": "file", "mode": "write", "path_prefix": "outbox" }"#,
+        );
+    let installed = store
+        .install_zip(&make_zip(&[
+            ("manifest.json", json.as_bytes()),
+            ("module.wasm", MINIMAL_WASM),
+        ]))
+        .unwrap();
+    let outbox = installed.install_dir.join("outbox");
+    fs::create_dir_all(&outbox).unwrap();
+    let target = outbox.join("result.txt");
+    write_file(&installed, &target, b"plugin output").unwrap();
+    assert_eq!(fs::read(&target).unwrap(), b"plugin output");
+}
+
+#[cfg(unix)]
+#[test]
+fn write_file_rejects_symlinked_parent_and_preserves_outside() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = TempDir::new("write-symlink");
+    let store = PluginStore::open(tmp.path()).unwrap();
+    let json = manifest_json()
+        .replace(
+            r#""capabilities": ["read-file", "http-request"]"#,
+            r#""capabilities": ["write-file"]"#,
+        )
+        .replace(
+            r#"{ "resource": "file", "mode": "read", "path_prefix": "assets" }"#,
+            r#"{ "resource": "file", "mode": "write", "path_prefix": "allowed" }"#,
+        );
+    let installed = store
+        .install_zip(&make_zip(&[
+            ("manifest.json", json.as_bytes()),
+            ("module.wasm", MINIMAL_WASM),
+        ]))
+        .unwrap();
+    let allowed = installed.install_dir.join("allowed");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&allowed).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, allowed.join("linked")).unwrap();
+
+    let target = allowed.join("linked/new.txt");
+    let error = write_file(&installed, &target, b"must not escape").unwrap_err();
+    assert!(matches!(error, HostError::Denied(_)), "got {error:?}");
+    assert!(!outside.join("new.txt").exists());
 }
 
 #[test]

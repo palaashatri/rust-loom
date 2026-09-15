@@ -456,7 +456,13 @@ pub fn check_permission(
     };
     let resource = capability_resource(requested);
     let mode = capability_mode(requested);
-    let requested_path = canonicalize_or_normalize(path);
+    let requested_path = requested_path(plugin, path);
+    let requested_path = canonicalize_or_normalize(&requested_path).map_err(|error| {
+        HostError::Denied(format!(
+            "cannot resolve requested path {}: {error}",
+            requested_path.display()
+        ))
+    })?;
     for permission in &plugin.manifest.permissions {
         if !permission.resource.eq_ignore_ascii_case(resource) {
             continue;
@@ -473,7 +479,12 @@ pub fn check_permission(
         } else {
             plugin.install_dir.join(prefix_path)
         };
-        let prefix = canonicalize_or_normalize(&resolved);
+        let prefix = canonicalize_or_normalize(&resolved).map_err(|error| {
+            HostError::Denied(format!(
+                "cannot resolve permission root {}: {error}",
+                resolved.display()
+            ))
+        })?;
         if is_prefix(&prefix, &requested_path) {
             return Ok(());
         }
@@ -482,6 +493,125 @@ pub fn check_permission(
         "no permission grants {requested:?} on {}",
         requested_path.display()
     )))
+}
+
+/// Write bytes through the host's permission boundary.
+///
+/// The target must match a `file` permission for [`Capability::WriteFile`].
+/// Existing ancestors are resolved before authorization. The final write is
+/// then opened beneath a directory handle with symlink rejection, so a link
+/// swap between authorization and the write fails closed.
+pub fn write_file(plugin: &InstalledPlugin, path: &Path, bytes: &[u8]) -> Result<(), HostError> {
+    let authorized = authorize_write_path(plugin, path)?;
+    secure_write_file(&authorized.root, &authorized.relative, bytes).map_err(|error| {
+        HostError::Denied(format!(
+            "secure write refused for {}: {error}",
+            authorized.requested.display()
+        ))
+    })
+}
+
+struct AuthorizedWritePath {
+    root: PathBuf,
+    relative: PathBuf,
+    requested: PathBuf,
+}
+
+fn authorize_write_path(
+    plugin: &InstalledPlugin,
+    path: &Path,
+) -> Result<AuthorizedWritePath, HostError> {
+    if !plugin
+        .manifest
+        .capabilities
+        .contains(&Capability::WriteFile)
+    {
+        return Err(HostError::Denied(format!(
+            "plugin {} does not hold capability write-file",
+            plugin.id
+        )));
+    }
+    let requested = requested_path(plugin, path);
+    let requested_normalized = normalize_path(&requested);
+    let requested_resolved = canonicalize_or_normalize(&requested).map_err(|error| {
+        HostError::Denied(format!(
+            "cannot resolve requested path {}: {error}",
+            requested.display()
+        ))
+    })?;
+    let plugin_root = fs::canonicalize(&plugin.install_dir).map_err(|error| {
+        HostError::Denied(format!(
+            "cannot resolve plugin install directory {}: {error}",
+            plugin.install_dir.display()
+        ))
+    })?;
+
+    for permission in &plugin.manifest.permissions {
+        if !permission.resource.eq_ignore_ascii_case("file")
+            || !mode_allows(&permission.mode, "write")
+        {
+            continue;
+        }
+        let Some(path_prefix) = permission.path_prefix.as_deref() else {
+            continue;
+        };
+        let prefix_path = Path::new(path_prefix);
+        let prefix_is_relative = !prefix_path.is_absolute();
+        let prefix = if prefix_is_relative {
+            plugin.install_dir.join(prefix_path)
+        } else {
+            prefix_path.to_path_buf()
+        };
+        let prefix_normalized = normalize_path(&prefix);
+        if !is_prefix(&prefix_normalized, &requested_normalized) {
+            continue;
+        }
+        let prefix_resolved = canonicalize_or_normalize(&prefix).map_err(|error| {
+            HostError::Denied(format!(
+                "cannot resolve permission root {}: {error}",
+                prefix.display()
+            ))
+        })?;
+        // A relative manifest prefix is confined to the plugin installation
+        // directory even when a package directory contains a symlink.
+        if prefix_is_relative && !is_prefix(&plugin_root, &prefix_resolved) {
+            continue;
+        }
+        if !is_prefix(&prefix_resolved, &requested_resolved) {
+            continue;
+        }
+        let relative = requested_resolved
+            .strip_prefix(&prefix_resolved)
+            .map_err(|_| HostError::Denied("requested path escaped permission root".into()))?;
+        if relative.as_os_str().is_empty()
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    Component::CurDir | Component::ParentDir | Component::RootDir
+                )
+            })
+        {
+            continue;
+        }
+        return Ok(AuthorizedWritePath {
+            root: prefix_resolved,
+            relative: relative.to_path_buf(),
+            requested,
+        });
+    }
+
+    Err(HostError::Denied(format!(
+        "no permission grants WriteFile on {}",
+        requested_resolved.display()
+    )))
+}
+
+fn requested_path(plugin: &InstalledPlugin, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        plugin.install_dir.join(path)
+    }
 }
 
 /// Resource family a capability maps to for permission matching.
@@ -523,14 +653,32 @@ fn is_prefix(prefix: &Path, path: &Path) -> bool {
     prefix.len() <= path.len() && prefix.iter().zip(&path).all(|(a, b)| a == b)
 }
 
-/// Canonicalize `path` when it exists; otherwise normalize it lexically.
-fn canonicalize_or_normalize(path: &Path) -> PathBuf {
-    if path.exists() {
-        if let Ok(canonical) = fs::canonicalize(path) {
-            return canonical;
+/// Canonicalize `path`, resolving the nearest existing ancestor for a new
+/// target and preserving its remaining components.
+fn canonicalize_or_normalize(path: &Path) -> io::Result<PathBuf> {
+    let mut missing = Vec::new();
+    let mut existing = path;
+    loop {
+        match fs::symlink_metadata(existing) {
+            Ok(_) => {
+                let mut resolved = fs::canonicalize(existing)?;
+                for component in missing.iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let name = existing.file_name().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "path has no existing ancestor")
+                })?;
+                missing.push(name.to_os_string());
+                existing = existing.parent().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "path has no existing ancestor")
+                })?;
+            }
+            Err(error) => return Err(error),
         }
     }
-    normalize_path(path)
 }
 
 /// Lexical path normalization: resolves `.` and `..` components without
@@ -547,6 +695,82 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(unix)]
+fn secure_write_file(root: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty()).map_err(io::Error::from)?;
+    let mut components = relative.components();
+    let file_name = loop {
+        match components.next() {
+            Some(Component::Normal(name)) if components.clone().next().is_none() => break name,
+            Some(Component::Normal(name)) => {
+                directory = openat(&directory, name, directory_flags, Mode::empty())
+                    .map_err(io::Error::from)?;
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "write target must be a relative file path",
+                ));
+            }
+        }
+    };
+    let file_flags =
+        OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file = openat(
+        &directory,
+        file_name,
+        file_flags,
+        Mode::from_raw_mode(0o600),
+    )
+    .map_err(io::Error::from)?;
+    let mut file: fs::File = file.into();
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+#[cfg(not(unix))]
+fn secure_write_file(root: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()> {
+    // Windows has no openat equivalent in the standard library. Reject every
+    // reparse point found before opening and use the platform no-reparse flag
+    // for the final component; the Unix implementation above is the fully
+    // race-resistant directory-handle path.
+    let mut target = root.to_path_buf();
+    let components: Vec<_> = relative.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "write target must be a relative file path",
+            ));
+        };
+        target.push(name);
+        if index + 1 < components.len() {
+            let metadata = fs::symlink_metadata(&target)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "write target contains a reparse point or non-directory",
+                ));
+            }
+        }
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT. This keeps the final path component
+        // from being followed when it is a reparse point.
+        options.custom_flags(0x0020_0000);
+    }
+    let mut file = options.open(target)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// Structural information discovered by the bounded WebAssembly validator.

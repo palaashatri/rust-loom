@@ -24,6 +24,7 @@ sha2 = "0.10"
 base64 = "0.22"
 ed25519-dalek = "2"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+rustix = { version = "1.1", features = ["fs"] }
 loom-plugin-manifest = { version = "0.1.0", path = "crates/loom-plugin-manifest" }
 loom-plugin-host = { version = "0.1.0", path = "crates/loom-plugin-host" }
 

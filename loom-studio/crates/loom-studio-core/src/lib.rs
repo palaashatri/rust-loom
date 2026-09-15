@@ -1,5 +1,6 @@
 //! Core audio engine and DAW model for Loom Studio.
 
+use audio_persistence::*;
 use loom_package::manifest::{
     json as pkg_json, Checksum, Manifest, ManifestEntry, MimeType, PackageKind, SchemaVersion,
 };
@@ -9,6 +10,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+
+mod audio_persistence;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WorkspaceMode {
@@ -1208,14 +1211,17 @@ impl AudioBuffer {
         }
     }
 
-    /// Encodes signed 16-bit PCM WAV bytes.
+    /// Encodes PCM16.
     pub fn to_wav_pcm16(&self) -> Result<Vec<u8>, String> {
         let cancellation = StudioCancellation::default();
         self.to_wav_pcm16_with_cancel(&cancellation, |_| {})
     }
 
-    /// Encodes signed 16-bit PCM WAV bytes while checking cooperative
-    /// cancellation between bounded chunks.
+    pub fn to_wav_float32(&self) -> Result<Vec<u8>, String> {
+        to_wav_float32(self)
+    }
+
+    /// Encodes PCM16 WAV bytes with cancellation.
     pub fn to_wav_pcm16_with_cancel<F>(
         &self,
         cancel: &StudioCancellation,
@@ -1358,18 +1364,6 @@ pub struct MidiNote {
     pub velocity: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct StudioBundleMetadata {
-    project: StudioProject,
-    assets: Vec<StudioBundleAsset>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StudioBundleAsset {
-    name: String,
-    path: String,
-}
-
 /// Saves a Studio project together with locally imported/recorded audio assets.
 pub fn save_studio_bundle(
     project: &StudioProject,
@@ -1380,7 +1374,7 @@ pub fn save_studio_bundle(
     let mut entries = Vec::new();
     for (index, (name, buffer)) in assets.iter().enumerate() {
         let path = format!("assets/audio-{index:04}.wav");
-        let bytes = buffer.to_wav_pcm16()?;
+        let bytes = to_wav_float32(buffer)?;
         archive
             .add(path.as_str(), bytes.clone())
             .map_err(|error| error.to_string())?;
@@ -1396,6 +1390,7 @@ pub fn save_studio_bundle(
         });
     }
     let metadata = StudioBundleMetadata {
+        format_version: STUDIO_BUNDLE_FORMAT_VERSION,
         project: project.clone(),
         assets: asset_records,
     };
@@ -1444,6 +1439,7 @@ pub fn load_studio_bundle(bytes: &[u8]) -> Result<(StudioProject, AudioAssetStor
         .get("content/studio.json")
         .ok_or_else(|| "missing studio.json".to_string())?;
     if let Ok(bundle) = serde_json::from_slice::<StudioBundleMetadata>(content) {
+        audio_persistence::validate_format_version(bundle.format_version)?;
         let mut assets = AudioAssetStore::default();
         for asset in bundle.assets {
             let bytes = archive
