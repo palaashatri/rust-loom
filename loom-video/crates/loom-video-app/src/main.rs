@@ -35,6 +35,8 @@ use slint::{
     SharedString, VecModel,
 };
 
+mod media_setup;
+
 slint::include_modules!();
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
@@ -185,7 +187,7 @@ struct AppState {
     selected_clip: Mutex<usize>,
     preview: Mutex<Option<VideoFrame>>,
     preview_synthetic: AtomicBool,
-    tools: Option<MediaTools>,
+    tools: Mutex<Option<MediaTools>>,
     exporting: AtomicBool,
     export_cancel: ExportCancellation,
     preview_generation: PreviewGeneration,
@@ -1157,18 +1159,18 @@ fn refresh(app: &VideoApp, state: &AppState) {
         })
         .collect::<Vec<_>>();
     app.set_media_bin_items(ModelRc::new(VecModel::from(media)));
-    app.set_backend_available(state.tools.is_some());
+    app.set_backend_available(state.media_tools().is_some());
     app.set_backend_version(
         state
-            .tools
+            .media_tools()
             .as_ref()
             .map(|tools| SharedString::from(tools.version.as_str()))
-            .unwrap_or_else(|| "Install FFmpeg, FFprobe and FFplay on PATH".into()),
+            .unwrap_or_else(|| "Choose FFmpeg with FFprobe in the same folder".into()),
     );
     let preview_synthetic = state.preview_synthetic.load(Ordering::Relaxed);
     app.set_preview_synthetic(preview_synthetic);
     app.set_status_right(
-        if state.tools.is_some() {
+        if state.media_tools().is_some() {
             if preview_synthetic {
                 "Local FFmpeg · synthetic preview"
             } else {
@@ -1249,7 +1251,7 @@ fn refresh_preview_surface(app: &VideoApp, state: &AppState) {
     let preview_synthetic = state.preview_synthetic.load(Ordering::Acquire);
     app.set_preview_synthetic(preview_synthetic);
     app.set_status_right(
-        if state.tools.is_some() {
+        if state.media_tools().is_some() {
             if preview_synthetic {
                 "Local FFmpeg · synthetic preview"
             } else {
@@ -1280,7 +1282,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
         preview_synthetic: AtomicBool::new(true),
-        tools: discover_media_tools().ok(),
+        tools: Mutex::new(discover_configured_tools()),
         exporting: AtomicBool::new(false),
         export_cancel: ExportCancellation::default(),
         preview_generation: PreviewGeneration::default(),
@@ -1433,7 +1435,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
         preview_synthetic: AtomicBool::new(true),
-        tools: Some(tools.clone()),
+        tools: Mutex::new(Some(tools.clone())),
         exporting: AtomicBool::new(false),
         export_cancel: ExportCancellation::default(),
         preview_generation: PreviewGeneration::default(),
@@ -1808,7 +1810,7 @@ fn request_preview_internal(
         }
         return;
     }
-    let Some(tools) = state.tools.clone() else {
+    let Some(tools) = state.media_tools().clone() else {
         state.preview_in_flight.store(false, Ordering::Release);
         let _ = lock(&state.preview_cancel).take();
         show_synthetic_preview(&state, &weak);
@@ -1910,7 +1912,7 @@ fn show_synthetic_preview(state: &AppState, weak: &slint::Weak<VideoApp>) {
         app.set_has_preview(true);
         app.set_preview_synthetic(true);
         app.set_status_right(
-            if state.tools.is_some() {
+            if state.media_tools().is_some() {
                 "Local FFmpeg · synthetic preview"
             } else {
                 "Media backend unavailable"
@@ -1949,7 +1951,7 @@ fn build_playback_clock(state: &AppState, playhead: f64) -> PlaybackClockSetup {
     };
     let source_clip_id = source.as_ref().map(|source| source.0.clone());
     let audio_probe = source.as_ref().and_then(|(_, path, _, _)| {
-        state.tools.as_ref().and_then(|tools| {
+        state.media_tools().as_ref().and_then(|tools| {
             let path = Path::new(path);
             path.is_file()
                 .then(|| probe_media(tools, path).ok())
@@ -1974,7 +1976,7 @@ fn build_playback_clock(state: &AppState, playhead: f64) -> PlaybackClockSetup {
     match (
         audio_sample_rate,
         source.as_ref(),
-        state.tools.as_ref(),
+        state.media_tools().as_ref(),
     ) {
         (Some(sample_rate), Some((clip_id, path, source_time, playback_rate)), Some(tools)) => {
             match spawn_decoded_audio_consumer(tools, Path::new(path), *source_time, sample_rate) {
@@ -2066,7 +2068,114 @@ fn advance_playback_tick(app: &VideoApp, state: &Arc<AppState>) -> bool {
     }
 }
 
+impl AppState {
+    fn media_tools(&self) -> Option<MediaTools> {
+        lock(&self.tools).clone()
+    }
+}
+fn configured_tools(path: &Path) -> Result<MediaTools, String> {
+    let version = media_setup::version(path, "ffmpeg")?;
+    let sibling = |name: &str| {
+        path.parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                name.to_string()
+            })
+    };
+    let ffprobe = sibling("ffprobe");
+    media_setup::version(&ffprobe, "ffprobe")?;
+    Ok(MediaTools {
+        ffmpeg: path.to_path_buf(),
+        ffprobe,
+        ffplay: sibling("ffplay"),
+        version,
+    })
+}
+fn discover_configured_tools() -> Option<MediaTools> {
+    let path = media_setup::saved("loom-video").unwrap_or_else(|| {
+        PathBuf::from(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        })
+    });
+    configured_tools(&path).ok()
+}
+
 fn wire_application(app: &VideoApp, state: Arc<AppState>) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_choose_backend(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if state.exporting.load(Ordering::Acquire) {
+                    app.set_setup_error("Stop the active job before changing media tools".into());
+                    return;
+                }
+                let request = OpenFileRequest {
+                    title: "Choose FFmpeg executable".into(),
+                    initial_directory: None,
+                    suggested_name: None,
+                    filters: vec![],
+                };
+                let path = match state.dialogs.open_file(&request) {
+                    Ok(Some(path)) => path,
+                    Ok(None) => return,
+                    Err(error) => {
+                        app.set_setup_error(format!("Could not open file chooser: {error}").into());
+                        return;
+                    }
+                };
+                match configured_tools(&path).and_then(|backend| {
+                    media_setup::save("loom-video", &path)?;
+                    Ok(backend)
+                }) {
+                    Ok(backend) => {
+                        *state.tools.lock().unwrap_or_else(|p| p.into_inner()) = Some(backend);
+                        app.set_setup_error("".into());
+                        refresh(&app, &state);
+                        app.set_status_left("Media tools ready. Your work is unchanged.".into());
+                    }
+                    Err(error) => app.set_setup_error(error.into()),
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_check_backend(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if state.exporting.load(Ordering::Acquire) {
+                    app.set_setup_error("Stop the active job before changing media tools".into());
+                    return;
+                }
+                let path = media_setup::saved("loom-video").unwrap_or_else(|| {
+                    PathBuf::from(if cfg!(windows) {
+                        "ffmpeg.exe"
+                    } else {
+                        "ffmpeg"
+                    })
+                });
+                match configured_tools(&path).and_then(|backend| {
+                    media_setup::save("loom-video", &path)?;
+                    Ok(backend)
+                }) {
+                    Ok(backend) => {
+                        *state.tools.lock().unwrap_or_else(|p| p.into_inner()) = Some(backend);
+                        app.set_setup_error("".into());
+                        refresh(&app, &state);
+                        app.set_status_left("Media tools ready. Your work is unchanged.".into());
+                    }
+                    Err(error) => app.set_setup_error(error.into()),
+                }
+            }
+        });
+    }
+
     let timer = Rc::new(slint::Timer::default());
     {
         let state = state.clone();
@@ -2253,7 +2362,8 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
         let app_ref = app.as_weak();
         app.on_import_media(move |path| {
             if let Some(app) = app_ref.upgrade() {
-                let Some(tools) = state.tools.as_ref() else {
+                let configured = state.media_tools();
+                let Some(tools) = configured.as_ref() else {
                     app.set_status_left("FFmpeg tools are unavailable".into());
                     return;
                 };
@@ -3067,7 +3177,7 @@ fn wire_application(app: &VideoApp, state: Arc<AppState>) {
                 return;
             }
             state.export_cancel.reset();
-            let Some(tools) = state.tools.clone() else {
+            let Some(tools) = state.media_tools().clone() else {
                 state.exporting.store(false, Ordering::SeqCst);
                 if let Some(app) = weak.upgrade() {
                     app.set_status_left("FFmpeg/FFprobe are unavailable".into());
@@ -3268,7 +3378,7 @@ fn main() -> Result<(), String> {
         selected_clip: Mutex::new(0),
         preview: Mutex::new(Some(procedural_preview())),
         preview_synthetic: AtomicBool::new(true),
-        tools: discover_media_tools().ok(),
+        tools: Mutex::new(discover_configured_tools()),
         exporting: AtomicBool::new(false),
         export_cancel: ExportCancellation::default(),
         preview_generation: PreviewGeneration::default(),
@@ -3606,6 +3716,18 @@ mod tests {
         test_app_and_state_with_dialogs(Arc::new(scripted))
     }
 
+    // These tests exercise real FFmpeg decoding. Keep the rest of the app
+    // suite useful on machines that do not have the optional media tools.
+    fn test_media_tools() -> Option<MediaTools> {
+        match discover_media_tools() {
+            Ok(tools) => Some(tools),
+            Err(error) => {
+                eprintln!("skipping real-media fixture test: {error}");
+                None
+            }
+        }
+    }
+
     fn test_app_and_state_with_dialogs(
         dialogs: Arc<dyn FileDialogService>,
     ) -> (VideoApp, Arc<AppState>) {
@@ -3618,7 +3740,7 @@ mod tests {
             selected_clip: Mutex::new(0),
             preview: Mutex::new(Some(procedural_preview())),
             preview_synthetic: AtomicBool::new(true),
-            tools: None,
+            tools: Mutex::new(None),
             exporting: AtomicBool::new(false),
             export_cancel: ExportCancellation::default(),
             preview_generation: PreviewGeneration::default(),
@@ -3648,7 +3770,7 @@ mod tests {
             selected_clip: Mutex::new(0),
             preview: Mutex::new(Some(procedural_preview())),
             preview_synthetic: AtomicBool::new(true),
-            tools: Some(tools),
+            tools: Mutex::new(Some(tools)),
             exporting: AtomicBool::new(false),
             export_cancel: ExportCancellation::default(),
             preview_generation: PreviewGeneration::default(),
@@ -4229,7 +4351,7 @@ mod tests {
 
     #[test]
     fn audio_master_clock_tick_consumes_decoded_samples_and_stalls_without_them() {
-        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let Some(tools) = test_media_tools() else { return };
         let dir =
             std::env::temp_dir().join(format!("loom-video-audio-clock-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4305,7 +4427,7 @@ mod tests {
 
     #[test]
     fn terminal_audio_eof_switches_playing_controller_to_monotonic_fallback() {
-        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let Some(tools) = test_media_tools() else { return };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-audio-eof-controller-{}",
             std::process::id()
@@ -4323,7 +4445,7 @@ mod tests {
         project.tracks[0].clips[0].out_point = 6.0;
         let (app, state) = test_app_and_state_with_project(project, tools);
         let consumer = spawn_decoded_audio_consumer(
-            state.tools.as_ref().unwrap(),
+            state.media_tools().as_ref().unwrap(),
             &source,
             999.0,
             sample_rate,
@@ -4368,7 +4490,7 @@ mod tests {
 
     #[test]
     fn same_clip_fallback_seek_rebuilds_audio_clock_and_preserves_unavailable_fallback() {
-        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let Some(tools) = test_media_tools() else { return };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-audio-fallback-seek-{}",
             std::process::id()
@@ -4384,7 +4506,7 @@ mod tests {
         project.tracks[0].clips[0].source_path = source.to_string_lossy().into_owned();
         let (app, state) = test_app_and_state_with_project(project.clone(), tools.clone());
         let consumer = spawn_decoded_audio_consumer(
-            state.tools.as_ref().unwrap(),
+            state.media_tools().as_ref().unwrap(),
             &source,
             999.0,
             sample_rate,
@@ -4482,7 +4604,7 @@ mod tests {
 
     #[test]
     fn audio_master_boundary_rebuilds_consumer_for_next_clip() {
-        let tools = discover_media_tools().expect("FFmpeg is required for audio clock test");
+        let Some(tools) = test_media_tools() else { return };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-audio-boundary-controller-{}",
             std::process::id()
@@ -4574,7 +4696,7 @@ mod tests {
     #[test]
     fn preview_request_generates_waveform_and_serves_cached_frame() {
         set_platform();
-        let tools = discover_media_tools().expect("FFmpeg is required for preview cache test");
+        let Some(tools) = test_media_tools() else { return };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-preview-cache-hit-{}",
             std::process::id()
@@ -4593,7 +4715,7 @@ mod tests {
             selected_clip: Mutex::new(0),
             preview: Mutex::new(Some(procedural_preview())),
             preview_synthetic: AtomicBool::new(true),
-            tools: Some(tools),
+            tools: Mutex::new(Some(tools)),
             exporting: AtomicBool::new(false),
             export_cancel: ExportCancellation::default(),
             preview_generation: PreviewGeneration::default(),

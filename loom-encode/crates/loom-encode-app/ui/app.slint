@@ -110,6 +110,9 @@ export component EncodeApp inherits Window {
     in property <int> collision-policy: 0;
     in property <string> selected-status: "";
     in property <string> report-summary: "Conformance pending";
+    callback choose-backend;
+    callback check-backend;
+    in property <string> setup-error: "";
     in property <bool> backend-available: false;
     in property <string> backend-version: "FFmpeg not found";
     in property <bool> running: false;
@@ -180,6 +183,41 @@ export component EncodeApp inherits Window {
             title: root.queue-name;
             trailing-text: root.job-labels.length == 1 ? "1 job" : root.job-labels.length + " jobs";
         }
+        if !root.backend-available || root.setup-error != "" : Rectangle {
+            background: Theme.palette().surface-sunken;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            VerticalLayout {
+                padding: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Encoding needs FFmpeg";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 650;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "Choose your FFmpeg executable to enable encoding. You can keep editing and saving your queue while the encoder is unavailable.";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body;
+                    wrap: word-wrap;
+                }
+                if root.setup-error != "" : Text {
+                    text: root.setup-error;
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    PrimaryButton { min-width: 180px; text: "Choose executable…"; clicked => { root.choose-backend(); } }
+                    PrimaryButton { min-width: 120px; text: "Check again"; clicked => { root.check-backend(); } }
+                    Text { text: "Get FFmpeg: ffmpeg.org/download.html"; color: Theme.palette().ink-secondary; wrap: word-wrap; }
+                }
+            }
+        }
+
         if root.labeled-toolbar : LabeledToolbar {
             EncodeToolbarBody {
                 rtl: root.rtl;

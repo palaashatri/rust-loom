@@ -220,7 +220,7 @@ export component VideoMediaBin inherits SidebarSurface {
                 padding: Theme.tokens.space.md;
                 spacing: Theme.tokens.space.sm;
                 Text {
-                    text: root.backend-available ? "FFmpeg / FFprobe / FFplay" : "Install FFmpeg tools";
+                    text: root.backend-available ? "FFmpeg / FFprobe" : "Install FFmpeg tools";
                     font-size: Theme.tokens.typography.body;
                     font-weight: 650;
                     color: Theme.palette().ink;
@@ -231,7 +231,7 @@ export component VideoMediaBin inherits SidebarSurface {
                     text: root.backend-version;
                     font-size: Theme.tokens.typography.caption;
                     color: Theme.palette().ink-secondary;
-                    overflow: elide;
+                    wrap: word-wrap;
                 }
             }
         }

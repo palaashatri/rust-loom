@@ -1554,13 +1554,26 @@ pub fn discover_media_tools() -> Result<MediaTools, String> {
         .next()
         .unwrap_or("ffmpeg")
         .to_string();
+    // Import depends on FFprobe too. A partial installation must show the
+    // recovery guidance instead of enabling an import that is certain to fail.
+    let ffprobe = PathBuf::from(if cfg!(windows) {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    });
+    let probe = Command::new(&ffprobe)
+        .arg("-version")
+        .output()
+        .map_err(|error| format!("start FFprobe: {error}"))?;
+    if !probe.status.success() {
+        return Err(format!(
+            "FFprobe is unavailable: {}",
+            String::from_utf8_lossy(&probe.stderr)
+        ));
+    }
     Ok(MediaTools {
         ffmpeg,
-        ffprobe: PathBuf::from(if cfg!(windows) {
-            "ffprobe.exe"
-        } else {
-            "ffprobe"
-        }),
+        ffprobe,
         ffplay: PathBuf::from(if cfg!(windows) {
             "ffplay.exe"
         } else {

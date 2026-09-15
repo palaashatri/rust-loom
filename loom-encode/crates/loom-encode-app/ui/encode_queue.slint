@@ -63,6 +63,25 @@ export component EncodeQueue inherits SidebarSurface {
                 }
             }
         }
+        if root.job-labels.length == 0 : VerticalLayout {
+            spacing: Theme.tokens.space.md;
+            padding: Theme.tokens.space.xl;
+            alignment: center;
+            Text {
+                text: "No jobs yet";
+                font-size: Theme.tokens.typography.body-large;
+                font-weight: 650;
+                color: Theme.palette().ink;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "Use Add Job to choose a source file.";
+                font-size: Theme.tokens.typography.caption;
+                color: Theme.palette().ink-secondary;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
         Rectangle { vertical-stretch: 1; background: transparent; }
     }
 }

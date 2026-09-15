@@ -1,5 +1,5 @@
 import { DocumentChrome, DirectionalLayout, ContextToolbar, LabeledToolbar } from "toolkit.slint";
-import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
+import { PrimaryButton, CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     VideoToolbarBody, VideoMediaBin, VideoPreviewStage, VideoTransport,
     VideoTimeline, VideoInspector, VideoStatusBar
@@ -48,6 +48,9 @@ export component VideoApp inherits Window {
     in property <image> preview-image;
     in property <bool> has-preview: false;
     in property <bool> preview-synthetic: false;
+    callback choose-backend;
+    callback check-backend;
+    in property <string> setup-error: "";
     in property <bool> backend-available: false;
     in property <string> backend-version: "FFmpeg not found";
     in property <float> timeline-duration: 1;
@@ -148,6 +151,41 @@ export component VideoApp inherits Window {
         DocumentChrome {
             title: root.project-name;
             trailing-text: root.project-format;
+        }
+
+        if !root.backend-available || root.setup-error != "" : Rectangle {
+            background: Theme.palette().surface-sunken;
+            border-width: 1px;
+            border-color: Theme.palette().border;
+            VerticalLayout {
+                padding: Theme.tokens.space.md;
+                spacing: Theme.tokens.space.xs;
+                Text {
+                    text: "Media import and export need FFmpeg";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body;
+                    font-weight: 650;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "Choose your FFmpeg executable. Video also needs ffprobe in the same folder. Import and export stay unavailable until a valid tool is found; project editing remains available.";
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body;
+                    wrap: word-wrap;
+                }
+                if root.setup-error != "" : Text {
+                    text: root.setup-error;
+                    color: Theme.palette().ink;
+                    font-size: Theme.tokens.typography.body;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: Theme.tokens.space.sm;
+                    PrimaryButton { min-width: 180px; text: "Choose executable…"; clicked => { root.choose-backend(); } }
+                    PrimaryButton { min-width: 120px; text: "Check again"; clicked => { root.check-backend(); } }
+                    Text { text: "Get FFmpeg: ffmpeg.org/download.html"; color: Theme.palette().ink-secondary; wrap: word-wrap; }
+                }
+            }
         }
 
         if root.labeled-toolbar : LabeledToolbar {

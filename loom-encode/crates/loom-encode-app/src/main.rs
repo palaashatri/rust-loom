@@ -12,15 +12,16 @@ use loom_desktop::{
     ScriptedFileDialogs,
 };
 use loom_encode_core::{
-    discover_ffmpeg, execute_job_with_cancel, load_encode_queue, probe_duration, save_encode_queue,
-    AudioSettings, DestinationCollisionPolicy, EncodeJob, EncodePreset, EncodeQueue,
-    EncoderBackend, ExecutionPolicy, JobStatus, MetadataSettings, SubtitleMode, SubtitleSettings,
-    VideoSettings,
+    execute_job_with_cancel, load_encode_queue, probe_duration, save_encode_queue, AudioSettings,
+    DestinationCollisionPolicy, EncodeJob, EncodePreset, EncodeQueue, EncoderBackend,
+    ExecutionPolicy, JobStatus, MetadataSettings, SubtitleMode, SubtitleSettings, VideoSettings,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use slint::private_unstable_api::re_exports::DataTransfer;
 use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
+
+mod media_setup;
 
 slint::include_modules!();
 
@@ -113,7 +114,10 @@ fn initial_queue(args: &Args) -> Result<(EncodeQueue, Option<PathBuf>), String> 
                 .map_err(|error| format!("failed to parse encode queue '{path}': {error}"))?;
             Ok((queue, Some(p)))
         }
-        None => Ok((sample_queue(), None)),
+        // A normal user session starts empty. Deterministic demo data belongs
+        // only to the explicit workflow journey below, never to a fresh queue
+        // that could look runnable.
+        None => Ok((empty_queue(), None)),
     }
 }
 
@@ -452,7 +456,27 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
             .map(|item| SharedString::from(item.version.as_str()))
             .unwrap_or_else(|| "Install FFmpeg and ensure it is available on PATH".into()),
     );
-    app.set_can_start(backend.is_some() && !running && queue.next_queued_index().is_some());
+    let next_job = queue
+        .next_queued_index()
+        .and_then(|index| queue.jobs.get(index));
+    let readiness = next_job.and_then(|job| {
+        if backend.is_none() {
+            return Some("Choose an FFmpeg executable or use Check again".to_string());
+        }
+        if let Err(error) = job.validate() {
+            return Some(format!("Fix selected job: {error}"));
+        }
+        if !Path::new(&job.source_file).is_file() {
+            return Some("Choose an existing source file".to_string());
+        }
+        if let Some(parent) = Path::new(&job.output_file).parent() {
+            if !parent.as_os_str().is_empty() && !parent.is_dir() {
+                return Some("Choose an existing output folder".to_string());
+            }
+        }
+        None
+    });
+    app.set_can_start(!running && next_job.is_some() && readiness.is_none());
     app.set_can_retry(
         !running
             && queue
@@ -486,7 +510,7 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
         app.set_selected_status(job_status_label(&job.status).into());
     } else {
         app.set_selected_job_text("No job selected".into());
-        app.set_selected_job_details("".into());
+        app.set_selected_job_details("Add a job to preview settings and progress".into());
         app.set_selected_source("".into());
         app.set_selected_output("".into());
         app.set_active_job_progress(0.0);
@@ -514,6 +538,15 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
         }
         .into(),
     );
+    app.set_status_left(if queue.jobs.is_empty() {
+        "No jobs yet · Add Job to choose a source file".into()
+    } else if let Some(message) = readiness {
+        SharedString::from(message)
+    } else if backend.is_some() {
+        "Queue ready · select Start Queue when a job is configured".into()
+    } else {
+        "Encoder unavailable · choose an executable or check again".into()
+    });
     app.set_status_right(
         if backend.is_some() {
             "Local FFmpeg"
@@ -552,7 +585,7 @@ fn set_selected_source_path(app: &EncodeApp, state: &Arc<AppState>, path: impl I
     refresh(
         app,
         &queue,
-        state.backend.as_ref(),
+        state.backend().as_ref(),
         state.running.load(Ordering::Relaxed),
     );
     update_history_controls(app, state);
@@ -584,7 +617,7 @@ fn set_selected_output_path(app: &EncodeApp, state: &Arc<AppState>, path: impl I
     refresh(
         app,
         &queue,
-        state.backend.as_ref(),
+        state.backend().as_ref(),
         state.running.load(Ordering::Relaxed),
     );
     update_history_controls(app, state);
@@ -618,7 +651,7 @@ fn set_selected_subtitle_path(app: &EncodeApp, state: &Arc<AppState>, path: impl
     refresh(
         app,
         &queue,
-        state.backend.as_ref(),
+        state.backend().as_ref(),
         state.running.load(Ordering::Relaxed),
     );
     update_history_controls(app, state);
@@ -678,7 +711,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     apply_theme(&app, &args.theme);
     configure_responsive_layout(&app, args.size);
     let (queue, _) = initial_queue(args)?;
-    let backend = discover_ffmpeg(&[]).ok();
+    let backend = discover_configured_backend();
     refresh(&app, &queue, backend.as_ref(), false);
     if args.palette {
         app.set_palette_query(SharedString::from("qu"));
@@ -689,7 +722,6 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
         app.set_palette_selected(0);
         app.set_palette_open(true);
     }
-    app.set_status_left("Queue ready · source paths are editable".into());
     let image = snapshot_component(&app, args.size.0 as f32, args.size.1 as f32, 1.0)
         .map_err(|error| error.to_string())?;
     loom_test_support::png::save_png(Path::new(output), &image).map_err(|error| error.to_string())
@@ -697,7 +729,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
 
 fn refresh_journey(app: &EncodeApp, state: &Arc<AppState>) {
     let queue = snapshot(state);
-    let backend = state.backend.clone();
+    let backend = state.backend().clone();
     refresh(
         app,
         &queue,
@@ -931,7 +963,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         history: Mutex::new(QueueHistory::default()),
         save_path: Mutex::new(None),
         dialogs: Arc::new(dialogs),
-        backend: Some(backend.clone()),
+        backend: Mutex::new(Some(backend.clone())),
         cancel: AtomicBool::new(false),
         running: AtomicBool::new(false),
     });
@@ -1317,9 +1349,35 @@ struct AppState {
     history: Mutex<QueueHistory>,
     save_path: Mutex<Option<PathBuf>>,
     dialogs: Arc<dyn FileDialogService + Send + Sync>,
-    backend: Option<EncoderBackend>,
+    backend: Mutex<Option<EncoderBackend>>,
     cancel: AtomicBool,
     running: AtomicBool,
+}
+
+impl AppState {
+    fn backend(&self) -> Option<EncoderBackend> {
+        self.backend
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+}
+
+fn configured_backend(path: &Path) -> Result<EncoderBackend, String> {
+    Ok(EncoderBackend {
+        executable: path.to_path_buf(),
+        version: media_setup::version(path, "ffmpeg")?,
+    })
+}
+fn discover_configured_backend() -> Option<EncoderBackend> {
+    let path = media_setup::saved("loom-encode").unwrap_or_else(|| {
+        PathBuf::from(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        })
+    });
+    configured_backend(&path).ok()
 }
 
 fn snapshot(state: &AppState) -> EncodeQueue {
@@ -1350,7 +1408,7 @@ fn checkpoint_queue(state: &AppState, queue: &EncodeQueue) {
 
 fn post_refresh(weak: &slint::Weak<EncodeApp>, state: &Arc<AppState>, message: String) {
     let queue = snapshot(state);
-    let backend = state.backend.clone();
+    let backend = state.backend().clone();
     let running = state.running.load(Ordering::Relaxed);
     let state = state.clone();
     let _ = weak.upgrade_in_event_loop(move |app| {
@@ -1361,6 +1419,77 @@ fn post_refresh(weak: &slint::Weak<EncodeApp>, state: &Arc<AppState>, message: S
 }
 
 fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_choose_backend(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Acquire) {
+                    app.set_setup_error("Stop the active job before changing media tools".into());
+                    return;
+                }
+                let request = OpenFileRequest {
+                    title: "Choose FFmpeg executable".into(),
+                    initial_directory: None,
+                    suggested_name: None,
+                    filters: vec![],
+                };
+                let path = match state.dialogs.open_file(&request) {
+                    Ok(Some(path)) => path,
+                    Ok(None) => return,
+                    Err(error) => {
+                        app.set_setup_error(format!("Could not open file chooser: {error}").into());
+                        return;
+                    }
+                };
+                match configured_backend(&path).and_then(|backend| {
+                    media_setup::save("loom-encode", &path)?;
+                    Ok(backend)
+                }) {
+                    Ok(backend) => {
+                        *state.backend.lock().unwrap_or_else(|p| p.into_inner()) = Some(backend);
+                        app.set_setup_error("".into());
+                        refresh(&app, &snapshot(&state), state.backend().as_ref(), false);
+                        app.set_status_left("Media tools ready. Your work is unchanged.".into());
+                    }
+                    Err(error) => app.set_setup_error(error.into()),
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_check_backend(move || {
+            if let Some(app) = app_ref.upgrade() {
+                if state.running.load(Ordering::Acquire) {
+                    app.set_setup_error("Stop the active job before changing media tools".into());
+                    return;
+                }
+                let path = media_setup::saved("loom-encode").unwrap_or_else(|| {
+                    PathBuf::from(if cfg!(windows) {
+                        "ffmpeg.exe"
+                    } else {
+                        "ffmpeg"
+                    })
+                });
+                match configured_backend(&path).and_then(|backend| {
+                    media_setup::save("loom-encode", &path)?;
+                    Ok(backend)
+                }) {
+                    Ok(backend) => {
+                        *state.backend.lock().unwrap_or_else(|p| p.into_inner()) = Some(backend);
+                        app.set_setup_error("".into());
+                        refresh(&app, &snapshot(&state), state.backend().as_ref(), false);
+                        app.set_status_left("Media tools ready. Your work is unchanged.".into());
+                    }
+                    Err(error) => app.set_setup_error(error.into()),
+                }
+            }
+        });
+    }
+
     macro_rules! queue_callback {
         ($method:ident, $operation:expr) => {{
             let state = state.clone();
@@ -1386,7 +1515,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     refresh(
                         &app,
                         &queue,
-                        state.backend.as_ref(),
+                        state.backend().as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
                     update_history_controls(&app, &state);
@@ -1419,7 +1548,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
                 let queue = snapshot(&state);
-                refresh(&app, &queue, state.backend.as_ref(), false);
+                refresh(&app, &queue, state.backend().as_ref(), false);
                 update_history_controls(&app, &state);
                 app.set_status_left("Created a new untitled batch queue".into());
             }
@@ -1465,7 +1594,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                                     .unwrap_or_else(|poisoned| poisoned.into_inner()) =
                                     Some(path.clone());
                                 let queue = snapshot(&state);
-                                refresh(&app, &queue, state.backend.as_ref(), false);
+                                refresh(&app, &queue, state.backend().as_ref(), false);
                                 update_history_controls(&app, &state);
                                 app.set_status_left(
                                     format!(
@@ -1535,7 +1664,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                             refresh(
                                 &app,
                                 &queue,
-                                state.backend.as_ref(),
+                                state.backend().as_ref(),
                                 state.running.load(Ordering::Relaxed),
                             );
                             update_history_controls(&app, &state);
@@ -1581,7 +1710,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                                 refresh(
                                     &app,
                                     &queue,
-                                    state.backend.as_ref(),
+                                    state.backend().as_ref(),
                                     state.running.load(Ordering::Relaxed),
                                 );
                                 update_history_controls(&app, &state);
@@ -1651,7 +1780,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     refresh(
                         &app,
                         &queue,
-                        state.backend.as_ref(),
+                        state.backend().as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
                     update_history_controls(&app, &state);
@@ -1674,7 +1803,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     refresh(
                         &app,
                         &queue,
-                        state.backend.as_ref(),
+                        state.backend().as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
                 }
@@ -1708,7 +1837,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     refresh(
                         &app,
                         &queue,
-                        state.backend.as_ref(),
+                        state.backend().as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
                     update_history_controls(&app, &state);
@@ -1737,7 +1866,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     refresh(
                         &app,
                         &queue,
-                        state.backend.as_ref(),
+                        state.backend().as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
                     update_history_controls(&app, &state);
@@ -1780,7 +1909,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                     refresh(
                         &app,
                         &queue,
-                        state.backend.as_ref(),
+                        state.backend().as_ref(),
                         state.running.load(Ordering::Relaxed),
                     );
                     update_history_controls(&app, &state);
@@ -1919,7 +2048,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 if before.queue_digest() != queue.queue_digest() {
                     checkpoint_queue(&state, &before);
                 }
-                refresh(&app, &queue, state.backend.as_ref(), false);
+                refresh(&app, &queue, state.backend().as_ref(), false);
                 update_history_controls(&app, &state);
                 app.set_status_left(format!("Audio codec set to {codec}").into());
             }
@@ -1959,7 +2088,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 if before.queue_digest() != queue.queue_digest() {
                     checkpoint_queue(&state, &before);
                 }
-                refresh(&app, &queue, state.backend.as_ref(), false);
+                refresh(&app, &queue, state.backend().as_ref(), false);
                 update_history_controls(&app, &state);
                 app.set_status_left("Subtitle mode updated · queue ready".into());
             }
@@ -1989,7 +2118,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 if before.queue_digest() != queue.queue_digest() {
                     checkpoint_queue(&state, &before);
                 }
-                refresh(&app, &queue, state.backend.as_ref(), false);
+                refresh(&app, &queue, state.backend().as_ref(), false);
                 update_history_controls(&app, &state);
                 app.set_status_left(
                     if copy {
@@ -2035,7 +2164,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 if before.queue_digest() != queue.queue_digest() {
                     checkpoint_queue(&state, &before);
                 }
-                refresh(&app, &queue, state.backend.as_ref(), false);
+                refresh(&app, &queue, state.backend().as_ref(), false);
                 update_history_controls(&app, &state);
                 app.set_status_left("Destination collision policy updated".into());
             }
@@ -2063,7 +2192,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 };
                 if changed {
                     let queue = snapshot(&state);
-                    refresh(&app, &queue, state.backend.as_ref(), false);
+                    refresh(&app, &queue, state.backend().as_ref(), false);
                     update_history_controls(&app, &state);
                 }
             }
@@ -2090,7 +2219,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                 };
                 if changed {
                     let queue = snapshot(&state);
-                    refresh(&app, &queue, state.backend.as_ref(), false);
+                    refresh(&app, &queue, state.backend().as_ref(), false);
                     update_history_controls(&app, &state);
                 }
             }
@@ -2101,7 +2230,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
         let state = state.clone();
         let weak = app.as_weak();
         app.on_start_queue(move || {
-            if state.backend.is_none() || state.running.swap(true, Ordering::SeqCst) {
+            if state.backend().is_none() || state.running.swap(true, Ordering::SeqCst) {
                 return;
             }
             {
@@ -2125,7 +2254,10 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
             let state = state.clone();
             let weak = weak.clone();
             std::thread::spawn(move || {
-                let backend = state.backend.clone().expect("checked before worker start");
+                let backend = state
+                    .backend()
+                    .clone()
+                    .expect("checked before worker start");
                 post_refresh(
                     &weak,
                     &state,
@@ -2198,7 +2330,7 @@ fn wire_application(app: &EncodeApp, state: Arc<AppState>) {
                                 }
                                 queue.clone()
                             };
-                            let backend = progress_state.backend.clone();
+                            let backend = progress_state.backend().clone();
                             let _ = progress_weak.upgrade_in_event_loop(move |app| {
                                 refresh(&app, &snapshot, backend.as_ref(), true);
                                 app.set_status_left(
@@ -2276,7 +2408,7 @@ fn main() -> Result<(), String> {
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     configure_responsive_layout(&app, args.size);
     wire_responsive_layout(&app);
-    let backend = discover_ffmpeg(&[]).ok();
+    let backend = discover_configured_backend();
     let recovered = initialize_snapshot_recovery()?;
     let (mut initial, save_path) = if args.open.is_some() {
         initial_queue(&args)?
@@ -2295,7 +2427,7 @@ fn main() -> Result<(), String> {
         history: Mutex::new(QueueHistory::default()),
         save_path: Mutex::new(save_path),
         dialogs: Arc::new(NativeFileDialogs),
-        backend,
+        backend: Mutex::new(backend),
         cancel: AtomicBool::new(false),
         running: AtomicBool::new(false),
     });
@@ -2329,7 +2461,7 @@ fn main() -> Result<(), String> {
 
     wire_palette(&app);
     let queue = snapshot(&state);
-    refresh(&app, &queue, state.backend.as_ref(), false);
+    refresh(&app, &queue, state.backend().as_ref(), false);
     update_history_controls(&app, &state);
     app.set_status_left("Queue ready · double click a source to edit".into());
     app.show().map_err(|error| error.to_string())?;
@@ -2575,7 +2707,7 @@ mod tests {
             history: Mutex::new(QueueHistory::default()),
             save_path: Mutex::new(None),
             dialogs: Arc::new(scripted),
-            backend: None,
+            backend: Mutex::new(None),
             cancel: AtomicBool::new(false),
             running: AtomicBool::new(false),
         });
@@ -2583,6 +2715,19 @@ mod tests {
         refresh(&app, &queue, None, false);
         update_history_controls(&app, &state);
         (app, state)
+    }
+
+    #[test]
+    fn invalid_backend_selection_preserves_queue_and_reports_error() {
+        let (app, state) = test_app_and_state(ScriptedFileDialogs::new(
+            vec![Some(PathBuf::from("/nonexistent/loom-ffmpeg"))],
+            vec![],
+        ));
+        let before = snapshot(&state).queue_digest();
+        app.invoke_choose_backend();
+        assert_eq!(snapshot(&state).queue_digest(), before);
+        assert!(state.backend().is_none());
+        assert!(app.get_setup_error().contains("Cannot run"));
     }
 
     #[test]
