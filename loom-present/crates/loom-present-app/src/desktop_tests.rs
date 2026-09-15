@@ -4,6 +4,8 @@ use loom_desktop::{CommandSource, ScriptedFileDialogs};
 fn test_state() -> GuiState {
     GuiState {
         session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(Some(PathBuf::from("projects/demo.loomdeck"))),
@@ -40,6 +42,8 @@ fn refresh_projects_selected_element_into_canvas_and_inspector() {
     let app = PresentApp::new().expect("create PresentApp");
     let state = GuiState {
         session: RefCell::new(sample_session()),
+        last_saved: RefCell::new(sample_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(None),
@@ -86,6 +90,8 @@ fn refresh_clears_inspector_when_domain_selection_is_empty() {
     let app = PresentApp::new().expect("create PresentApp");
     let state = GuiState {
         session: RefCell::new(sample_session()),
+        last_saved: RefCell::new(sample_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(1),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(None),
@@ -334,6 +340,8 @@ fn compact_stage_render_is_safe_for_short_windows() {
     let app = PresentApp::new().expect("create PresentApp");
     let state = GuiState {
         session: RefCell::new(sample_session()),
+        last_saved: RefCell::new(sample_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(None),
@@ -479,6 +487,8 @@ fn present_menu_projection_derives_live_session_and_window_state() {
     let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
     let state = GuiState {
         session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(None),
@@ -579,6 +589,8 @@ fn present_menu_disables_inspector_when_window_cannot_show_it() {
     let inspector_available = configure_responsive_width(&app, 900);
     let state = Rc::new(GuiState {
         session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(None),
@@ -623,6 +635,8 @@ fn present_menu_action_sink_dispatches_to_controller_and_guards_disabled_boundar
     let menu_service = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
         session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(None),
@@ -696,6 +710,8 @@ fn notes_edit_refreshes_undo_menu_state() {
     let menu_service = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
         session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(None),

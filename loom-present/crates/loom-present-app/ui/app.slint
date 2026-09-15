@@ -7,6 +7,7 @@ import {
 import { PresentActionToolbar } from "toolbar.slint";
 import { PresentInspector } from "inspector.slint";
 import { PresentThemeChooser } from "theme_chooser.slint";
+import { LoomButton } from "foundation.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
 
@@ -75,6 +76,8 @@ export component PresentApp inherits Window {
     in property <bool> can-redo: false;
     in property <string> status-left: "Ready";
     in property <string> status-right: "Offline";
+    in-out property <bool> save-changes-open: false;
+    in-out property <string> save-changes-document: "";
 
     in-out property <string> slide-notes: "";
     in-out property <bool> show-notes-drawer: false;
@@ -93,6 +96,9 @@ export component PresentApp inherits Window {
     callback open-deck;
     callback save-deck;
     callback save-as-deck;
+    callback save-changes-save;
+    callback save-changes-discard;
+    callback save-changes-cancel;
     callback export-pdf;
     callback export-pptx;
     callback undo;
@@ -465,6 +471,39 @@ export component PresentApp inherits Window {
         close-requested => {
             root.palette-open = false;
             root.palette-close();
+        }
+    }
+
+    if root.save-changes-open : Rectangle {
+        width: root.width; height: root.height; background: #00000066;
+        TouchArea { clicked => { } }
+        Rectangle { width: min(440px, root.width - 48px); height: 210px; x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
+            VerticalLayout { padding: 24px; spacing: 12px;
+                Text { text: "Save changes?"; font-size: 22px; color: Theme.palette().ink; }
+                Text { text: "Save changes to \"" + root.save-changes-document + "\" before replacing it?"; color: Theme.palette().ink-secondary; wrap: word-wrap; vertical-stretch: 1; }
+                HorizontalLayout { alignment: end; spacing: 8px;
+                    LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
+                    LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
+                    LoomButton { label: "Save"; variant: "primary"; clicked => { root.save-changes-save(); } }
+                }
+            }
+        }
+    }
+    save-changes-focus := FocusScope {
+        enabled: root.save-changes-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.save-changes-cancel();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    changed save-changes-open => {
+        if (root.save-changes-open) {
+            save-changes-focus.focus();
+        } else {
+            app-focus.focus();
         }
     }
 }

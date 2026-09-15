@@ -204,6 +204,8 @@ fn test_deep_audit_macos_global_menu_bar_command_projection() {
 
     let state = GuiState {
         session: RefCell::new(PresentationSession::new(test_audit_doc())),
+        last_saved: RefCell::new(test_audit_doc().clone()),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
         save_path: RefCell::new(Some(PathBuf::from("audit.loomdeck"))),

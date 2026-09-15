@@ -302,11 +302,19 @@ fn cancel_drag(
     drag.reset();
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingReplacement {
+    NewDeck,
+    OpenDeck,
+}
+
 struct GuiState {
     session: RefCell<PresentationSession>,
     selected_element: Cell<usize>,
     inspector_available: Cell<bool>,
     save_path: RefCell<Option<PathBuf>>,
+    last_saved: RefCell<PresentationDocument>,
+    pending_replacement: Cell<Option<PendingReplacement>>,
     dialogs: Rc<dyn FileDialogService>,
     deck_filter: FileFilter,
     pdf_filter: FileFilter,
@@ -776,11 +784,14 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let inspector_available = configure_responsive_layout(&app, args.size);
+    let initial = initial_session(args)?;
     let state = GuiState {
-        session: RefCell::new(initial_session(args)?),
+        last_saved: RefCell::new(initial.document.clone()),
+        session: RefCell::new(initial),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(args.open.as_ref().map(PathBuf::from)),
+        pending_replacement: Cell::new(None),
         dialogs: Rc::new(NativeFileDialogs),
         deck_filter: FileFilter::new("Loom Present deck", ["loomdeck"])
             .map_err(|error| error.to_string())?,
@@ -852,10 +863,37 @@ fn replace_opened_deck(
     path: PathBuf,
     session: PresentationSession,
 ) {
+    *state.last_saved.borrow_mut() = session.document.clone();
     *state.session.borrow_mut() = session;
     *state.save_path.borrow_mut() = Some(path);
     state.selected_element.set(0);
     refresh(app, state);
+}
+
+fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
+    let session = empty_session();
+    *state.last_saved.borrow_mut() = session.document.clone();
+    *state.session.borrow_mut() = session;
+    *state.save_path.borrow_mut() = None;
+    state.selected_element.set(0);
+    refresh(app, state);
+    set_status(app, "Created unsaved presentation");
+}
+
+/// Open and validate a candidate deck before replacing the live session.
+/// Cancelled or invalid opens leave the current deck untouched.
+fn open_deck_from_picker(app: &PresentApp, state: &GuiState) {
+    match state.dialogs.open_file(&open_request(state)) {
+        Ok(Some(path)) => match load_session(&path) {
+            Ok(session) => {
+                replace_opened_deck(app, state, path.clone(), session);
+                set_status(app, format!("Opened {}", path.display()));
+            }
+            Err(error) => set_status(app, format!("Open failed: {error}")),
+        },
+        Ok(None) => set_status(app, "Open cancelled"),
+        Err(error) => set_status(app, format!("Open dialog failed: {error}")),
+    }
 }
 
 fn save_current_deck(
@@ -882,6 +920,7 @@ fn save_current_deck(
     loom_storage::atomic_write(&path, &bytes)
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
+    *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
         Err(error) => set_status(
@@ -952,8 +991,11 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
         [Some(save_path.clone())],
         [Some(save_path.clone()), Some(export_path.clone())],
     ));
+    let initial = initial_session(args)?;
     let state = Rc::new(GuiState {
-        session: RefCell::new(initial_session(args)?),
+        last_saved: RefCell::new(initial.document.clone()),
+        session: RefCell::new(initial),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(None),
@@ -1277,7 +1319,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     let menu_service = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
+        last_saved: RefCell::new(initial.document.clone()),
         session: RefCell::new(initial),
+        pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
         save_path: RefCell::new(initial_path),
@@ -1505,17 +1549,42 @@ fn schedule_menu_action(
         })
 }
 
+fn deck_is_dirty(state: &GuiState) -> bool {
+    !presentation_documents_match(&state.session.borrow().document, &state.last_saved.borrow())
+}
+
+fn request_deck_replacement(
+    app: &PresentApp,
+    state: &GuiState,
+    operation: PendingReplacement,
+) -> bool {
+    if !deck_is_dirty(state) {
+        return false;
+    }
+    state.pending_replacement.set(Some(operation));
+    app.set_save_changes_document(state.session.borrow().document.title.as_str().into());
+    app.set_save_changes_open(true);
+    set_status(app, "Unsaved changes — choose Save, Discard, or Cancel");
+    true
+}
+
+fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
+    match state.pending_replacement.take() {
+        Some(PendingReplacement::NewDeck) => replace_with_empty_deck(app, state),
+        Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
+        None => {}
+    }
+}
+
 fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_new_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                *state.session.borrow_mut() = empty_session();
-                *state.save_path.borrow_mut() = None;
-                state.selected_element.set(0);
-                refresh(&app, &state);
-                set_status(&app, "Created unsaved presentation");
+                if !request_deck_replacement(&app, &state, PendingReplacement::NewDeck) {
+                    replace_with_empty_deck(&app, &state);
+                }
             }
         });
     }
@@ -1524,17 +1593,52 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let app_ref = app.as_weak();
         app.on_open_deck(move || {
             if let Some(app) = app_ref.upgrade() {
-                match state.dialogs.open_file(&open_request(&state)) {
-                    Ok(Some(path)) => match load_session(&path) {
-                        Ok(session) => {
-                            replace_opened_deck(&app, &state, path.clone(), session);
-                            set_status(&app, format!("Opened {}", path.display()));
-                        }
-                        Err(error) => set_status(&app, format!("Open failed: {error}")),
-                    },
-                    Ok(None) => set_status(&app, "Open cancelled"),
-                    Err(error) => set_status(&app, format!("Open dialog failed: {error}")),
+                if request_deck_replacement(&app, &state, PendingReplacement::OpenDeck) {
+                    return;
                 }
+                open_deck_from_picker(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_save(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let pending = state.pending_replacement.take();
+                match save_current_deck(&app, &state, false) {
+                    Ok(true) => {
+                        app.set_save_changes_open(false);
+                        state.pending_replacement.set(pending);
+                        continue_deck_replacement(&app, &state);
+                    }
+                    Ok(false) => state.pending_replacement.set(pending),
+                    Err(error) => {
+                        state.pending_replacement.set(pending);
+                        set_status(&app, format!("Save failed: {error}"));
+                    }
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_discard(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_save_changes_open(false);
+                continue_deck_replacement(&app, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.on_save_changes_cancel(move || {
+            if let Some(app) = app_ref.upgrade() {
+                state.pending_replacement.set(None);
+                app.set_save_changes_open(false);
+                set_status(&app, "Replacement cancelled");
             }
         });
     }
