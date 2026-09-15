@@ -13,6 +13,12 @@ fn rtl_argument_is_parsed_and_applied_to_the_root() {
 }
 
 #[test]
+fn objects_argument_enables_the_native_object_fixture() {
+    let args = parse_args_from(["--objects"] as [&str; 1]).expect("parse --objects");
+    assert!(args.objects);
+}
+
+#[test]
 fn new_workbook_is_blank_and_named_untitled() {
     let sheet = blank_sheet();
     assert!(sheet.cells.is_empty());
@@ -148,6 +154,123 @@ fn sheet_grid_projection_uses_viewport_offsets_for_headers_and_cells() {
     assert_eq!(projection.column_headers, ["C", "D"]);
     assert_eq!(projection.row_headers, ["11", "12"]);
     assert_eq!(projection.cells, ["Bottom right", "", "", "Tail"]);
+}
+
+#[test]
+fn sheet_object_projection_tracks_anchor_and_visibility() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let mut sheet = Sheet::new("objects");
+    sheet.objects.push(loom_sheets_core::SheetObject::shape(
+        CellRef { row: 1, col: 2 },
+        "Callout",
+    ));
+    sheet.objects.push(loom_sheets_core::SheetObject::shape(
+        CellRef { row: 40, col: 40 },
+        "Offscreen",
+    ));
+
+    project_sheet(&app, &sheet);
+
+    assert_eq!(app.get_object_kinds().row_count(), 2);
+    assert_eq!(app.get_object_kinds().row_data(0).as_deref(), Some("shape"));
+    assert_eq!(
+        app.get_object_labels().row_data(0).as_deref(),
+        Some("Callout")
+    );
+    assert!(app.get_visible_objects().row_data(0).unwrap_or(false));
+    assert!(!app.get_visible_objects().row_data(1).unwrap_or(true));
+}
+
+#[test]
+fn embedded_image_object_projects_without_a_source_path() {
+    const PNG_BYTES: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let mut sheet = Sheet::new("embedded");
+    let mut object =
+        loom_sheets_core::SheetObject::image(CellRef { row: 0, col: 0 }, "missing.png")
+            .expect("image object");
+    object.embedded = Some(PNG_BYTES.to_vec());
+    sheet.objects.push(object);
+
+    project_sheet(&app, &sheet);
+
+    let image = app
+        .get_object_images()
+        .row_data(0)
+        .expect("projected image");
+    assert_eq!(image.size().width, 1);
+    assert_eq!(image.size().height, 1);
+}
+
+#[test]
+fn object_gestures_are_live_previewed_and_committed_as_one_undoable_change() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let state = Rc::new(GuiState::new(
+        starter_workbook(),
+        None,
+        dialogs,
+        FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+    ));
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_history_actions(&app, &state, &menu_service);
+    object_actions::register_object_actions(&app, &state, &menu_service);
+    app.set_grid_viewport_width(640.0);
+
+    let mut sheet = Sheet::new("Objects");
+    sheet.objects.push(loom_sheets_core::SheetObject::shape(
+        CellRef { row: 0, col: 0 },
+        "Movable",
+    ));
+    state.install_workbook(vec![sheet], 0);
+    project_current(&app, &state);
+
+    app.invoke_object_move_started(0);
+    assert_eq!(app.get_selected_object(), 0);
+    app.invoke_object_moved(0, 80.0, 24.0);
+    assert_eq!(
+        state.current.borrow().objects[0].anchor,
+        CellRef { row: 1, col: 1 }
+    );
+    assert!(state.undo_stack.borrow().is_empty());
+    app.invoke_object_move_ended(0);
+    assert_eq!(state.undo_stack.borrow().len(), 1);
+
+    app.invoke_undo();
+    assert_eq!(
+        state.current.borrow().objects[0].anchor,
+        CellRef { row: 0, col: 0 }
+    );
+
+    app.invoke_object_resize_started(0);
+    app.invoke_object_resized(0, 100.0, 100.0);
+    assert_eq!(
+        (
+            state.current.borrow().objects[0].width,
+            state.current.borrow().objects[0].height
+        ),
+        (340, 212)
+    );
+    app.invoke_object_resize_ended(0);
+    assert_eq!(state.undo_stack.borrow().len(), 1);
+    app.invoke_undo();
+    assert_eq!(
+        (
+            state.current.borrow().objects[0].width,
+            state.current.borrow().objects[0].height
+        ),
+        (240, 112)
+    );
 }
 
 #[test]
@@ -681,6 +804,83 @@ fn workbook_file_roundtrip_preserves_tabs_styles_and_freeze() {
 }
 
 #[test]
+fn loomsheet_embeds_image_payload_and_reopens_without_source_file() {
+    const PNG_BYTES: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let dir = std::env::temp_dir().join(format!(
+        "loom-sheets-embedded-image-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("test temp dir");
+    let source = dir.join("source.png");
+    let package = dir.join("embedded.loomtable");
+    std::fs::write(&source, PNG_BYTES).expect("source image");
+
+    let mut sheet = Sheet::new("Images");
+    sheet.objects.push(
+        loom_sheets_core::SheetObject::image(
+            CellRef { row: 1, col: 1 },
+            source.to_string_lossy().into_owned(),
+        )
+        .expect("image object"),
+    );
+    save_workbook(&package, &[sheet], 0).expect("save package");
+
+    let archive = PackageArchive::from_bytes(&std::fs::read(&package).expect("package bytes"))
+        .expect("valid package");
+    assert!(archive
+        .paths()
+        .iter()
+        .any(|path| path.starts_with("content/assets/")));
+    std::fs::remove_file(&source).expect("remove source");
+
+    let workbook = load_workbook(&package).expect("load package without source");
+    assert_eq!(
+        workbook.sheets[0].objects[0].embedded.as_deref(),
+        Some(PNG_BYTES)
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn xlsx_workbook_load_imports_all_tabs_and_formulas() {
+    let dir = std::env::temp_dir().join(format!(
+        "loom-sheets-xlsx-import-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("test temp dir");
+    let path = dir.join("tabs.xlsx");
+
+    let mut first = Sheet::new("First");
+    first.set_str("A1", "10");
+    first.set_str("B1", "=A1*2");
+    let mut second = Sheet::new("Second");
+    second.set_str("A1", "=First!B1+5");
+    let sheets = vec![first.clone(), second.clone()];
+    let bytes = loom_sheets_core::export_xlsx_sheets(&sheets).expect("xlsx export");
+    std::fs::write(&path, bytes).expect("write xlsx");
+
+    let workbook = load_workbook(&path).expect("xlsx import");
+    assert_eq!(workbook.sheets.len(), 2);
+    assert_eq!(workbook.sheets[0].name, "First");
+    assert_eq!(workbook.sheets[1].name, "Second");
+    assert_eq!(
+        workbook.sheets[0].raw(CellRef::parse("B1").unwrap()),
+        Some("=A1*2")
+    );
+    assert_eq!(
+        workbook.sheets[1].raw(CellRef::parse("A1").unwrap()),
+        Some("=First!B1+5")
+    );
+
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_dir(&dir).ok();
+}
+
+#[test]
 fn legacy_single_sheet_package_loads_as_one_tab() {
     let dir = std::env::temp_dir().join(format!("loom-sheets-legacy-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("test temp dir");
@@ -790,6 +990,8 @@ fn palette_exposes_keyboard_paths_for_every_primary_command() {
         "sheets.organize",
         "table.fill_down",
         "sheets.insert_chart",
+        "sheets.insert_shape",
+        "sheets.insert_image",
         "sheets.cycle_chart_kind",
         "table.pivot_sum",
         "table.pivot_count",
@@ -830,10 +1032,11 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     app.set_can_redo(true);
     wire_palette(&app);
     rebuild_palette(&app, "");
-    assert_eq!(app.get_palette_commands().row_count(), 47);
+    assert_eq!(app.get_palette_commands().row_count(), 49);
+    let redo_row = app.get_palette_commands().row_count() - 1;
     assert_eq!(
         app.get_palette_commands()
-            .row_data(46)
+            .row_data(redo_row)
             .expect("rendered Redo row")
             .id
             .as_str(),
@@ -841,7 +1044,7 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     );
 
     app.set_can_undo(false);
-    app.invoke_palette_invoked(46);
+    app.invoke_palette_invoked(redo_row as i32);
 
     assert_eq!(redo_calls.get(), 1);
     assert!(!app.get_palette_open());
@@ -871,6 +1074,8 @@ fn sheets_menu_disables_unhandled_controller_commands() {
                 MenuItem::action("table.freeze_header", "Freeze Header Row"),
                 MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
                 MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
+                MenuItem::action("sheets.insert_shape", "Insert Shape"),
+                MenuItem::action("sheets.insert_image", "Insert Image"),
                 MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
             ],
         )],
@@ -903,6 +1108,8 @@ fn sheets_menu_disables_unhandled_controller_commands() {
         "table.freeze_header",
         "table.unfreeze_panes",
         "table.pivot_sum",
+        "sheets.insert_shape",
+        "sheets.insert_image",
         "sheets.delete_sheet",
     ]);
     for id in [

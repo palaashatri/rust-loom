@@ -1,0 +1,129 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.94s
+     Running unittests src/lib.rs (loom-sheets/target/debug/deps/loom_sheets_core-e28b2d433145355f)
+
+running 80 tests
+test functions::tests::test_iferror_formula ... ok
+test functions::tests::test_sumif_countif_averageif_formulas ... ok
+test functions::tests::test_financial_and_date_formulas ... ok
+test functions::tests::test_text_formulas ... ok
+test functions::tests::test_minifs_maxifs_formulas ... ok
+test functions::tests::test_textjoin_and_concatenate_formulas ... ok
+test functions::tests::test_vlookup_formula ... ok
+test interop::tests::formula_csv_preserves_raw_formulas_and_sniffs_delimiters ... ok
+test objects::tests::image_objects_can_carry_an_embedded_payload ... ok
+test objects::tests::image_objects_require_a_path_and_derive_an_accessible_label ... ok
+test objects::tests::object_anchors_follow_row_and_column_deletions ... ok
+test persistence::tests::json_roundtrip_preserves_alignments_and_styles ... ok
+test persistence::tests::workbook_load_rejects_empty_and_clamps_active ... ok
+test persistence::tests::json_roundtrip_preserves_freeze_panes ... ok
+test persistence::tests::sheet_chart_roundtrip_and_kind_cycle ... ok
+test refs::tests::qualified_shift_moves_only_the_cell_part ... ok
+test persistence::tests::sheet_objects_roundtrip_with_legacy_payload_compatibility ... ok
+test refs::tests::rename_rewrites_only_matching_qualifiers ... ok
+test refs::tests::sheet_name_quoting_rules ... ok
+test refs::tests::sheet_name_validation_rejects_ambiguous_names ... ok
+test refs::tests::unqualified_shift_behavior_is_preserved ... ok
+test style::tests::test_default_style_is_default ... ok
+test style::tests::test_fill_color_cycle_parse_and_indices ... ok
+test style::tests::test_format_currency_with_decimals ... ok
+test style::tests::test_format_percentage_with_decimals ... ok
+test tests::basic_arithmetic ... ok
+test tests::cell_and_range_alignment ... ok
+test persistence::tests::workbook_roundtrip_preserves_all_tabs_and_active_index ... ok
+test tests::calculation_cache_recalculates_transitive_dependents ... ok
+test tests::cell_ref_parse_render ... ok
+test tests::cell_data_validation_rules ... ok
+test tests::cell_number_format_display ... ok
+test tests::chart_spec_validation_and_normalization ... ok
+test tests::cell_references_resolve ... ok
+test tests::chart_placement_export_validation ... ok
+test tests::csv_dialect_sniffing ... ok
+test tests::csv_roundtrip ... ok
+test tests::currency_and_percentage_formatting ... ok
+test tests::dependency_order_and_cycle ... ok
+test tests::custom_column_and_row_sizing ... ok
+test tests::date_arithmetic_civil_calendar ... ok
+test tests::dependency_graph_and_recalculation_order ... ok
+test tests::division_by_zero ... ok
+test tests::editing_a_cell_retains_formula_and_empty_raw_semantics ... ok
+test tests::fill_series_and_range_sorting ... ok
+test tests::extract_xlsx_grid_errs_on_corrupt_archive_or_missing_sheet_part ... ok
+test tests::formula_reference_shifting ... ok
+test tests::extended_formula_functions_evaluate_correctly ... ok
+test tests::extract_xlsx_grid_resolves_shared_inline_numeric_and_boolean_cells ... ok
+test tests::formula_edit_transaction_commits_once_and_cancels_without_mutation ... ok
+test tests::freeze_panes_configuration_and_unfreeze ... ok
+test tests::grid_selection_extend_and_collapse_keep_keyboard_semantics ... ok
+test tests::grid_selection_preserves_anchor_and_normalizes_range ... ok
+test tests::json_roundtrip ... ok
+test tests::literal_parsing ... ok
+test tests::named_ranges_validation_and_conditional_formatting_work ... ok
+test tests::ocr_table_to_editable_grid ... ok
+test tests::precedence_and_parens ... ok
+test tests::parse_csv_records_handles_multiline_quotes_and_custom_delimiters ... ok
+test tests::parse_error_reports ... ok
+test tests::sheet_grid_defaults_are_shared_and_invalid_dimensions_fall_back ... ok
+test tests::rows_sort_filter_and_ranges_are_deterministic ... ok
+test tests::sheet_clear_and_used_range_operations ... ok
+test tests::sheet_dimensions_follow_sparse_used_cells_with_nonempty_minimum ... ok
+test tests::viewport_clamps_invalid_and_out_of_range_scroll_offsets ... ok
+test tests::viewport_projects_scroll_offsets_against_workbook_dimensions ... ok
+test tests::viewport_reveals_a_selection_outside_its_visible_window ... ok
+test tests::workbook_integrity_digest_stability ... ok
+test tests::workbook_sheet_management_operations ... ok
+test tests::xlsx_export_round_trips_through_import ... ok
+test tests::xlsx_extraction_helpers_handle_entities_coordinates_and_gaps ... ok
+test tests::xlsx_sheet_names_sanitize_to_excel_rules ... ok
+test workbook::tests::cross_sheet_cycles_become_ref_errors ... ok
+test workbook::tests::foreign_range_dependencies_keep_their_sheet_qualifier ... ok
+test workbook::tests::self_qualified_and_case_insensitive_names_resolve ... ok
+test workbook::tests::single_sheet_delegation_matches_evaluate ... ok
+test workbook::tests::cross_sheet_values_and_ranges_resolve ... ok
+test tests::xlsx_workbook_export_preserves_sheets_and_formulas ... ok
+test xlsx::tests::rich_xlsx_roundtrip_keeps_drawing_relationships_per_sheet ... ok
+test xlsx::tests::rich_xlsx_roundtrip_preserves_styles_charts_and_embedded_images ... ok
+
+test result: ok. 80 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/formula_eval_tests.rs (loom-sheets/target/debug/deps/formula_eval_tests-9237f6616c5e06e3)
+
+running 13 tests
+test absolute_references_parse_and_shift_correctly ... ok
+test financial_formula_pmt_fv_pv ... ok
+test comparison_and_text ... ok
+test goal_seek_solves_equations ... ok
+test functions ... ok
+test pivot_grouping_and_aggregation ... ok
+test sumproduct_and_conditional_aggregations ... ok
+test if_branches_are_lazy_and_errors_propagate ... ok
+test statistical_formulas_mode_stdev_var ... ok
+test math_and_statistical_functions_evaluate_correctly ... ok
+test text_join_split_substitute_repeat ... ok
+test vlookup_hlookup_and_index_match ... ok
+test text_manipulation_formulas ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/perf_measure.rs (loom-sheets/target/debug/deps/perf_measure-4751ffddc30b7774)
+
+running 1 test
+test perf_measure_large_workbook ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running tests/sheet_range_tests.rs (loom-sheets/target/debug/deps/sheet_range_tests-804a0e7141b062cb)
+
+running 4 tests
+test range_edit_fills_formulas_and_reverts_without_losing_absent_cells ... ok
+test grid_selection_preserves_anchor_and_normalizes_range ... ok
+test range_edit_copy_handles_multi_cell_formulas_and_noop_detection ... ok
+test range_edit_replace_preserves_present_empty_and_absent_raw_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests loom_sheets_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

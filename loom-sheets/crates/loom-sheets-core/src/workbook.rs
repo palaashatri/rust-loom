@@ -447,11 +447,10 @@ fn collect_foreign_refs(root: &Expr) -> Vec<(String, CellRef)> {
     let mut singles = Vec::new();
     collect_foreign_nodes(root, &mut ranges, &mut singles);
     let mut out = singles;
-    for (_, start, end) in ranges {
+    for (name, start, end) in ranges {
         for row in start.row.min(end.row)..=start.row.max(end.row) {
             for col in start.col.min(end.col)..=start.col.max(end.col) {
-                // Name lookup happens per range below; placeholder replaced.
-                out.push((String::new(), CellRef { row, col }));
+                out.push((name.clone(), CellRef { row, col }));
             }
         }
     }
@@ -621,5 +620,17 @@ mod tests {
                 .display(),
             "7"
         );
+    }
+
+    #[test]
+    fn foreign_range_dependencies_keep_their_sheet_qualifier() {
+        let formula = parse_formula("SUM(Second!A1:B2)").expect("range parses");
+        let refs = collect_foreign_refs(&formula.root);
+
+        assert_eq!(refs.len(), 4);
+        assert!(refs.contains(&("SECOND".to_string(), CellRef { row: 0, col: 0 })));
+        assert!(refs.contains(&("SECOND".to_string(), CellRef { row: 0, col: 1 })));
+        assert!(refs.contains(&("SECOND".to_string(), CellRef { row: 1, col: 0 })));
+        assert!(refs.contains(&("SECOND".to_string(), CellRef { row: 1, col: 1 })));
     }
 }

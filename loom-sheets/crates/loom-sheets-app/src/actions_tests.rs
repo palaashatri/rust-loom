@@ -9,7 +9,7 @@ use loom_desktop::{
 use loom_sheets_core::{
     compute_pivot, evaluate, export_xlsx_from_grid, from_csv, shift_formula_references, to_csv,
     CalcError, CellAlignment, CellRange, CellRef, ChartKind, ChartSeries, ChartSpec,
-    PivotAggregation, Sheet, SheetModel, Value,
+    PivotAggregation, Sheet, SheetModel, SheetObject, Value,
 };
 
 use super::*;
@@ -610,6 +610,41 @@ fn test_delete_col_and_undo_redo() {
     tx.revert(&mut sheet);
     assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("Item"));
     assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("Amount"));
+}
+
+#[test]
+fn test_delete_row_and_col_follow_anchored_objects() {
+    let mut sheet = Sheet::new("Objects");
+    sheet
+        .objects
+        .push(SheetObject::shape(CellRef { row: 3, col: 2 }, "Callout"));
+
+    let after_row = delete_row(&sheet, 1).expect("row deletion");
+    assert_eq!(after_row.objects[0].anchor, CellRef { row: 2, col: 2 });
+
+    let after_col = delete_col(&sheet, 1).expect("column deletion");
+    assert_eq!(after_col.objects[0].anchor, CellRef { row: 3, col: 1 });
+
+    let deleted_row = delete_row(&sheet, 3).expect("row deletion");
+    assert!(deleted_row.objects.is_empty());
+}
+
+#[test]
+fn test_insert_shape_callback_is_undoable() {
+    loom_test_support::capture::set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = make_test_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_sheet_actions(&app, &state, &menu_service);
+    crate::register_history_actions(&app, &state, &menu_service);
+
+    app.invoke_insert_shape();
+    assert_eq!(state.current.borrow().objects.len(), 1);
+    assert_eq!(state.current.borrow().objects[0].label, "Shape");
+    assert_eq!(state.undo_stack.borrow().len(), 1);
+
+    app.invoke_undo();
+    assert!(state.current.borrow().objects.is_empty());
 }
 
 #[test]

@@ -11,14 +11,20 @@ use loom_package::zip::PackageArchive;
 use serde::{Deserialize, Serialize};
 
 pub mod functions;
+pub mod interop;
+pub mod objects;
 pub mod persistence;
 pub mod refs;
 pub mod style;
 pub mod workbook;
+pub mod xlsx;
+pub use interop::{from_csv_sniffed, from_csv_with_dialect, to_csv_with_formulas};
+pub use objects::{SheetObject, SheetObjectKind};
 pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
 };
 pub use style::{CellAlignment, CellStyle};
+pub use xlsx::{export_xlsx_sheets, extract_xlsx_sheets};
 
 /// Default width of a worksheet column in the desktop editor, in pixels.
 ///
@@ -413,6 +419,8 @@ pub struct Sheet {
     pub row_heights: BTreeMap<u32, f32>,
     /// Embedded live-linked chart overlay, if the user inserted one.
     pub chart: Option<SheetChart>,
+    /// Drawings and local image attachments anchored to worksheet cells.
+    pub objects: Vec<SheetObject>,
 }
 
 impl Sheet {
@@ -428,6 +436,7 @@ impl Sheet {
             col_widths: BTreeMap::new(),
             row_heights: BTreeMap::new(),
             chart: None,
+            objects: Vec::new(),
         }
     }
 
@@ -1315,11 +1324,15 @@ impl Sheet {
     /// 1,000-row by 52-column workbook without allocating the intervening
     /// cells.
     pub fn dimensions(&self) -> SheetDimensions {
-        self.used_range()
-            .map(|(_, _, max_col, max_row)| {
-                SheetDimensions::new(max_row.saturating_add(1), max_col.saturating_add(1))
-            })
-            .unwrap_or_else(|| SheetDimensions::new(1, 1))
+        let (mut rows, mut cols) = self
+            .used_range()
+            .map(|(_, _, max_col, max_row)| (max_row.saturating_add(1), max_col.saturating_add(1)))
+            .unwrap_or((1, 1));
+        for object in &self.objects {
+            rows = rows.max(object.anchor.row.saturating_add(1));
+            cols = cols.max(object.anchor.col.saturating_add(1));
+        }
+        SheetDimensions::new(rows, cols)
     }
 }
 
@@ -3855,6 +3868,9 @@ pub struct XlsxSheetData {
     pub grid: Vec<Vec<XlsxCellData>>,
 }
 
+/// Dense worksheet values returned by the multi-sheet XLSX importer.
+pub type XlsxWorkbookData = Vec<(String, Vec<Vec<String>>)>;
+
 /// Build export cells for a sheet from evaluated values: display text plus
 /// the raw formula and typed cached values underneath.
 pub fn sheet_to_xlsx_data(
@@ -4097,7 +4113,6 @@ fn xml_escape_cell(value: &str) -> String {
 pub fn extract_xlsx_grid(xlsx_bytes: &[u8]) -> Result<Vec<Vec<String>>, String> {
     let archive = PackageArchive::from_bytes(xlsx_bytes)
         .map_err(|e| format!("unreadable xlsx archive: {e}"))?;
-
     let shared: Vec<String> = match archive.get("xl/sharedStrings.xml") {
         Some(bytes) => {
             let xml = std::str::from_utf8(bytes)
@@ -4106,19 +4121,133 @@ pub fn extract_xlsx_grid(xlsx_bytes: &[u8]) -> Result<Vec<Vec<String>>, String> 
         }
         None => Vec::new(),
     };
-
     let sheet_bytes = archive
         .get("xl/worksheets/sheet1.xml")
         .ok_or_else(|| "missing worksheet part xl/worksheets/sheet1.xml".to_string())?;
     let sheet_xml = std::str::from_utf8(sheet_bytes)
         .map_err(|_| "xl/worksheets/sheet1.xml is not valid UTF-8".to_string())?;
-
     extract_sheet_grid(sheet_xml, &shared)
+}
+
+/// Extract every worksheet from an `.xlsx` archive in workbook tab order.
+/// Formula cells keep their formula text (with the leading `=`), while
+/// ordinary cells retain the displayed value. This is intentionally a small
+/// OOXML reader: it covers the worksheet/shared-string subset produced by
+/// Loom and common spreadsheet exports without pretending to import charts,
+/// pivots, or external links.
+pub fn extract_xlsx_workbook(xlsx_bytes: &[u8]) -> Result<XlsxWorkbookData, String> {
+    let archive = PackageArchive::from_bytes(xlsx_bytes)
+        .map_err(|e| format!("unreadable xlsx archive: {e}"))?;
+    let shared: Vec<String> = match archive.get("xl/sharedStrings.xml") {
+        Some(bytes) => {
+            let xml = std::str::from_utf8(bytes)
+                .map_err(|_| "xl/sharedStrings.xml is not valid UTF-8".to_string())?;
+            parse_shared_strings(xml)
+        }
+        None => Vec::new(),
+    };
+    // Keep the legacy sheet1-only scanner usable for small fixture archives
+    // that contain a worksheet part but omit workbook metadata. Real Excel
+    // files take the relationship-aware path below.
+    let Some(workbook_bytes) = archive.get("xl/workbook.xml") else {
+        let sheet_bytes = archive
+            .get("xl/worksheets/sheet1.xml")
+            .ok_or_else(|| "missing worksheet part xl/worksheets/sheet1.xml".to_string())?;
+        let sheet_xml = std::str::from_utf8(sheet_bytes)
+            .map_err(|_| "xl/worksheets/sheet1.xml is not valid UTF-8".to_string())?;
+        return Ok(vec![(
+            "Sheet1".to_string(),
+            extract_sheet_grid_with_formulas(sheet_xml, &shared)?,
+        )]);
+    };
+    let workbook_xml = std::str::from_utf8(workbook_bytes)
+        .map_err(|_| "xl/workbook.xml is not valid UTF-8".to_string())?;
+    let rels_bytes = archive
+        .get("xl/_rels/workbook.xml.rels")
+        .ok_or_else(|| "missing workbook relationships".to_string())?;
+    let rels_xml = std::str::from_utf8(rels_bytes)
+        .map_err(|_| "xl/_rels/workbook.xml.rels is not valid UTF-8".to_string())?;
+
+    let mut relationships = BTreeMap::new();
+    let mut rest = rels_xml;
+    while let Some(offset) = next_tag_open(rest, "Relationship") {
+        rest = &rest[offset..];
+        let Some(tag_end) = rest.find('>') else {
+            break;
+        };
+        let attrs = &rest[1..tag_end];
+        if let (Some(id), Some(target)) = (
+            attribute_value(attrs, "Id"),
+            attribute_value(attrs, "Target"),
+        ) {
+            relationships.insert(id.to_string(), target.to_string());
+        }
+        rest = &rest[tag_end + 1..];
+    }
+
+    let mut sheets = Vec::new();
+    let mut rest = workbook_xml;
+    while let Some(offset) = next_tag_open(rest, "sheet") {
+        rest = &rest[offset..];
+        let Some(tag_end) = rest.find('>') else {
+            break;
+        };
+        let attrs = &rest[1..tag_end];
+        let Some(name) = attribute_value(attrs, "name").map(xml_unescape) else {
+            rest = &rest[tag_end + 1..];
+            continue;
+        };
+        let Some(rel_id) = attribute_value(attrs, "r:id") else {
+            rest = &rest[tag_end + 1..];
+            continue;
+        };
+        let Some(target) = relationships.get(rel_id) else {
+            rest = &rest[tag_end + 1..];
+            continue;
+        };
+        let target = normalize_xlsx_target(target);
+        let Some(sheet_bytes) = archive.get(&target) else {
+            return Err(format!("missing worksheet part {target}"));
+        };
+        let sheet_xml =
+            std::str::from_utf8(sheet_bytes).map_err(|_| format!("{target} is not valid UTF-8"))?;
+        sheets.push((name, extract_sheet_grid_with_formulas(sheet_xml, &shared)?));
+        rest = &rest[tag_end + 1..];
+    }
+    Ok(sheets)
+}
+
+fn normalize_xlsx_target(target: &str) -> String {
+    let target = target.trim_start_matches('/');
+    if let Some(target) = target.strip_prefix("xl/") {
+        format!("xl/{target}")
+    } else if let Some(target) = target.strip_prefix("../") {
+        format!("xl/{}", target.trim_start_matches("../"))
+    } else {
+        format!("xl/{target}")
+    }
 }
 
 /// Walks `sheet_xml`, resolves every `<c>` against `shared`, and densifies the
 /// used range up to the maximum row/column actually seen.
 fn extract_sheet_grid(sheet_xml: &str, shared: &[String]) -> Result<Vec<Vec<String>>, String> {
+    extract_sheet_grid_with_formulas_inner(sheet_xml, shared, false)
+}
+
+fn extract_sheet_grid_with_formulas(
+    sheet_xml: &str,
+    shared: &[String],
+) -> Result<Vec<Vec<String>>, String> {
+    extract_sheet_grid_with_formulas_inner(sheet_xml, shared, true)
+}
+
+/// Walks a worksheet part, optionally retaining `<f>` formula text instead of
+/// returning its cached `<v>` display value.
+fn extract_sheet_grid_with_formulas_inner(
+    sheet_xml: &str,
+    shared: &[String],
+    keep_formulas: bool,
+) -> Result<Vec<Vec<String>>, String> {
     let mut placed: Vec<(u32, u32, String)> = Vec::new();
     let mut max_row = 0u32;
     let mut max_col = 0u32;
@@ -4178,6 +4307,13 @@ fn extract_sheet_grid(sheet_xml: &str, shared: &[String]) -> Result<Vec<Vec<Stri
                 None => String::new(),
             },
             _ => first_element_text(body, "v").unwrap_or_default(),
+        };
+        let text = if keep_formulas {
+            first_element_text(body, "f")
+                .map(|formula| format!("={formula}"))
+                .unwrap_or(text)
+        } else {
+            text
         };
         placed.push((row, col, text));
         max_row = max_row.max(row);
@@ -5476,6 +5612,13 @@ mod tests {
         let grid = extract_xlsx_grid(&bytes).expect("re-import");
         assert_eq!(grid[0][0], "10");
         assert_eq!(grid[0][1], "20");
+
+        let workbook = extract_xlsx_workbook(&bytes).expect("all sheets re-import");
+        assert_eq!(workbook.len(), 2);
+        assert_eq!(workbook[0].0, "First");
+        assert_eq!(workbook[1].0, "Second");
+        assert_eq!(workbook[0].1[0][1], "=A1*2");
+        assert_eq!(workbook[1].1[0][0], "=First!B1+5");
     }
 
     #[test]
@@ -5542,6 +5685,12 @@ mod tests {
 
         empty.set_str("AZ1000", "tail");
         assert_eq!(empty.dimensions(), SheetDimensions::new(1_000, 52));
+
+        let mut object_sheet = Sheet::new("objects");
+        object_sheet
+            .objects
+            .push(SheetObject::shape(CellRef { row: 4, col: 3 }, "Note"));
+        assert_eq!(object_sheet.dimensions(), SheetDimensions::new(5, 4));
     }
 
     #[test]

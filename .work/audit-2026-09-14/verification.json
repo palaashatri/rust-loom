@@ -1,0 +1,30 @@
+{
+  "commit": "8fce78253cd1a5e6077654975943997a279cce9a",
+  "baseline_counts": {
+    "core": 123,
+    "sheets": 98,
+    "writer": 77,
+    "present": 49,
+    "photo": 49
+  },
+  "source_sha256": {
+    "/home/patri/code/rust-loom/.github/workflows/ci.yml": "a524b4a1392b1ac5b4965e3c0a6b369add9cf699256c7a3bb10900e29e758d76",
+    "/home/patri/code/rust-loom/TRUTH.md": "bdf022c7fedec40a658405003d427b37ccb791ceadaf3e8a227436539a5633b6",
+    "/home/patri/code/rust-loom/loom-core/crates/loom-production/src/lib.rs": "210896f45b7d185811ffde704092127a5fb8ed4443ca27002f307dfeb50c55e7",
+    "/home/patri/code/rust-loom/loom-core/crates/loom-production/src/snapshot.rs": "ccd798fbb7f3fdeb513abaeb2609e33b3e2920c1f0a2abc075335955b8a36762",
+    "/home/patri/code/rust-loom/loom-core/crates/loom-storage/src/lib.rs": "f84d4d2f39644fdc98a978c184d261d3c2d6a4079084f4a6d4697ba8a175e6b1",
+    "/home/patri/code/rust-loom/loom-encode/crates/loom-encode-core/src/lib.rs": "10d80c674f313a9719afd995abfe61fb3daa333852f5624f91d0c1aef253a55d",
+    "/home/patri/code/rust-loom/loom-photo/crates/loom-photo-app/src/main.rs": "61c421493f15d2c36b7a815f56b33f4bb84613360f9fcdf3e546551e22894c99",
+    "/home/patri/code/rust-loom/loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs": "a93ce65c3ab1a209356df4245cab9ff1da5cf9b92f103f9573c062f6e715100f",
+    "/home/patri/code/rust-loom/loom-present/crates/loom-present-app/src/main.rs": "1049627a66f99f1f25e6bf329e4899a7076b2ab89b2f3fd0b92e5b73107b8095",
+    "/home/patri/code/rust-loom/loom-present/crates/loom-present-core/src/lib.rs": "2c9cc2cb3bc887a2ad761a5745f7847909a7f0b259e68d5ef34802ab4da8bee7",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-app/src/main.rs": "6a3e9ca0accede3e320f440d7449ece9e56b40d476bdecfbe7cde782f3d27ae0",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core/src/lib.rs": "78b65a09902d76ef2eca321b4f5a593c8f3954cadf6e7b71ec759eee8e716cda",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core/src/persistence.rs": "23a3bb1a4f5c3c1c4874d2a80d6952f19b56cf34f32c18fd3b3534328351998c",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core/src/xlsx.rs": "2a3e722fc46f0eed2a752a544c86d97e7729eca9f35843f036c2f3a1a8461d24",
+    "/home/patri/code/rust-loom/loom-studio/crates/loom-studio-core/src/lib.rs": "5bc0954219b4dfe455117cc19fad1234bd6bdd2ae2a7d76de986a5fc8e41032e",
+    "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-app/src/main.rs": "9a61e822825f88b146c7382c5000ae88a7af9b155ce0c1e476b9d012aa377aff",
+    "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-core/src/export.rs": "ded6b0889fb02f4b50a32fbe954afd21e3bfbb8e76c5de50d40b6677c4d2d748",
+    "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-core/src/lib.rs": "9e1d8e63dda09a0889aafc75433d925f9af32d836a3a9cda9989c3aec9690aa1"
+  }
+}

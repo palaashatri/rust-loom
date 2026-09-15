@@ -24,12 +24,15 @@ use loom_sheets_core::workbook::evaluate_workbook;
 #[cfg(test)]
 use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, from_csv, sheet_from_json, to_csv_with_values, workbook_from_json, workbook_to_json,
-    CellAlignment, CellRange, CellRef, GridSelection, NumberFormat, RangeEdit, Sheet,
-    SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, from_csv_sniffed, sheet_from_json, to_csv_with_formulas, workbook_from_json,
+    workbook_to_json, CellAlignment, CellRange, CellRef, GridSelection, NumberFormat, RangeEdit,
+    Sheet, SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{
+    ComponentHandle, Image, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    VecModel,
+};
 
 slint::include_modules!();
 
@@ -37,6 +40,10 @@ pub mod formatting;
 
 mod analysis;
 use analysis::plan_chart;
+
+mod assets;
+
+mod object_actions;
 
 mod palette;
 use palette::*;
@@ -68,6 +75,7 @@ pub(crate) struct Args {
     pub(crate) smoke: bool,
     pub(crate) palette: bool,
     pub(crate) chart: bool,
+    pub(crate) objects: bool,
     pub(crate) journey: Option<String>,
     pub(crate) size: (u32, u32),
     pub(crate) theme: String,
@@ -91,6 +99,7 @@ where
         smoke: false,
         palette: false,
         chart: false,
+        objects: false,
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
@@ -106,6 +115,7 @@ where
             "--smoke" => args.smoke = true,
             "--palette" => args.palette = true,
             "--chart" => args.chart = true,
+            "--objects" => args.objects = true,
             "--journey" => {
                 args.journey = Some(it.next().ok_or("--journey needs an output directory")?)
             }
@@ -407,9 +417,20 @@ pub(crate) fn load_workbook(
     {
         let csv = std::str::from_utf8(&bytes).map_err(|e| format!("csv utf8: {e}"))?;
         return Ok(WorkbookFile {
-            sheets: vec![from_csv("imported", csv)],
+            sheets: vec![from_csv_sniffed("imported", csv)],
             active: 0,
         });
+    }
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
+    {
+        let sheets = loom_sheets_core::extract_xlsx_sheets(&bytes)?;
+        if sheets.is_empty() {
+            return Err("xlsx workbook has no worksheets".to_string());
+        }
+        return Ok(WorkbookFile { sheets, active: 0 });
     }
     let arch = PackageArchive::from_bytes(&bytes).map_err(|e| format!("archive: {e}"))?;
     let manifest_bytes = arch
@@ -426,13 +447,21 @@ pub(crate) fn load_workbook(
         .map_err(|e| format!("validation: {e}"))?;
     if let Some(content) = arch.get("content/workbook.json") {
         let s = std::str::from_utf8(content).map_err(|_| "workbook not utf8".to_string())?;
-        return workbook_from_json(s).map_err(|e| format!("workbook: {e}"));
+        let mut workbook = workbook_from_json(s).map_err(|e| format!("workbook: {e}"))?;
+        assets::attach_workbook_assets(&mut workbook, &arch)?;
+        return Ok(workbook);
     }
     let content = arch
         .get("content/sheet.json")
         .ok_or_else(|| "missing sheet.json".to_string())?;
     let s = std::str::from_utf8(content).map_err(|_| "sheet not utf8".to_string())?;
-    let sheet = sheet_from_json(s).map_err(|e| format!("sheet: {e}"))?;
+    let mut sheet = sheet_from_json(s).map_err(|e| format!("sheet: {e}"))?;
+    let mut workbook = loom_sheets_core::persistence::WorkbookFile {
+        sheets: vec![sheet.clone()],
+        active: 0,
+    };
+    assets::attach_workbook_assets(&mut workbook, &arch)?;
+    sheet = workbook.sheets.remove(0);
     Ok(WorkbookFile {
         sheets: vec![sheet],
         active: 0,
@@ -448,27 +477,42 @@ pub(crate) fn save_workbook(path: &Path, sheets: &[Sheet], active: usize) -> Res
     if sheets.is_empty() {
         return Err("cannot save an empty workbook".to_string());
     }
+    let (persisted_sheets, embedded_assets) = assets::prepare_workbook(sheets)?;
     let mut arch = PackageArchive::new();
-    let json = workbook_to_json(sheets, active);
+    let json = workbook_to_json(&persisted_sheets, active);
     arch.add("content/workbook.json", json.clone().into_bytes())
         .map_err(|e| e.to_string())?;
-    let title = sheets
+    let title = persisted_sheets
         .get(active.min(sheets.len() - 1))
         .map(|sheet| sheet.name.clone())
         .unwrap_or_else(|| "Untitled".to_string());
+    let mut entries = vec![ManifestEntry {
+        path: "content/workbook.json".into(),
+        mime: MimeType::parse("application/vnd.loom.sheet-content")
+            .map_err(|e| format!("invalid built-in sheets MIME type: {e}"))?,
+        size: json.len() as u64,
+        sha256: Checksum::from_bytes(loom_package::zip::sha256(json.as_bytes())),
+    }];
+    for asset in embedded_assets {
+        let size = asset.bytes.len() as u64;
+        let sha256 = Checksum::from_bytes(loom_package::zip::sha256(&asset.bytes));
+        arch.add(&asset.path, asset.bytes)
+            .map_err(|e| e.to_string())?;
+        entries.push(ManifestEntry {
+            path: asset.path,
+            mime: MimeType::parse(asset.mime)
+                .map_err(|e| format!("invalid image MIME type: {e}"))?,
+            size,
+            sha256,
+        });
+    }
     let manifest = Manifest {
         schema: SchemaVersion::CURRENT,
         kind: PackageKind::Sheets,
         id: "sheets-doc".to_string(),
         title,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
-        entries: vec![ManifestEntry {
-            path: "content/workbook.json".into(),
-            mime: MimeType::parse("application/vnd.loom.sheet-content")
-                .map_err(|e| format!("invalid built-in sheets MIME type: {e}"))?,
-            size: json.len() as u64,
-            sha256: Checksum::from_bytes(loom_package::zip::sha256(json.as_bytes())),
-        }],
+        entries,
     };
     let manifest_str = pkg_json::write(&manifest);
     arch.add("manifest.json", manifest_str.into_bytes())
@@ -838,6 +882,112 @@ struct GridGeometry {
     content_height: f32,
 }
 
+/// Materialized positions for the bounded worksheet object layer. Objects
+/// retain worksheet coordinates in the core model while the UI receives only
+/// the small list of objects and their current viewport-relative geometry.
+struct ProjectedSheetObjects {
+    kinds: Vec<SharedString>,
+    labels: Vec<SharedString>,
+    images: Vec<Image>,
+    positions_x: Vec<f32>,
+    positions_y: Vec<f32>,
+    widths: Vec<i32>,
+    heights: Vec<i32>,
+    fills: Vec<i32>,
+    visible: Vec<bool>,
+    selected: Vec<bool>,
+}
+
+fn project_sheet_objects(
+    sheet: &Sheet,
+    viewport: SheetViewport,
+    geometry: &GridGeometry,
+    zoom: f32,
+    scroll_x: f32,
+    scroll_y: f32,
+    selected_object: i32,
+) -> ProjectedSheetObjects {
+    let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
+        .col_widths
+        .iter()
+        .map(|(&col, &width)| (col, width * zoom))
+        .collect();
+    let scaled_rows: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
+    let first_row = viewport.first_row;
+    let first_col = viewport.first_col;
+    let last_row = first_row.saturating_add(viewport.visible_rows);
+    let last_col = first_col.saturating_add(viewport.visible_cols);
+    let mut projected = ProjectedSheetObjects {
+        kinds: Vec::with_capacity(sheet.objects.len()),
+        labels: Vec::with_capacity(sheet.objects.len()),
+        images: Vec::with_capacity(sheet.objects.len()),
+        positions_x: Vec::with_capacity(sheet.objects.len()),
+        positions_y: Vec::with_capacity(sheet.objects.len()),
+        widths: Vec::with_capacity(sheet.objects.len()),
+        heights: Vec::with_capacity(sheet.objects.len()),
+        fills: Vec::with_capacity(sheet.objects.len()),
+        visible: Vec::with_capacity(sheet.objects.len()),
+        selected: Vec::with_capacity(sheet.objects.len()),
+    };
+    for object in &sheet.objects {
+        let absolute_x =
+            dimension_offset(object.anchor.col, geometry.default_col_width, &scaled_cols);
+        let absolute_y = dimension_offset(object.anchor.row, GRID_ROW_HEIGHT * zoom, &scaled_rows);
+        projected.kinds.push(object.kind.as_str().into());
+        projected.labels.push(object.label.as_str().into());
+        let image = load_sheet_object_image(object);
+        projected.images.push(image);
+        projected.positions_x.push(24.0 + absolute_x + scroll_x);
+        projected.positions_y.push(52.0 + absolute_y + scroll_y);
+        projected
+            .widths
+            .push((object.width as f32 * zoom).round().max(1.0) as i32);
+        projected
+            .heights
+            .push((object.height as f32 * zoom).round().max(1.0) as i32);
+        projected.fills.push(object.fill.swatch_index());
+        projected.visible.push(
+            object.anchor.row >= first_row
+                && object.anchor.row < last_row
+                && object.anchor.col >= first_col
+                && object.anchor.col < last_col,
+        );
+        projected
+            .selected
+            .push(selected_object == projected.kinds.len() as i32 - 1);
+    }
+    projected
+}
+
+fn load_sheet_object_image(object: &loom_sheets_core::SheetObject) -> Image {
+    if object.kind != loom_sheets_core::SheetObjectKind::Image {
+        return Image::default();
+    }
+    if let Some(bytes) = object.embedded.as_deref() {
+        let is_svg = object
+            .path
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("svg"));
+        if is_svg {
+            if let Ok(image) = Image::load_from_svg_data(bytes) {
+                return image;
+            }
+        } else if let Ok(decoded) = image::load_from_memory(bytes) {
+            let rgba = decoded.to_rgba8();
+            return Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                rgba.as_raw(),
+                rgba.width(),
+                rgba.height(),
+            ));
+        }
+    }
+    Image::load_from_path(Path::new(&object.path)).unwrap_or_default()
+}
+
 fn grid_geometry(
     sheet: &Sheet,
     dimensions: SheetDimensions,
@@ -1092,6 +1242,15 @@ fn project_sheet_inner(
         app.set_grid_scroll_y(-current_scroll_y.min(max_scroll_y));
     }
     let grid = project_sheet_grid_with_values(sheet, vals, viewport);
+    let objects = project_sheet_objects(
+        sheet,
+        viewport,
+        &geometry,
+        zoom,
+        app.get_grid_scroll_x(),
+        app.get_grid_scroll_y(),
+        app.get_selected_object(),
+    );
 
     app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
     app.set_rows(ModelRc::new(VecModel::from(grid.rows)));
@@ -1120,6 +1279,16 @@ fn project_sheet_inner(
     app.set_cell_borders(ModelRc::new(VecModel::from(grid.cell_borders)));
     app.set_cell_fills(ModelRc::new(VecModel::from(grid.cell_fills)));
     app.set_cell_font_sizes(ModelRc::new(VecModel::from(grid.cell_font_sizes)));
+    app.set_object_kinds(ModelRc::new(VecModel::from(objects.kinds)));
+    app.set_object_labels(ModelRc::new(VecModel::from(objects.labels)));
+    app.set_object_images(ModelRc::new(VecModel::from(objects.images)));
+    app.set_object_positions_x(ModelRc::new(VecModel::from(objects.positions_x)));
+    app.set_object_positions_y(ModelRc::new(VecModel::from(objects.positions_y)));
+    app.set_object_widths(ModelRc::new(VecModel::from(objects.widths)));
+    app.set_object_heights(ModelRc::new(VecModel::from(objects.heights)));
+    app.set_object_fills(ModelRc::new(VecModel::from(objects.fills)));
+    app.set_visible_objects(ModelRc::new(VecModel::from(objects.visible)));
+    app.set_selected_objects(ModelRc::new(VecModel::from(objects.selected)));
     app.set_grid_col_width(geometry.default_col_width);
     app.set_grid_row_height(GRID_ROW_HEIGHT * zoom);
     app.set_grid_col_offset(geometry.col_offset);
@@ -1130,6 +1299,9 @@ fn project_sheet_inner(
     app.set_grid_content_height(geometry.content_height);
     app.set_grid_column_widths(ModelRc::new(VecModel::from(geometry.column_widths)));
     app.set_grid_row_heights(ModelRc::new(VecModel::from(geometry.row_heights)));
+    if app.get_selected_object() >= sheet.objects.len() as i32 {
+        app.set_selected_object(-1);
+    }
     update_selection_range(app, sheet, vals, selection);
     app.set_table_rows_label(SharedString::from(dimensions.rows.to_string()));
     app.set_table_cols_label(SharedString::from(dimensions.cols.to_string()));
@@ -1369,8 +1541,6 @@ pub(crate) enum SheetTransaction {
 pub(crate) struct WorkbookUndoState {
     sheets: Vec<Sheet>,
     active: usize,
-    undo_stack: Vec<SheetTransaction>,
-    redo_stack: Vec<SheetTransaction>,
     histories: Vec<(Vec<SheetTransaction>, Vec<SheetTransaction>)>,
 }
 
@@ -1379,8 +1549,6 @@ impl WorkbookUndoState {
         Self {
             sheets: state.sheets.borrow().clone(),
             active: *state.active_sheet_index.borrow(),
-            undo_stack: state.undo_stack.borrow().clone(),
-            redo_stack: state.redo_stack.borrow().clone(),
             histories: state.sheet_histories.borrow().clone(),
         }
     }
@@ -1390,9 +1558,10 @@ impl WorkbookUndoState {
         *state.active_sheet_index.borrow_mut() = self.active;
         let active = self.active.min(self.sheets.len().saturating_sub(1));
         *state.current.borrow_mut() = self.sheets[active].clone();
-        *state.undo_stack.borrow_mut() = self.undo_stack.clone();
-        *state.redo_stack.borrow_mut() = self.redo_stack.clone();
         *state.sheet_histories.borrow_mut() = self.histories.clone();
+        let (undo, redo) = self.histories.get(active).cloned().unwrap_or_default();
+        *state.undo_stack.borrow_mut() = undo;
+        *state.redo_stack.borrow_mut() = redo;
     }
 }
 
@@ -1516,7 +1685,6 @@ pub(crate) fn commit_workbook_transaction(
     if after_sheets.is_empty() {
         return;
     }
-    let before = WorkbookUndoState::capture(state);
     let old_active = *state.active_sheet_index.borrow();
 
     // Stash the outgoing tab's live stacks, mirroring sheet switching.
@@ -1529,6 +1697,10 @@ pub(crate) fn commit_workbook_transaction(
         }
         histories[old_active] = (live_undo, live_redo);
     }
+    // Workbook snapshots keep per-tab histories as data, rather than taking
+    // a recursive copy of the live workbook undo/redo stacks. This keeps tab
+    // operations bounded even after long editing sessions.
+    let before = WorkbookUndoState::capture(state);
 
     let after_active = after_active.min(after_sheets.len().saturating_sub(1));
     *state.sheets.borrow_mut() = after_sheets;
@@ -1821,6 +1993,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
         Some(p) => load_sheet(Path::new(p))?,
         None => starter_workbook(),
     };
+    if args.objects {
+        object_actions::seed_demo_objects(&mut sheet);
+        app.set_selected_object(0);
+    }
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
     }
@@ -1863,6 +2039,7 @@ pub(crate) struct GuiState {
     pub(crate) csv_filter: FileFilter,
     pub(crate) xlsx_filter: FileFilter,
     pub(crate) clipboard: RefCell<Option<Vec<Vec<String>>>>,
+    pub(crate) object_gesture: RefCell<Option<object_actions::ObjectGesture>>,
 }
 
 impl GuiState {
@@ -1889,6 +2066,7 @@ impl GuiState {
             csv_filter,
             xlsx_filter,
             clipboard: RefCell::new(None),
+            object_gesture: RefCell::new(None),
         }
     }
 
@@ -1922,8 +2100,23 @@ fn open_request(state: &GuiState) -> OpenFileRequest {
         title: "Open or Import Loom Sheets Workbook".into(),
         initial_directory: initial_directory(state.save_path.borrow().as_deref()),
         suggested_name: None,
-        filters: vec![state.workbook_filter.clone(), state.import_filter.clone()],
+        filters: vec![
+            state.workbook_filter.clone(),
+            state.import_filter.clone(),
+            state.xlsx_filter.clone(),
+        ],
     }
+}
+
+pub(crate) fn image_open_request(state: &GuiState) -> Result<OpenFileRequest, String> {
+    let filter = FileFilter::new("Images", ["png", "jpg", "jpeg", "webp", "gif", "svg"])
+        .map_err(|error| error.to_string())?;
+    Ok(OpenFileRequest {
+        title: "Insert Image".into(),
+        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
+        suggested_name: None,
+        filters: vec![filter],
+    })
 }
 
 fn save_request(state: &GuiState) -> SaveFileRequest {
@@ -1979,7 +2172,8 @@ fn replace_opened_workbook(
     *state.save_path.borrow_mut() = is_native_workbook(&path).then_some(path);
     state.undo_stack.borrow_mut().clear();
     state.redo_stack.borrow_mut().clear();
-    *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
+    *state.sheet_histories.borrow_mut() =
+        vec![(Vec::new(), Vec::new()); state.sheets.borrow().len()];
     apply_sheet(app, state);
     sync_sheet_tabs(app, state);
 }
@@ -2034,6 +2228,62 @@ fn run_gui(args: &Args) -> Result<(), String> {
     run_gui_with_dialogs(args, Rc::new(NativeFileDialogs))
 }
 
+/// Register the live undo/redo callbacks shared by the native bootstrap and
+/// callback-level tests. Keeping this wiring separate from the window setup
+/// ensures every UI action can exercise the same history path headlessly.
+pub(crate) fn register_history_actions(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_undo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let popped = state.undo_stack.borrow_mut().pop();
+                if let Some(edit) = popped {
+                    if let SheetTransaction::Workbook { before, .. } = &edit {
+                        restore_workbook_state(&app, &state, before, &menu_service);
+                    } else {
+                        {
+                            let mut sheet = state.current.borrow_mut();
+                            edit.revert(&mut sheet);
+                        }
+                        apply_sheet(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                    }
+                    push_history(&mut state.redo_stack.borrow_mut(), edit);
+                }
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_redo(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let popped = state.redo_stack.borrow_mut().pop();
+                if let Some(edit) = popped {
+                    if let SheetTransaction::Workbook { after, .. } = &edit {
+                        restore_workbook_state(&app, &state, after, &menu_service);
+                    } else {
+                        {
+                            let mut sheet = state.current.borrow_mut();
+                            edit.apply(&mut sheet);
+                        }
+                        apply_sheet(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                    }
+                    push_history(&mut state.undo_stack.borrow_mut(), edit);
+                }
+            }
+        });
+    }
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
@@ -2072,6 +2322,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         xlsx_filter,
     ));
     state.install_workbook(initial.sheets, initial.active);
+    if args.objects {
+        let active = *state.active_sheet_index.borrow();
+        let mut sheet = state.current.borrow_mut();
+        object_actions::seed_demo_objects(&mut sheet);
+        state.sheets.borrow_mut()[active] = sheet.clone();
+        app.set_selected_object(0);
+    }
     // One menu adapter owns the application sink for its entire lifetime so
     // accepted native actions and toolbar/palette callbacks share a route.
     let menu_service = Arc::new(NativeMenuBar::new());
@@ -2101,6 +2358,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 *state.save_path.borrow_mut() = None;
                 state.undo_stack.borrow_mut().clear();
                 state.redo_stack.borrow_mut().clear();
+                *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
                 apply_sheet(&app, &state);
                 sync_sheet_tabs(&app, &state);
                 sync_menu_state(&menu_service, &app, &state);
@@ -2266,12 +2524,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 match state.dialogs.save_file(&export_request(&state)) {
                     Ok(Some(path)) => {
                         let sheet = state.current.borrow().clone();
-                        let vals = evaluate_current(&state);
-                        let csv = to_csv_with_values(&sheet, &vals);
+                        let csv = to_csv_with_formulas(&sheet);
                         let name = sheet.name.clone();
                         match loom_storage::atomic_write(&path, csv.as_bytes()) {
                             Ok(()) => app.set_status_left(SharedString::from(format!(
-                                "Exported {name} to {} (values only)",
+                                "Exported {name} to {} (formulas preserved)",
                                 path.display()
                             ))),
                             Err(error) => app.set_status_left(SharedString::from(format!(
@@ -2295,14 +2552,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 match state.dialogs.save_file(&export_xlsx_request(&state)) {
                     Ok(Some(path)) => {
                         let (siblings, _) = workbook_sheets(&state);
-                        let evaluated = loom_sheets_core::workbook::evaluate_workbook(&siblings);
-                        let sheets_data: Vec<loom_sheets_core::XlsxSheetData> = siblings
-                            .iter()
-                            .zip(evaluated.iter())
-                            .map(|(sheet, vals)| loom_sheets_core::sheet_to_xlsx_data(sheet, vals))
-                            .collect();
-                        let tabs = sheets_data.len();
-                        match loom_sheets_core::export_xlsx_workbook(&sheets_data) {
+                        let tabs = siblings.len();
+                        match loom_sheets_core::export_xlsx_sheets(&siblings) {
                             Ok(bytes) => match loom_storage::atomic_write(&path, &bytes) {
                                 Ok(()) => app.set_status_left(SharedString::from(format!(
                                     "Exported {} {} to {} (formulas kept)",
@@ -2327,52 +2578,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_undo(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let popped = state.undo_stack.borrow_mut().pop();
-                if let Some(edit) = popped {
-                    if let SheetTransaction::Workbook { before, .. } = &edit {
-                        restore_workbook_state(&app, &state, before, &menu_service);
-                    } else {
-                        {
-                            let mut sheet = state.current.borrow_mut();
-                            edit.revert(&mut sheet);
-                        }
-                        apply_sheet(&app, &state);
-                        sync_menu_state(&menu_service, &app, &state);
-                    }
-                    push_history(&mut state.redo_stack.borrow_mut(), edit);
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_redo(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let popped = state.redo_stack.borrow_mut().pop();
-                if let Some(edit) = popped {
-                    if let SheetTransaction::Workbook { after, .. } = &edit {
-                        restore_workbook_state(&app, &state, after, &menu_service);
-                    } else {
-                        {
-                            let mut sheet = state.current.borrow_mut();
-                            edit.apply(&mut sheet);
-                        }
-                        apply_sheet(&app, &state);
-                        sync_menu_state(&menu_service, &app, &state);
-                    }
-                    push_history(&mut state.undo_stack.borrow_mut(), edit);
-                }
-            }
-        });
-    }
+    register_history_actions(&app, &state, &menu_service);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -2537,6 +2743,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 MenuItem::action("table.freeze_header", "Freeze Header Row"),
                 MenuItem::action("table.unfreeze_panes", "Unfreeze Panes"),
                 MenuItem::action("table.pivot_sum", "Pivot Summary (Sum)"),
+                MenuItem::action("sheets.insert_shape", "Insert Shape"),
+                MenuItem::action("sheets.insert_image", "Insert Image"),
                 MenuItem::action("sheets.delete_sheet", "Delete Sheet"),
             ],
         )],
@@ -2572,6 +2780,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         "table.freeze_header",
         "table.unfreeze_panes",
         "table.pivot_sum",
+        "sheets.insert_shape",
+        "sheets.insert_image",
         "sheets.delete_sheet",
     ]);
     menu_service
@@ -2585,15 +2795,23 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .map_err(|error| error.to_string())?;
 
     register_sheet_actions(&app, &state, &menu_service);
+    object_actions::register_object_actions(&app, &state, &menu_service);
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
     }
     apply_sheet(&app, &state);
+    if args.objects {
+        app.set_selected_object(0);
+    }
     sync_sheet_tabs(&app, &state);
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
     if args.chart {
-        if let Ok(chart) = plan_chart(&state.current.borrow(), 0, 1) {
+        let chart = {
+            let sheet = state.current.borrow();
+            plan_chart(&sheet, 0, 1).ok()
+        };
+        if let Some(chart) = chart {
             state.current.borrow_mut().chart = Some(chart);
             app.set_chart_visible(true);
             sync_chart_to_app(&app, &state.current.borrow());
@@ -2607,6 +2825,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // grid after the native window is shown; winit may replace the focus item
     // during presentation, so doing this before `show` is not durable.
     app.invoke_focus_grid();
+    if args.objects {
+        // Keep the scalar selection in sync with the projected selection list.
+        app.set_selected_object(0);
+        let app_ref = app.as_weak();
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = app_ref.upgrade() {
+                app.set_selected_object(0);
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    }
     slint::run_event_loop().map_err(|e| e.to_string())?;
     Ok(())
 }

@@ -1,0 +1,57 @@
+     Locking 24 packages to latest compatible versions
+    Blocking waiting for file lock on build directory
+   Compiling generic-array v0.14.7
+   Compiling typenum v1.20.1
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling digest v0.10.7
+   Compiling memchr v2.8.3
+   Compiling cfg-if v1.0.4
+   Compiling cpufeatures v0.2.17
+   Compiling itoa v1.0.18
+   Compiling sha2 v0.10.9
+   Compiling loom-package v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-package)
+   Compiling loom-production v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-production)
+   Compiling loom-storage v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-storage)
+   Compiling loom-audit-shared-probes v0.0.0 (/home/patri/code/rust-loom/.work/audit-2026-09-14/shared-probes)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 06s
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_audit_shared_probes-e1a29068dc91f66f)
+
+running 3 tests
+test tests::failed_journal_append_must_not_consume_sequence ... FAILED
+test tests::edits_after_checkpoint_and_restart_must_recover ... FAILED
+test tests::metadata_write_failure_must_preserve_recoverable_state ... FAILED
+
+failures:
+
+---- tests::failed_journal_append_must_not_consume_sequence stdout ----
+
+thread 'tests::failed_journal_append_must_not_consume_sequence' (763717) panicked at src/lib.rs:61:9:
+successful retry left an unreadable journal: Err(Corruption("non-sequential sequence number 2 at offset 0, expected 1"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::edits_after_checkpoint_and_restart_must_recover stdout ----
+
+thread 'tests::edits_after_checkpoint_and_restart_must_recover' (763716) panicked at src/lib.rs:28:9:
+assertion `left == right` failed: recovery silently rolled back to saved contents
+  left: [115, 97, 118, 101, 100, 32, 99, 111, 110, 116, 101, 110, 116, 115]
+ right: [110, 101, 119, 32, 117, 110, 115, 97, 118, 101, 100, 32, 101, 100, 105, 116]
+
+---- tests::metadata_write_failure_must_preserve_recoverable_state stdout ----
+
+thread 'tests::metadata_write_failure_must_preserve_recoverable_state' (763718) panicked at src/lib.rs:46:9:
+valid journal is inaccessible after partial checkpoint: Err(Integrity("checkpoint digest mismatch"))
+
+
+failures:
+    tests::edits_after_checkpoint_and_restart_must_recover
+    tests::failed_journal_append_must_not_consume_sequence
+    tests::metadata_write_failure_must_preserve_recoverable_state
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `--lib`

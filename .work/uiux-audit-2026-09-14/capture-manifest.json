@@ -1,0 +1,499 @@
+[
+  {
+    "app": "writer",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-writer/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-writer-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "writer",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-writer",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "writer",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-writer",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "writer",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-writer",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "writer",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-writer",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "present",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-present/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-present-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "present",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-present",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "present",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-present",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "present",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-present",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "present",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-present",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "photo",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-photo/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-photo-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "photo",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-photo",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "photo",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-photo",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "photo",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-photo",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "photo",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-photo",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "motion",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-motion/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-motion-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "motion",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-motion",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "motion",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-motion",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "motion",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-motion",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "motion",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-motion",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "video",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-video/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-video-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "video",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-video",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "video",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-video",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "video",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-video",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "video",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-video",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "studio",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-studio/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-studio-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "studio",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-studio",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "studio",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-studio",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "studio",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-studio",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "studio",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-studio",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "encode",
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-encode/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-encode-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "app": "encode",
+    "capture": "01-1440x900-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-encode",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/01-1440x900-light.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "encode",
+    "capture": "02-1024x720-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-encode",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/02-1024x720-light.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "light"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "encode",
+    "capture": "03-1440x900-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-encode",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/03-1440x900-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "app": "encode",
+    "capture": "04-1440x900-light-palette.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-encode",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/04-1440x900-light-palette.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "light",
+      "--palette"
+    ],
+    "exit": 0
+  }
+]

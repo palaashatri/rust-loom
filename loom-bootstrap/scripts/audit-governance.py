@@ -13,6 +13,8 @@ AGENTS = ROOT / "AGENTS.MD"
 TRUTH = ROOT / "TRUTH.md"
 APPS = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
 errors: list[str] = []
+workflow: dict = {}
+phase = None
 
 
 def fail(message: str) -> None:
@@ -26,7 +28,36 @@ else:
     phase = workflow.get("phase")
     foundation_status = workflow.get("foundation_status")
 
-    if phase == "ui-foundation":
+    if phase == "audit-repair":
+        if workflow.get("active_repair") != "shared-recovery":
+            fail("audit-repair currently permits only shared-recovery; review a scope change explicitly")
+        if workflow.get("application_development_locked") is not True:
+            fail("application development must remain locked during audit-repair")
+        if workflow.get("consumer_imports_allowed") is not False:
+            fail("new consumer imports must remain locked during audit-repair")
+        if workflow.get("next_application") != "sheets":
+            fail("audit-repair must return to Sheets first")
+        if foundation_status not in ("ACCEPTED", "ACCEPTANCE_BLOCKED"):
+            fail("invalid foundation status during audit-repair")
+        if workflow.get("foundation_gate", {}).get("status") != foundation_status:
+            fail("foundation gate status disagrees with foundation_status")
+        if workflow.get("existing_foundation_consumers") != list(APPS[:5]):
+            fail("existing foundation consumer list changed without an adoption gate")
+        repair_prefixes = {
+            ".github/", "AGENTS.MD", "TRUTH.md", "README.md", "loom-bootstrap/",
+            "loom-core/crates/loom-ui/", "loom-core/crates/loom-desktop/",
+            "loom-core/crates/loom-production/", "loom-core/crates/loom-storage/",
+            "loom-design-bible/contracts/", "loom-design-bible/tokens/",
+        }
+        prefixes = workflow.get("allowed_active_prefixes")
+        if not isinstance(prefixes, list) or any(
+            not isinstance(prefix, str) for prefix in prefixes
+        ) or not set(prefixes).issubset(repair_prefixes):
+            fail("shared-recovery allowed_active_prefixes changed beyond approved scope; review explicitly")
+        for app in APPS:
+            if workflow.get("application_status", {}).get(app) != "LOCKED":
+                fail(f"application {app} must remain LOCKED during shared-recovery")
+    elif phase == "ui-foundation":
         if foundation_status != "ACCEPTANCE_BLOCKED":
             fail("foundation status changed without the acceptance procedure")
         if workflow.get("application_development_locked") is not True:
@@ -144,7 +175,7 @@ agents_lower = agents_text.lower()
 truth_lower = truth_text.lower()
 for phrase in (
     "highest-authority engineering instruction",
-    "ACTIVE PHASE: UI FOUNDATION LOCK",
+    "Active workflow and audit repair gate",
     "Serial application workflow",
     "Visual foundation gate",
     "commercially redistributable assets",
@@ -152,7 +183,14 @@ for phrase in (
     if phrase.lower() not in agents_lower:
         fail(f"AGENTS.MD missing required constitutional clause: {phrase}")
 
-if phase == "ui-foundation":
+if phase == "audit-repair":
+    truth_phrases = (
+        "APPLICATION DEVELOPMENT: LOCKED",
+        "SUITE STATUS: ACCEPTANCE_BLOCKED",
+        "ACTIVE REPAIR: SHARED-RECOVERY",
+        "NEXT APPLICATION: SHEETS",
+    )
+elif phase == "ui-foundation":
     truth_phrases = (
         "ACTIVE PHASE: UI FOUNDATION",
         "FOUNDATION STATUS: ACCEPTANCE_BLOCKED",
@@ -195,22 +233,60 @@ for phrase in truth_phrases:
     if phrase.lower() not in truth_lower:
         fail(f"TRUTH.md missing required active-state statement: {phrase}")
 
-# TRUTH.md owns the readiness number (updated only from verified evidence);
-# governance requires the statement to be present with a well-formed score.
+# Check the live gate, not incidental words in historical prose. Readiness is
+# evidence and explicit status, not an arbitrary number required by a regex.
 if phase:
-    readiness = re.search(
-        r"Current complete-suite readiness (?:remains )?(?:is )?approximately \*\*(\d+)/100\*\*",
-        truth_text,
+    phases = re.findall(r"^ACTIVE PHASE: (.+)$", truth_text, re.MULTILINE)
+    expected_phase = "UI FOUNDATION" if phase == "ui-foundation" else phase.upper()
+    if [value.strip() for value in phases] != [expected_phase]:
+        fail("TRUTH.md active phase disagrees with workflow")
+    foundations = re.findall(r"^FOUNDATION STATUS: (.+)$", truth_text, re.MULTILINE)
+    if [value.strip() for value in foundations] != [workflow.get("foundation_status")]:
+        fail("TRUTH.md foundation status disagrees with workflow")
+
+if phase == "audit-repair":
+    gate_fields = {
+        "APPLICATION DEVELOPMENT": "LOCKED",
+        "SUITE STATUS": "ACCEPTANCE_BLOCKED",
+        "ACTIVE REPAIR": str(workflow.get("active_repair", "")).upper(),
+        "NEXT APPLICATION": str(workflow.get("next_application", "")).upper(),
+    }
+    for field, expected in gate_fields.items():
+        values = re.findall(rf"^{re.escape(field)}: (.+)$", truth_text, re.MULTILINE)
+        if [value.strip() for value in values] != [expected]:
+            fail(f"TRUTH.md {field} must appear once and match workflow")
+    tables = re.findall(
+        r"^\|[ \t]*Order[ \t]*\|[ \t]*Application[ \t]*\|"
+        r"[ \t]*Product status[ \t]*\|[ \t]*Work status[ \t]*\|[^\n]*\n"
+        r"((?:\|[^\n]*(?:\n|$))+)",
+        truth_text, re.MULTILINE,
     )
-    if readiness is None:
-        fail(
-            "TRUTH.md missing required readiness statement: "
-            "'Current complete-suite readiness ... approximately **N/100**'"
+    rows = re.findall(
+        r"^\|\s*\d+\s*\|\s*(\w+)\s*\|\s*(\w+)\s*\|\s*(\w+)\s*\|",
+        tables[0] if len(tables) == 1 else "", re.MULTILINE,
+    )
+    if len(tables) != 1 or [name.lower() for name, _, _ in rows] != list(APPS):
+        fail("TRUTH.md must contain exactly one ordered live application status table")
+    for name, quality, schedule in rows:
+        if quality != "ACCEPTANCE_BLOCKED":
+            fail(f"{name} product status must remain ACCEPTANCE_BLOCKED during shared-recovery")
+        if schedule != workflow.get("application_status", {}).get(name.lower()):
+            fail(f"{name} work status disagrees with workflow")
+        section = re.search(
+            rf"^### {re.escape(name)}\s*\n(.*?)(?=^## |^### |\Z)",
+            truth_text, re.MULTILINE | re.DOTALL,
         )
-    elif int(readiness.group(1)) > 100:
-        fail(f"TRUTH.md readiness score out of range: {readiness.group(1)}")
+        if section:
+            for status in re.findall(
+                r"^\s*(?:\*\*)?Status(?:\*\*)?:\s*(?:\*\*)?\s*`?(\w+)",
+                section.group(1), re.MULTILINE,
+            ):
+                if status != quality:
+                    fail(f"{name} section status disagrees with the live table")
 
 for app in APPS:
+    if phase == "audit-repair" and app in workflow.get("existing_foundation_consumers", []):
+        continue
     if app in ("sheets", "writer", "present", "photo", "motion") and phase in ("sheets", "writer", "present", "photo", "motion"):
         continue
     ui_root = ROOT / f"loom-{app}" / "crates" / f"loom-{app}-app" / "ui"

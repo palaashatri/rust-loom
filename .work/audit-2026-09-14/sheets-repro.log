@@ -1,0 +1,15 @@
+     Locking 10 packages to latest compatible versions
+   Compiling loom-command v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-command)
+   Compiling loom-sheets-core v0.1.0 (/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core)
+   Compiling loom-audit-sheets v0.0.0 (/home/patri/code/rust-loom/.work/audit-2026-09-14/sheets)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.70s
+     Running `/tmp/loom-audit-core-target/debug/sheets-repro`
+JSON input="one\ttwo" output=Some("one\\ttwo")
+JSON input="one\rtwo" output=Some("one\\rtwo")
+JSON input="C:\\new\\notes" output=Some("C:\new\notes")
+JSON input="before\"}after" output=Some("before\\")
+JSON name="My \"Sheet\"" output="My \\"
+XLSX shared formula B1=Some("=A1*2") B2=Some("30")
+XLSX after A2=50 B2=Some(Number(30.0))
+Recovery embedded=None asset=Some("content/assets/image-0-0.png")
+Recovered image export=Err("unable to read image /missing/original.png")

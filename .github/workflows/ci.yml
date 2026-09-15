@@ -20,7 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Governance and serial workflow lock
-        run: python3 loom-bootstrap/scripts/audit-governance.py
+        run: |
+          python3 -m unittest discover -s loom-bootstrap/scripts -p test_audit_governance.py
+          python3 loom-bootstrap/scripts/audit-governance.py
       - name: Code structure ratchet
         run: python3 loom-bootstrap/scripts/audit-code-structure.py
       - name: Commercial asset provenance

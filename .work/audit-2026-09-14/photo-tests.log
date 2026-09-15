@@ -1,0 +1,63 @@
+   Compiling loom-photo-core v0.1.0 (/home/patri/code/rust-loom/loom-photo/crates/loom-photo-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.95s
+     Running unittests src/lib.rs (/tmp/loom-audit-doc-target/debug/deps/loom_photo_core-868d393c8ba9d78d)
+
+running 49 tests
+test tests::affine_transform_2d_operations ... ok
+test tests::aspect_ratio_crop_bounds_calculate_centered_rectangles ... ok
+test tests::asset_registry_audit_and_relink ... ok
+test tests::blend_modes_and_adjustments_evaluate_correctly ... ok
+test tests::box_blur_smoothing ... ok
+test tests::auto_contrast_derives_levels ... ok
+test tests::canvas_transform_is_applied_to_every_layer_and_round_trips ... ok
+test tests::canvas_package_round_trip_preserves_pixels_masks_and_adjustments ... ok
+test tests::chromatic_aberration_channel_shifting ... ok
+test tests::brush_dab_and_stroke_painting ... ok
+test tests::composed_transform_overflow_is_rejected_without_mutating_or_checkpointing ... ok
+test tests::compute_histogram_counts_channel_distributions ... ok
+test tests::clone_stamp_copies_source_region ... ok
+test tests::document_validation_rejects_malformed_persisted_state ... ok
+test tests::crop_and_resize_preserve_expected_pixels ... ok
+test tests::film_grain_simulation ... ok
+test tests::gaussian_blur_filtering ... ok
+test tests::geometry_validation_rejects_overflow_and_unsafe_affines ... ok
+test tests::high_pass_and_unsharp_mask_filtering ... ok
+test tests::image_transforms_flip_and_rotate_correctly ... ok
+test tests::layer_bounds_compose_canvas_and_layer_transforms_from_source_corners ... ok
+test tests::lens_distortion_radial_correction ... ok
+test tests::layer_crop_changes_composited_pixels_without_changing_canvas_size ... ok
+test tests::layer_mask_inversion_and_threshold ... ok
+test tests::levels_adjustment_remap ... ok
+test tests::lift_gamma_gain_color_grading ... ok
+test tests::non_pixel_layers_cannot_receive_pixel_geometry_or_bounds ... ok
+test tests::masks_and_ppm_export_are_deterministic ... ok
+test tests::openraster_stack_manifest_emission ... ok
+test tests::photo_integrity_digests ... ok
+test tests::photo_session_undo_redo_restores_layer_stack ... ok
+test tests::png_chunk_parsing_and_ihdr ... ok
+test tests::png_and_jpeg_are_real_decodable_exports ... ok
+test tests::radial_gradient_and_channel_extraction ... ok
+test tests::rejected_geometry_edits_do_not_create_history_entries ... ok
+test tests::reference_compositor_blends_pixels_and_adjustments ... ok
+test tests::segmentation_mask_conversion_and_regions ... ok
+test tests::split_toning_color_balance ... ok
+test tests::selection_crop_and_adjustment_edits_are_validated_and_undoable ... ok
+test tests::malformed_non_pixel_geometry_is_rejected_from_memory_and_packages ... ok
+test tests::test_photo_doc_creation ... ok
+test tests::test_select_layer_rejects_invalid_index ... ok
+test tests::tint_and_sepia_adjustments ... ok
+test tests::tone_curve_lut_mapping ... ok
+test tests::test_add_layers ... ok
+test tests::vignette_filter_application ... ok
+test tests::test_save_load_roundtrip ... ok
+test tests::transformed_layer_bounds_and_pixels_follow_persisted_geometry ... ok
+test tests::arbitrary_rotation_geometry ... ok
+
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests loom_photo_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,19 @@
+[package]
+name = "loom-audit-sheets"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+loom-sheets-core = { path = "../../../loom-sheets/crates/loom-sheets-core" }
+loom-package = { path = "../../../loom-core/crates/loom-package" }
+
+[[bin]]
+name = "sheets-repro"
+path = "repro.rs"
+
+[[bin]]
+name = "history-repro"
+path = "history.rs"
+

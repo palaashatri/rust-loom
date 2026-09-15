@@ -60,7 +60,7 @@ pub fn sheet_to_json(sheet: &Sheet) -> String {
     let mut s = String::with_capacity(256);
     s.push('{');
     s.push_str("\"name\":\"");
-    s.push_str(&sheet.name.replace('"', "\\\""));
+    s.push_str(&json_escape(&sheet.name));
     s.push_str("\",\"cells\":[");
     let mut first = true;
     for (r, c) in &sheet.cells {
@@ -72,12 +72,7 @@ pub fn sheet_to_json(sheet: &Sheet) -> String {
         s.push_str("\"ref\":\"");
         s.push_str(&r.to_a1());
         s.push_str("\",\"raw\":\"");
-        s.push_str(
-            &c.raw
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('\n', "\\n"),
-        );
+        s.push_str(&json_escape(&c.raw));
         s.push_str("\"}");
     }
     s.push(']');
@@ -180,8 +175,48 @@ pub fn sheet_to_json(sheet: &Sheet) -> String {
         s.push_str(&chart.val_col.to_string());
         s.push('}');
     }
+    if !sheet.objects.is_empty() {
+        s.push_str(",\"objects\":[");
+        for (index, object) in sheet.objects.iter().enumerate() {
+            if index > 0 {
+                s.push(',');
+            }
+            s.push_str("{\"kind\":\"");
+            s.push_str(object.kind.as_str());
+            s.push_str("\",\"row\":");
+            s.push_str(&object.anchor.row.to_string());
+            s.push_str(",\"col\":");
+            s.push_str(&object.anchor.col.to_string());
+            s.push_str(",\"width\":");
+            s.push_str(&object.width.to_string());
+            s.push_str(",\"height\":");
+            s.push_str(&object.height.to_string());
+            s.push_str(",\"label\":\"");
+            s.push_str(&json_escape(&object.label));
+            s.push_str("\",\"path\":\"");
+            s.push_str(&json_escape(&object.path));
+            if let Some(asset) = &object.asset {
+                s.push_str("\",\"asset\":\"");
+                s.push_str(&json_escape(asset));
+            }
+            s.push_str("\",\"fill\":\"");
+            s.push_str(object.fill.as_str());
+            s.push_str("\"}");
+        }
+        s.push(']');
+    }
     s.push('}');
     s
+}
+
+/// Escape the JSON string subset emitted by the hand-rolled format.
+fn json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 /// Parse sheet JSON back.
@@ -230,6 +265,7 @@ pub fn sheet_from_json(s: &str) -> Result<Sheet, String> {
     if let Some(chart) = parse_chart(s) {
         sheet.chart = Some(chart);
     }
+    sheet.objects = parse_object_list(s);
     Ok(sheet)
 }
 
@@ -417,8 +453,21 @@ fn extract_json_array<'a>(s: &'a str, key: &str) -> Option<&'a str> {
     let rest = &s[start..];
     let mut depth = 1usize;
     let mut end = None;
+    let mut in_string = false;
+    let mut escaped = false;
     for (i, ch) in rest.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
         match ch {
+            '"' => in_string = true,
             '[' => depth += 1,
             ']' => {
                 depth -= 1;
@@ -524,6 +573,66 @@ fn parse_style_list(s: &str) -> Vec<(CellRef, CellStyle)> {
         ));
     }
     out
+}
+
+/// Parse persisted worksheet objects; unknown object kinds are ignored so
+/// newer files remain readable by older-compatible loaders.
+fn parse_object_list(s: &str) -> Vec<crate::SheetObject> {
+    let Some(body) = extract_json_array(s, "objects") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in split_top_level_objects(body) {
+        let Some(kind) = parse_json_string_field(entry, "kind")
+            .and_then(|raw| crate::SheetObjectKind::parse(&raw))
+        else {
+            continue;
+        };
+        let anchor = CellRef {
+            row: parse_u32_field(entry, "row"),
+            col: parse_u32_field(entry, "col"),
+        };
+        let width = parse_u32_field(entry, "width").max(1);
+        let height = parse_u32_field(entry, "height").max(1);
+        let label = parse_json_string_field(entry, "label").unwrap_or_default();
+        let path = parse_json_string_field(entry, "path").unwrap_or_default();
+        let fill = parse_json_string_field(entry, "fill")
+            .map(|raw| crate::style::FillColor::parse_kind(&raw))
+            .unwrap_or_default();
+        out.push(crate::SheetObject {
+            kind,
+            anchor,
+            width,
+            height,
+            label,
+            path,
+            embedded: None,
+            asset: parse_json_string_field(entry, "asset"),
+            fill,
+        });
+    }
+    out
+}
+
+/// Read one escaped JSON string field from a small object slice.
+fn parse_json_string_field(s: &str, key: &str) -> Option<String> {
+    let marker = format!("\"{key}\":\"");
+    let tail = s.split_once(&marker)?.1;
+    let mut out = String::new();
+    let mut chars = tail.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next()? {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                escaped => out.push(escaped),
+            },
+            '"' => return Some(out),
+            other => out.push(other),
+        }
+    }
+    None
 }
 
 /// Parse the optional numeric dimension maps emitted by [`sheet_to_json`].
@@ -705,5 +814,24 @@ mod tests {
             .unwrap()
             .chart
             .is_none());
+    }
+
+    #[test]
+    fn sheet_objects_roundtrip_with_legacy_payload_compatibility() {
+        let mut sheet = Sheet::new("Objects");
+        sheet.objects.push(crate::SheetObject::shape(
+            CellRef { row: 1, col: 2 },
+            "Review",
+        ));
+        sheet
+            .objects
+            .push(crate::SheetObject::image(CellRef { row: 5, col: 0 }, "/tmp/hero.png").unwrap());
+
+        let json = sheet_to_json(&sheet);
+        let back = sheet_from_json(&json).expect("object payload loads");
+        assert_eq!(back.objects, sheet.objects);
+
+        let legacy = r#"{"name":"old","cells":[],"col_widths":{},"row_heights":{}}"#;
+        assert!(sheet_from_json(legacy).unwrap().objects.is_empty());
     }
 }

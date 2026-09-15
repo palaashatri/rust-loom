@@ -1,0 +1,5 @@
+   Compiling loom-audit-media v0.1.0 (/tmp/loom-audit-media)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.83s
+     Running `/tmp/loom-audit-media-target/debug/encode_collision`
+No overwrite (-n) result=Ok(()), final content="NEWENCODE"
+Input/output resolve to same existing file; validate=Ok(())

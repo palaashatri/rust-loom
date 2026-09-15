@@ -1,245 +1,692 @@
 # Loom — Current Truth
 
-`AGENTS.MD` defines what Loom must become. This file records what is verified today and which work is currently allowed.
+This is the live product ledger and repair queue. `AGENTS.MD` defines the rules; `loom-bootstrap/contracts/workflow.toml` records the work gate. Updated 2026-09-15 from a code audit and fresh UI/UX inspection. Recording a defect does not fix it.
+
+## Active gate — read this before choosing a card
+
+```text
+ACTIVE PHASE: AUDIT-REPAIR
+FOUNDATION STATUS: ACCEPTED
+SUITE STATUS: ACCEPTANCE_BLOCKED
+APPLICATION DEVELOPMENT: LOCKED
+ACTIVE REPAIR: SHARED-RECOVERY
+NEXT APPLICATION: SHEETS
+```
+
+The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this audit. Existing consumer imports remain compatible; new adoption and new application features are frozen. The current visual audit does not recertify the gallery or supply human acceptance. Recheck gallery evidence and human sign-off before advancing application design. Do not delete or refresh existing baselines to hide findings.
+
+**Active product repair scope:** shared production recovery and storage only: CODE-01, then CODE-02, then CODE-18. This request records instructions; no product repair has been implemented. Read-only inspection, capture, regression reproductions, and documentation are allowed for every app. Update this gate and the workflow contract together before a later repair stage. A card's presence is not permission to skip the active scope.
+
+The contract's allowed prefixes are an outer file boundary, not permission to edit unrelated UI/desktop/design code during shared recovery. A newly supported repair stage also needs a reviewed update to `loom-bootstrap/scripts/audit-governance.py` and its focused tests; the present validator deliberately supports only `shared-recovery` in this phase.
+
+**Repair order after the shared stage:** verify the foundation gate; Sheets data integrity and unsaved-work protection (CODE-03/04/07/11/06/12), then Sheets UI; Writer; Present; Photo; Motion; Video; Studio; Encode. Record a bounded plugin-host security/runtime stage for CODE-08/15 separately before implementing it. Do not release the plugin host while those defects remain. Within each app, data loss and broken output come before visual polish. No later app starts until the current app passes its full gate, unless the owner explicitly changes scope.
+
+**How to use a card:** follow the numbered steps in `AGENTS.MD` under “Start here.” Select one card, reproduce it, make a small repair, run its concrete check, and record evidence under that same card. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. Stop after the authorized card. All code and UI cards in this ledger are OPEN unless their own record explicitly says otherwise.
 
 ## Current product state
 
-Loom is a local-first Rust + Slint creative-suite **functional alpha** with eight desktop applications, substantial domain engines, persistence/history infrastructure, native project formats, cross-platform packaging machinery, and a large amount of unfinished product/UI code.
+Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features, but this audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
 
-It is **not** yet a professional replacement for mature office, image, motion, video, audio, or encoding software. One application (Sheets) passes the acceptance definition in `AGENTS.MD`; Writer has verified evidence toward it; the remaining six do not.
+Quality and permission to work are different. This is the single live application status table:
 
-Current complete-suite readiness is approximately **38/100**, raised from 30 for Sheets' verified acceptance: the first application to pass all 14 gate items — real multi-sheet persistence, undoable tab operations, 41-function formula engine, persisted live charts, real zoom, honest templates, keyboard-complete palette, measured performance, and a judge-reviewed 18-capture viewport/theme pass.
+| Order | Application | Product status | Work status | Current blocking evidence |
+|---:|---|---|---|---|
+| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED | CODE-03/04/06/07/11/12; UI cards below |
+| 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/05/13/17; UI-11/12/13/14 |
+| 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/16/19; UI-15 |
+| 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/14; UI-14/16/18 |
+| 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-14/17/18; complete native workflow not established |
+| 6 | Video | ACCEPTANCE_BLOCKED | LOCKED | UI-19/20/25; complete native workflow not established |
+| 7 | Studio | ACCEPTANCE_BLOCKED | LOCKED | CODE-10; UI-20/21/22 |
+| 8 | Encode | ACCEPTANCE_BLOCKED | LOCKED | CODE-09; UI-23/24/25 |
 
-The score is intentionally frozen during the UI-foundation reset unless verified user-facing capability materially changes. Repository cleanup, smaller code, better CI, and stronger governance are valuable, but they do not by themselves increase professional product readiness.
+The previous ledger listed Present/Photo both LOCKED and ACCEPTED and said Sheets had no known serious defects. Those statements are withdrawn. Historical test counts and agent-reviewed screenshots do not override the open findings below. The pre-update ledger is retained as an ignored audit backup, not a competing authority.
 
-## Active gate
+## Recorded audit and evidence
 
-```text
-ACTIVE PHASE: WRITER
-FOUNDATION STATUS: ACCEPTED
-ACTIVE APPLICATION: WRITER (IN_PROGRESS)
-LOCKED APPLICATIONS: PRESENT, PHOTO, MOTION, VIDEO, STUDIO, ENCODE
-```
+The first audit was a code/reliability audit; it explicitly did **not** certify UI/UX. The follow-up adds fresh rendered screenshots from all eight apps and isolated native Linux interactions in Sheets and Writer. The observations are durable in CODE-01 through CODE-19 and UI-01 through UI-25 below, including reproduction instructions so they remain usable if `.work/` is removed. UI cards distinguish reproduced failures from source-confirmed limitations and visual design recommendations.
 
-Loom Sheets is recorded `ACCEPTED` below (verified 2026-09-11), satisfying the user directive that paused Writer until Sheets reached 100% genuine functionality. Per owner directive 2026-09-11, Sheets remains the active workstream for an extended scope — removing every documented limitation in its section — and no Writer implementation work has started. Present, Photo, Motion, Video, Studio, and Encode remain strictly LOCKED.
+- Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
+- Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
+- Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. Audit work preserves the existing product changes. It changes documentation and governance, not application behavior.
+- Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
+- Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
+- Visual evidence covers only the states explicitly listed in the visual report. It does not establish screen-reader compliance, complete keyboard operation, every scale/direction, all dialog outcomes, or cross-platform acceptance. Uncaptured or untested states remain unknown.
+- Documentation handoff checks: 18 focused governance tests pass; governance, code-structure, asset, and UI-foundation source audits pass. The source audit recognizes pre-existing accepted baseline files; it does not supply new human visual approval. All 49 accepted screenshot paths/hashes and explicit source-file references were checked. Sixteen audited product source files still match the original code audit hashes. Verification details are saved beside the visual report.
 
-### Writer acceptance evidence (verified 2026-09-06)
+## Existing capability inventory — preserve these while repairing
 
-- **Features now real (previously facade controls):** per-document page setup (paper/orientation/margins — persisted, undoable, drives layout, canvas geometry, and export PDF page size), bulleted/numbered list styles (block-kind edits with hanging markers, restart-after-interrupt numbering, markdown/PDF export), anchored comments (block-id + byte-range threads, resolve/reopen/delete, undoable, persisted in `.loomdoc`), and markdown-native tables (block text is the table source of truth; insertion at the caret, verbatim markdown export). All are reachable through the command registry / palette keyboard path.
-- **End-to-end journey:** `loom-writer/.work/qa-round8/journey/` — type, select, format, lists, comments, tables, page setup, undo/redo, zoom/scroll, save `.loomdoc`, reopen, export PDF, and cancel/failure paths all assert real state (block kinds, marker projection, comment threads, table parse-back, page-style switch, package round-trip) and PASS.
-- **Viewport/theme acceptance:** 18 deterministic captures covering 1024×720, 1280×800, 1440×900, 1920×1200 × light/dark/high-contrast, plus inspector (seeded with comment + table) and template-chooser states, in `loom-writer/.work/acceptance/`. A full judge review passed all 18 with no clipping, no ellipsized action labels, and no contrast defects; three defects it found first (status-bar clipping under the inspector, unseeded headless captures, left-heavy chooser grid) were fixed and re-verified.
-- **Native macOS visual QA:** live-GUI window captures via `screencapture -l` across nine states in `loom-writer/.work/qa-native/` (light/dark/high-contrast, inspector light/dark seeded with comments and a table, template chooser, palette).
-- **Tests/gates:** 149 tests green (72 app, 77 core), `loom-writer-core` and `loom-writer-app` clippy-clean, code-structure and governance audits PASS (legacy byte ceilings enforced).
-
-### Remaining Writer gate blockers
-
-1. **Human visual acceptance** (section 5): the judge-reviewed captures above are agent-reviewed evidence; `ACCEPTED` additionally requires explicit human sign-off of the represented design.
-2. **Representative performance evidence** (section 13 item 10): no measured interaction/pagination budget runs exist yet.
-3. **Documented limitations** (not severity-1/2): table cells are edited as markdown text rather than a pointer-driven cell grid; commented ranges are listed in the inspector but not yet visually highlighted in the canvas.
-
-## Why the reset is necessary
-
-The repository has accumulated useful engines together with excessive agent-generated structure and UI duplication. Several application entrypoints and core modules are extremely large; generic controls exist both in shared and application-local Slint files; old plans and reports compete for agent attention; and CI has been spending substantial compute on all-workspace release builds and cross-platform packaging even when the active work is a shared UI edit.
-
-The visible result is below the desired product bar. Current captures have demonstrated clipping, weak hierarchy, dense or redundant chrome, dead space, inconsistent control grammar, fixed-size workspaces, and prototype-like composition. Passing deterministic screenshot tests does not make those designs acceptable.
-
-## Strict readiness scorecard
-
-| Dimension | Current | Current truth |
-|---|---:|---|
-| Core/backend engineering | 67/100 | Sheets formula engine (41 functions, lazy IF, error propagation, absolute refs), chart geometry, and workbook persistence added to the existing models. |
-| Architecture & persistence | 72/100 | Versioned multi-tab `.loomtable` format with back-compat, workbook undo states, crash-recovery of all tabs; new code lives in small modules (`functions`, `persistence`, `style`, `formatting`) while legacy cores stay under byte ceilings. |
-| Functionality reachable through GUI | 52/100 | Sheets' full daily workflow (cells, ranges, 41-function formulas, formatting, charts, zoom, sort, tabs, templates, save/reopen, CSV/XLSX export) is wired end to end with journey evidence; Writer's document workflow slice from 2026-09-06 stands; other apps unchanged. |
-| Interaction design | 38/100 | Sheets: every mutation undoable (incl. tab add/delete/rename and chart ops), keyboard/palette reachability for all primary commands, truthful enablement and status announcements, responsive toolbar/inspector breakpoints, viewport-filling grid, Esc hierarchy. Direct manipulation beyond fill-handle/chart-overlay remains future. |
-| Visual design & polish | 40/100 | Sheets passed a judge-reviewed 18-capture viewport/theme acceptance pass (no clipping, no ellipsized labels, no contrast defects; two defects found and fixed: stale zoom label, fixed-size grid void); Writer's earlier pass stands; other applications' UI remains frozen legacy reference. |
-| Professional workflow depth | 32/100 | Sheets completes a coherent daily spreadsheet workflow; cross-sheet references, pivot tables, and drawing/media remain documented future scope. Other apps unchanged. |
-| **Overall product readiness** | **38/100** | Functional alpha with the first accepted application; professional-suite parity is not established. |
-
-The overall score is not an arithmetic mean. User-visible workflow completion, reliability, and acceptance evidence dominate.
-
-## Shared UI foundation status
-
-Status: `ACCEPTED`
-
-The shared UI foundation (`loom-core/crates/loom-ui/ui/foundation.slint`) is accepted with approved baselines and full mechanical CI passing. Consumer imports are now unlocked for the active application (Sheets). Approved screenshot baselines are recorded under `loom-core/crates/loom-ui/baselines/foundation`.
-
-## Legacy UI status
-
-`loom-core/crates/loom-ui/ui/toolkit.slint` and existing application-local component files are compatibility code for the current applications. They are **not** the design source for the new foundation.
-
-They remain in the tree only to avoid breaking existing application builds during the reset. New applications/components must not copy from them. They will be removed or reduced as each application migrates after foundation acceptance.
-
-## Code-structure debt
-
-The following classes of debt are verified and must be reduced by the code-structure ratchet:
-
-- monolithic application `main.rs` files;
-- monolithic application-core `lib.rs` files;
-- oversized legacy shared Slint files;
-- application-local generic component libraries;
-- compatibility aliases and forwarding wrappers that no longer add semantics;
-- QA scripts that combine governance, source heuristics, visual auditing, and product scoring in one large program.
-
-Existing oversized files are legacy exceptions with fixed byte ceilings. They may not grow. New source files must obey the smaller general budgets in `loom-bootstrap/contracts/code-quality.toml`.
-
-## CI truth
-
-Routine CI is being reduced to high-signal checks appropriate for the active phase: governance, structure, asset provenance, shared UI compilation, format/Clippy, focused tests, and deterministic foundation capture.
-
-The full cross-platform application/package matrix remains useful release evidence, but it is not a routine PR gate during the UI foundation lock.
-
-Source inspection, callback counts, control counts, screenshot existence, or a generated numeric "readiness" score are not product evidence and must not be used to raise this file's score.
-
-## Asset/licensing truth
-
-No third-party visual asset should enter the product without explicit provenance and a license compatible with commercial redistribution.
-
-Current policy prefers original Loom-generated assets, CC0/public-domain material, SIL OFL fonts, and clearly permissive licenses whose terms are satisfied. Unknown, personal-use, non-commercial, editorial-only, or scraped assets are forbidden.
-
-Existing product screenshots and test fixtures are project-generated evidence/fixtures rather than shipped third-party artwork. New external assets must be registered in the asset manifest before use.
-
-## Serial application gate
-
-After the shared foundation becomes `ACCEPTED`, application migration proceeds only in this order:
-
-| Order | Application | Status |
-|---:|---|---|
-| 1 | Sheets | ACCEPTED |
-| 2 | Writer | IN_PROGRESS |
-| 3 | Present | LOCKED |
-| 4 | Photo | LOCKED |
-| 5 | Motion | LOCKED |
-| 6 | Video | LOCKED |
-| 7 | Studio | LOCKED |
-| 8 | Encode | LOCKED |
-
-A later application remains locked until the immediately preceding application is explicitly recorded `ACCEPTED` here.
-
-## Current application boundaries
+These capabilities describe the current implementation and historical work, not blanket acceptance. Do not remove working features to make a defect disappear. Old performance and cross-platform numbers are historical, not rerun measurements.
 
 ### Sheets
 
-Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13, verified 2026-09-11)
-
-Verified capabilities (each gate item in parentheses):
-- Shared-foundation adoption, no app-local generic forks (§13.1): zero `toolkit.slint` imports, zero app-local `Loom*` controls; 100% token discipline; native palette and AppKit/DBus menu-bar reflection with live enablement.
-- Daily workflow end to end through the GUI (§13.3): cell selection, ranges, Shift/Arrow navigation, Select All, formula-bar input/cancel/commit, Fill Down, Copy/Cut/Paste (cells and matrices), Delete/Backspace clearing — all keyboard-reachable.
-- Selection/direct manipulation (§13.4): anchor/focus ranges, marquee, fill handle, floating live chart overlay, Esc hierarchy (palette/template/overflow/chart/edit).
-- Undo/redo and persistence (§13.5): every mutation undoable — cells, styles, alignments, decimals, sort, freeze, row/column sizing, chart insert/kind, tab add/delete/rename (workbook-level transactions with per-tab history discipline); `.loomtable` persists all tabs, active index, styles, alignments, freeze panes, and chart specs with legacy single-sheet back-compat; crash recovery restores the full workbook.
-- Native open/save/export (§13.6): `.loomtable` open/save/save-as, CSV import/export, single-sheet XLSX export; exports state values-only scope truthfully in the status line; cancellations and dialog failures report truthfully (§13.7).
-- Keyboard-only primary workflow (§13.8): full shortcut map (Ctrl+N/O/S/E/Z/C/X/V/A/B/I/U/K, Ctrl+=/-/0 zoom, arrows/Tab/Del/Esc) plus a 38-command palette covering every primary command incl. decimals, sort-by-column, fill, and chart ops.
-- Accessibility (§13.9): table role with polite live-region announcements, per-cell accessible labels/values, labeled icon-only controls with tooltips, managed focus (grid/palette/template/overflow), status confirmations for toggles.
-- Performance (§13.10): 10k-cell chained-formula sheet evaluates in ~167 ms (debug, Apple Silicon), 30 KB workbook serializes in ~1 ms and parses in ~2 ms; projection renders the visible window only.
-- Interop (§13.11): CSV round-trip with dialect sniffing and RFC 4180 multiline quotes, XLSX export validity (ZIP magic, shared strings), legacy `.loomtable` load path — each with tests.
-- Evidence (§13.12): 151 tests green (74 app, 72 core lib, 1 perf, 4 integration); keyboard + sparse + two-tab-save/reopen headless journeys PASS; 18 judge-reviewed captures (4 viewports × 3 themes + chooser/palette/chart/zoom states) with two found defects fixed (stale zoom label, fixed-size grid void); 4 audits PASS; Clippy `-D warnings` clean; `cargo fmt --check` clean; byte ceilings hold (`loom-sheets-core/src/lib.rs` 198,002 < 199,529; app `main.rs` 93,608 < 108,783).
-- Visual acceptance (§13.2): judge-reviewed pass over all 18 captures — no overlap, no clipped/ellipsized action labels, no toolbar wrapping, truthful disabled states, visible grid fills every viewport, light/dark/high-contrast coherent.
-- Defects (§13.13): no known severity-1/2 defect in the accepted workflow.
-- Formula engine depth: 41 functions (arithmetic, comparison, SUM/AVERAGE/COUNT/COUNTA/MIN/MAX/IF(lazy)/AND/OR/NOT, ROUND/ABS/SQRT/POWER/MOD/FLOOR/CEILING/MEDIAN, CONCAT/CONCATENATE/TEXTJOIN, VLOOKUP/HLOOKUP/INDEX/MATCH, LEFT/RIGHT/MID/LEN/UPPER/LOWER/TRIM, SUMIF/COUNTIF/AVERAGEIF with criteria + wildcards, PMT/FV/PV, TODAY/NOW, IFERROR), absolute `$` refs, preserved error codes, cycle detection.
-- Facade removal: Category/Pivot/Shape/Media/Note placebo controls, non-undoable pivot summary, label-only zoom, and dead template cards all replaced with real semantics or removed; eleven template cards each create their advertised sheet with live formulas.
-
-Documented limitations (not severity-1/2, future scope): cross-sheet cell references are not supported (tabs organize single-sheet models); XLSX export covers the active sheet only; CSV carries values only; array formulas, pivot tables, cell borders/fills/fonts, and drawing/media are future work; undo stacks are memory-unbounded.
+The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. Existing tests cover meaningful pieces. The new audit specifically disproves lossless text/recovery, bounded workbook history, fully valid rich XLSX output, and fully live imported formulas. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
 
 ### Writer
 
-Status: `IN_PROGRESS` (unlocked 2026-09-11 after Sheets acceptance; no implementation work started yet — evidence below is preserved from the 2026-09-06 pass)
-
-Verified capabilities:
-- Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
-- UI debt reduction: `app.slint` reduced to 15,269 bytes (from 36,518 bytes); `writer_components.slint` reduced to 12,785 bytes (from 32,542 bytes); `main.rs` reduced to 141,585 bytes (from 194,401 bytes).
-- Full document model & multi-page layout: RichBlock structure with character style runs, paragraph styles, headings H1-H6, multi-page layout engine with zoom and scroll projection.
-- Text selection & grapheme-safe navigation: Collapsed caret, range selection, UTF-8 and extended grapheme boundary clamping, word boundary detection.
-- Undo/redo isolation & coalescing: Typing coalescence within time windows, discrete formatting actions creating undoable snapshots, memory-bounded history cache.
-- Native persistence & export: Native `.loomdoc` package format saving and loading with integrity verification, Markdown export, deterministic PDF export.
-- Document metrics & table of contents: Word count, character count, sentence count, reading time estimation, hierarchical outline/TOC generation from headings.
-- Format Inspector: Dedicated side panel with Style/Layout/More tabs, paragraph style selector, character style toggles (Bold/Italic/Underline), alignment, and live document statistics.
-- Template Chooser: Modal sheet with category filtering (All Templates, Basic, Letters, Curricula Vitae) and deterministic template initialization.
-- Native macOS Global Menu Bar: AppKit reflection for File, Edit, View, and Format menus with live command state synchronization.
-- Test and audit verification:
-  - 125 unit/integration tests passing (64 in `loom-writer-app`, 61 in `loom-writer-core`).
-  - 4 automated bootstrap audits passing (governance, code structure, asset provenance, UI foundation).
-  - 0 warnings with Clippy (`-D warnings`).
-  - Native screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and states (default, inspector, template chooser).
+The implementation includes rich blocks/style runs, multi-page layout, selection, undo/coalescing, native packages, Markdown/PDF export, outline/metrics, page setup, list styles, comments, Markdown-native tables, an inspector, templates, and command/menu projection. Historical Linux/macOS and headless journeys exist. The audit shows PDF truncation, drifting comment anchors, unsafe Open, and launch-path recovery gaps. Pointer-driven table editing, visible comment highlighting, measured representative performance, and explicit human acceptance remain incomplete/unverified.
 
 ### Present
 
-Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
-
-Verified capabilities:
-- Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
-- Complete removal of placebo and fake controls: clean toolbar (`LoomToolbar`, `LoomIconButton`, `LoomOverflowButton`) and inspector (`LoomPanel`, `LoomSegmentedControl`, `LoomSectionHeader`, `LoomButton`).
-- Native macOS AppKit `NSMenu` and Linux DBusMenu reflection (`MenuBarService`) with command projection (`file.new`, `file.open`, `file.save`, `file.export_pdf`, `edit.undo`, `edit.redo`, `slide.new`, `slide.duplicate`, `slide.delete`, `slide.prev`, `slide.next`, `view.inspector`).
-- Dynamic menu enablement synchronization matching document state, history, selection, and viewport constraints.
-- Deep audit test suite passing (scene graph, shapes, selection, marquee, snapping, notes, undo/redo, persistence, PPTX/PDF export, macOS AppKit menu bar reflection).
-- File byte size ceilings enforced and reduced:
-  - `main.rs`: 95,635 bytes (ceiling 123,901 bytes; reduced by 28,266 bytes).
-  - `app.slint`: 20,432 bytes (ceiling 42,883 bytes; reduced by 22,451 bytes).
-  - `present_components.slint`: 23,544 bytes (ceiling 34,385 bytes; reduced by 10,841 bytes).
-  - `desktop_tests.rs`: 25,607 bytes (under 65,536 limit).
-  - `audit_tests.rs`: 10,009 bytes (under 65,536 limit).
-  - `theme_chooser.slint`: 20,491 bytes (under 32,768 limit).
-  - `inspector.slint`: 7,521 bytes (under 32,768 limit).
-  - `toolbar.slint`: 3,248 bytes (under 32,768 limit).
-- Test and audit verification:
-  - 78 unit/integration tests passing (29 in `loom-present-app`, 49 in `loom-present-core`).
-  - 4 automated bootstrap audits passing (governance, code structure, asset provenance, UI foundation).
-  - 0 warnings with Clippy (`-D warnings`).
-  - Native screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and states (default, theme chooser, command palette).
+The implementation includes slides, scene objects, selection/manipulation helpers, snapping, notes, undo, native persistence, PPTX/PDF paths, themes, transitions, and native command/menu projection. CODE-04/16/19 block acceptance: unsafe New, duplicate identities, and non-undoable transitions. Older source-cleanup and test-count claims are not evidence that these user workflows are correct.
 
 ### Photo
 
-Status: `ACCEPTED` (Application Acceptance Gate Satisfied per `AGENTS.MD` Section 13)
-
-Verified capabilities:
-- Shared UI foundation adopted: zero legacy `toolkit.slint` imports; 100% token discipline, native palette & AppKit menu bar reflection.
-- Complete removal of placebo and fake controls: clean toolbar (`PhotoActionToolbar`), canvas with subtle drop shadows (`PhotoCanvas`), right format inspector (`PhotoInspector`), status bar (`PhotoStatusBar`), and command palette (`CommandPalette`).
-- Native macOS AppKit `NSMenu` and Linux DBusMenu reflection (`MenuBarService`) with command projection (`file.new`, `file.open`, `file.save`, `file.export_png`, `file.export_jpeg`, `edit.undo`, `edit.redo`, `layer.new_pixel`, `layer.new_adjustment`, `layer.delete`, `layer.move_up`, `layer.move_down`, `view.inspector`, `view.zoom_in`, `view.zoom_out`).
-- Layer stack lifecycle & reordering: pixel layers, adjustment layers, visibility toggling, layer selection, move up/down, delete.
-- Compositing & blend modes: Normal, Multiply, Screen, Overlay blend modes, per-layer opacity adjustments (0-100%).
-- Color adjustments: live brightness, contrast, and saturation adjustments on dedicated adjustment layers.
-- Affine transforms & cropping: position X/Y nudging, scale X/Y, rotation (-180° to 180°), document bounds calculation, canvas cropping to selection, layer cropping to selection.
-- Raster payloads, persistence, and export: native `.loomphoto` project saving and loading, deterministic PNG export, JPEG export, and OpenRaster stack manifest emission.
-- File byte size ceilings enforced and ratcheted down:
-  - `main.rs`: 82,220 bytes (legacy debt ceiling reduced from 111,647 to 82,500 bytes; reduced by 29,427 bytes).
-  - `desktop_tests.rs`: 26,005 bytes (< 65,536 limit).
-  - `audit_tests.rs`: 7,860 bytes (< 65,536 limit).
-  - `app.slint`: 18,380 bytes (< 32,768 limit).
-  - `inspector.slint`: 21,491 bytes (< 32,768 limit).
-  - `photo_components.slint`: 10,101 bytes (< 32,768 limit).
-  - `toolbar.slint`: 3,171 bytes (< 32,768 limit).
-- Test and audit verification:
-  - 74 unit/integration tests passing (25 in `loom-photo-app`, 49 in `loom-photo-core`).
-  - 4 automated bootstrap audits passing (governance, code structure, asset provenance, UI foundation).
-  - 0 warnings with Clippy (`-D warnings`).
-  - Native macOS screenshot evidence captured across all viewports (1024×720, 1280×800, 1440×900, 1920×1200), themes (light, dark), and command palette.
+The implementation includes image/layer models, pixel and adjustment operations, selection/editing tools, native persistence, export paths, history, and a desktop canvas/inspector. Unsafe New and layer ID collisions block acceptance. A real import-edit-save-reopen-export journey and the required visual/accessibility matrix must be checked before approval.
 
 ### Motion
 
-Foundation strengths include layer/keyframe models, interpolation, transforms, timing/playback helpers, procedural motion utilities, render-queue primitives, persistence/history, and a composition shell.
-
-Current product limitation: professional scene manipulation, graph/timeline editing, compositing, effects, playback/render workflows, and interchange remain incomplete.
+Layer/keyframe models, interpolation, transforms, timing/playback helpers, procedural utilities, render-queue primitives, persistence/history, and a composition shell exist. Professional scene manipulation, graph/timeline editing, compositing/effects, playback/render workflows, and interchange remain incomplete or unverified.
 
 ### Video
 
-Foundation strengths include timeline/track/clip models, trim/marker helpers, local processing pieces, captions/audio/media helpers, persistence/history, and a timeline shell.
-
-Current product limitation: scalable timeline interaction, trimming/direct manipulation, media/source consistency, source/viewer workflows, effects/color/audio depth, export UX, and professional NLE behavior remain incomplete.
+Timeline/track/clip models, trim/marker helpers, local processing, caption/audio/media helpers, persistence/history, and a timeline shell exist. Scalable interaction, media/source consistency, source/viewer workflows, effects/color/audio depth, export UX, and professional editing behavior remain incomplete or unverified.
 
 ### Studio
 
-Foundation strengths include tracks/regions, PCM/WAV support, synthesis/DSP helpers, mixer/automation primitives, persistence/history, local device foundations, and a multitrack shell.
-
-Current product limitation: production recording, low-latency realtime scheduling, editing/comping, time/pitch workflows, plugin hosting/isolation/UI, mixing/mastering depth, and scalable arrangement interaction remain incomplete.
+Tracks/regions, PCM/WAV support, synthesis/DSP, mixer/automation primitives, persistence/history, local device foundations, and a multitrack shell exist. CODE-10 disproves lossless native audio persistence. Production recording, realtime scheduling, comping/time/pitch, plugin isolation/UI, mixing/mastering, and scalable arrangement interaction remain incomplete or unverified.
 
 ### Encode
 
-Foundation strengths include FFmpeg queue/preset planning, command execution/progress/cancellation, persistence/recovery, probe/conformance helpers, hardware-codec planning, and batch/destination primitives.
+FFmpeg queue/preset planning, execution/progress/cancellation, persistence/recovery, probe/conformance helpers, hardware-codec planning, and destination primitives exist. CODE-09 disproves final no-overwrite protection. Queue/settings hierarchy, watch-folder experience, hardware policy, pause/resume guarantees, exhaustive format support, and perceptual conformance remain incomplete or unverified.
 
-Current product limitation: queue/settings hierarchy, watch-folder experience, hardware policy, pause/resume guarantees, exhaustive format support, and perceptual conformance remain incomplete.
+## Engineering and acceptance debt
 
-## Evidence rules
+Oversized `main.rs`/`lib.rs` files and duplicated generic UI remain maintenance debt. Follow the byte ratchet; extract coherent responsibilities when a touched legacy file cannot grow. Do not create a parallel framework or rewrite the suite as part of one repair.
 
-A capability receives full product credit only when the normal GUI exposes real semantics, editing is selection/context aware, undo/persistence are correct where applicable, failures are truthful and recoverable, realistic user content completes the workflow, UI passes the mechanical contract, format claims have proportional evidence, and the claimed platforms have been validated.
+Routine CI currently exercises shared `loom-ui`, formatting, and source audits, while the native application matrix is manual. It does not provide focused behavioral coverage of all active application changes. **GOV-01 · OPEN:** when activating a repair stage, add the affected crate's tests and the relevant behavioral regressions to routine CI; keep unrelated release/package builds manual. Start in `.github/workflows/ci.yml`. Prove a deliberately reintroduced audited regression fails that focused job, then restore the fix. Do not add a cosmetic callback-count or screenshot-exists check in its place.
 
-Core-only functionality earns foundation credit, not parity credit.
+Asset provenance and commercial redistribution rules remain in `AGENTS.MD` and `loom-bootstrap/contracts/assets.toml`. Fresh screenshots are evidence generated by this project, not imported product artwork. No third-party assets were added for this audit.
 
-Do not mark this project `complete`, `production`, `100%`, or equivalent while any active acceptance gate remains blocked.
+## Code and workflow repair cards
+
+All cards below are **OPEN**. P1 means user data, trust, or a security boundary is at risk. P2 means a serious workflow defect. These are findings, not implemented fixes. Paths are relative to this repository. Search for the named function; old line numbers can move. Evidence directory: `.work/audit-2026-09-14/`. Recreate a fixture from the instructions if ignored evidence is unavailable.
+
+### CODE-01 — Keep edits after reopening a saved document
+
+**P1 · Shared · OPEN.** Think of the recovery sequence as numbered pages. A new page must have a bigger number than every saved page. Currently a restart resets the number and hides later edits.
+
+**Open:** `loom-core/crates/loom-production/src/lib.rs`, `RecoveryJournal::open`.
+
+1. Read the checkpoint sequence and the last journal sequence.
+2. Set the next sequence to one more than the larger value. Handle an empty journal and checked integer overflow.
+3. Keep existing file compatibility. Do not delete a checkpoint to hide this error.
+
+**Prove it:** Record `first`, checkpoint `saved`, close, reopen, record `new unsaved edit`, close, reopen. Recovered text must be exactly `new unsaved edit`. Repeat twice. Existing result is `saved contents`. Evidence: `shared-probes/src/lib.rs`, `shared-probes.log`.
+
+### CODE-02 — Publish recovery checkpoints without destroying the last good copy
+
+**P1 · Shared · OPEN · Needs experienced review.** The payload and its checksum are one thing. Replacing just one half makes the saved copy unreadable.
+
+**Open:** `loom-core/crates/loom-production/src/lib.rs`, `checkpoint`, atomic replacement helper.
+
+1. Draw the old checkpoint, new checkpoint, and journal on paper. At every filesystem operation, identify which complete copy a restart can read.
+2. Write a new generation into separate files; flush its payload and metadata. Verify both before publishing that generation through one atomic commit point.
+3. Preserve the old generation and journal until the new generation is durably published. Never delete the destination before replacing it.
+4. Make startup choose a complete valid generation. Report damage; do not silently claim that missing edits were saved.
+
+**Prove it:** Inject failure before/after each write, sync, and publish step. Restart must recover the last committed data plus valid newer journal entries. The existing metadata-temp failure produces `checkpoint digest mismatch` despite a valid journal. Test Linux and Windows replacement semantics before acceptance. Evidence: `shared-probes/src/lib.rs`. A tiny model must not invent an atomic-file protocol alone.
+
+### CODE-03 — Save and load Sheets text exactly
+
+**P1 · Sheets · OPEN.** Saving a sentence must not change any of its letters.
+
+**Open:** `loom-sheets/crates/loom-sheets-core/src/persistence.rs`, `sheet_from_json`, workbook parsing and object parsing.
+
+1. Add round-trip examples with a tab, carriage return, newline, backslash, quote, Unicode, `before\"}after`, and the literal path `C:\new\notes`.
+2. Replace delimiter searches and chained string replacements with a real JSON decoder for the complete structure, including sheet names and object fields.
+3. Keep the supported legacy format by decoding its actual schema. Reject malformed input with an error; never silently truncate it.
+
+**Prove it:** Save/reopen multiple tabs and recovery snapshots; every original string must compare equal byte for byte, including a sheet named `My "Sheet"`. Evidence: `sheets/repro.rs`, `sheets-repro.log`.
+
+### CODE-04 — Ask before throwing away unsaved work
+
+**P1 · Shared interaction, then one app at a time · OPEN.** New/Open must not silently erase the document being edited.
+
+**Open:** Sheets `src/main.rs` callbacks for New/Open; corresponding Present New, Photo New, Writer Open; all under `loom-<app>/crates/loom-<app>-app/`. Shared dialogs live under `loom-core/crates/loom-desktop/`.
+
+1. Track whether the current document differs from its last successful save. An undo back to the saved state should clear dirty state.
+2. Before replacing dirty work, show **Save changes?** with **Save**, **Discard**, **Cancel**. Name the document. Cancel/Escape must be the safe way out.
+3. Save: complete the real save first. A cancelled chooser or failed write keeps the old document, path, selection, history, and recovery state. Discard: replace only after that explicit choice.
+4. For Open, parse the candidate successfully before swapping it into the live session. Audit close/quit through the same decision helper.
+
+**Prove it:** Type a unique value, invoke New/Open, exercise all three choices and a failed save/open. Cancel/failure preserves the value and undo history. Only successful Save or explicit Discard allows replacement. Writer's initial New opens a template chooser; put the guard at replacement, not at every chooser opening. Original evidence is a callback trace; the fresh Linux Sheets run also observed New clearing `audit123` without a decision and Undo not restoring it.
+
+### CODE-05 — Export every Writer page
+
+**P1 · Writer · OPEN.** Export must not quietly stop halfway through the document.
+
+**Open:** `loom-writer/crates/loom-writer-core/src/export.rs`, `export_pdf`, and Writer pagination/layout code.
+
+1. Use the same page setup, wrapping, and pagination data as the document layout.
+2. Start a PDF page for each layout page. Render all fragments in order, with the correct page margins and text styling.
+3. Wrap long paragraphs. Do not use a bottom-of-page `break` that drops the remaining document.
+
+**Prove it:** Export 60 uniquely numbered paragraphs. Independently extract the PDF text: all 60 must appear in order, once each. Page count must match layout (the audit fixture lays out three pages but exports one and only 31 paragraphs). Add a long paragraph and non-ASCII text; inspect rendered pages for clipping. Evidence: `documents-repro.log`, `documents/writer-60-paragraphs.pdf`.
+
+### CODE-06 — Write valid XLSX drawing and chart XML
+
+**P1 · Sheets · OPEN.** A file with a chart must still open in another spreadsheet program.
+
+**Open:** `loom-sheets/crates/loom-sheets-core/src/xlsx.rs`, worksheet drawing insertion and chart formula/range serialization.
+
+1. Declare the relationship namespace wherever an `r:id` attribute is written.
+2. Escape XML text in chart range formulas. Keep spreadsheet quoting and XML escaping as two separate steps.
+3. Use the existing `REL_NS` namespace and `xml_escape_text` helper at these two write sites. Escape the complete generated chart formula after spreadsheet quoting. Do not rewrite unrelated XML generation.
+
+**Prove it:** Export charts, shapes, and an embedded image on a sheet named `R&D`. Unzip the XLSX and parse every XML part with an independent XML parser. Verify relationships resolve and chart data points to the intended cells. Then open the file in an independent spreadsheet app without a repair warning. Current parser failures: `unbound prefix` and unescaped `&`. Evidence: `sheets/validate_xml.py`, `sheets-xml.log`.
+
+### CODE-07 — Stop undo history from copying itself
+
+**P1 · Sheets · OPEN.** A history entry must contain document changes, not another complete history full of histories.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `WorkbookUndoState::capture`/`restore`, `SheetTransaction`, and `commit_workbook_transaction`.
+
+1. Separate document state from undo stacks. A document snapshot must not contain workbook transactions.
+2. Store document-only before/after snapshots or a bounded delta. Preserve active-tab and per-tab edit behavior explicitly.
+3. Apply an actual byte budget as well as an entry count. Releasing an old entry must release its owned data.
+
+**Prove it:** Rename a tab 9 times, then 100 times; count retained transactions and bytes. Growth must be bounded/linear in the retained edits, not 1, 4, 13, 40… (9 edits currently contain 9,841 nested transactions). Undo/redo across rename, delete, switch, and cell edits must still work. Evidence: `sheets/history.rs`, `sheets-history.log`.
+
+### CODE-08 — Keep plugin writes inside the allowed folder
+
+**P1 · Plugin host · OPEN · Needs experienced security review.** A shortcut folder must not let a plugin write outside its permission boundary.
+
+**Open:** `loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs`, `canonicalize_or_normalize`, write authorization and the actual write operation.
+
+1. Reproduce with an allowed directory containing a symlink to an outside directory and a target file that does not exist yet.
+2. Resolve existing parent directories for create targets. Compare the resolved parent with the allowed root.
+3. Enforce the boundary when opening/creating the file, using directory handles or equivalent race-resistant platform APIs. Checking a string and writing later is insufficient.
+4. Handle link swaps between check and write; fail closed with an actionable permission error.
+
+**Prove it:** Existing-file, new-file, nested-link, traversal, and link-swap attempts cannot create or change any outside file. Normal allowed writes still work. The audit proves the host permission API escape, not a running Wasmtime exploit. Evidence: `plugin-permission.log`, `media-plugins/src/main.rs`.
+
+### CODE-09 — Respect Encode's no-overwrite choice at the final write
+
+**P1 · Encode · OPEN · Needs filesystem review.** Another file may appear while encoding. It still belongs to its owner.
+
+**Open:** `loom-encode/crates/loom-encode-core/src/lib.rs`, `commit_encode_output`.
+
+1. Keep encoding into a temporary file.
+2. When overwrite is false, publish with an atomic **create only if absent** operation. An earlier `exists()` check does not solve the race.
+3. On collision, preserve the existing destination, report the conflict, and clean up or offer the completed temporary result under a new name.
+4. Keep explicit overwrite=true behavior separate and test platform differences.
+
+**Prove it:** Have a controlled encoder create `IMPORTANT_OTHER_FILE` at the destination midway through the job. The job must report a collision and that file's bytes must remain unchanged. Current result replaces it with `NEWENCODE`. Evidence: `encode-overwrite.log`, `media-plugins/src/bin/encode_collision.rs`.
+
+### CODE-10 — Preserve audio precision in Studio projects
+
+**P1 · Studio · OPEN.** Saving the project must not make quiet sounds disappear or lower every sample a little.
+
+**Open:** `loom-studio/crates/loom-studio-core/src/lib.rs`, `save_studio_bundle`, audio asset encoding/decoding.
+
+1. Store native audio assets losslessly at their source/internal precision. Version the package representation and retain old-file loading.
+2. Keep PCM16 quantization in explicit export options only. Native Save is not an audio conversion command.
+3. Reuse unchanged asset payloads where possible.
+
+**Prove it:** Round-trip samples `0.000001`, `0.75`, negative values, and supported extrema through three native saves. Samples must be bit-exact at the supported internal precision, with unchanged sample rate/channels/frame count. Currently the first becomes zero and 0.75 keeps decreasing. Evidence: `studio-roundtrip.log`, `media-plugins/src/bin/studio_roundtrip.rs`.
+
+### CODE-11 — Recover Sheets images together with their cells
+
+**P1 · Sheets · OPEN.** An image's name is not the image. Recovery needs its actual bytes.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `record_workbook_snapshot`; `loom-sheets/crates/loom-sheets-app/src/assets.rs`, `prepare_workbook` and `attach_workbook_assets`; `loom-sheets/crates/loom-sheets-core/src/persistence.rs`, object parsing.
+
+1. Encode workbook data and package-owned asset bytes in one recoverable snapshot/package.
+2. Restore object references to those recovered bytes; do not depend on the original import path.
+3. Preserve deduplication and integrity checks. Make missing/corrupt assets an explicit recoverable error.
+
+**Prove it:** Import a valid PNG, save, remove only the test PNG's original file, edit, crash/recover, then render and export XLSX. The image must remain visible and exportable. The original probe used arbitrary bytes to isolate transport loss, so add the real-image case. Evidence: `sheets-repro.log`.
+
+### CODE-12 — Keep imported shared formulas live
+
+**P1 · Sheets · OPEN.** A displayed number calculated by a formula must keep recalculating after import.
+
+**Open:** `loom-sheets/crates/loom-sheets-core/src/lib.rs`, XLSX formula extraction; move coherent parser work into the existing interop module rather than growing this oversized file.
+
+1. Index each shared formula master by worksheet and shared-formula ID.
+2. Translate its formula to each member's relative row/column. Respect absolute `$` references, mixed references, ranges, and quoted sheet names.
+3. Preserve a live expression. If a formula cannot be supported, show an explicit import warning and preserve its source; do not silently turn it into an ordinary constant.
+
+**Prove it:** B1 has `A1*2`; B2 is a shared member. After import, change A2 to 50. B2 must become 100, not stay at its cached 30. Add mixed/absolute references and save/reopen. Evidence: `sheets-repro.log`; format reference: Microsoft's Open XML `CellFormula` documentation linked in the original audit.
+
+### CODE-13 — Turn on Writer recovery when opening a file at launch
+
+**P1 · Writer · OPEN.** Opening a document from the command line must not disable its safety net.
+
+**Open:** `loom-writer/crates/loom-writer-app/src/main.rs`, `run_gui_with_dialogs` startup; `loom-core/crates/loom-production/src/snapshot.rs` recovery macro.
+
+1. Initialize the recovery store for every editing session, including `--open`.
+2. Separately choose whether to restore an older recovery payload or open the requested document.
+3. Surface initialization/write errors in interactive sessions. Preserve the recovery macro's intentional no-op for nonediting headless capture paths; enforce the editing-session requirement at interactive initialization/call sites.
+
+**Prove it:** Launch with a saved test `.loomdoc`, edit a unique sentence, terminate the test app without a save, and recover. The sentence must return. Also test ordinary launch and an invalid launch path. Original evidence is source tracing, not a live forced-crash test. This depends on CODE-01/02.
+
+### CODE-14 — Give every Photo layer a unique ID
+
+**P2 · Photo · OPEN.** Deleting a layer does not make its old number safe to reuse if another layer already has that number.
+
+**Open:** `loom-photo/crates/loom-photo-app/src/main.rs`, pixel and adjustment layer insertion near `layers.len() + 1`; layer identity helpers in the core.
+
+1. Use a persisted monotonic allocator or collision-checked unique ID helper. Apply it to every layer creation path.
+2. Keep displayed layer names separate from internal identity. Never replace an existing asset because a new layer got the same ID.
+
+**Prove it:** Add two layers, delete the earlier one, add another, save/reopen, undo/redo. IDs stay unique and each layer keeps its original image. Current result includes `layer-3` twice and save fails. Evidence: `documents-repro.log`.
+
+### CODE-15 — Enforce plugin timeouts while sending input
+
+**P2 · Plugin host · OPEN · Needs concurrency review.** A child that refuses to read must not freeze the host while the host fills its input pipe.
+
+**Open:** `loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs`, `invoke`.
+
+1. Start the deadline before process I/O. Supervise stdin, stdout, stderr, and child completion concurrently.
+2. On timeout or I/O failure, close pipes, stop and reap the child, and finish the invocation once. Bound buffered output.
+3. Avoid waiting forever on the input writer after killing the process; test child descendants holding pipes too.
+
+**Prove it:** A nonreading child with 1 MiB input and a 50 ms limit returns a timeout within a documented scheduling tolerance (for example 500 ms on the test host), without a leaked child. Also test full stdout/stderr, normal completion, and cancellation. Current controlled adapter takes about 2,014 ms and returns Broken pipe. No real Wasmtime runtime was exercised. Evidence: `media-timeout.log`.
+
+### CODE-16 — Give every Present slide a unique ID
+
+**P2 · Present · OPEN.** Two slides must never share the same identity.
+
+**Open:** `loom-present/crates/loom-present-core/src/lib.rs`, `add_slide` and the existing unique-slide-ID helper used for duplication.
+
+1. Reuse the collision-free allocation strategy for new slides as well as duplicates.
+2. Preserve transitions, notes, navigation, and references when deleting/recreating slides.
+
+**Prove it:** Add two slides, delete the earlier added slide, add again. IDs must be unique; select each slide, assign a different transition, save/reopen, and verify each keeps its own state. Current IDs include `slide-3` twice. Evidence: `documents-repro.log`.
+
+### CODE-17 — Move Writer comments with the text they describe
+
+**P2 · Writer · OPEN.** Inserting words before a comment must not attach it to different words.
+
+**Open:** `loom-writer/crates/loom-writer-core/src/lib.rs`, `replace_paragraphs`, comment anchors, text-edit mapping.
+
+1. Describe each edit as removed range plus inserted text. Rebase comment endpoints alongside style runs.
+2. Define what happens when commented text is partly or entirely deleted: shrink, collapse, or mark orphaned explicitly; never silently point at unrelated text.
+3. Handle paragraph split/merge and valid UTF-8 boundaries. Include anchors in undo/redo and persistence.
+
+**Prove it:** Comment on `world` in `Hello world`, insert `New ` at the start; the anchor must still select `world` (10..15), not `llo w` (6..11). Add emoji, splits, merges, deletion, undo/redo, save/reopen. Evidence: `documents-repro.log`.
+
+### CODE-18 — Do not consume a storage sequence when append fails
+
+**P2 · Shared storage · OPEN.** A failed write is not a completed journal entry.
+
+**Open:** `loom-core/crates/loom-storage/src/lib.rs`, journal `append`.
+
+1. Reserve the next sequence locally. Advance in-memory sequence state only after the entry is durably written.
+2. Define and implement partial-write recovery/truncation so a retry cannot append behind a broken tail.
+3. Preserve the original error and keep the journal recoverable. Do not waive sequence validation on load.
+
+**Prove it:** Force the first open/write to fail, remove the fixture obstruction, append successfully, reopen. The entry must load at sequence 1. Also inject partial-write and sync failures. Current retry writes sequence 2 and reopen fails. This storage journal is distinct from desktop production recovery. Evidence: `shared-probes/src/lib.rs`, `shared-probes.log`.
+
+### CODE-19 — Undo Present transitions with the rest of the slide
+
+**P2 · Present · OPEN.** Undo must reverse a visible transition change.
+
+**Open:** Present app `src/main.rs`, transition callback; `loom-present/crates/loom-present-core/src/lib.rs`, session history and transition map.
+
+1. Include transitions in the session state saved by undo history. A document-only checkpoint is insufficient.
+2. Route transition edits through the same transaction/checkpoint mechanism as other edits.
+3. A fresh edit after undo must clear redo. Keep transition state attached to unique slide IDs (CODE-16).
+
+**Prove it:** Set Dissolve, undo to the original transition, redo to Dissolve. Mix this with slide deletion/duplication, then save/reopen. Current isolated transition change leaves `undo()` false. Evidence: `documents-repro.log`.
+
+## UI/UX repair cards — fresh 2026-09-14/15 evidence
+
+All cards are OPEN. A screenshot proves only the visible state. Native observations are marked separately. Evidence paths below are relative to `.work/uiux-audit-2026-09-14/`. The full report embeds each accepted screenshot with its flow step. A cut-off control inside an otherwise complete app capture is a product finding, not an accidentally cropped evidence image.
+
+### UI-01 — Give Linux users a visible route to basic file commands
+
+**P1 · Sheets first; check each app when active · OPEN.** In the isolated Linux desktop with no global menu host, the window has no visible New/Open/Save menu or palette button. At 1280 px, overflow offers only Export CSV. A new user has to know Ctrl+K before discovering the commands.
+
+**Evidence:** `sheets/17-current-native-start.png`, `22-current-native-overflow.png`, `21-current-native-palette.png`. Ctrl+K successfully opens a readable palette; retain that working shortcut. This observation is specific to the captured Linux environment, not a claim about every desktop menu host.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/ui/app.slint`, `SheetActionToolbar` in `ui/components.slint`, app command registry/palette, and menu-host detection in `loom-core/crates/loom-desktop/`.
+
+1. Detect whether the desktop actually hosts the native/global menu. Publishing DBus menu data alone is not proof that users can see it.
+2. When no host exists, render a shared local menu or clearly named menu button. Include New Workbook, Open, Save, Save As, Export, and Search Commands. Route every entry to the existing typed command and its enablement state.
+3. Keep this entry visible at 1024, 1280, and 1440 px. Put secondary items inside the menu; do not squeeze more unlabeled icons into the toolbar.
+
+**Done when:** A person using only the pointer can create, open, and save a test workbook without knowing a shortcut; a keyboard user can reach the same menu and return focus to the sheet. Check a Linux desktop without a global menu and one platform with native menu hosting. CODE-04 must protect the transitions.
+
+### UI-02 — Stop opening a mostly empty Sheets inspector by default
+
+**P2 · Sheets · OPEN.** The startup inspector consumes 320 px for a few properties and a large empty panel. At the reference 1280 px width, only 960 px remain for the central area (75%, before inner padding). The contract requires at least 78% and a closed inspector by default.
+
+**Evidence:** `sheets/01-start-light-1440.png`, `02-compact-light-1024.png`, `17-current-native-start.png`. Compact mode already gives the sheet more room; keep that strength.
+
+**Open:** Sheets `ui/app.slint` (`show-inspector`), `src/main.rs` (`INSPECTOR_WIDTH`, breakpoint handling); `loom-design-bible/contracts/desktop-ui.toml` `[app.sheets]`.
+
+1. Start with the inspector closed, matching `right-inspector-default = 0`.
+2. Keep a labeled Format toggle; opening it must preserve selection and show properties for that selection.
+3. Respect the user's explicit open/closed choice across resizing. Use shared width tokens instead of an app-only 320 px constant.
+
+**Done when:** A fresh 1280×800 window gives the central work surface at least 78% of available width. Toggle Format, resize below and above the compact breakpoint, and verify useful controls remain reachable without reopening a panel the user closed. Test 1024×720 and 1440×900 too.
+
+### UI-03 — Reflow the template chooser and show truthful Recents
+
+**P2 · Sheets · OPEN.** At 1024×720 the rightmost template previews and names are cut off. The chooser also repeats the selected Blank item under Recents and Basic; the Recents section is hard-coded rather than driven by real recent choices.
+
+**Evidence:** `sheets/04-template-chooser.png`; source uses fixed 156 px cards in long horizontal rows. Cancel and Create remain visible — preserve that.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/ui/template_chooser.slint`, `SheetsTemplateCard`, category rows and Recents; template selection callbacks in `src/main.rs`.
+
+1. Compute how many full cards fit in the content area after the category sidebar and padding. Move excess cards to another row; allow vertical scrolling of this content region.
+2. Keep the entire template name and preview visible. Do not shrink the text or make the whole modal horizontally scroll.
+3. Show Recents only from actual stored template choices. If there are none, omit that section or say `No recent templates`.
+4. Keep keyboard selection visible as it moves; selection must refer to the intended template after reflow or category filtering.
+
+**Done when:** At 1024×720 and 1.25/1.5 text scale, every template can be reached, its full name is readable, and Create produces the selected item. Escape/Cancel preserves the current workbook. No right-edge card is sliced in half.
+
+### UI-04 — Use honest starter data and a clear empty-document path
+
+**P2 · Sheets · OPEN.** Startup looks like a user's Budget but contains demo values. Rent/Transport say monthly, Food says weekly, yet Total simply adds all three. No common period or currency is stated.
+
+**Evidence:** `sheets/01-start-light-1440.png`, `17-current-native-start.png`; `starter_workbook` assigns the mixed period labels.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `starter_workbook`, startup selection, and template data.
+
+1. Make a new document blank, with an obvious path to templates/examples. If opening an example is desired, name it `Example Budget` and make that choice explicit.
+2. Give the example a single stated period and unit. Either all amounts are monthly or convert them with a visible formula and explanation before totaling.
+3. Keep the sample's totals as real formulas. Never mark example data as a saved user document or silently overwrite user recovery with it.
+
+**Done when:** First launch and New have clear, distinct blank/example behavior. Every Budget amount uses the same stated unit and time period, and changing an amount recalculates its total. Add a small test of example values/formulas, not a test that merely searches for the word Budget.
+
+### UI-05 — Make Sheets header cells readable in high contrast
+
+**P1 · Sheets accessibility · OPEN.** High-contrast mode hides the actual header text `Item`, `Amount`, and `Note`: the header background and text are both black. A1's formula field still says Item, confirming the text exists.
+
+**Evidence:** `sheets/08-high-contrast.png` compared with `02-compact-light-1024.png`. Source uses `paper-line` for header fill and `paper-ink` for text; both are black in the high-contrast palette.
+
+**Open:** Sheets `ui/components.slint`, cell background/text in `SheetGridSurface`; shared `loom-core/crates/loom-ui/ui/theme.slint`; corresponding design tokens/contracts.
+
+1. Use a foreground/background pair for header cells. Do not use a line/separator color as a text background without its paired foreground.
+2. Preserve the distinct active-cell border and readable user-specified fills. Check headers, selected ranges, and ordinary cells separately.
+3. If a new semantic token is necessary, define it centrally and demonstrate it in the gallery; do not add an isolated color literal.
+
+**Done when:** Item/Amount/Note are readable at 1024×720 and 1440×900 in all three themes, with and without selection/fills. Measure the contract's required contrast for each pair and inspect the actual screenshot. This repairs one visible accessibility defect; it is not full accessibility certification.
+
+### UI-06 — Render the status and errors the controller produces
+
+**P1 · Sheets trust/feedback · OPEN.** The window has no visible status bar or saved/unsaved indicator. Source declares and updates status strings, imports status components, but never instantiates those components. Users cannot rely on messages that only exist in memory.
+
+**Evidence:** `sheets/17-current-native-start.png`, `18-current-native-edit.png`, `20-current-native-undo.png`; source check of `status-left`, `status-right`, and the complete `ui/app.slint` layout. Native title remains `Untitled` after the test edit. Save/error dialogs were not exhaustively exercised in this visual run.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/ui/app.slint`, status properties and layout; status-setting paths and document dirty state in `src/main.rs`; shared `LoomStatusBar`/`LoomStatusText`.
+
+1. Render the existing status properties in the shared status bar using the contract height, outside the grid.
+2. Show a clear unsaved state tied to actual document dirtiness. Clear it only after a successful save, not after merely opening a save chooser.
+3. Show actionable error messages persistently enough to read; do not bury a failed save in an invisible property. Announce relevant messages through the existing accessibility mechanism without repeating every frame.
+
+**Done when:** Edit, save, cancel save, force a write failure in a test folder, and trigger an invalid formula. Visible state must distinguish these outcomes. The grid must remain usable at 1024×720. A screen reader must receive the meaningful error once; record that check separately from screenshots.
+
+### UI-07 — Clear edited fields when their document value changes
+
+**P1 · Shared text input, reproduced in Sheets · OPEN.** After typing `audit123` and creating a new blank workbook, the formula field still paints that old text over its empty-field placeholder. The grid is blank. This makes the visible value disagree with the current document.
+
+**Evidence:** `sheets/18-current-native-edit.png` → `19-current-native-new.png` → `20-current-native-undo.png` → `21-current-native-palette.png`. Reproduced with the freshly built current-source native app in an isolated display and state directory. Source points to the shared input's one-way `text: root.value` binding and its independently drawn placeholder; confirm the precise binding fix with a focused reproducer.
+
+**Open:** `loom-core/crates/loom-ui/ui/foundation/controls.slint`, `LoomTextField` (also check `LoomSearchField`); Sheets `FormulaNameBar` and buffer reset paths.
+
+1. Reproduce typing, then programmatically replacing the field's value with a different string and with empty text.
+2. Make the editable text and public value stay synchronized, using Slint's appropriate two-way binding or explicit update path. The placeholder must depend on the actual displayed text being empty.
+3. Ensure New/Open, selection changes, commit, and cancel reset the buffer consistently without writing stale text into the new document.
+
+**Done when:** Type `audit123`, commit, start a blank document, then select another cell. No old text remains; exactly one placeholder appears in an empty field. Repeat using Undo and switching tabs. Verify the shared gallery case and native Sheets; a headless initial-state screenshot cannot expose this defect.
+
+### UI-08 — Make chart ranges and comparisons understandable
+
+**P2 · Sheets · OPEN.** The default Budget chart compares Rent, Food, Transport, Total, and Average as if they were five peer categories. It provides no visible range/unit explanation. This turns summary values into misleading bars.
+
+**Evidence:** `sheets/05-chart.png`; `src/analysis.rs` `plan_chart` currently collects populated rows for the selected columns.
+
+**Open:** `loom-sheets/crates/loom-sheets-app/src/analysis.rs`, chart command/controller, `ui/chart.slint`, persisted chart specification.
+
+1. Build a chart from an explicit selected range, with clear category/value columns. Preserve that range in the model.
+2. Show/edit the range and series label in chart properties. For the starter example, select only the actual expense rows; do not silently guess that any formula row must be excluded in arbitrary user data.
+3. Include a clear unit/period when the data supplies one. Keep charts live when source cells change.
+
+**Done when:** Select A1:B4 in the example and create a chart: exactly Rent/Food/Transport appear. Show that source range. Changing Food changes the chart, Undo reverses the change, and Save/Open preserves the range. A deliberately selected Total row must still be chartable as an explicit user choice.
+
+### UI-09 — Distinguish a workbook from one sheet in its commands
+
+**P1 · Sheets · OPEN.** The palette says `New Sheet`, but the command replaces the entire workbook and clears its tabs/history. This label suggests a much smaller action than it performs.
+
+**Evidence:** `sheets/21-current-native-palette.png`, the New callback in CODE-04, and `19-current-native-new.png` showing the blank workbook after New.
+
+**Open:** Sheets command labels in `src/main.rs`/`src/palette.rs`, menus, tab-add control, and user-facing status strings.
+
+1. Use `New Workbook`, `Open Workbook`, `Save Workbook`, and `Save Workbook As` for whole-file actions.
+2. Use `Add Sheet`, `Rename Sheet`, and `Delete Sheet` for operations on a tab inside that file.
+3. Update labels, tooltips, accessible names, and palette search synonyms together; retain the established shortcuts.
+
+**Done when:** A workbook with two tabs remains intact when Add Sheet is chosen and gains one tab. New Workbook invokes CODE-04's dirty-work decision and replaces the whole file only after consent. Every visible label accurately names its scope.
+
+### UI-10 — Remove the contradictory permission to truncate action captions
+
+**P2 · Shared design contract · OPEN · Source-confirmed design debt.** `AGENTS.MD` requires readable complete action labels, but `desktop-ui.toml` permits 10 px ellipsized toolbar captions. A small model can obey one rule and violate the other.
+
+**Open:** `loom-design-bible/contracts/desktop-ui.toml`, `[component.labeled-toolbar-item]`, `[component.icon-over-label-toolbar-item]`, toolbar/ellipsis clauses; shared toolbar components and their contract audits.
+
+1. Make the contract agree with the readable-action rule: full captions or an accessible icon-only action with a tooltip and a reachable fully labeled menu item.
+2. Use the existing `[typography]` `caption = 11` and matching caption line height from this contract, through shared tokens. Do not invent a separate 10 px caption rule or shrink text to make it fit.
+3. Update component measurement/overflow behavior and contract checks together. Preserve optional ellipsis for user content names where explicitly allowed.
+
+**Done when:** Long translated action labels and 1.25/1.5 text scale remain operable at the boundary widths 1179/1180, 1279/1280, and 1319/1320. The contract and UI tests reject clipped action captions. This is a source-confirmed rule conflict, not a claim that every captured toolbar currently clips.
+
+### UI-11 — Keep product help out of the user's document
+
+**P2 · Writer · OPEN · Rendered and source-confirmed.** The default sample page contains product claims about an “inspectable” package, deterministic PDF export, and fully wired undo. It looks like editable document content because it is document content. This is a poor starting point for writing and makes unverified engineering claims part of the user's file.
+
+**Evidence:** `writer/01-1440x900-light.png`, `02-1024x720-light.png`. Native launch opens a chooser; the screenshot path shows the sample. Do not claim every native launch bypasses the chooser.
+
+**Open:** `loom-writer/crates/loom-writer-app/src/main.rs`, the sample document builder containing `Loom Writer is a calm`; `ui/template_chooser.slint` in that app.
+
+1. Keep Blank genuinely blank, with the caret ready for text. Keep deliberate sample content available only as a clearly named sample/template.
+2. Put shortcuts and help in application help or an empty-state hint outside the saved document. Do not serialize that hint into user content.
+3. Remove unsupported readiness claims from the sample/help copy. Describe available actions in ordinary words.
+
+**Done when:** Create Blank, type one sentence, save/reopen, and export. Only that sentence appears. Opening a named sample still works and never replaces a dirty document without CODE-04's decision.
+
+### UI-12 — Make each Writer template create what its card says
+
+**P1 · Writer · OPEN · Native failure reproduced.** Selecting Executive Report and clicking Create Document produces a letter beginning “Your Name” and “Dear Recipient”; the status says “Created letter document.” The UI exposes six positional choices while the callback maps only four template kinds.
+
+**Evidence:** `writer/09-native-start.png` → `10-native-report-selected.png` → `11-native-created-letter.png`. These use the current-source executable.
+
+**Open:** `loom-writer/crates/loom-writer-app/ui/template_chooser.slint`, card IDs/order; `loom-writer/crates/loom-writer-app/src/main.rs`, `on_create_template`; the existing core template enum and builders reached from that callback.
+
+1. Make a small table of every visible card and the document it must create. Current cards are Blank, Blank Black, Executive Report, Business Letter, Curriculum Vitae, and Newsletter.
+2. Give cards stable template IDs and dispatch by ID. Do not use the card's position as its meaning. Use the same descriptor for the name and preview.
+3. Show only genuinely implemented template choices. If a displayed style lacks a generator, record that missing choice explicitly; never silently create a different template. Preserve the existing working generators.
+4. Generate the selected document, then replace the current one through the dirty-work guard. An invalid ID must return an understandable error without changing the open document.
+
+**Done when:** Click every visible template card in the native chooser and create it. Its heading, content, page style, and status agree with the selected card. A test that reorders the descriptors must not change which document an ID creates. Save/reopen one nonblank result. Check pointer and keyboard selection independently.
+
+### UI-13 — Make the table command honest about its editing model
+
+**P2 · Writer · OPEN · Rendered limitation.** Insert Table renders pipe-separated Markdown text on the page instead of a table with aligned cells and borders. The generic “Insert Table” command promises a visual editing object the current renderer does not provide.
+
+**Evidence:** `writer/05-inspector.png`, `08-inspector-wide.png`; the wide capture shows populated rows as literal pipes. This audit did not verify pointer-based cell editing.
+
+**Open:** `loom-writer/crates/loom-writer-app/src/main.rs`, `writer_render_projection`, `writer_render_markup`, `on_insert_table`, and command label `writer.table.insert`; `loom-writer/crates/loom-writer-app/ui/writer_components.slint`; core `parse_table_markdown` and table model.
+
+1. For the first bounded repair, label the current operation “Insert Markdown Table (text)” consistently in the menu, palette, and help. Explain that it inserts editable table text. Preserve its content and round-trip behavior.
+2. Keep visual table editing explicitly incomplete in the capability inventory. Do not draw decorative cell borders over unrelated text and claim cell editing works.
+3. When visual table editing is separately authorized, split it into model-to-cell projection, measured row/column layout, cell selection/editing, and pagination/export checks. Reuse the existing table parser/model; each piece needs its own behavioral evidence before removing the “text” label.
+
+**Done when:** The current command accurately describes its result, and a 3×3 table survives edit/save/reopen without loss. That closes the misleading-label repair only; a future visual-table feature is accepted only after actual cell editing and multi-page export are verified.
+
+### UI-14 — Keep formatting and comments reachable in compact windows
+
+**P1 · Writer; shared compact-layout rule also applies to Sheets/Photo/Motion · OPEN.** Writer's inspector disappears at 1024×720, and `inspector_available` disables toggling it. A comment visible in the wide inspector has no visible anchor highlight on the page. The compact capture therefore removes the visible route to that review context. Photo/Motion also hide their inspectors at compact width; their complete alternate command reachability remains untested.
+
+**Evidence:** Writer `05-inspector.png` versus `08-inspector-wide.png`; Photo/Motion `02-1024x720-light.png`; Sheets UI-02. The wide Writer capture also proves the comment exists, so this is not an empty-comment state.
+
+**Open:** Writer `src/main.rs`, `apply_layout_breakpoints`, `on_toggle_inspector`, `writer_render_projection`; full base path `loom-writer/crates/loom-writer-app/`; `ui/app.slint`, `ui/inspector.slint`, and `ui/writer_components.slint` there. Use the corresponding app's breakpoint/inspector paths only when that app's stage is active.
+
+1. First repair compact access: collapse the side panel, but keep a labeled Format/Review action available. Open the same controls in a dismissible overlay or drawer at compact width. Do not build a second set of editing callbacks.
+2. Opening the panel must move focus inside; Escape/Close must restore focus to its trigger. Keep the document selection while choosing a property or comment.
+3. In a separate patch under this card, display a comment marker/range on the page and connect it to the same comment ID in the panel. Fix CODE-17's anchor drift before relying on the displayed range.
+4. Recheck each other app's compact inspector when its stage starts. Record missing alternate actions; do not infer reachability just because a palette exists.
+
+**Done when:** At 1024×720, select text, change its style, add a comment, close/reopen the review panel, and navigate between the comment and its anchored text using pointer and keyboard. No forced window enlargement is needed. Repeat at 1440×900 with the docked panel, without duplicate controls or lost selection.
+
+### UI-15 — Put Present's navigator in the expected reading position
+
+**P2 · Present · OPEN · Visual recommendation and contract mismatch.** In the captured left-to-right layout, the slide filmstrip sits to the right of the canvas, beside another right-hand inspector. The contract specifies a left navigator and right inspector. This makes navigation and properties compete in one region. The empty inspector also repeats “No element selected” above several meaningless dashes.
+
+**Evidence:** Present `01-1440x900-light.png`, `02-1024x720-light.png`, `03-1440x900-dark.png`.
+
+**Open:** `loom-present/crates/loom-present-app/ui/app.slint`, the `root.rtl`/`!root.rtl` branches placing `PresentSlideStrip`; `ui/inspector.slint`; Present workspace settings in `loom-design-bible/contracts/desktop-ui.toml`.
+
+1. Move the existing filmstrip before the canvas for LTR and after it for RTL. Keep the inspector on its contract-defined side. Change placement, not slide state or selection callbacks.
+2. Show one useful empty inspector message: “Select an object to edit its position and style.” Hide inapplicable geometry rows until an object is selected.
+3. Preserve filmstrip scrolling, add/select/reorder behavior, and the compact panel policy.
+
+**Done when:** The active slide is easy to locate at 1024×720 and 1440×900. Selecting, adding, and reordering a slide updates the same canvas and selection. Check RTL separately; do not accidentally put both panels on the same side again. Keyboard focus order follows the visual arrangement.
+
+### UI-16 — Fit Photo's whole image inside its viewport
+
+**P1 · Photo · OPEN · Rendered defect with a source-level geometry cause.** The initial image loses its right and bottom portions inside a clipped viewport even though the surrounding canvas has space. The selection outline is also only partially visible. The image-fit properties use the enclosing stage's size rather than the smaller viewport's size.
+
+**Evidence:** Photo `01-1440x900-light.png`, `02-1024x720-light.png`, `03-1440x900-dark.png`.
+
+**Open:** `loom-photo/crates/loom-photo-app/ui/photo_components.slint`, `viewport`, `scaled-width`, `scaled-height`, and the four `image-content-*` properties.
+
+1. Create a test image with a different labeled marker in each corner. Start at the app's default fit view.
+2. Compute fitted image width/height from the actual viewport width/height and image aspect ratio. Compute its centered x/y from those same viewport dimensions. Do not use `parent` when it refers to the larger stage.
+3. Use the same image rectangle for selection overlays and pointer-to-image coordinates. Do not remove clipping globally; deliberate zoom/pan still needs viewport clipping.
+
+**Done when:** All four corners are visible at fit in 1024×720 and 1440×900, for wide, tall, and square images. A click on each corner targets that image corner. Zoom/pan and reset-to-fit work, and export retains the complete original image. Check light and dark themes.
+
+### UI-17 — Make Motion's preview represent the exported frame
+
+**P1 · Motion · OPEN · Rendered/source mismatch.** Changing the app theme changes the composition background and title color in the stage. The SVG exporter uses fixed colors instead. The stage adds “(Text)” to layer names while the exported text uses only the name. A user cannot trust the visible frame as a preview of the output.
+
+**Evidence:** Motion `01-1440x900-light.png` versus `03-1440x900-dark.png`; source trace of `export_svg_frame`. No real video render was tested.
+
+**Open:** `loom-motion/crates/loom-motion-app/ui/stage.slint`; `loom-motion/crates/loom-motion-app/src/main.rs`, `export_svg_frame` and stage projection; existing composition/layer properties.
+
+1. Make a fixture with known text, color, position, scale, and rotation. Render the current SVG independently and compare it with the stage at the same time.
+2. Build one document-frame projection for those existing supported properties. Feed both stage and SVG export from it; the UI theme may color chrome and selection handles, not document artwork.
+3. Display the actual layer text on the stage. Put type labels such as “Text” in the layers panel, not in exported-content space.
+4. Keep unsupported effects explicitly unsupported. Do not expand this card into a new video renderer.
+
+**Done when:** At a fixed playhead time, light/dark app themes produce the same artwork colors, text, and geometry. The independently rendered SVG agrees within recorded rendering tolerance. Selection handles remain visible but are absent from export. Repeat after one keyframe/transform edit and Undo.
+
+### UI-18 — Let users type precise transform values
+
+**P2 · Photo and Motion · OPEN · Visual design limitation.** Transform inspectors show numbers beside sliders, but the numbers are static text. A slider alone is a poor way to place a layer at an exact coordinate or angle.
+
+**Evidence:** Photo/Motion wide light captures and their inspector source. This is a precision-entry recommendation, not a claim that all keyboard nudging is absent.
+
+**Open:** `loom-photo/crates/loom-photo-app/ui/inspector.slint` and `loom-motion/crates/loom-motion-app/ui/inspector.slint`, transform value text/slider rows; existing transform callbacks in each app's `src/main.rs`.
+
+1. Repair one app at its permitted stage. Replace the static value label for one transform row with the shared numeric input, leaving the slider for rough adjustment.
+2. Route typed and dragged values through the same existing mutation function. Show units: px, degrees, or percent. Use the model's legal range; reject nonfinite/invalid input without silently changing the layer.
+3. Commit a typed edit once on Enter or focus completion, cancel on Escape, and preserve one undo transaction. Extend the verified pattern to the remaining transform rows.
+
+**Done when:** Type x=123 px, rotation=12.5 degrees, and scale=75% where supported; the model and visible value agree after Save/Open. Enter, Escape, invalid text, drag, Undo, and Redo behave predictably. Typed controls remain reachable through UI-14's compact panel.
+
+### UI-19 — Distinguish Video timeline zoom from scrolling
+
+**P2 · Video · OPEN · Rendered and source-confirmed.** The timeline toolbar reads “Zoom out timeline,” a slider, “Zoom in timeline,” then another slider. The second slider actually scrolls. Long button captions make the pair look like two zoom controls and obscure the different action.
+
+**Evidence:** Video `01-1440x900-light.png`, `02-1024x720-light.png`; `components.slint` has a zoom slider and a separate `Timeline scroll` slider. This is not two zoom sliders in the implementation.
+
+**Open:** `loom-video/crates/loom-video-app/ui/components.slint`, timeline `ToolbarButton` and `Slider` rows; shared toolbar rendering used by that component.
+
+1. Group minus button, one visibly labeled Zoom control, and plus button together. Use shared icon buttons with accessible names and tooltips for minus/plus.
+2. Show timeline position with a distinct horizontal scroll control attached to the track area. Preserve the existing scroll value and callback.
+3. Keep zoom anchored to the playhead or a clearly specified viewport anchor so changing magnification does not unexpectedly lose the working location.
+
+**Done when:** Zoom changes displayed duration while scroll changes the visible start time. A native user can do both at 1024×720 using pointer and keyboard. Labels/tooltips/accessibility names distinguish the operations, and the playhead remains understandable.
+
+### UI-20 — Keep clip and region captions readable on their fills
+
+**P2 · Video and Studio · OPEN · Visible accessibility risk.** Small secondary clip text is difficult to distinguish from the colored Video clips; Studio's light captions on cyan regions are also at risk. A screenshot establishes the risk, not a measured contrast ratio or full accessibility verdict.
+
+**Evidence:** Video/Studio `01-1440x900-light.png` and `03-1440x900-dark.png`.
+
+**Open:** `loom-video/crates/loom-video-app/ui/components.slint`, clip fill/secondary text; `loom-studio/crates/loom-studio-app/ui/studio_arrangement.slint`, region fill/name; shared semantic color tokens and contrast contract.
+
+1. At the permitted app stage, list the actual background/foreground pairs for normal, selected, muted, and disabled clips. Measure each pair against the contract.
+2. Use a shared semantic foreground paired with each region fill. Do not apply a generic muted-text color over arbitrary saturated backgrounds.
+3. Preserve clip type/selection meaning through icon, border, and text as well as color. Keep readable labels when a region is short; expose the full name through focus/tooltip.
+
+**Done when:** Measured pairs meet the contract in light, dark, and high-contrast modes. Real screenshots at 1024×720 and larger show readable name, duration/source status, and selected state. Keyboard focus and screen-reader naming get separate checks.
+
+### UI-21 — Give Studio one transport control for each action
+
+**P2 · Studio · OPEN · Rendered/source-confirmed duplication.** Loop and Metronome each appear twice across the main toolbar. This consumes scarce width and makes users wonder whether the copies control different things.
+
+**Evidence:** Studio `01-1440x900-light.png`, `02-1024x720-light.png`; duplicate instances in `ui/app.slint`. Actual audio device operation was not tested.
+
+**Open:** `loom-studio/crates/loom-studio-app/ui/app.slint`, Loop/Metronome toolbar instances; `ui/studio_transport.slint`; their callbacks in `src/main.rs`.
+
+1. Keep one Loop toggle and one Metronome toggle in the transport group next to playback. Remove only the duplicate toolbar instances, not the command or keyboard shortcut.
+2. Make the controller state authoritative. A single activation must change the state once; avoid both the UI and callback independently inverting it.
+3. Use the same checked state, accessible name, and shortcut in any menu projection. Keep transport visible at compact width without wrapping.
+
+**Done when:** Each control appears once in the main toolbar. Clicking once toggles once; its keyboard command and menu show the same state. Save/reopen behavior follows the existing model policy. Verify playback with an actual configured device separately; headless “device unavailable” messages are expected capture behavior.
+
+### UI-22 — Show Studio users what is inside an audio region
+
+**P2 · Studio · OPEN · Visible capability gap/design recommendation.** Audio regions are mostly solid colored rectangles with an icon and filename. There is no waveform to locate speech, silence, or a transient, and the arrangement lacks a useful sequence of time ticks. The screen gives little help deciding where to cut.
+
+**Evidence:** Studio wide/compact light captures; `studio_arrangement.slint` renders icon/text but no sample peaks. Empty room below tracks is working space and is not itself a defect.
+
+**Open:** `loom-studio/crates/loom-studio-app/ui/studio_arrangement.slint`, region rendering and time header; existing region/audio-asset projection in `src/main.rs`; decoded PCM access in the core.
+
+1. Start with one bounded audio-waveform patch: compute min/max sample peaks for visible time buckets from the actual decoded asset. Cache by asset revision and scale; do not fabricate decorative wave shapes.
+2. Draw those peaks inside the existing region rectangle. Respect channel count, region offset, trim, and zoom. Missing audio gets an explicit unavailable state.
+3. In a separate patch, add measured time ticks aligned with region positions and the playhead. Label seconds or beats according to the actual project time base; do not mix them silently.
+4. Keep MIDI previews as a separately scoped event-data projection if supported; do not render audio peaks for MIDI or claim note editing exists.
+
+**Done when:** A fixture with sound/silence/sound visibly matches its actual waveform; trimming and zooming preserve alignment. A click at a labeled tick lands at that time. Work remains responsive for a long file and multiple tracks. Record native audio verification separately from a rendered peak display.
+
+### UI-23 — Make Encode's empty queue and readiness truthful
+
+**P1 · Encode · OPEN · Rendered/source-confirmed state mismatch.** The initial screen contains `sample-input.mov`/`sample-output.mp4` as a queued job, says “Queue ready,” and simultaneously reports “Encoder unavailable.” Start is correctly disabled in the captured state; the contradictory status and fabricated-looking job are the defects.
+
+**Evidence:** Encode `01-1440x900-light.png`, `02-1024x720-light.png`; `sample_queue`, `refresh`, and `run_gui` in the app source. No real media was encoded in this visual run.
+
+**Open:** `loom-encode/crates/loom-encode-app/src/main.rs`, `sample_queue`, startup status, readiness calculation; `ui/encode_queue.slint`, `ui/encode_job_card.slint`, and `ui/encode_progress.slint` in that app.
+
+1. Start an ordinary fresh user session with an empty queue and one clear Add Files action. Keep synthetic jobs only in an explicit demo/capture fixture, identified as examples and never runnable as user jobs.
+2. Derive summary status and Start availability from the same readiness state. Distinguish no jobs, missing input, missing encoder, invalid destination, ready, running, failed, and finished.
+3. Show the first actionable blocker beside the affected job or setup control. Do not display “Queue ready” merely because a queue object exists.
+
+**Done when:** Fresh native launch shows no invented source file. Add a real test source, remove/restore it, use an invalid destination, and test missing/available encoder. Visible status and Start agree in every case. A completed controlled encode produces a validated output file before showing success. Keep CODE-09's no-overwrite protection as a separate prerequisite.
+
+### UI-24 — Make Encode's job settings fit the editing task
+
+**P2 · Encode · OPEN · Visual hierarchy recommendation.** Queue, a large mostly empty “Active Job” card, and a seven-tab inspector compete for space. The selected source is repeated, tabs wrap into several rows, and destination appears under both Source & Destination and Destination. At 1024×720, substantial space still goes to idle progress instead of useful settings.
+
+**Evidence:** Encode wide/compact light captures and dark variant.
+
+**Open:** `loom-encode/crates/loom-encode-app/ui/app.slint`, `ui/encode_progress.slint`, `ui/encode_inspector.slint`, `ui/encode_job_card.slint`; Encode workspace contract in `loom-design-bible/contracts/desktop-ui.toml`.
+
+1. First remove duplicated selected-job headings and show the large progress detail only for an actual running/completed/failed job. Idle state should direct the user to add/select a job.
+2. Give Destination one canonical editing location. If another view summarizes it, make that view read-only and link it to the same setting.
+3. Group settings under Source, Output, and Advanced using the shared navigation/disclosure pattern. Keep every existing setting and callback; do not hide required settings behind an unlabeled icon or wrapped tab strip.
+4. At compact width, prioritize queue plus the selected job's settings. Open secondary detail on demand. Use an accurate destination action such as “Choose output folder/file”; only promise dropping a destination if that action is actually implemented.
+
+**Done when:** At 1024×720 and 1440×900, add two jobs, select each, set distinct destinations/presets, and verify they remain independent after Save/Open. Settings labels never overlap or wrap into ambiguous tab rows. Progress becomes visible for the running job without stealing the user's selected-job edits.
+
+### UI-25 — Help users recover from missing media tools
+
+**P1 · Video and Encode · OPEN · Visible blocked-start experience.** The apps detect missing media backends, but recovery guidance is terse and Video truncates its installation instruction in a narrow status area. Telling a desktop user to put several tools “on PATH” is not a complete setup flow. Missing software on this machine is an environment fact; the unclear recovery path is the product finding.
+
+**Evidence:** Video/Encode wide and compact light captures. No claim is made that codecs or playback worked during this run.
+
+**Open:** `loom-video/crates/loom-video-app/src/main.rs` and `loom-encode/crates/loom-encode-app/src/main.rs`, backend detection and startup/error strings; their `ui/app.slint` files and Video's `ui/components.slint`.
+
+1. Repair the active app first. Put one readable setup message near the blocked action, naming the exact missing tools. Keep status-bar text short and let the user open full details.
+2. Provide Choose executable/folder and Check again actions using the existing file chooser and backend detection. Validate the selected tool with a bounded version/probe call; store a successful local path through existing settings.
+3. Explain which tasks are unavailable and leave unaffected document editing usable. A failed check preserves the current project/queue and displays its actual error.
+4. Keep optional installation instructions outside the main editing canvas. Do not automatically download or install tools as part of this repair.
+
+**Done when:** With tools absent, the complete explanation is readable at 1024×720. Select a valid local installation, check again without restarting, and verify the formerly blocked action becomes available. Wrong path, wrong executable, and a hanging probe produce bounded, actionable errors. Run one real playback/export/encode fixture once the backend is configured.

@@ -1,0 +1,334 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded byteorder v1.5.0
+  Downloaded getrandom v0.4.3
+  Downloaded tempfile v3.27.0
+  Downloaded zip v0.6.6
+   Compiling proc-macro2 v1.0.107
+   Compiling cfg-if v1.0.4
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling version_check v0.9.5
+   Compiling generic-array v0.14.7
+   Compiling zmij v1.0.23
+   Compiling syn v3.0.3
+   Compiling libc v0.2.189
+   Compiling serde v1.0.229
+   Compiling typenum v1.20.1
+   Compiling serde_json v1.0.151
+   Compiling serde_derive v1.0.229
+   Compiling getrandom v0.4.3
+   Compiling memchr v2.8.3
+   Compiling rustix v1.1.4
+   Compiling itoa v1.0.18
+   Compiling bitflags v2.13.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling once_cell v1.21.4
+   Compiling fastrand v2.5.0
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling loom-package v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-package)
+   Compiling crc32fast v1.5.0
+   Compiling sha2 v0.10.9
+   Compiling tempfile v3.27.0
+   Compiling adler2 v2.0.1
+   Compiling simd-adler32 v0.3.10
+   Compiling miniz_oxide v0.8.9
+   Compiling byteorder v1.5.0
+   Compiling flate2 v1.1.9
+   Compiling loom-command v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-command)
+   Compiling zip v0.6.6
+   Compiling loom-interop v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-interop)
+   Compiling loom-history v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-history)
+   Compiling loom-production v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-production)
+   Compiling loom-document v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-document)
+   Compiling loom-storage v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-storage)
+   Compiling loom-media-runtime v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-media-runtime)
+   Compiling loom-color v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-color)
+   Compiling loom-text v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-text)
+   Compiling loom-jobs v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-jobs)
+   Compiling loom-pdf v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-pdf)
+   Compiling loom-runtime v0.1.0 (/home/patri/code/rust-loom/loom-core/crates/loom-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 07s
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_color-3dd4349b5dae9a22)
+
+running 8 tests
+test tests::blend_multiply_known ... ok
+test tests::hex_parse_format ... ok
+test tests::premultiply ... ok
+test tests::blend_normal ... ok
+test tests::white_black_extremes ... ok
+test tests::srgb_linear_known_vector ... ok
+test tests::xyz_reference ... ok
+test tests::xyz_roundtrip ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_command-c0074644aa01e6a6)
+
+running 8 tests
+test tests::authoritative_invoke_success ... ok
+test tests::empty_query_returns_nothing ... ok
+test tests::all_surfaces_invoke_same_handler ... ok
+test tests::radio_group_mutual_exclusion ... ok
+test tests::invoke_unregistered_fails_with_not_found ... ok
+test tests::disabled_command_never_executes_handler ... ok
+test tests::search_deterministic_ranking ... ok
+test tests::register_and_lookup ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_document-adfda93aa75ed5d1)
+
+running 16 tests
+test lifecycle::tests::cancelled_open_leaves_old_document_untouched ... ok
+test lifecycle::tests::failed_save_preserves_dirty_state ... ok
+test lifecycle::tests::path_backed_document_transitions ... ok
+test lifecycle::tests::recovery_remains_dirty_until_explicitly_saved ... ok
+test lifecycle::tests::save_as_changes_path_only_after_success ... ok
+test lifecycle::tests::untitled_document_clean_and_modified ... ok
+test selection::tests::grid_range_containment ... ok
+test selection::tests::scene_selection_set ... ok
+test selection::tests::text_selection_normalization ... ok
+test tests::block_tree_basics ... ok
+test tests::char_boundary_validation ... ok
+test tests::multiple_edits_apply ... ok
+test tests::insert_delete_replace ... ok
+test tests::mutation_inverse_roundtrip ... ok
+test lifecycle::tests::read_only_cannot_be_modified ... ok
+test tests::byte_char_conversion ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_history-5ee9f81350fd84b6)
+
+running 10 tests
+test tests::coalescing_preserves_earliest_undo_state ... ok
+test tests::deterministic_replay ... ok
+test tests::byte_budget_accounting_with_groups ... ok
+test tests::history_view_ordering ... ok
+test tests::nested_groups_supported_without_overwriting ... ok
+test tests::empty_groups_do_not_generate_fake_history ... ok
+test tests::recovery_journal_survives_torn_tail ... ok
+test tests::undo_redo_roundtrip ... ok
+test tests::compound_group_preserves_children_boundaries_and_types ... ok
+test tests::new_edit_clears_redo_even_when_coalesced ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_interop-ef39ba53cc05592d)
+
+running 7 tests
+test tests::fidelity_reports_advanced_psd_loss ... ok
+test tests::format_support_matrix_levels ... ok
+test tests::detects_psd_and_media_magic ... ok
+test tests::detects_office_packages_from_parts_not_extensions ... ok
+test tests::unknown_conversion_is_blocked ... ok
+test tests::office_plan_is_shell_free_and_path_scoped ... ok
+test tests::conformance_corpus_detects_to_documented_formats ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_jobs-584921a2c2745375)
+
+running 6 tests
+test tests::panic_containment_in_worker ... ok
+test tests::failed_job_propagates_error ... ok
+test tests::synchronous_test_executor ... ok
+test tests::successful_job_with_progress_and_join ... ok
+test tests::cancellation_before_and_during_execution ... ok
+test tests::condvar_pause_and_resume ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_media_runtime-c2bafee329af80d5)
+
+running 6 tests
+test tests::backend_selection_requires_real_filter_support ... ok
+test tests::preview_frame_size_is_checked ... ok
+test tests::audio_master_clock_advances_from_rendered_frames ... ok
+test tests::render_graph_compiles_gpu_overlay_and_reports_cpu_effects ... ok
+test tests::sync_controller_drops_late_and_holds_early_video ... ok
+test tests::bounded_queue_drops_oldest_and_reports_count ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_package-23c457f95fd1cab4)
+
+running 22 tests
+test manifest::json::tests::rejects_bad_schema ... ok
+test manifest::json::tests::rejects_deep_nesting ... ok
+test manifest::json::tests::rejects_garbage ... ok
+test manifest::json::tests::rejects_unescaped_control ... ok
+test manifest::json::tests::round_trip ... ok
+test manifest::tests::checksum_hex_roundtrip ... ok
+test manifest::tests::schema_version_parse ... ok
+test manifest::tests::extension_and_mime ... ok
+test zip::tests::crc32_known_vector ... ok
+test manifest::tests::mime_validation ... ok
+test zip::tests::detects_corruption ... ok
+test zip::tests::entry_too_large ... ok
+test zip::tests::manifest_mismatch_detected ... ok
+test zip::tests::from_bytes_never_panics_on_arbitrary_input ... ok
+test zip::tests::duplicate_rejected ... ok
+test zip::tests::hostile_inputs_never_panic_and_fail_bounded ... ok
+test zip::tests::normalize_paths ... ok
+test zip::tests::round_trip ... ok
+test zip::tests::sha256_known_vector ... ok
+test zip::tests::too_many_entries ... ok
+test zip::tests::validates_against_manifest ... ok
+test zip::tests::truncated_archives_never_parse_as_half_valid ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_pdf-f8fe1aa0359e4e11)
+
+running 5 tests
+test tests::bold_and_italic_font_selection ... ok
+test tests::transformed_text_keeps_glyph_y_axis_upright ... ok
+test tests::serializes_valid_pdf ... ok
+test tests::deterministic_output ... ok
+test tests::escapes_special_characters ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_production-63b8feb0d332a53c)
+
+running 9 tests
+test snapshot::tests::application_ids_are_validated ... ok
+test tests::accessibility_audit_reports_actionable_rules ... ok
+test tests::corrupt_checkpoint_fails_bounded_without_panicking ... ok
+test tests::locale_fallback_and_arguments_are_deterministic ... ok
+test tests::profiler_computes_percentiles ... ok
+test tests::release_matrix_requires_all_primary_platforms ... ok
+test tests::journal_recovers_after_checkpoint_and_rejects_tampering ... ok
+test tests::crash_during_append_leaves_torn_tail_that_recovers_and_self_heals ... ok
+test snapshot::tests::snapshots_deduplicate_recover_and_checkpoint ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_runtime-8cbabc16fda33560)
+
+running 8 tests
+test tests::clipboard_enforces_mime_and_size ... ok
+test tests::autosave_due_handles_clock_skew ... ok
+test tests::diagnostic_log_is_bounded_and_redacted ... ok
+test tests::cross_app_clipboard_provenance_and_fallbacks ... ok
+test tests::recent_files_deduplicate_and_bound ... ok
+test tests::shortcut_registry_normalizes_and_rejects_conflicts ... ok
+test tests::settings_roundtrip_preserves_escaped_values ... ok
+test tests::recovery_store_roundtrip_and_retention ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_storage-ed67b5782dcb6451)
+
+running 8 tests
+test tests::journal_append_reopen_and_checksum ... ok
+test tests::journal_clear ... ok
+test tests::atomic_write_roundtrip_and_no_tmp_leak ... ok
+test tests::journal_interior_corruption_fails_loudly ... ok
+test tests::safe_path_validation ... ok
+test tests::prior_valid_destination_survives_interrupted_write ... ok
+test tests::journal_torn_tail_self_heals ... ok
+test tests::autosave_recency_pruning ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running unittests src/lib.rs (/tmp/loom-audit-core-target/debug/deps/loom_text-12359608ecbb2442)
+
+running 10 tests
+test tests::bidi_detection ... ok
+test tests::char_wrap ... ok
+test tests::cjk_width ... ok
+test tests::explicit_newline ... ok
+test tests::no_break ... ok
+test tests::style_flags_preserved ... ok
+test tests::utf16_mapping ... ok
+test tests::word_wrap_simple ... ok
+test tests::word_wrap_unbreakable_word ... ok
+test tests::paragraph_defaults ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests loom_color
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_command
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_document
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_history
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_interop
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_jobs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_media_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_package
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_pdf
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_production
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_storage
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

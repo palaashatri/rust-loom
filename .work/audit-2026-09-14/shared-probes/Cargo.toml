@@ -1,0 +1,11 @@
+[package]
+name = "loom-audit-shared-probes"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+loom-production = { path = "../../../loom-core/crates/loom-production" }
+loom-storage = { path = "../../../loom-core/crates/loom-storage" }
+

@@ -1,0 +1,83 @@
+{
+  "checked_at_utc": "2026-09-15 02:12:36 UTC",
+  "checks": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "cmd": "python3 -m unittest discover -s loom-bootstrap/scripts -p test_audit_governance.py",
+        "chunk_id": "b95199",
+        "wall_time_seconds": 4.836661315,
+        "exit_code": 0,
+        "original_token_count": 30,
+        "output": "..................\n----------------------------------------------------------------------\nRan 18 tests in 5.097s\n\nOK\n"
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "cmd": "python3 loom-bootstrap/scripts/audit-governance.py",
+        "chunk_id": "a5abcf",
+        "wall_time_seconds": 3.213118221,
+        "exit_code": 0,
+        "original_token_count": 7,
+        "output": "Loom governance audit: PASS\n"
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "cmd": "python3 loom-bootstrap/scripts/audit-code-structure.py",
+        "chunk_id": "d7e2bd",
+        "wall_time_seconds": 2.596344474,
+        "exit_code": 0,
+        "original_token_count": 16,
+        "output": "Loom code-structure audit: PASS (25 legacy ceilings enforced)\n"
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "cmd": "python3 loom-bootstrap/scripts/audit-ui-contract.py",
+        "chunk_id": "a3018c",
+        "wall_time_seconds": 0.000003191,
+        "exit_code": 2,
+        "original_token_count": 34,
+        "output": "python3: can't open file '/home/patri/code/rust-loom/loom-bootstrap/scripts/audit-ui-contract.py': [Errno 2] No such file or directory\n"
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "cmd": "python3 loom-bootstrap/scripts/audit-assets.py",
+        "chunk_id": "83930f",
+        "wall_time_seconds": 3.71000397,
+        "exit_code": 0,
+        "original_token_count": 6,
+        "output": "Loom asset audit: PASS\n"
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "cmd": "git diff --check",
+        "chunk_id": "c0744f",
+        "wall_time_seconds": 0.350510029,
+        "exit_code": 0,
+        "original_token_count": 0,
+        "output": ""
+      }
+    }
+  ],
+  "corrected_ui_foundation_check": {
+    "chunk_id": "808c19",
+    "wall_time_seconds": 0.009337362,
+    "exit_code": 0,
+    "original_token_count": 21,
+    "output": "Loom UI foundation audit: PASS (foundation ACCEPTED; approved baselines present)\n"
+  },
+  "notes": [
+    "The attempted audit-ui-contract.py command was a mistaken filename; the actual CI script audit-ui-foundation.py passed.",
+    "18 governance tests passed. No application fixes were made.",
+    "Screenshot count and hashes and product source comparisons are in evidence-checks.json."
+  ]
+}

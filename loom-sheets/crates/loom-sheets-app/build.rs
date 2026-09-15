@@ -21,6 +21,10 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
+        ui.join("objects.slint").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
         ui.join("template_chooser.slint").display()
     );
     slint_build::compile_with_config(

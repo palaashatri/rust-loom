@@ -1,0 +1,7 @@
+   Compiling loom-audit-media v0.1.0 (/home/patri/code/rust-loom/.work/audit-2026-09-14/media-plugins)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.50s
+     Running `/tmp/loom-audit-media-target/debug/studio_roundtrip`
+Original samples: [1e-6, 0.75, -1.0]
+After native save/reopen 1: [0.0, 0.7499695, -0.9999695]
+After native save/reopen 2: [0.0, 0.74993896, -0.99993896]
+After native save/reopen 3: [0.0, 0.74990845, -0.99990845]

@@ -1,8 +1,36 @@
 # LOOM ENGINEERING CONSTITUTION
 
-This file is the **highest-authority engineering instruction in the repository**. Every coding agent, reviewer, automation, and human contributor must read it before modifying Loom.
+This file is the **highest-authority engineering instruction in the repository**. Every coding agent, reviewer, automation, and human contributor must read it before modifying Loom. The owner's explicit instructions may change these repository rules; this file is not authority over the owner.
 
 If another repository document, comment, old plan, screenshot, baseline, issue, model instruction, or generated report conflicts with this file, **this file wins**. If a requirement cannot be satisfied, report the blocker. Do not reinterpret, weaken, bypass, stub, hide, baseline, or redefine a requirement to make work appear complete.
+
+## Start here — one small repair at a time
+
+The owner requested the 2026-09-14 code and UI/UX audit and these repair instructions. Findings and exact repair cards live in `TRUTH.md`. Writing a card does not fix the product. All audit cards start OPEN.
+
+For a small local coding model, including a model with a tiny context window:
+
+1. Read this section, the active gate and repair order at the top of `TRUTH.md`, and `loom-bootstrap/contracts/workflow.toml`. If they disagree, report the exact disagreement before editing product code.
+2. Select **one** OPEN card allowed by the active gate. Start with CODE-01. Read only that card and its named source functions, their callers, and applicable rules here. Do not ask a tiny model to repair the entire suite in one prompt.
+3. Say what the user does, what goes wrong now, and what must happen instead. Copy the card's acceptance check into a focused regression test or a short manual interaction script. For a data-loss fix, first run the test and see it fail for the reported reason.
+4. Make the smallest coherent change. A card with several steps may need several patches. Do not mix formatting, renaming, feature work, and a bug fix. Preserve unrelated uncommitted work.
+5. Run the failing example again and the affected module's existing tests. For a UI change, also build the actual app, perform the interaction, save a fresh screenshot, and inspect it at the card's sizes/themes. A callback-only journey does not prove native focus or keyboard behavior.
+6. Check the real result: compare saved/reopened data, inspect an independently opened export, or verify the changed visible state. A success message or a green build is not proof.
+7. Record changed files, exact commands, observed result, evidence path, and remaining gaps under that card. Mark FIXED only when its check passes. Mark NEEDS_REVIEW when the code changed but a required check or expert review is missing. Do not delete the original finding.
+8. Stop after this card. Do not change acceptance, unlock the next app, refresh visual baselines, or take the next card automatically unless the current task authorizes it.
+
+Useful starting commands (run from the repository root; substitute the one named app/package):
+
+```bash
+rg -n '^### CODE-01|^### CODE-02' TRUTH.md
+rg -n 'fn open|next_seq|checkpoint' loom-core/crates/loom-production/src/lib.rs
+cargo test --manifest-path loom-core/Cargo.toml -p loom-production --locked
+python3 loom-bootstrap/scripts/audit-governance.py
+```
+
+Read one complete card between its `###` heading and the next `###` heading. The ignored `.work/` reports contain supporting evidence, not a second task queue. If an old probe is missing, rebuild the tiny fixture described in the card; do not mark it passed from an old log.
+
+**Small models need bounded tasks, not weaker standards.** CODE-02, CODE-08, CODE-09, and CODE-15 involve atomic file operations, security boundaries, or concurrency. Split them into reproducer, implementation, failure-injection checks, and experienced review. If you cannot explain every failure path, leave NEEDS_REVIEW with the precise gap. Do not guess. Never “fix” data loss by dropping data, ignoring an error, deleting a journal, weakening a test, or turning a feature into a success-message stub.
 
 ## 1. Product and technology lock
 
@@ -25,7 +53,7 @@ The active integration branch is `cline-implementation`. Do not create long-live
 
 Only these root Markdown files are authoritative:
 
-- `AGENTS.MD` — immutable engineering constitution and acceptance rules.
+- `AGENTS.MD` — owner-controlled engineering constitution and acceptance rules.
 - `TRUTH.md` — current verified product state, active gate, and blockers.
 - `README.md` — public-facing introduction.
 
@@ -35,32 +63,17 @@ All other prose is reference material only. Never add an `AGENTS.md`/`AGENTS.MD`
 
 Delete obsolete agent residue instead of preserving it "for context". Stale instructions are defects because they mislead future agents.
 
-## 3. ACTIVE PHASE: UI FOUNDATION LOCK
+## 3. Active workflow and audit repair gate
 
-The current phase is **UI FOUNDATION**.
+The current phase and active repair scope are recorded together in `TRUTH.md` and `loom-bootstrap/contracts/workflow.toml`. Do not infer them from old acceptance prose or this file's history.
 
-Until `loom-bootstrap/contracts/workflow.toml` and `TRUTH.md` both record the shared UI foundation as `ACCEPTED`, application feature development is locked.
+During `audit-repair`, new application features and new foundation consumers are locked. Read-only audits, evidence capture, focused regression tests, and documentation are allowed across the suite. Product edits are limited to the named active repair scope. The first scope is shared recovery/storage (CODE-01, CODE-02, CODE-18). Existing foundation imports may remain only for consumers enumerated in the workflow contract; retaining an import is not acceptance.
 
-### Allowed work during this phase
+Finish the shared data-integrity repairs and their failure-path tests before application repairs. Recheck the shared visual foundation and obtain explicit human acceptance before advancing application design. Then repair applications serially, starting with Sheets. A later app's recorded defect is not permission to skip the queue. Security/runtime cards outside the app sequence need an explicitly recorded bounded repair scope before implementation.
 
-- repository cleanup and CI simplification;
-- shared UI architecture in `loom-core/crates/loom-ui/**`;
-- design tokens and machine-readable UI contracts;
-- component-gallery implementation and validation;
-- accessibility, keyboard, responsive, localization, and theme behavior of shared components;
-- code-structure cleanup that reduces existing debt without adding product scope;
-- licensing/asset provenance infrastructure;
-- fixes strictly required to keep the repository buildable after shared-infrastructure changes.
+Changing phase is a separate reviewed action: update the workflow contract and the active gate in `TRUTH.md` together, with evidence. When adding a repair stage the validator does not yet support, update `loom-bootstrap/scripts/audit-governance.py` and its focused tests in that same reviewed change. The contract's allowed prefixes are an outer file boundary; the named active scope still limits which product behavior may change. An audit or a documentation change must never silently promote an app to ACCEPTED.
 
-### Forbidden work during this phase
-
-- new Writer, Sheets, Present, Photo, Motion, Video, Studio, or Encode features;
-- new application-local generic buttons, fields, tabs, menus, sliders, panels, dialogs, toolbars, status bars, list rows, scrollbars, or other reusable controls;
-- application visual redesign before the foundation gate is accepted;
-- adding placeholder or disabled "future" controls to make screenshots look complete;
-- refreshing old application screenshot baselines.
-
-Existing application UI is **legacy product code**, not design authority. `toolkit.slint` and application-local component files remain compatibility surfaces until an accepted foundation exists. Do not copy their visual language into the new foundation merely because it already exists.
+Always forbidden: app-local copies of generic controls; placebo or disabled future controls; baseline refreshes that hide defects; a second competing repair ledger. Existing application UI and `toolkit.slint` are compatibility code, not design authority.
 
 ## 4. Serial application workflow
 
@@ -144,6 +157,25 @@ Hard rules:
 - Animations must be short, purposeful, cancellable by reduced-motion policy, and never required to understand state.
 
 Exact geometry, token, and responsive values live in the machine-readable design contracts. Agents must use those values rather than approximate them from screenshots.
+
+### Turn the audit into concrete design work
+
+Apply the specific UI cards in `TRUTH.md`, one at a time. These rules describe the required result:
+
+- Protect work first. New/Open/Close must handle dirty documents explicitly. Save/Export/Recovery must preserve the actual content, not just show a reassuring message.
+- Make basic actions findable in the app on every supported desktop. If a desktop has no global menu host, provide a visible local route to New, Open, Save, Save As, and the command palette. A memorized shortcut is not discoverability.
+- Start with an honest empty document or clearly named example. Example data must make sense. Never start a real job from a made-up source path.
+- Give the document the space promised by its contract. Close optional inspectors by default where required. Do not create a large blank panel just to fill the window.
+- At narrow sizes, reflow template choices and move low-priority commands into a reachable overflow. Keep names and primary actions readable. Never solve clipping by making text tiny, hiding actions with no replacement, or making the whole toolbar scroll.
+- Use foreground/background token pairs. Check selected cells, headers, fields, disabled controls, and error text in high contrast. A dark toolbar alone does not prove that the document surface has a working dark mode.
+- Feedback must be visible. Render status/error state that the controller produces; keep it outside editable content. Say what failed and how to retry. Do not put developer types, placeholder paths, or internal implementation slogans in ordinary product copy.
+- Previews must match the item they create. Charts must state their data range and units, and must not quietly mix totals/averages with the items being compared. User-inserted document objects may overlap cells; transient status UI may not.
+- Template identity comes from a stable ID, never a card's list position. One shared descriptor must connect the displayed name, preview, and actual generated document. An unavailable template must not silently create something else.
+- UI theme changes may recolor application chrome, not document artwork. Preview and export must share document geometry/content. Fit-to-window must show every image corner, with selection and pointer coordinates using the same rectangle.
+- Compact windows must retain access to formatting and review controls. A hidden inspector needs an operable replacement route. Comments need visible anchors tied to their real ranges; a raw Markdown insertion must be labeled as text until visual table editing works.
+- Precise properties need typed numeric entry with units, commit/cancel, and undo. Distinguish timeline zoom from scrolling. Show real sample peaks/time positions where an editor asks users to cut audio; never draw fictional media detail.
+- Give each transport action one primary control. Show progress for actual jobs, derive readiness from real prerequisites, and provide a readable way to resolve missing local tools. Keep one authoritative editing location per setting.
+- Keep visible keyboard focus and meaningful accessible names. Screenshots can reveal unreadable text; they cannot prove tab order, screen-reader output, or a complete keyboard workflow. Record untested accessibility work explicitly.
 
 ## 7. No facade-first development
 
@@ -261,7 +293,7 @@ When in doubt, do not add the asset. Original generated vector artwork is prefer
 
 `TRUTH.md` is the only live readiness ledger.
 
-Agents may update it only from verified evidence. Never increase a readiness score because code volume increased, a component exists, a test fixture renders, or a screenshot baseline was refreshed.
+Agents may update it only from verified evidence. Do not manufacture numerical readiness scores. Report concrete capabilities, open defects, tested flows, and missing acceptance evidence. Historical scores and agent-reviewed screenshots are not human acceptance.
 
 Use these state labels exactly where applicable:
 
@@ -270,6 +302,8 @@ Use these state labels exactly where applicable:
 - `FUNCTIONAL_WITH_LIMITATIONS`
 - `ACCEPTANCE_BLOCKED`
 - `ACCEPTED`
+
+Card states are `OPEN`, `NEEDS_REVIEW`, and `FIXED`. Workflow scheduling uses `LOCKED` and `IN_PROGRESS`; these describe permission to work, not product quality. The live application quality table in `TRUTH.md` must not contradict its detailed sections or the workflow contract.
 
 Do not claim `production`, `complete`, `parity`, `100%`, or equivalent language unless every applicable product gate passes.
 

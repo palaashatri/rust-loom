@@ -1,0 +1,345 @@
+[
+  {
+    "step": "1.1",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/01-start-light-1440.png",
+    "sha256": "c2f3cb625071d356b4c0943e931f0f72d7080d322ab3139260ef1de603e158d6",
+    "note": "The grid is orderly and selected cells are clear. The inspector occupies substantial width for few properties. Budget mixes weekly and monthly amounts without normalization; no period/unit is explained. UI-02/04."
+  },
+  {
+    "step": "1.2",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/02-compact-light-1024.png",
+    "sha256": "57fd3b8665805a64a5c8a47214f9b674ff27dadef78e2fbacf31823dc0cde243",
+    "note": "Collapsing the inspector gives the grid more space, a useful behavior to preserve. Formatting still needs an accessible compact route; the complete alternate route was not verified. UI-02/14."
+  },
+  {
+    "step": "1.3",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/03-palette-light.png",
+    "sha256": "9e204fd390aaf72d4d5e4845a8719d94f7a18d183639a0de0de66f9e090cde61",
+    "note": "Search results are readable, and export formats are named clearly. This scripted palette state does not prove initial pointer discoverability, focus return, or execution."
+  },
+  {
+    "step": "1.4",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/04-template-chooser.png",
+    "sha256": "52bbadcd7c881f467d08d245907d36e5b86b640c051ee4ebb0a1e2b04b5160c6",
+    "note": "Cancel and Create remain visible, but right-hand previews and names are cut off. Recents duplicates a hard-coded Blank entry. Reflow full cards and use real recent choices. UI-03."
+  },
+  {
+    "step": "1.5",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/05-chart.png",
+    "sha256": "b9d2428e2da1b9766d95a2d33dbdfc6536d17d07d48a5470019c4528f5b1a5e6",
+    "note": "Bars have readable value labels. Total and Average are plotted alongside individual expenses with no visible source range or unit. Require an explicit range; do not automatically suppress user-selected formula rows. UI-08."
+  },
+  {
+    "step": "1.6",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/06-objects.png",
+    "sha256": "566651c8705e8f563a4761e50f6aa3c9d36d0fc69e5bccc40ce21a748a4b9771",
+    "note": "The selected shape and resize handle are visible. User-inserted objects legitimately overlap cells. This seeded capture does not establish native dragging, image recovery, or XLSX fidelity."
+  },
+  {
+    "step": "1.7",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/07-dark.png",
+    "sha256": "42df810454a527284cd3da0f320e5e2483bb85f374e8e013bb12c42c2cd694a3",
+    "note": "Dark chrome retains readable document cells and selected-cell borders. The light paper surface is not itself a defect. Dark mode does not establish high-contrast correctness."
+  },
+  {
+    "step": "1.8",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/08-high-contrast.png",
+    "sha256": "452ebbfb0909b51fb37f4d6cc73c0a045f214805b6da31b64b3dae9311258ebd",
+    "note": "Item, Amount, and Note disappear into black header fill, while the formula field still contains Item. The text exists but the chosen foreground/background pair hides it. UI-05."
+  },
+  {
+    "step": "1.9",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/17-current-native-start.png",
+    "sha256": "722f0af262e7c0d808e34ae44ab0870f70bc01d73c54701cda139c1cbad250e9",
+    "note": "Fresh current-source build at 1280\u00d7800 shows Budget and no visible New/Open/Save menu. There is no global menu host in this test environment. Title/status do not identify document save state. UI-01/02/04/06."
+  },
+  {
+    "step": "1.10",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/18-current-native-edit.png",
+    "sha256": "d96563f03f815adf5d66fef2926e175be6f6a111d7c99b8e2f843ec574e92894",
+    "note": "The grid confirms the edit. The native title stays Untitled and there is no visible dirty/status indicator. This is an actual pointer/keyboard interaction, not a seeded screenshot. UI-06."
+  },
+  {
+    "step": "1.11",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/19-current-native-new.png",
+    "sha256": "dd4cd981a4d4fe2e2e0a64460501e0511c6fe1268b858d223564b01f446d85be",
+    "note": "The workbook immediately becomes blank with no save/discard/cancel decision. The formula field still paints audit123 over the empty placeholder. CODE-04 and UI-07."
+  },
+  {
+    "step": "1.12",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/20-current-native-undo.png",
+    "sha256": "dd4cd981a4d4fe2e2e0a64460501e0511c6fe1268b858d223564b01f446d85be",
+    "note": "The blank workbook remains and the stale field persists. Undo does not restore the discarded Budget edit. These results were reproduced after rebuilding current source."
+  },
+  {
+    "step": "1.13",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/21-current-native-palette.png",
+    "sha256": "074f0c5d074c01fc879500cba6c0b25a0a5cbb153f794908f1a43e52b26e2a34",
+    "note": "The palette works and lists shortcuts. Its New Sheet command actually replaces the workbook; name whole-file actions accurately. UI-09. Full keyboard navigation and screen-reader output were not tested."
+  },
+  {
+    "step": "1.14",
+    "app": "sheets",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/22-current-native-overflow.png",
+    "sha256": "6674f8fb4f7346b27bbf947fecd92c5b2c289cad69f75fc5cd07fbe438015e41",
+    "note": "Overflow contains Export CSV only, so it does not solve pointer access to New/Open/Save in this environment. The captured app window is complete; the black surrounding area is the private display. UI-01."
+  },
+  {
+    "step": "2.1",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/01-1440x900-light.png",
+    "sha256": "5e6ee8ea9142e061bbfce0b0a99c9ea24c502c7ec083c5350043973ff2d43543",
+    "note": "The page is visually dominant and the status bar is visible. Sample prose advertises implementation details instead of helping the user write; keep it out of Blank and label samples explicitly. UI-11."
+  },
+  {
+    "step": "2.2",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/02-1024x720-light.png",
+    "sha256": "c3e9a2c17f10a4238ea5c92d0f32bfe72f47f48f61d5ccfd51af01b85b6471ee",
+    "note": "The page remains usable, but the inspector is unavailable at this breakpoint. Do not remove a control category without another reachable route. UI-14."
+  },
+  {
+    "step": "2.3",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/03-1440x900-dark.png",
+    "sha256": "5a713e36d3e067369570d6aa8e90b8dda1b04e13a1fe702d7dc8830425d898fd",
+    "note": "Light paper stays readable against dark chrome. Document colors remain stable here, a useful behavior. Full contrast and accessibility were not measured."
+  },
+  {
+    "step": "2.4",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/04-1440x900-light-palette.png",
+    "sha256": "1fb1333e4fc00f52fc339a2eec3ffe22f0af9d41e4bcb5a8472cff917531663e",
+    "note": "Commands, search field, and keyboard hints are readable. This seeded state does not verify all command enablement or focus transitions."
+  },
+  {
+    "step": "2.5",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/05-inspector.png",
+    "sha256": "43eda9ad20f1172dbb200625b8bf898a635a104dfdf1310ddcdf1e5b738e24a6",
+    "note": "The capture seeds a comment and table and requests the inspector. The breakpoint hides that panel; the table appears as Markdown text. UI-13/14."
+  },
+  {
+    "step": "2.6",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/06-chooser.png",
+    "sha256": "444e24414efd093213a014346fe7a652868bb31153cb24ee3f56c2f638cdd05b",
+    "note": "All six cards fit in two rows, and the selection/action area is clear. This is better reflow than Sheets. Card identity still needs the native check below."
+  },
+  {
+    "step": "2.7",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/07-high-contrast.png",
+    "sha256": "3973a8e936381117edde27be21006da33c658e8105c816976872449d988ccbb7",
+    "note": "Paper and body text remain readable in this captured state. The inspector is still hidden at compact width. This is not screen-reader or complete contrast certification."
+  },
+  {
+    "step": "2.8",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/08-inspector-wide.png",
+    "sha256": "0f252a7889f3b283d25f97da56569c45bca4c9c45aacef49634855682d7757a5",
+    "note": "The inspector now shows the seeded comment, proving it exists. No visible anchor highlights it on the page; the populated table still shows literal pipes. UI-13/14; CODE-17 covers anchor drift."
+  },
+  {
+    "step": "2.9",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/09-native-start.png",
+    "sha256": "78b36c88a99e09b3829b16cdbd319bb5845f75f775a1c6ee03d170d2bd8935b6",
+    "note": "Fresh current-source native launch shows the template chooser in the private display. No real user document is open in this fixture."
+  },
+  {
+    "step": "2.10",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/10-native-report-selected.png",
+    "sha256": "231dda66560cdba2c387a332a652a29e7c5e7d2866299923ae407b1bf36ffadc",
+    "note": "The card is visibly selected. The following Create Document action should construct this report."
+  },
+  {
+    "step": "2.11",
+    "app": "writer",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/writer/11-native-created-letter.png",
+    "sha256": "eba4435a32b7c9157c7ef74860253951fec4288d9473edf97a391e4578880543",
+    "note": "The result is a letter with Your Name and Dear Recipient; status explicitly says Created letter document. Six UI positions and four callback mappings disagree. UI-12. Save/export of this result was not exercised."
+  },
+  {
+    "step": "3.1",
+    "app": "present",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/01-1440x900-light.png",
+    "sha256": "7671fce6ab7480c9ead8dd0a56d752c3083f776904579da159b2980050e80ff0",
+    "note": "The canvas is large and readable. The LTR filmstrip is on the right beside the inspector, contrary to the left-navigator contract. No element selected is repeated with empty geometry fields. UI-15."
+  },
+  {
+    "step": "3.2",
+    "app": "present",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/02-1024x720-light.png",
+    "sha256": "1eb20903dc135492c5d1522f7630ec3bf27eb17347ef3f677c597ef33de3e1ce",
+    "note": "The optional inspector disappears and the slide thumbnails remain visible, preserving basic orientation. The filmstrip is still on the right. Full compact property access was not tested."
+  },
+  {
+    "step": "3.3",
+    "app": "present",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/03-1440x900-dark.png",
+    "sha256": "d456ef5e22ae7f7c983856ca43f211f85c534db5009d02a756185c2a390012d6",
+    "note": "The slide paper remains readable against dark chrome. Filmstrip and inspector placement issues persist. Toolbar icons need native tooltip/name checks before accessibility acceptance."
+  },
+  {
+    "step": "3.4",
+    "app": "present",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/present/04-1440x900-light-palette.png",
+    "sha256": "05b8070420f9495a5857c9e47a2736868ab25eacb7fdd5f4913fb3649e7cb935",
+    "note": "The modal and its entries are legible. These captures do not establish slide creation, transitions, undo, or exported deck correctness; see the separate code findings."
+  },
+  {
+    "step": "4.1",
+    "app": "photo",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/01-1440x900-light.png",
+    "sha256": "e68bdb1bb379d96b6e2f681e38c1a7e451a52649d77164340b985d168470a597",
+    "note": "Image content dominates, but its right/bottom portions and selection edges are clipped inside the viewport. The source fits content against the larger stage instead of the viewport. Transform values are static labels beside sliders. UI-16/18."
+  },
+  {
+    "step": "4.2",
+    "app": "photo",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/02-1024x720-light.png",
+    "sha256": "480054795be1526f967322e841ac2a871bdb39368271ce3c541f2c1a2b1d2c6e",
+    "note": "Clipping remains and the inspector disappears. An alternate compact property route needs native verification. Canvas whitespace alone is not a defect. UI-14/16."
+  },
+  {
+    "step": "4.3",
+    "app": "photo",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/03-1440x900-dark.png",
+    "sha256": "d0256d34ed0a8a2898846df1589aaeaeefccd58b6c7727a261ce0fc79c49d41d",
+    "note": "The artwork remains visible, but changing chrome does not solve the clipped image rectangle. Verify all corners and coordinate mapping after repair. UI-16."
+  },
+  {
+    "step": "4.4",
+    "app": "photo",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/photo/04-1440x900-light-palette.png",
+    "sha256": "a1ddf819dbcb705bbc4b5bfb939b72b03852daae1fa154c2ed541d77b97e59df",
+    "note": "PNG and JPEG choices are explicit and readable. A palette image is not proof of actual export, color fidelity, layer persistence, or selection manipulation."
+  },
+  {
+    "step": "5.1",
+    "app": "motion",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/01-1440x900-light.png",
+    "sha256": "4aebcce4d0bd00f9682d5ece825ae6e703d2d60f597cfee0dfad4c4e40de7eb1",
+    "note": "Layers, stage, timeline, and transforms are visible. Stage labels include type suffixes such as (Text); these are not the text written by the SVG exporter. Precise transform entry needs typed values. UI-17/18."
+  },
+  {
+    "step": "5.2",
+    "app": "motion",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/02-1024x720-light.png",
+    "sha256": "ec83b5925e620a39583616e32e205f85f7f2ea533bb19948c9d18f52861f94b6",
+    "note": "The inspector disappears and the composition-layers heading truncates. Keep a reachable compact editing route; do not infer missing timeline/keyframe features from this screenshot. UI-14."
+  },
+  {
+    "step": "5.3",
+    "app": "motion",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/03-1440x900-dark.png",
+    "sha256": "a22ae28fb913e07f4604061a25196466a9126c5932c343bfe584b9eaad5476e0",
+    "note": "Stage background and title color change with the UI theme. Source export colors are fixed, so the visible artwork cannot serve as a trustworthy output preview. UI-17."
+  },
+  {
+    "step": "5.4",
+    "app": "motion",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/motion/04-1440x900-light-palette.png",
+    "sha256": "a0d093055ec7a00de0deb1ed7ab84846de7827e877acf82b95827f79428397bc",
+    "note": "Export SVG Frame describes the implemented output more honestly than promising a video render. The native keyframe, playback, and export workflow was not completed in this visual audit."
+  },
+  {
+    "step": "6.1",
+    "app": "video",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/01-1440x900-light.png",
+    "sha256": "36d6faca5e6ac6213d101406bc94c79fa54d6967b134a7d5bff285c00190799d",
+    "note": "The viewer is large, and synthetic media is explicitly labeled Offline sample, which is honest. Missing-tool guidance is truncated; zoom button captions make the adjacent scroll slider confusing. Small secondary clip text has weak visible separation from the fill. UI-19/20/25."
+  },
+  {
+    "step": "6.2",
+    "app": "video",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/02-1024x720-light.png",
+    "sha256": "0672d6d57c01fb4803f868f393d47b210877177b4dda372958d562967e7d31d7",
+    "note": "The timeline and viewer remain available, but the backend instruction is even harder to read fully. Provide readable setup details and a retry route. UI-25."
+  },
+  {
+    "step": "6.3",
+    "app": "video",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/03-1440x900-dark.png",
+    "sha256": "571c2aa4d475897929c9958007a0bf0db8549743f072f57ec0be773201569b06",
+    "note": "Clip color coding remains clear; secondary text still needs measured foreground/background contrast. No quantitative contrast ratio or screen-reader compliance is claimed. UI-20."
+  },
+  {
+    "step": "6.4",
+    "app": "video",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/video/04-1440x900-light-palette.png",
+    "sha256": "cbf114c6b517d8d1c4b42c28858631ffc5bcbc5388b4ff3427959da5a3ac3645",
+    "note": "Commands are readable. A source check distinguishes the single zoom slider from the separate scroll slider. Actual media decoding, playback, caption/export fidelity, and backend recovery were not exercised."
+  },
+  {
+    "step": "7.1",
+    "app": "studio",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/01-1440x900-light.png",
+    "sha256": "bd94eee89c1b1a620b1e65ef62e25555399991894f86ddc6dcbac3d65a7b638c",
+    "note": "Tracks and regions are identifiable, but Loop and Metronome each appear twice. Audio regions show generic fills/icons/filenames without sample peaks or a useful sequence of time ticks. UI-21/22."
+  },
+  {
+    "step": "7.2",
+    "app": "studio",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/02-1024x720-light.png",
+    "sha256": "8f7753d7b9c97f284dbcadcc3b421f758f5853118ae6ee5e213168ad321583c3",
+    "note": "Library, arrangement, and mixer compete for width while repeated transport actions consume toolbar space. Keep the arrangement primary and verify existing mixer/inspector contract behavior during the app stage. Empty space below tracks is intentional working room."
+  },
+  {
+    "step": "7.3",
+    "app": "studio",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/03-1440x900-dark.png",
+    "sha256": "c2ef408586b8289702c57b4b2db65c825bb22218376c8abd6234accf7870a3cd",
+    "note": "Bright cyan regions are distinct; light text on them needs a contrast measurement. Device-unavailable/headless-deterministic messages belong to the capture harness, so this image cannot diagnose native device failure. UI-20."
+  },
+  {
+    "step": "7.4",
+    "app": "studio",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/studio/04-1440x900-light-palette.png",
+    "sha256": "6c546589b9181444350ac5d67e2f031fc620bd7efc4277b751a7f00bcfbbb3b5",
+    "note": "Search and commands are readable. No real recording, playback, MIDI device, or plugin workflow was tested. Waveform recommendations require real PCM data, not decorative shapes. Native persistence loss is separately documented in CODE-10."
+  },
+  {
+    "step": "8.1",
+    "app": "encode",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/01-1440x900-light.png",
+    "sha256": "1508117af7f5bb883d43ff458320f71bfaea0066a8c556461b8851226bc8ef17",
+    "note": "Start is correctly disabled while Encoder unavailable is shown, yet the status says Queue ready and a sample-input.mov job is queued. A large idle progress card repeats the selected job; settings tabs wrap. UI-23/24."
+  },
+  {
+    "step": "8.2",
+    "app": "encode",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/02-1024x720-light.png",
+    "sha256": "10e9d3e39086cbaabb16704458673d94655c5424040586598052de4416576f99",
+    "note": "Three competing panels leave little room for job settings. Destination appears in multiple contexts and Drop destination file here gives unclear guidance. Provide one authoritative destination editor and readable setup recovery. UI-24/25."
+  },
+  {
+    "step": "8.3",
+    "app": "encode",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/03-1440x900-dark.png",
+    "sha256": "e0364cdc979d4302163dfdbc7ed0f6774a4a3f217f540d00d339c78569489cf4",
+    "note": "The warning remains visible, but contradictory readiness and idle progress hierarchy remain. Derive labels and action enablement from the same real prerequisites. UI-23."
+  },
+  {
+    "step": "8.4",
+    "app": "encode",
+    "path": "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/encode/04-1440x900-light-palette.png",
+    "sha256": "36d5685f3c2ae15e05f27437420f78164d9fabf0da9d2394766121318ecf4486",
+    "note": "The palette is readable. The capture does not prove that all listed actions are enabled or that a real encode succeeds. The output overwrite race was reproduced separately with a controlled adapter, not a real codec. CODE-09."
+  }
+]

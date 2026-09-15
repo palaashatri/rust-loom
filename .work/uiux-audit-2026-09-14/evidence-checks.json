@@ -1,0 +1,24 @@
+{
+  "code_cards": 19,
+  "ui_cards": 25,
+  "images_verified": 49,
+  "source_paths_exist": true,
+  "unchanged_product_sources": [
+    "/home/patri/code/rust-loom/loom-core/crates/loom-production/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-core/crates/loom-production/src/snapshot.rs",
+    "/home/patri/code/rust-loom/loom-core/crates/loom-storage/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-encode/crates/loom-encode-core/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-photo/crates/loom-photo-app/src/main.rs",
+    "/home/patri/code/rust-loom/loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-present/crates/loom-present-app/src/main.rs",
+    "/home/patri/code/rust-loom/loom-present/crates/loom-present-core/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-app/src/main.rs",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core/src/persistence.rs",
+    "/home/patri/code/rust-loom/loom-sheets/crates/loom-sheets-core/src/xlsx.rs",
+    "/home/patri/code/rust-loom/loom-studio/crates/loom-studio-core/src/lib.rs",
+    "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-app/src/main.rs",
+    "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-core/src/export.rs",
+    "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-core/src/lib.rs"
+  ]
+}

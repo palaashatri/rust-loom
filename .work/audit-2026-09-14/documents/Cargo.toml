@@ -1,0 +1,8 @@
+[package]
+name = "loom-audit-documents"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+loom-writer-core = { path = "/home/patri/code/rust-loom/loom-writer/crates/loom-writer-core" }
+loom-present-core = { path = "/home/patri/code/rust-loom/loom-present/crates/loom-present-core" }
+loom-photo-core = { path = "/home/patri/code/rust-loom/loom-photo/crates/loom-photo-core" }

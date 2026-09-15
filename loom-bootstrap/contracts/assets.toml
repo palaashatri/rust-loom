@@ -27,6 +27,14 @@ redistributable = true
 attribution_required = false
 
 [[allow]]
+glob = "loom-*/docs/screenshot-linux*.png"
+origin = "Loom project-generated native Linux QA screenshot"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
 glob = "loom-*/docs/acceptance/*.png"
 origin = "Loom project-generated acceptance test screenshot"
 license = "Repository project license"

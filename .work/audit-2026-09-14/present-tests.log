@@ -1,0 +1,63 @@
+   Compiling loom-present-core v0.1.0 (/home/patri/code/rust-loom/loom-present/crates/loom-present-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.15s
+     Running unittests src/lib.rs (/tmp/loom-audit-doc-target/debug/deps/loom_present_core-9ae44b45c59f5b90)
+
+running 49 tests
+test tests::animation_build_order_and_progress ... ok
+test tests::accessibility_audit_flags_empty_visuals ... ok
+test tests::authoring_session_supports_slide_and_element_history ... ok
+test tests::cancelled_checkpoint_preserves_redo_after_undo ... ok
+test tests::cancelled_checkpoint_restores_document_without_history ... ok
+test tests::deck_outline_import_structure ... ok
+test tests::deck_integrity_digest_stability ... ok
+test tests::deck_outline_round_trip ... ok
+test tests::element_distribution_spacing ... ok
+test tests::deck_theme_presets ... ok
+test tests::failed_or_noop_transform_does_not_create_history ... ok
+test tests::elements_bounding_box_union ... ok
+test tests::grid_arrangement_layout ... ok
+test tests::history_capabilities_track_mutations ... ok
+test tests::hit_testing_and_marquee_follow_rotation ... ok
+test tests::fit_preserves_aspect_ratio_centered ... ok
+test tests::linked_asset_relink_lifecycle ... ok
+test tests::master_slide_application ... ok
+test tests::pdf_export_changes_when_element_geometry_or_rotation_changes ... ok
+test tests::pptx_title_extraction_orders_numerically_and_joins_runs ... ok
+test tests::pptx_title_unescapes_entities_and_handles_empty_first_paragraphs ... ok
+test tests::presenter_drawing_annotations ... ok
+test tests::presenter_session_navigation_and_timer ... ok
+test tests::reading_order_manipulation_and_validation ... ok
+test tests::scene_node_hierarchical_bounds ... ok
+test tests::rehearsal_timing_and_report ... ok
+test tests::scene_normalizes_geometry_and_validation_catches_duplicates ... ok
+test tests::pptx_export_round_trips_through_import ... ok
+test tests::slide_action_trigger_execution ... ok
+test tests::slide_aspect_ratio_presets ... ok
+test tests::slide_element_ordering_and_alignment_operations ... ok
+test tests::slide_deck_duplicate_move_and_remove ... ok
+test tests::slide_layout_presets_configure_elements ... ok
+test tests::slide_transition_config ... ok
+test tests::smart_snapping_to_reference_bounds ... ok
+test tests::speaker_notes_markdown_and_total_elements ... ok
+test tests::speaker_notes_search_query ... ok
+test tests::stroke_and_shadow_styling ... ok
+test tests::test_hit_testing ... ok
+test tests::test_add_slides ... ok
+test tests::test_pdf_export ... ok
+test tests::test_presentation_creation ... ok
+test tests::test_select_slide_bounds ... ok
+test tests::test_single_multi_marquee_selection ... ok
+test tests::session_persistence_preserves_theme_and_transitions ... ok
+test tests::test_snap_calculation ... ok
+test tests::test_transform_operations_and_undo ... ok
+test tests::test_save_load_roundtrip ... ok
+test tests::transformed_elements_survive_save_reopen ... ok
+
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests loom_present_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

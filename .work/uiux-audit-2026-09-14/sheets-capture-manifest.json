@@ -1,0 +1,111 @@
+[
+  {
+    "build_command": [
+      "cargo",
+      "build",
+      "--manifest-path",
+      "loom-sheets/Cargo.toml",
+      "--locked",
+      "--offline",
+      "-p",
+      "loom-sheets-app"
+    ],
+    "build_exit": 0
+  },
+  {
+    "capture": "01-start-light-1440.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/01-start-light-1440.png",
+      "--size",
+      "1440x900"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "02-compact-light-1024.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/02-compact-light-1024.png",
+      "--size",
+      "1024x720"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "03-palette-light.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/03-palette-light.png",
+      "--size",
+      "1440x900",
+      "--palette"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "04-template-chooser.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/04-template-chooser.png",
+      "--size",
+      "1024x720",
+      "--template-chooser"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "05-chart.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/05-chart.png",
+      "--size",
+      "1440x900",
+      "--chart"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "06-objects.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/06-objects.png",
+      "--size",
+      "1024x720",
+      "--objects"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "07-dark.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/07-dark.png",
+      "--size",
+      "1440x900",
+      "--theme",
+      "dark"
+    ],
+    "exit": 0
+  },
+  {
+    "capture": "08-high-contrast.png",
+    "command": [
+      "/home/patri/code/rust-loom/loom-sheets/target/debug/loom-sheets",
+      "--screenshot",
+      "/home/patri/code/rust-loom/.work/uiux-audit-2026-09-14/sheets/08-high-contrast.png",
+      "--size",
+      "1024x720",
+      "--theme",
+      "high-contrast"
+    ],
+    "exit": 0
+  }
+]

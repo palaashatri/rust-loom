@@ -1,0 +1,11 @@
+[package]
+name = "loom-audit-media"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+loom-plugin-host = { path = "/home/patri/code/rust-loom/loom-plugin-sdk/crates/loom-plugin-host" }
+loom-plugin-manifest = { path = "/home/patri/code/rust-loom/loom-plugin-sdk/crates/loom-plugin-manifest" }
+loom-encode-core = { path = "/home/patri/code/rust-loom/loom-encode/crates/loom-encode-core" }
+loom-video-core = { path = "/home/patri/code/rust-loom/loom-video/crates/loom-video-core" }
+loom-studio-core = { path = "/home/patri/code/rust-loom/loom-studio/crates/loom-studio-core" }
+serde_json = "1"

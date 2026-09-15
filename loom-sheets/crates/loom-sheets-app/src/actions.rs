@@ -7,9 +7,9 @@ use loom_desktop::{CommandAction, DesktopError, NativeMenuBar};
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
     CellAlignment, CellRange, CellRef, ChartSeries, ChartSpec, NumberFormat, PivotAggregation,
-    RangeEdit, Sheet, SheetChart, SheetModel,
+    RangeEdit, Sheet, SheetChart, SheetModel, SheetObject,
 };
-use slint::{ComponentHandle, SharedString, VecModel};
+use slint::{ComponentHandle, Image, SharedString, VecModel};
 
 use crate::analysis::{
     chart_points, label_value_columns, line_path_commands, pie_wedge_commands, plan_chart,
@@ -22,9 +22,9 @@ use crate::formatting::{
 };
 use crate::{
     apply_sheet, clear_selection, commit_formula_edit, commit_transaction,
-    commit_workbook_transaction, evaluate_current, project_current, select_cell,
-    selection_from_app, set_selection_alignment, sync_current_to_tabs, sync_menu_state,
-    update_selection_range, GridSelection, GuiState, SheetTransaction, SheetsApp,
+    commit_workbook_transaction, evaluate_current, image_open_request, project_current,
+    select_cell, selection_from_app, set_selection_alignment, sync_current_to_tabs,
+    sync_menu_state, update_selection_range, GridSelection, GuiState, SheetTransaction, SheetsApp,
 };
 
 /// Synchronize the sheet tab labels and active selection with the Slint UI.
@@ -196,7 +196,6 @@ pub(crate) fn register_sheet_actions(
                     }
                     state.sheet_histories.borrow_mut()[active_idx] = (cur_undo, cur_redo);
 
-                    // Switch sheet
                     *state.active_sheet_index.borrow_mut() = idx;
                     *state.current.borrow_mut() = state.sheets.borrow()[idx].clone();
 
@@ -603,10 +602,96 @@ pub(crate) fn register_sheet_actions(
         let app_ref = app.as_weak();
         app.on_close_chart(move || {
             if let Some(app) = app_ref.upgrade() {
-                // Hiding is session state only; the persisted spec survives
-                // and Insert Chart restores it.
                 app.set_chart_visible(false);
                 app.set_status_left("Chart hidden".into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_insert_shape(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let before = state.current.borrow().clone();
+                let mut after = before.clone();
+                let anchor = selection_from_app(&app).focus;
+                after.objects.push(SheetObject::shape(anchor, "Shape"));
+                commit_transaction(
+                    &mut state.current.borrow_mut(),
+                    &mut state.undo_stack.borrow_mut(),
+                    &mut state.redo_stack.borrow_mut(),
+                    SheetTransaction::Snapshot {
+                        before: Box::new(before),
+                        after: Box::new(after),
+                    },
+                );
+                apply_sheet(&app, &state);
+                sync_menu_state(&menu_service, &app, &state);
+                app.set_status_left("Inserted shape".into());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_insert_image(move || {
+            if let Some(app) = app_ref.upgrade() {
+                let request = match image_open_request(&state) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        app.set_status_left(SharedString::from(format!(
+                            "Insert image failed: {error}"
+                        )));
+                        return;
+                    }
+                };
+                match state.dialogs.open_file(&request) {
+                    Ok(Some(path)) => {
+                        if let Err(error) = Image::load_from_path(&path) {
+                            app.set_status_left(SharedString::from(format!(
+                                "Insert image failed: {error}"
+                            )));
+                            return;
+                        }
+                        let anchor = selection_from_app(&app).focus;
+                        let object =
+                            match SheetObject::image(anchor, path.to_string_lossy().into_owned()) {
+                                Ok(object) => object,
+                                Err(error) => {
+                                    app.set_status_left(SharedString::from(format!(
+                                        "Insert image failed: {error}"
+                                    )));
+                                    return;
+                                }
+                            };
+                        let before = state.current.borrow().clone();
+                        let mut after = before.clone();
+                        after.objects.push(object);
+                        commit_transaction(
+                            &mut state.current.borrow_mut(),
+                            &mut state.undo_stack.borrow_mut(),
+                            &mut state.redo_stack.borrow_mut(),
+                            SheetTransaction::Snapshot {
+                                before: Box::new(before),
+                                after: Box::new(after),
+                            },
+                        );
+                        apply_sheet(&app, &state);
+                        sync_menu_state(&menu_service, &app, &state);
+                        app.set_status_left(SharedString::from(format!(
+                            "Inserted image {}",
+                            path.display()
+                        )));
+                    }
+                    Ok(None) => app.set_status_left("Insert image cancelled".into()),
+                    Err(error) => app.set_status_left(SharedString::from(format!(
+                        "Insert image dialog failed: {error}"
+                    ))),
+                }
             }
         });
     }
@@ -1351,6 +1436,11 @@ pub(crate) fn delete_row(sheet: &Sheet, target_row: u32) -> Option<Sheet> {
             );
         }
     }
+    new_sheet.objects = sheet
+        .objects
+        .iter()
+        .filter_map(|object| object.after_deleted_row(target_row))
+        .collect();
     Some(new_sheet)
 }
 
@@ -1412,6 +1502,11 @@ pub(crate) fn delete_col(sheet: &Sheet, target_col: u32) -> Option<Sheet> {
             );
         }
     }
+    new_sheet.objects = sheet
+        .objects
+        .iter()
+        .filter_map(|object| object.after_deleted_col(target_col))
+        .collect();
     Some(new_sheet)
 }
 
@@ -1438,7 +1533,8 @@ pub(crate) fn sort_table(
     let mut model = SheetModel::new(sheet.clone());
     let clamped_col = col_idx.min(dims.cols.saturating_sub(1));
     if model.sort_rows(range, clamped_col, ascending).is_ok() {
-        let after = model.sheet;
+        let mut after = model.sheet;
+        after.objects = before.objects.clone();
         commit_transaction(
             sheet,
             undo_stack,
@@ -1532,6 +1628,8 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "format.font_decrease" => app.invoke_adjust_font(-1),
         "table.fill_down" => app.invoke_fill_selection(),
         "sheets.insert_chart" => app.invoke_insert_chart(),
+        "sheets.insert_shape" => app.invoke_insert_shape(),
+        "sheets.insert_image" => app.invoke_insert_image(),
         "sheets.cycle_chart_kind" => app.invoke_cycle_chart_kind(),
         "table.pivot_sum" => app.invoke_pivot_summary(0),
         "table.pivot_count" => app.invoke_pivot_summary(1),

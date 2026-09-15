@@ -1,0 +1,12 @@
+   Compiling loom-audit-sheets v0.0.0 (/home/patri/code/rust-loom/.work/audit-2026-09-14/sheets)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.93s
+     Running `/tmp/loom-audit-core-target/debug/history-repro`
+renames=1 top-level=1 nested_transactions=1 elapsed_ms=0
+renames=2 top-level=2 nested_transactions=4 elapsed_ms=0
+renames=3 top-level=3 nested_transactions=13 elapsed_ms=0
+renames=4 top-level=4 nested_transactions=40 elapsed_ms=0
+renames=5 top-level=5 nested_transactions=121 elapsed_ms=0
+renames=6 top-level=6 nested_transactions=364 elapsed_ms=1
+renames=7 top-level=7 nested_transactions=1093 elapsed_ms=3
+renames=8 top-level=8 nested_transactions=3280 elapsed_ms=16
+renames=9 top-level=9 nested_transactions=9841 elapsed_ms=41

@@ -1,0 +1,12 @@
+    Updating crates.io index
+     Locking 2 packages to latest compatible versions
+      Adding hound v3.5.1
+      Adding loom-studio-core v0.1.0 (/home/patri/code/rust-loom/loom-studio/crates/loom-studio-core)
+ Downloading crates ...
+  Downloaded hound v3.5.1
+   Compiling hound v3.5.1
+   Compiling loom-studio-core v0.1.0 (/home/patri/code/rust-loom/loom-studio/crates/loom-studio-core)
+   Compiling loom-audit-media v0.1.0 (/home/patri/code/rust-loom/.work/audit-2026-09-14/media-plugins)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.27s
+     Running `/tmp/loom-audit-media-target/debug/loom-audit-media stdin`
+Configured deadline=50ms; elapsed=2014ms; result=Err(Execution("Broken pipe (os error 32)"))

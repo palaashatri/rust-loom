@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.77s
+     Running `/tmp/loom-audit-media-target/debug/loom-audit-media`
+Authorization for /tmp/loom-audit-media/evidence/allowed/linked/new.txt: Ok(())
+Created unauthorized file: true

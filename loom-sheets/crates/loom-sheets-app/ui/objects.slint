@@ -1,0 +1,131 @@
+import { Theme } from "theme.slint";
+
+/// Non-cell content placed on a worksheet at a cell anchor.
+///
+/// The native controller supplies pixel geometry and decoded images. Keeping
+/// this layer data-driven lets the virtual grid remain bounded while objects
+/// still scroll with the worksheet.
+export component SheetObjectLayer inherits Rectangle {
+    in property <[string]> kinds: [];
+    in property <[string]> labels: [];
+    in property <[image]> images: [];
+    in property <[length]> positions-x: [];
+    in property <[length]> positions-y: [];
+    in property <[int]> widths: [];
+    in property <[int]> heights: [];
+    in property <[int]> fills: [];
+    in property <[bool]> visible-objects: [];
+    in property <[bool]> selected-objects: [];
+    in property <int> selected-object: -1;
+    callback object-move-started(int);
+    callback object-moved(int, float, float);
+    callback object-move-ended(int);
+    callback object-move-cancelled(int);
+    callback object-resize-started(int);
+    callback object-resized(int, float, float);
+    callback object-resize-ended(int);
+    callback object-resize-cancelled(int);
+
+    background: transparent;
+    clip: true;
+
+    for idx in root.kinds.length : Rectangle {
+        property <bool> is-selected: (idx < root.selected-objects.length && root.selected-objects[idx])
+            || idx == root.selected-object;
+        x: idx < root.positions-x.length ? root.positions-x[idx] : 0px;
+        y: idx < root.positions-y.length ? root.positions-y[idx] : 0px;
+        width: idx < root.widths.length ? max(80px, root.widths[idx] * 1px) : 80px;
+        height: idx < root.heights.length ? max(48px, root.heights[idx] * 1px) : 48px;
+        visible: idx < root.visible-objects.length && root.visible-objects[idx];
+        border-width: is-selected ? 2px : 1px;
+        border-color: is-selected ? Theme.palette().focus : Theme.palette().border-strong;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        background: root.kinds[idx] == "shape"
+            ? (idx < root.fills.length && root.fills[idx] == 0 ? #FECACA
+                : idx < root.fills.length && root.fills[idx] == 1 ? #FED7AA
+                : idx < root.fills.length && root.fills[idx] == 2 ? #FEF08A
+                : idx < root.fills.length && root.fills[idx] == 3 ? #BBF7D0
+                : idx < root.fills.length && root.fills[idx] == 4 ? #BFDBFE
+                : idx < root.fills.length && root.fills[idx] == 5 ? #DDD6FE
+                : idx < root.fills.length && root.fills[idx] == 6 ? #E5E7EB
+                : Theme.palette().surface-raised)
+            : Theme.palette().surface;
+
+        if root.kinds[idx] == "shape" : Text {
+            x: Theme.tokens.space.sm;
+            y: Theme.tokens.space.sm;
+            width: parent.width - 2 * Theme.tokens.space.sm;
+            height: parent.height - 2 * Theme.tokens.space.sm;
+            text: idx < root.labels.length ? root.labels[idx] : "Shape";
+            color: Theme.palette().ink;
+            font-size: Theme.tokens.typography.body;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            overflow: elide;
+            accessible-role: text;
+            accessible-label: self.text;
+        }
+
+        if root.kinds[idx] == "image" : Image {
+            x: 2px;
+            y: 2px;
+            width: parent.width - 4px;
+            height: parent.height - 4px;
+            source: root.images[idx];
+            image-fit: contain;
+        }
+
+        drag := TouchArea {
+            mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    root.object-move-started(idx);
+                }
+                if (event.kind == PointerEventKind.up) {
+                    root.object-move-ended(idx);
+                }
+                if (event.kind == PointerEventKind.cancel) {
+                    root.object-move-cancelled(idx);
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.object-moved(idx, (self.mouse-x - self.pressed-x) / 1px, (self.mouse-y - self.pressed-y) / 1px);
+                }
+            }
+        }
+
+        if is-selected : Rectangle {
+            x: parent.width - 12px;
+            y: parent.height - 12px;
+            width: 12px;
+            height: 12px;
+            border-radius: 6px;
+            border-width: 2px;
+            border-color: Theme.palette().focus;
+            background: Theme.palette().paper;
+
+            resize := TouchArea {
+                mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.se-resize;
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        root.object-resize-started(idx);
+                    }
+                    if (event.kind == PointerEventKind.up) {
+                        root.object-resize-ended(idx);
+                    }
+                    if (event.kind == PointerEventKind.cancel) {
+                        root.object-resize-cancelled(idx);
+                    }
+                }
+                moved => {
+                    if (self.pressed) {
+                        root.object-resized(idx, (self.mouse-x - self.pressed-x) / 1px, (self.mouse-y - self.pressed-y) / 1px);
+                    }
+                }
+            }
+        }
+    }
+}

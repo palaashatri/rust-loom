@@ -1,0 +1,9 @@
+   Compiling loom-audit-documents v0.0.0 (/home/patri/code/rust-loom/.work/audit-2026-09-14/documents)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.32s
+     Running `/tmp/loom-audit-doc-target/debug/loom-audit-documents`
+Writer PDF: input blocks=60, exported paragraph occurrences=31, contains final paragraph=false
+Writer layout pages=3
+Writer comment: text="New Hello world", anchor=6..11, selected="llo w"
+Photo add/delete/add: ids=["layer-bg", "layer-3", "layer-3"]; save result=Err("duplicate layer id 'layer-3'")
+Present add/delete/add ids=["slide-1", "slide-3", "slide-3"]
+Present transition undo: before=Dissolve undo=false after=Dissolve

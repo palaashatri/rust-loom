@@ -3,6 +3,7 @@ import {
     LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
 } from "foundation.slint";
 import { SheetChart } from "chart.slint";
+import { SheetObjectLayer } from "objects.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     FormulaNameBar, SheetActionToolbar, SheetGridSurface, SheetInspector, SheetSelectionOverlay,
@@ -65,6 +66,17 @@ export component SheetsApp inherits Window {
     in property <[bool]> cell-borders: [];
     in property <[int]> cell-fills: [];
     in property <[int]> cell-font-sizes: [];
+    in property <[string]> object-kinds: [];
+    in property <[string]> object-labels: [];
+    in property <[image]> object-images: [];
+    in property <[length]> object-positions-x: [];
+    in property <[length]> object-positions-y: [];
+    in property <[int]> object-widths: [];
+    in property <[int]> object-heights: [];
+    in property <[int]> object-fills: [];
+    in property <[bool]> visible-objects: [];
+    in property <[bool]> selected-objects: [];
+    in-out property <int> selected-object: -1;
     in property <bool> cell-bold: false;
     in property <bool> cell-italic: false;
     in property <bool> cell-underline: false;
@@ -157,6 +169,16 @@ export component SheetsApp inherits Window {
     callback zoom-out;
     callback zoom-actual;
     callback insert-chart;
+    callback insert-shape;
+    callback insert-image;
+    callback object-move-started(int);
+    callback object-moved(int, float, float);
+    callback object-move-ended(int);
+    callback object-move-cancelled(int);
+    callback object-resize-started(int);
+    callback object-resized(int, float, float);
+    callback object-resize-ended(int);
+    callback object-resize-cancelled(int);
     callback rename-sheet(string);
     callback add-table-col;
     callback delete-row;
@@ -555,6 +577,30 @@ export component SheetsApp inherits Window {
                             root.is-editing = true;
                             root.begin-edit(initial-text);
                         }
+                    }
+
+                    SheetObjectLayer {
+                        width: parent.width;
+                        height: parent.height;
+                        kinds: root.object-kinds;
+                        labels: root.object-labels;
+                        images: root.object-images;
+                        positions-x: root.object-positions-x;
+                        positions-y: root.object-positions-y;
+                        widths: root.object-widths;
+                        heights: root.object-heights;
+                        fills: root.object-fills;
+                        visible-objects: root.visible-objects;
+                        selected-objects: root.selected-objects;
+                        selected-object: root.selected-object;
+                        object-move-started(index) => { root.object-move-started(index); }
+                        object-moved(index, delta-x, delta-y) => { root.object-moved(index, delta-x, delta-y); }
+                        object-move-ended(index) => { root.object-move-ended(index); }
+                        object-move-cancelled(index) => { root.object-move-cancelled(index); }
+                        object-resize-started(index) => { root.object-resize-started(index); }
+                        object-resized(index, delta-x, delta-y) => { root.object-resized(index, delta-x, delta-y); }
+                        object-resize-ended(index) => { root.object-resize-ended(index); }
+                        object-resize-cancelled(index) => { root.object-resize-cancelled(index); }
                     }
 
                     if root.chart-visible : SheetChart {

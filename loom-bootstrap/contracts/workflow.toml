@@ -1,9 +1,12 @@
 schema_version = 1
-phase = "writer"
+phase = "audit-repair"
 foundation_status = "ACCEPTED"
-application_development_locked = false
-consumer_imports_allowed = true
-next_application = "present"
+application_development_locked = true
+consumer_imports_allowed = false
+active_repair = "shared-recovery"
+next_application = "sheets"
+# Keep already-migrated UI compiling; this is not permission for new adoption.
+existing_foundation_consumers = ["sheets", "writer", "present", "photo", "motion"]
 
 application_order = [
   "sheets",
@@ -16,6 +19,8 @@ application_order = [
   "encode",
 ]
 
+# Outer file boundary only. The named active_repair still limits product edits.
+# UI/desktop/design entries do not authorize unrelated work during shared recovery.
 allowed_active_prefixes = [
   ".github/",
   "AGENTS.MD",
@@ -24,10 +29,10 @@ allowed_active_prefixes = [
   "loom-bootstrap/",
   "loom-core/crates/loom-ui/",
   "loom-core/crates/loom-desktop/",
+  "loom-core/crates/loom-production/",
+  "loom-core/crates/loom-storage/",
   "loom-design-bible/contracts/",
   "loom-design-bible/tokens/",
-  "loom-sheets/",
-  "loom-writer/",
 ]
 
 [foundation_gate]
@@ -43,8 +48,8 @@ text_scales = [1.0, 1.25, 1.5]
 directions = ["ltr", "rtl"]
 
 [application_status]
-sheets = "ACCEPTED"
-writer = "IN_PROGRESS"
+sheets = "LOCKED"
+writer = "LOCKED"
 present = "LOCKED"
 photo = "LOCKED"
 motion = "LOCKED"

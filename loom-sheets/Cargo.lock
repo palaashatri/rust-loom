@@ -3047,6 +3047,7 @@ dependencies = [
 name = "loom-sheets-app"
 version = "0.1.0"
 dependencies = [
+ "image",
  "loom-desktop",
  "loom-package",
  "loom-production",

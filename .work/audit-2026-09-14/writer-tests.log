@@ -1,0 +1,91 @@
+   Compiling loom-writer-core v0.1.0 (/home/patri/code/rust-loom/loom-writer/crates/loom-writer-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.71s
+     Running unittests src/lib.rs (/tmp/loom-audit-doc-target/debug/deps/loom_writer_core-046eaa97ad643b7b)
+
+running 77 tests
+test comments::tests::add_thread_rejects_empty_body_unknown_block_bad_range ... ok
+test comments::tests::add_thread_anchors_and_generates_unique_ids ... ok
+test comments::tests::legacy_content_without_comments_loads_empty ... ok
+test comments::tests::resolve_and_delete_find_by_id ... ok
+test page_setup::tests::content_json_rejects_unknown_names ... ok
+test comments::tests::comments_round_trip_through_content_json ... ok
+test page_setup::tests::content_json_round_trips_all_fields ... ok
+test page_setup::tests::default_setup_projects_a4_portrait_normal_margins ... ok
+test page_setup::tests::landscape_swaps_dimensions_and_wide_margins_apply ... ok
+test comments::tests::threads_on_deleted_blocks_are_not_live ... ok
+test tables::tests::caret_selection_stays_normalized ... ok
+test tables::tests::insert_rejects_empty_geometry ... ok
+test tables::tests::insert_table_after_offset_places_block_between_paragraphs ... ok
+test tables::tests::insert_table_appends_markdown_block_and_moves_caret ... ok
+test tests::advanced_search_and_replace_with_options ... ok
+test tables::tests::table_blocks_export_verbatim_to_markdown ... ok
+test tables::tests::table_markdown_round_trips_through_parse ... ok
+test tests::block_formatting_and_alignment_operations ... ok
+test tests::block_spacing_formatting ... ok
+test tests::break_config_and_kinds ... ok
+test tests::caret_movement_stays_on_extended_grapheme_boundaries ... ok
+test tests::citation_formatting_styles ... ok
+test tests::comments_revisions_bookmarks_and_tables_are_editable ... ok
+test tests::document_outline_extraction ... ok
+test tests::document_statistics_calculation ... ok
+test tests::corrupted_content_rejected ... ok
+test tests::count_matches_counts_occurrences ... ok
+test tests::docx_extraction_paragraphs_and_headings ... ok
+test tests::find_word_boundaries_expansion ... ok
+test tests::footnote_numbering_markers ... ok
+test tests::format_block_range_splits_overlapping_runs ... ok
+test tests::generate_toc_extracts_hierarchical_headings ... ok
+test tests::docx_export_round_trips_through_import ... ok
+test tests::header_footer_formatting_and_page_numbers ... ok
+test tests::estimate_pagination_calculates_pages_and_metrics ... ok
+test tests::layout_exposes_zoom_scroll_visible_and_selection_geometry ... ok
+test tests::layout_uses_block_metrics_for_heading_spacing_and_alignment ... ok
+test tests::json_content_roundtrip ... ok
+test tests::legacy_alignment_only_json_still_loads_with_default_style_and_runs ... ok
+test tests::line_break_penalty_optimization ... ok
+test tests::linked_table_paste_validation ... ok
+test tests::mail_merge_template_rendering ... ok
+test tests::multi_column_layout_and_drop_caps ... ok
+test tests::next_id_increments ... ok
+test tests::ocr_blocks_to_editable_paragraphs ... ok
+test tests::outline_numbering_hierarchies ... ok
+test tests::json_content_roundtrip_preserves_full_styles_and_runs ... ok
+test tests::paper_sizes_and_reading_metrics ... ok
+test tests::plain_text_and_markdown ... ok
+test tests::readability_scoring_and_syllables ... ok
+test tests::remap_style_runs_does_not_duplicate_at_boundary ... ok
+test tests::replace_all_mutation ... ok
+test tests::replace_paragraphs_keeps_changed_metadata_across_a_nearby_insertion ... ok
+test tests::replace_paragraphs_matches_metadata_across_middle_insert_delete ... ok
+test tests::replace_paragraphs_preserves_runs_for_unchanged_and_remaps_them_on_change ... ok
+test tests::replace_paragraphs_preserves_single_newlines_and_empty_paragraphs ... ok
+test tests::replace_paragraphs_removes_all_blocks_for_empty_input ... ok
+test tests::replace_paragraphs_shifts_a_style_run_when_text_is_inserted_inside_it ... ok
+test tests::replacement_inherits_active_style_and_collapses_selection ... ok
+test tests::replacing_editor_text_keeps_selection_in_document_bounds ... ok
+test tests::search_replace_toc_and_pagination_are_functional ... ok
+test tests::save_load_roundtrip ... ok
+test tests::selection_edge_cases_empty_collapsed_multiblock_utf8 ... ok
+test tests::pagination_uses_heading_width_and_height_for_long_blocks ... ok
+test tests::split_and_merge_blocks_preserves_content_and_runs ... ok
+test tests::split_and_merge_round_trip_preserves_content_and_runs ... ok
+test tests::text_hyphenation_and_soft_hyphens ... ok
+test tests::text_import_paragraph_detection ... ok
+test tests::save_load_preserves_full_rich_state_and_selection ... ok
+test tests::to_html_string_generates_semantic_markup ... ok
+test tests::selection_state_is_clamped_and_round_trips_with_rich_document ... ok
+test tests::watermark_and_line_numbering ... ok
+test tests::word_diff_lcs_operations ... ok
+test tests::writer_document_integrity_digest ... ok
+test tests::selection_bold_across_two_blocks_survives_replace_paragraphs_and_roundtrip ... ok
+test tests::to_content_json_is_deterministic_and_round_trips ... ok
+test tests::truncated_saves_never_load_as_half_documents ... ok
+
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+   Doc-tests loom_writer_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
