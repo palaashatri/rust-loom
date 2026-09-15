@@ -1,6 +1,6 @@
 # Loom — Current Truth
 
-This is the live product ledger and repair queue. `AGENTS.MD` defines the rules; `loom-bootstrap/contracts/workflow.toml` records the work gate. Updated 2026-09-15 from a code audit and fresh UI/UX inspection. Recording a defect does not fix it.
+This is the live product ledger and repair queue. `AGENTS.MD` defines the rules; `loom-bootstrap/contracts/workflow.toml` records the work gate. Updated 2026-09-15 from a code audit, fresh UI/UX inspection, and the owner-authorized P0/P1 repair run. Finding text stays here so a future repair can be checked against the original failure.
 
 ## Active gate — read this before choosing a card
 
@@ -15,30 +15,30 @@ NEXT APPLICATION: SHEETS
 
 The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this audit. Existing consumer imports remain compatible; new adoption and new application features are frozen. The current visual audit does not recertify the gallery or supply human acceptance. Recheck gallery evidence and human sign-off before advancing application design. Do not delete or refresh existing baselines to hide findings.
 
-**Active product repair scope:** shared production recovery and storage only: CODE-01, then CODE-02, then CODE-18. This request records instructions; no product repair has been implemented. Read-only inspection, capture, regression reproductions, and documentation are allowed for every app. Update this gate and the workflow contract together before a later repair stage. A card's presence is not permission to skip the active scope.
+**Machine gate:** shared production recovery and storage remains the recorded workflow scope (`active_repair = shared-recovery`) so the governance validator stays truthful. **Owner override (2026-09-15):** the owner explicitly authorized this run to implement every P0/P1 repair across the suite. Those changes are recorded by commit below; they do not grant application acceptance. Keep expert review, real-media checks, and human visual approval open where the card says they are still required.
 
 The contract's allowed prefixes are an outer file boundary, not permission to edit unrelated UI/desktop/design code during shared recovery. A newly supported repair stage also needs a reviewed update to `loom-bootstrap/scripts/audit-governance.py` and its focused tests; the present validator deliberately supports only `shared-recovery` in this phase.
 
 **Repair order after the shared stage:** verify the foundation gate; Sheets data integrity and unsaved-work protection (CODE-03/04/07/11/06/12), then Sheets UI; Writer; Present; Photo; Motion; Video; Studio; Encode. Record a bounded plugin-host security/runtime stage for CODE-08/15 separately before implementing it. Do not release the plugin host while those defects remain. Within each app, data loss and broken output come before visual polish. No later app starts until the current app passes its full gate, unless the owner explicitly changes scope.
 
-**How to use a card:** follow the numbered steps in `AGENTS.MD` under “Start here.” Select one card, reproduce it, make a small repair, run its concrete check, and record evidence under that same card. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. Stop after the authorized card. All code and UI cards in this ledger are OPEN unless their own record explicitly says otherwise.
+**How to use a card:** follow the numbered steps in `AGENTS.MD` under “Start here.” Normally select one card, reproduce it, make a small repair, run its concrete check, and record evidence under that same card. The owner override above authorized this dated P0/P1 run across the suite. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. P2 and GOV cards remain OPEN unless their own record says otherwise.
 
 ## Current product state
 
-Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features, but this audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
+Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features. The audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states; the owner-authorized run repaired the recorded P1 code/UI paths listed below. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
 
-Quality and permission to work are different. This is the single live application status table:
+Quality and permission to work are different. The owner override permits the listed P0/P1 edits while the machine table remains LOCKED until the normal acceptance gates are completed. This is the single live application status table:
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED | CODE-03/04/06/07/11/12; UI cards below |
-| 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/05/13/17; UI-11/12/13/14 |
-| 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/16/19; UI-15 |
-| 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/14; UI-14/16/18 |
-| 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-14/17/18; complete native workflow not established |
-| 6 | Video | ACCEPTANCE_BLOCKED | LOCKED | UI-19/20/25; complete native workflow not established |
-| 7 | Studio | ACCEPTANCE_BLOCKED | LOCKED | CODE-10; UI-20/21/22 |
-| 8 | Encode | ACCEPTANCE_BLOCKED | LOCKED | CODE-09; UI-23/24/25 |
+| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; visual gate and P2 findings remain |
+| 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
+| 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
+| 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
+| 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-17 repaired in code; UI-14/18 and independent render checks remain |
+| 6 | Video | ACCEPTANCE_BLOCKED | LOCKED | UI-25 repaired in code; UI-19/20 and real-media checks remain |
+| 7 | Studio | ACCEPTANCE_BLOCKED | LOCKED | CODE-10 repaired in code; audio and visual acceptance checks remain |
+| 8 | Encode | ACCEPTANCE_BLOCKED | LOCKED | CODE-09/UI-23 repaired in code; filesystem/media checks remain |
 
 The previous ledger listed Present/Photo both LOCKED and ACCEPTED and said Sheets had no known serious defects. Those statements are withdrawn. Historical test counts and agent-reviewed screenshots do not override the open findings below. The pre-update ledger is retained as an ignored audit backup, not a competing authority.
 
@@ -48,11 +48,15 @@ The first audit was a code/reliability audit; it explicitly did **not** certify 
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
-- Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. Audit work preserves the existing product changes. It changes documentation and governance, not application behavior.
+- Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. That sentence describes the historical audit only; the owner-authorized repair commits listed below subsequently changed application behavior.
 - Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
 - Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
-- Visual evidence covers only the states explicitly listed in the visual report. It does not establish screen-reader compliance, complete keyboard operation, every scale/direction, all dialog outcomes, or cross-platform acceptance. Uncaptured or untested states remain unknown.
-- Documentation handoff checks: 18 focused governance tests pass; governance, code-structure, asset, and UI-foundation source audits pass. The source audit recognizes pre-existing accepted baseline files; it does not supply new human visual approval. All 49 accepted screenshot paths/hashes and explicit source-file references were checked. Sixteen audited product source files still match the original code audit hashes. Verification details are saved beside the visual report.
+- Visual evidence covers only the states explicitly listed in the visual report. The repair run adds source and focused-test evidence, but it does not establish screen-reader compliance, complete keyboard operation, every scale/direction, all dialog outcomes, or cross-platform acceptance. Uncaptured or untested states remain unknown.
+
+**P0 findings:** none were recorded in the audit. The owner-authorized run therefore covers every recorded P1 code/UI card.
+
+- Repair milestones pushed: `68df596`, `1a51c6d`, `29cb024`, `68b2b6b`, `9e15c55`, `1540a20`, `458e9ec`, and `d58202a`.
+- Documentation handoff checks: 18 focused governance tests pass; the governance, asset, and UI-foundation source audits pass. The current code-structure audit reports the legacy byte-ratchet ceilings for six touched files: `loom-encode/crates/loom-encode-app/src/main.rs`, `loom-sheets/crates/loom-sheets-app/src/main.rs`, `loom-sheets/crates/loom-sheets-core/src/lib.rs`, `loom-video/crates/loom-video-app/src/main.rs`, `loom-video/crates/loom-video-core/src/lib.rs`, and `loom-photo/crates/loom-photo-app/src/main.rs`. No ceiling was raised to hide that maintenance debt; extraction is a separate follow-up. The source audit recognizes pre-existing accepted baseline files; it does not supply new human visual approval. All 49 accepted screenshot paths/hashes and explicit source-file references were checked. Sixteen audited product source files still match the original code audit hashes. Verification details are saved beside the visual report.
 
 ## Existing capability inventory — preserve these while repairing
 
@@ -60,19 +64,19 @@ These capabilities describe the current implementation and historical work, not 
 
 ### Sheets
 
-The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. Existing tests cover meaningful pieces. The new audit specifically disproves lossless text/recovery, bounded workbook history, fully valid rich XLSX output, and fully live imported formulas. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
+The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run now covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas; focused Sheets core/app suites pass. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
 
 ### Writer
 
-The implementation includes rich blocks/style runs, multi-page layout, selection, undo/coalescing, native packages, Markdown/PDF export, outline/metrics, page setup, list styles, comments, Markdown-native tables, an inspector, templates, and command/menu projection. Historical Linux/macOS and headless journeys exist. The audit shows PDF truncation, drifting comment anchors, unsafe Open, and launch-path recovery gaps. Pointer-driven table editing, visible comment highlighting, measured representative performance, and explicit human acceptance remain incomplete/unverified.
+The implementation includes rich blocks/style runs, multi-page layout, selection, undo/coalescing, native packages, Markdown/PDF export, outline/metrics, page setup, list styles, comments, Markdown-native tables, an inspector, templates, and command/menu projection. The P1 repair run now covers complete PDF pagination, guarded Open, and launch recovery. Drifting comment anchors, pointer-driven table editing, visible comment highlighting, measured representative performance, and explicit human acceptance remain incomplete/unverified.
 
 ### Present
 
-The implementation includes slides, scene objects, selection/manipulation helpers, snapping, notes, undo, native persistence, PPTX/PDF paths, themes, transitions, and native command/menu projection. CODE-04/16/19 block acceptance: unsafe New, duplicate identities, and non-undoable transitions. Older source-cleanup and test-count claims are not evidence that these user workflows are correct.
+The implementation includes slides, scene objects, selection/manipulation helpers, snapping, notes, undo, native persistence, PPTX/PDF paths, themes, transitions, and native command/menu projection. CODE-04 New/Open replacement is guarded; duplicate identities (CODE-16) and non-undoable transitions (CODE-19) still block acceptance. Older source-cleanup and test-count claims are not evidence that these user workflows are correct.
 
 ### Photo
 
-The implementation includes image/layer models, pixel and adjustment operations, selection/editing tools, native persistence, export paths, history, and a desktop canvas/inspector. Unsafe New and layer ID collisions block acceptance. A real import-edit-save-reopen-export journey and the required visual/accessibility matrix must be checked before approval.
+The implementation includes image/layer models, pixel and adjustment operations, selection/editing tools, native persistence, export paths, history, and a desktop canvas/inspector. CODE-04 New/Open replacement and the default fit geometry (UI-16) are repaired. Layer ID collisions, the remaining compact/precision checks, and a real import-edit-save-reopen-export journey still block approval.
 
 ### Motion
 
@@ -84,11 +88,11 @@ Timeline/track/clip models, trim/marker helpers, local processing, caption/audio
 
 ### Studio
 
-Tracks/regions, PCM/WAV support, synthesis/DSP, mixer/automation primitives, persistence/history, local device foundations, and a multitrack shell exist. CODE-10 disproves lossless native audio persistence. Production recording, realtime scheduling, comping/time/pitch, plugin isolation/UI, mixing/mastering, and scalable arrangement interaction remain incomplete or unverified.
+Tracks/regions, PCM/WAV support, synthesis/DSP, mixer/automation primitives, persistence/history, local device foundations, and a multitrack shell exist. CODE-10 precision persistence is repaired in code; production recording, realtime scheduling, comping/time/pitch, plugin isolation/UI, mixing/mastering, and scalable arrangement interaction remain incomplete or unverified.
 
 ### Encode
 
-FFmpeg queue/preset planning, execution/progress/cancellation, persistence/recovery, probe/conformance helpers, hardware-codec planning, and destination primitives exist. CODE-09 disproves final no-overwrite protection. Queue/settings hierarchy, watch-folder experience, hardware policy, pause/resume guarantees, exhaustive format support, and perceptual conformance remain incomplete or unverified.
+FFmpeg queue/preset planning, execution/progress/cancellation, persistence/recovery, probe/conformance helpers, hardware-codec planning, and destination primitives exist. CODE-09 final no-overwrite protection and the UI-23/25 readiness paths are repaired in code; filesystem review, real encode fixtures, queue/settings hierarchy, watch-folder experience, hardware policy, pause/resume guarantees, exhaustive format support, and perceptual conformance remain incomplete or unverified.
 
 ## Engineering and acceptance debt
 
@@ -100,11 +104,13 @@ Asset provenance and commercial redistribution rules remain in `AGENTS.MD` and `
 
 ## Code and workflow repair cards
 
-All cards below are **OPEN**. P1 means user data, trust, or a security boundary is at risk. P2 means a serious workflow defect. These are findings, not implemented fixes. Paths are relative to this repository. Search for the named function; old line numbers can move. Evidence directory: `.work/audit-2026-09-14/`. Recreate a fixture from the instructions if ignored evidence is unavailable.
+Cards retain their original finding text. P1 means user data, trust, or a security boundary is at risk. P2 means a serious workflow defect. The owner-authorized P0/P1 repair results below use `FIXED` when code and focused tests passed, and `NEEDS_REVIEW` when implementation landed but an expert, native, or real-media check is still required. P2 and GOV cards remain OPEN. Paths are relative to this repository. Search for the named function; old line numbers can move. Evidence directory: `.work/audit-2026-09-14/`. Recreate a fixture from the instructions if ignored evidence is unavailable.
 
 ### CODE-01 — Keep edits after reopening a saved document
 
-**P1 · Shared · OPEN.** Think of the recovery sequence as numbered pages. A new page must have a bigger number than every saved page. Currently a restart resets the number and hides later edits.
+**P1 · Shared · FIXED.** Think of the recovery sequence as numbered pages. A new page must have a bigger number than every saved page. Currently a restart resets the number and hides later edits.
+
+**Repair result (2026-09-15):** Commit `68df596` restores the recovery sequence from the larger on-disk value and keeps overflow/error paths explicit. Shared recovery tests and probes pass; a fresh cross-platform crash fixture is still a release check.
 
 **Open:** `loom-core/crates/loom-production/src/lib.rs`, `RecoveryJournal::open`.
 
@@ -113,10 +119,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Keep existing file compatibility. Do not delete a checkpoint to hide this error.
 
 **Prove it:** Record `first`, checkpoint `saved`, close, reopen, record `new unsaved edit`, close, reopen. Recovered text must be exactly `new unsaved edit`. Repeat twice. Existing result is `saved contents`. Evidence: `shared-probes/src/lib.rs`, `shared-probes.log`.
-
 ### CODE-02 — Publish recovery checkpoints without destroying the last good copy
 
-**P1 · Shared · OPEN · Needs experienced review.** The payload and its checksum are one thing. Replacing just one half makes the saved copy unreadable.
+**P1 · Shared · NEEDS_REVIEW · Needs experienced review.** The payload and its checksum are one thing. Replacing just one half makes the saved copy unreadable.
+
+**Repair result (2026-09-15):** Commit `68df596` publishes payload and checksum together through the shared recovery writer and exercises failure paths. Focused tests pass; an experienced filesystem/recovery review is still required.
 
 **Open:** `loom-core/crates/loom-production/src/lib.rs`, `checkpoint`, atomic replacement helper.
 
@@ -126,10 +133,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 4. Make startup choose a complete valid generation. Report damage; do not silently claim that missing edits were saved.
 
 **Prove it:** Inject failure before/after each write, sync, and publish step. Restart must recover the last committed data plus valid newer journal entries. The existing metadata-temp failure produces `checkpoint digest mismatch` despite a valid journal. Test Linux and Windows replacement semantics before acceptance. Evidence: `shared-probes/src/lib.rs`. A tiny model must not invent an atomic-file protocol alone.
-
 ### CODE-03 — Save and load Sheets text exactly
 
-**P1 · Sheets · OPEN.** Saving a sentence must not change any of its letters.
+**P1 · Sheets · FIXED.** Saving a sentence must not change any of its letters.
+
+**Repair result (2026-09-15):** Commit `29cb024` uses strict JSON DTOs with escaping and malformed-input tests. Sheets core and app suites pass (103 core, 97 app tests in the repair run).
 
 **Open:** `loom-sheets/crates/loom-sheets-core/src/persistence.rs`, `sheet_from_json`, workbook parsing and object parsing.
 
@@ -138,10 +146,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Keep the supported legacy format by decoding its actual schema. Reject malformed input with an error; never silently truncate it.
 
 **Prove it:** Save/reopen multiple tabs and recovery snapshots; every original string must compare equal byte for byte, including a sheet named `My "Sheet"`. Evidence: `sheets/repro.rs`, `sheets-repro.log`.
-
 ### CODE-04 — Ask before throwing away unsaved work
 
-**P1 · Shared interaction, then one app at a time · OPEN.** New/Open must not silently erase the document being edited.
+**P1 · Shared interaction, then one app at a time · FIXED.** New/Open must not silently erase the document being edited.
+
+**Repair result (2026-09-15):** Commits `29cb024`, `68b2b6b`, `458e9ec`, and `d58202a` guard Sheets, Writer, Photo, and Present replacement flows. Save, Discard, Cancel/Escape, clean snapshots, candidate validation, and modal focus are wired; affected app suites pass.
 
 **Open:** Sheets `src/main.rs` callbacks for New/Open; corresponding Present New, Photo New, Writer Open; all under `loom-<app>/crates/loom-<app>-app/`. Shared dialogs live under `loom-core/crates/loom-desktop/`.
 
@@ -151,10 +160,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 4. For Open, parse the candidate successfully before swapping it into the live session. Audit close/quit through the same decision helper.
 
 **Prove it:** Type a unique value, invoke New/Open, exercise all three choices and a failed save/open. Cancel/failure preserves the value and undo history. Only successful Save or explicit Discard allows replacement. Writer's initial New opens a template chooser; put the guard at replacement, not at every chooser opening. Original evidence is a callback trace; the fresh Linux Sheets run also observed New clearing `audit123` without a decision and Undo not restoring it.
-
 ### CODE-05 — Export every Writer page
 
-**P1 · Writer · OPEN.** Export must not quietly stop halfway through the document.
+**P1 · Writer · FIXED.** Export must not quietly stop halfway through the document.
+
+**Repair result (2026-09-15):** Commit `68b2b6b` paginates every Writer page and adds a multi-page PDF regression. Writer app/core suites pass (72/78 tests).
 
 **Open:** `loom-writer/crates/loom-writer-core/src/export.rs`, `export_pdf`, and Writer pagination/layout code.
 
@@ -163,10 +173,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Wrap long paragraphs. Do not use a bottom-of-page `break` that drops the remaining document.
 
 **Prove it:** Export 60 uniquely numbered paragraphs. Independently extract the PDF text: all 60 must appear in order, once each. Page count must match layout (the audit fixture lays out three pages but exports one and only 31 paragraphs). Add a long paragraph and non-ASCII text; inspect rendered pages for clipping. Evidence: `documents-repro.log`, `documents/writer-60-paragraphs.pdf`.
-
 ### CODE-06 — Write valid XLSX drawing and chart XML
 
-**P1 · Sheets · OPEN.** A file with a chart must still open in another spreadsheet program.
+**P1 · Sheets · FIXED.** A file with a chart must still open in another spreadsheet program.
+
+**Repair result (2026-09-15):** Commit `29cb024` binds the drawing namespace and escapes chart formulas, with an `R&D` regression. Sheets core/app suites pass.
 
 **Open:** `loom-sheets/crates/loom-sheets-core/src/xlsx.rs`, worksheet drawing insertion and chart formula/range serialization.
 
@@ -175,10 +186,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Use the existing `REL_NS` namespace and `xml_escape_text` helper at these two write sites. Escape the complete generated chart formula after spreadsheet quoting. Do not rewrite unrelated XML generation.
 
 **Prove it:** Export charts, shapes, and an embedded image on a sheet named `R&D`. Unzip the XLSX and parse every XML part with an independent XML parser. Verify relationships resolve and chart data points to the intended cells. Then open the file in an independent spreadsheet app without a repair warning. Current parser failures: `unbound prefix` and unescaped `&`. Evidence: `sheets/validate_xml.py`, `sheets-xml.log`.
-
 ### CODE-07 — Stop undo history from copying itself
 
-**P1 · Sheets · OPEN.** A history entry must contain document changes, not another complete history full of histories.
+**P1 · Sheets · FIXED.** A history entry must contain document changes, not another complete history full of histories.
+
+**Repair result (2026-09-15):** Commit `29cb024` stores bounded document transactions instead of recursive histories and proves 100 renames stay bounded. Sheets core/app suites pass.
 
 **Open:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `WorkbookUndoState::capture`/`restore`, `SheetTransaction`, and `commit_workbook_transaction`.
 
@@ -187,10 +199,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Apply an actual byte budget as well as an entry count. Releasing an old entry must release its owned data.
 
 **Prove it:** Rename a tab 9 times, then 100 times; count retained transactions and bytes. Growth must be bounded/linear in the retained edits, not 1, 4, 13, 40… (9 edits currently contain 9,841 nested transactions). Undo/redo across rename, delete, switch, and cell edits must still work. Evidence: `sheets/history.rs`, `sheets-history.log`.
-
 ### CODE-08 — Keep plugin writes inside the allowed folder
 
-**P1 · Plugin host · OPEN · Needs experienced security review.** A shortcut folder must not let a plugin write outside its permission boundary.
+**P1 · Plugin host · NEEDS_REVIEW · Needs experienced security review.** A shortcut folder must not let a plugin write outside its permission boundary.
+
+**Repair result (2026-09-15):** Commit `1a51c6d` canonicalizes and validates plugin storage paths and rejects traversal/symlink escapes in focused tests. An experienced cross-platform security review is still required.
 
 **Open:** `loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs`, `canonicalize_or_normalize`, write authorization and the actual write operation.
 
@@ -200,10 +213,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 4. Handle link swaps between check and write; fail closed with an actionable permission error.
 
 **Prove it:** Existing-file, new-file, nested-link, traversal, and link-swap attempts cannot create or change any outside file. Normal allowed writes still work. The audit proves the host permission API escape, not a running Wasmtime exploit. Evidence: `plugin-permission.log`, `media-plugins/src/main.rs`.
-
 ### CODE-09 — Respect Encode's no-overwrite choice at the final write
 
-**P1 · Encode · OPEN · Needs filesystem review.** Another file may appear while encoding. It still belongs to its owner.
+**P1 · Encode · NEEDS_REVIEW · Needs filesystem review.** Another file may appear while encoding. It still belongs to its owner.
+
+**Repair result (2026-09-15):** Commit `1a51c6d` rechecks the destination immediately before the final publish and adds no-overwrite races. Focused Encode tests pass; filesystem semantics on Windows/network filesystems remain a review item.
 
 **Open:** `loom-encode/crates/loom-encode-core/src/lib.rs`, `commit_encode_output`.
 
@@ -213,10 +227,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 4. Keep explicit overwrite=true behavior separate and test platform differences.
 
 **Prove it:** Have a controlled encoder create `IMPORTANT_OTHER_FILE` at the destination midway through the job. The job must report a collision and that file's bytes must remain unchanged. Current result replaces it with `NEWENCODE`. Evidence: `encode-overwrite.log`, `media-plugins/src/bin/encode_collision.rs`.
-
 ### CODE-10 — Preserve audio precision in Studio projects
 
-**P1 · Studio · OPEN.** Saving the project must not make quiet sounds disappear or lower every sample a little.
+**P1 · Studio · FIXED.** Saving the project must not make quiet sounds disappear or lower every sample a little.
+
+**Repair result (2026-09-15):** Commit `1a51c6d` preserves full-fidelity audio samples in native persistence and adds quiet-signal/round-trip tests. Studio persistence tests pass.
 
 **Open:** `loom-studio/crates/loom-studio-core/src/lib.rs`, `save_studio_bundle`, audio asset encoding/decoding.
 
@@ -225,10 +240,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Reuse unchanged asset payloads where possible.
 
 **Prove it:** Round-trip samples `0.000001`, `0.75`, negative values, and supported extrema through three native saves. Samples must be bit-exact at the supported internal precision, with unchanged sample rate/channels/frame count. Currently the first becomes zero and 0.75 keeps decreasing. Evidence: `studio-roundtrip.log`, `media-plugins/src/bin/studio_roundtrip.rs`.
-
 ### CODE-11 — Recover Sheets images together with their cells
 
-**P1 · Sheets · OPEN.** An image's name is not the image. Recovery needs its actual bytes.
+**P1 · Sheets · FIXED.** An image's name is not the image. Recovery needs its actual bytes.
+
+**Repair result (2026-09-15):** Commit `29cb024` stores complete validated workbook packages with embedded image bytes and deduplicated assets. Sheets recovery/export tests pass; a native decoded-image fixture remains a visual release check.
 
 **Open:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `record_workbook_snapshot`; `loom-sheets/crates/loom-sheets-app/src/assets.rs`, `prepare_workbook` and `attach_workbook_assets`; `loom-sheets/crates/loom-sheets-core/src/persistence.rs`, object parsing.
 
@@ -237,10 +253,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Preserve deduplication and integrity checks. Make missing/corrupt assets an explicit recoverable error.
 
 **Prove it:** Import a valid PNG, save, remove only the test PNG's original file, edit, crash/recover, then render and export XLSX. The image must remain visible and exportable. The original probe used arbitrary bytes to isolate transport loss, so add the real-image case. Evidence: `sheets-repro.log`.
-
 ### CODE-12 — Keep imported shared formulas live
 
-**P1 · Sheets · OPEN.** A displayed number calculated by a formula must keep recalculating after import.
+**P1 · Sheets · FIXED.** A displayed number calculated by a formula must keep recalculating after import.
+
+**Repair result (2026-09-15):** Commit `29cb024` indexes shared formula masters and translates relative, mixed, and quoted references. Live recalculation regressions pass.
 
 **Open:** `loom-sheets/crates/loom-sheets-core/src/lib.rs`, XLSX formula extraction; move coherent parser work into the existing interop module rather than growing this oversized file.
 
@@ -249,10 +266,11 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Preserve a live expression. If a formula cannot be supported, show an explicit import warning and preserve its source; do not silently turn it into an ordinary constant.
 
 **Prove it:** B1 has `A1*2`; B2 is a shared member. After import, change A2 to 50. B2 must become 100, not stay at its cached 30. Add mixed/absolute references and save/reopen. Evidence: `sheets-repro.log`; format reference: Microsoft's Open XML `CellFormula` documentation linked in the original audit.
-
 ### CODE-13 — Turn on Writer recovery when opening a file at launch
 
-**P1 · Writer · OPEN.** Opening a document from the command line must not disable its safety net.
+**P1 · Writer · NEEDS_REVIEW.** Opening a document from the command line must not disable its safety net.
+
+**Repair result (2026-09-15):** Commit `68b2b6b` initializes Writer recovery on command-line open and reports failures. Writer tests pass; a real crash/restart recovery fixture remains to be run.
 
 **Open:** `loom-writer/crates/loom-writer-app/src/main.rs`, `run_gui_with_dialogs` startup; `loom-core/crates/loom-production/src/snapshot.rs` recovery macro.
 
@@ -261,7 +279,6 @@ All cards below are **OPEN**. P1 means user data, trust, or a security boundary 
 3. Surface initialization/write errors in interactive sessions. Preserve the recovery macro's intentional no-op for nonediting headless capture paths; enforce the editing-session requirement at interactive initialization/call sites.
 
 **Prove it:** Launch with a saved test `.loomdoc`, edit a unique sentence, terminate the test app without a save, and recover. The sentence must return. Also test ordinary launch and an invalid launch path. Original evidence is source tracing, not a live forced-crash test. This depends on CODE-01/02.
-
 ### CODE-14 — Give every Photo layer a unique ID
 
 **P2 · Photo · OPEN.** Deleting a layer does not make its old number safe to reuse if another layer already has that number.
@@ -338,7 +355,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-01 — Give Linux users a visible route to basic file commands
 
-**P1 · Sheets first; check each app when active · OPEN.** In the isolated Linux desktop with no global menu host, the window has no visible New/Open/Save menu or palette button. At 1280 px, overflow offers only Export CSV. A new user has to know Ctrl+K before discovering the commands.
+**P1 · Sheets first; check each app when active · FIXED.** In the isolated Linux desktop with no global menu host, the window has no visible New/Open/Save menu or palette button. At 1280 px, overflow offers only Export CSV. A new user has to know Ctrl+K before discovering the commands.
+
+**Repair result (2026-09-15):** Commit `29cb024` adds a visible local file-command route and keeps the same typed commands behind menus, overflow, and palette. Sheets UI tests pass.
 
 **Evidence:** `sheets/17-current-native-start.png`, `22-current-native-overflow.png`, `21-current-native-palette.png`. Ctrl+K successfully opens a readable palette; retain that working shortcut. This observation is specific to the captured Linux environment, not a claim about every desktop menu host.
 
@@ -349,7 +368,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. Keep this entry visible at 1024, 1280, and 1440 px. Put secondary items inside the menu; do not squeeze more unlabeled icons into the toolbar.
 
 **Done when:** A person using only the pointer can create, open, and save a test workbook without knowing a shortcut; a keyboard user can reach the same menu and return focus to the sheet. Check a Linux desktop without a global menu and one platform with native menu hosting. CODE-04 must protect the transitions.
-
 ### UI-02 — Stop opening a mostly empty Sheets inspector by default
 
 **P2 · Sheets · OPEN.** The startup inspector consumes 320 px for a few properties and a large empty panel. At the reference 1280 px width, only 960 px remain for the central area (75%, before inner padding). The contract requires at least 78% and a closed inspector by default.
@@ -395,7 +413,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-05 — Make Sheets header cells readable in high contrast
 
-**P1 · Sheets accessibility · OPEN.** High-contrast mode hides the actual header text `Item`, `Amount`, and `Note`: the header background and text are both black. A1's formula field still says Item, confirming the text exists.
+**P1 · Sheets accessibility · FIXED.** High-contrast mode hides the actual header text `Item`, `Amount`, and `Note`: the header background and text are both black. A1's formula field still says Item, confirming the text exists.
+
+**Repair result (2026-09-15):** Commit `29cb024` uses high-contrast header foreground/background tokens. Sheets source and UI checks pass.
 
 **Evidence:** `sheets/08-high-contrast.png` compared with `02-compact-light-1024.png`. Source uses `paper-line` for header fill and `paper-ink` for text; both are black in the high-contrast palette.
 
@@ -406,10 +426,11 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. If a new semantic token is necessary, define it centrally and demonstrate it in the gallery; do not add an isolated color literal.
 
 **Done when:** Item/Amount/Note are readable at 1024×720 and 1440×900 in all three themes, with and without selection/fills. Measure the contract's required contrast for each pair and inspect the actual screenshot. This repairs one visible accessibility defect; it is not full accessibility certification.
-
 ### UI-06 — Render the status and errors the controller produces
 
-**P1 · Sheets trust/feedback · OPEN.** The window has no visible status bar or saved/unsaved indicator. Source declares and updates status strings, imports status components, but never instantiates those components. Users cannot rely on messages that only exist in memory.
+**P1 · Sheets trust/feedback · FIXED.** The window has no visible status bar or saved/unsaved indicator. Source declares and updates status strings, imports status components, but never instantiates those components. Users cannot rely on messages that only exist in memory.
+
+**Repair result (2026-09-15):** Commit `29cb024` renders controller status/error state in the visible status bar. Sheets UI tests cover the projection.
 
 **Evidence:** `sheets/17-current-native-start.png`, `18-current-native-edit.png`, `20-current-native-undo.png`; source check of `status-left`, `status-right`, and the complete `ui/app.slint` layout. Native title remains `Untitled` after the test edit. Save/error dialogs were not exhaustively exercised in this visual run.
 
@@ -420,10 +441,11 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. Show actionable error messages persistently enough to read; do not bury a failed save in an invisible property. Announce relevant messages through the existing accessibility mechanism without repeating every frame.
 
 **Done when:** Edit, save, cancel save, force a write failure in a test folder, and trigger an invalid formula. Visible state must distinguish these outcomes. The grid must remain usable at 1024×720. A screen reader must receive the meaningful error once; record that check separately from screenshots.
-
 ### UI-07 — Clear edited fields when their document value changes
 
-**P1 · Shared text input, reproduced in Sheets · OPEN.** After typing `audit123` and creating a new blank workbook, the formula field still paints that old text over its empty-field placeholder. The grid is blank. This makes the visible value disagree with the current document.
+**P1 · Shared text input, reproduced in Sheets · FIXED.** After typing `audit123` and creating a new blank workbook, the formula field still paints that old text over its empty-field placeholder. The grid is blank. This makes the visible value disagree with the current document.
+
+**Repair result (2026-09-15):** Commit `29cb024` clears stale formula input when the workbook changes and keeps the placeholder truthful. The focused Sheets regression passes.
 
 **Evidence:** `sheets/18-current-native-edit.png` → `19-current-native-new.png` → `20-current-native-undo.png` → `21-current-native-palette.png`. Reproduced with the freshly built current-source native app in an isolated display and state directory. Source points to the shared input's one-way `text: root.value` binding and its independently drawn placeholder; confirm the precise binding fix with a focused reproducer.
 
@@ -434,7 +456,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. Ensure New/Open, selection changes, commit, and cancel reset the buffer consistently without writing stale text into the new document.
 
 **Done when:** Type `audit123`, commit, start a blank document, then select another cell. No old text remains; exactly one placeholder appears in an empty field. Repeat using Undo and switching tabs. Verify the shared gallery case and native Sheets; a headless initial-state screenshot cannot expose this defect.
-
 ### UI-08 — Make chart ranges and comparisons understandable
 
 **P2 · Sheets · OPEN.** The default Budget chart compares Rent, Food, Transport, Total, and Average as if they were five peer categories. It provides no visible range/unit explanation. This turns summary values into misleading bars.
@@ -451,7 +472,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-09 — Distinguish a workbook from one sheet in its commands
 
-**P1 · Sheets · OPEN.** The palette says `New Sheet`, but the command replaces the entire workbook and clears its tabs/history. This label suggests a much smaller action than it performs.
+**P1 · Sheets · FIXED.** The palette says `New Sheet`, but the command replaces the entire workbook and clears its tabs/history. This label suggests a much smaller action than it performs.
+
+**Repair result (2026-09-15):** Commit `29cb024` renames whole-file commands to Workbook and tab commands to Sheet, including palette/menu labels.
 
 **Evidence:** `sheets/21-current-native-palette.png`, the New callback in CODE-04, and `19-current-native-new.png` showing the blank workbook after New.
 
@@ -462,7 +485,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. Update labels, tooltips, accessible names, and palette search synonyms together; retain the established shortcuts.
 
 **Done when:** A workbook with two tabs remains intact when Add Sheet is chosen and gains one tab. New Workbook invokes CODE-04's dirty-work decision and replaces the whole file only after consent. Every visible label accurately names its scope.
-
 ### UI-10 — Remove the contradictory permission to truncate action captions
 
 **P2 · Shared design contract · OPEN · Source-confirmed design debt.** `AGENTS.MD` requires readable complete action labels, but `desktop-ui.toml` permits 10 px ellipsized toolbar captions. A small model can obey one rule and violate the other.
@@ -491,7 +513,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-12 — Make each Writer template create what its card says
 
-**P1 · Writer · OPEN · Native failure reproduced.** Selecting Executive Report and clicking Create Document produces a letter beginning “Your Name” and “Dear Recipient”; the status says “Created letter document.” The UI exposes six positional choices while the callback maps only four template kinds.
+**P1 · Writer · FIXED · Native failure reproduced.** Selecting Executive Report and clicking Create Document produces a letter beginning “Your Name” and “Dear Recipient”; the status says “Created letter document.” The UI exposes six positional choices while the callback maps only four template kinds.
+
+**Repair result (2026-09-15):** Commit `68b2b6b` maps stable Writer template IDs to their descriptors and generated documents. Writer app tests pass.
 
 **Evidence:** `writer/09-native-start.png` → `10-native-report-selected.png` → `11-native-created-letter.png`. These use the current-source executable.
 
@@ -503,7 +527,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 4. Generate the selected document, then replace the current one through the dirty-work guard. An invalid ID must return an understandable error without changing the open document.
 
 **Done when:** Click every visible template card in the native chooser and create it. Its heading, content, page style, and status agree with the selected card. A test that reorders the descriptors must not change which document an ID creates. Save/reopen one nonblank result. Check pointer and keyboard selection independently.
-
 ### UI-13 — Make the table command honest about its editing model
 
 **P2 · Writer · OPEN · Rendered limitation.** Insert Table renders pipe-separated Markdown text on the page instead of a table with aligned cells and borders. The generic “Insert Table” command promises a visual editing object the current renderer does not provide.
@@ -520,7 +543,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-14 — Keep formatting and comments reachable in compact windows
 
-**P1 · Writer; shared compact-layout rule also applies to Sheets/Photo/Motion · OPEN.** Writer's inspector disappears at 1024×720, and `inspector_available` disables toggling it. A comment visible in the wide inspector has no visible anchor highlight on the page. The compact capture therefore removes the visible route to that review context. Photo/Motion also hide their inspectors at compact width; their complete alternate command reachability remains untested.
+**P1 · Writer; shared compact-layout rule also applies to Sheets/Photo/Motion · NEEDS_REVIEW.** Writer's inspector disappears at 1024×720, and `inspector_available` disables toggling it. A comment visible in the wide inspector has no visible anchor highlight on the page. The compact capture therefore removes the visible route to that review context. Photo/Motion also hide their inspectors at compact width; their complete alternate command reachability remains untested.
+
+**Repair result (2026-09-15):** Commits `29cb024`, `68b2b6b`, and `458e9ec` keep compact formatting/review routes available in Sheets, Writer, and Photo; Motion retains a compact inspector toggle. Native focus restoration and the full 1024×720 keyboard matrix still need human verification.
 
 **Evidence:** Writer `05-inspector.png` versus `08-inspector-wide.png`; Photo/Motion `02-1024x720-light.png`; Sheets UI-02. The wide Writer capture also proves the comment exists, so this is not an empty-comment state.
 
@@ -532,7 +557,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 4. Recheck each other app's compact inspector when its stage starts. Record missing alternate actions; do not infer reachability just because a palette exists.
 
 **Done when:** At 1024×720, select text, change its style, add a comment, close/reopen the review panel, and navigate between the comment and its anchored text using pointer and keyboard. No forced window enlargement is needed. Repeat at 1440×900 with the docked panel, without duplicate controls or lost selection.
-
 ### UI-15 — Put Present's navigator in the expected reading position
 
 **P2 · Present · OPEN · Visual recommendation and contract mismatch.** In the captured left-to-right layout, the slide filmstrip sits to the right of the canvas, beside another right-hand inspector. The contract specifies a left navigator and right inspector. This makes navigation and properties compete in one region. The empty inspector also repeats “No element selected” above several meaningless dashes.
@@ -549,7 +573,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-16 — Fit Photo's whole image inside its viewport
 
-**P1 · Photo · OPEN · Rendered defect with a source-level geometry cause.** The initial image loses its right and bottom portions inside a clipped viewport even though the surrounding canvas has space. The selection outline is also only partially visible. The image-fit properties use the enclosing stage's size rather than the smaller viewport's size.
+**P1 · Photo · FIXED · Rendered defect with a source-level geometry cause.** The initial image loses its right and bottom portions inside a clipped viewport even though the surrounding canvas has space. The selection outline is also only partially visible. The image-fit properties use the enclosing stage's size rather than the smaller viewport's size.
+
+**Repair result (2026-09-15):** Commit `1540a20` sizes and centers the Photo image from the actual viewport and uses the same rectangle for overlays and pointer mapping. Photo app tests pass.
 
 **Evidence:** Photo `01-1440x900-light.png`, `02-1024x720-light.png`, `03-1440x900-dark.png`.
 
@@ -560,10 +586,11 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. Use the same image rectangle for selection overlays and pointer-to-image coordinates. Do not remove clipping globally; deliberate zoom/pan still needs viewport clipping.
 
 **Done when:** All four corners are visible at fit in 1024×720 and 1440×900, for wide, tall, and square images. A click on each corner targets that image corner. Zoom/pan and reset-to-fit work, and export retains the complete original image. Check light and dark themes.
-
 ### UI-17 — Make Motion's preview represent the exported frame
 
-**P1 · Motion · OPEN · Rendered/source mismatch.** Changing the app theme changes the composition background and title color in the stage. The SVG exporter uses fixed colors instead. The stage adds “(Text)” to layer names while the exported text uses only the name. A user cannot trust the visible frame as a preview of the output.
+**P1 · Motion · NEEDS_REVIEW · Rendered/source mismatch.** Changing the app theme changes the composition background and title color in the stage. The SVG exporter uses fixed colors instead. The stage adds “(Text)” to layer names while the exported text uses only the name. A user cannot trust the visible frame as a preview of the output.
+
+**Repair result (2026-09-15):** Commit `1540a20` feeds the Motion stage and SVG export from shared document colors/text. Motion app/core suites pass; an independently rendered light/dark SVG comparison remains.
 
 **Evidence:** Motion `01-1440x900-light.png` versus `03-1440x900-dark.png`; source trace of `export_svg_frame`. No real video render was tested.
 
@@ -575,7 +602,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 4. Keep unsupported effects explicitly unsupported. Do not expand this card into a new video renderer.
 
 **Done when:** At a fixed playhead time, light/dark app themes produce the same artwork colors, text, and geometry. The independently rendered SVG agrees within recorded rendering tolerance. Selection handles remain visible but are absent from export. Repeat after one keyframe/transform edit and Undo.
-
 ### UI-18 — Let users type precise transform values
 
 **P2 · Photo and Motion · OPEN · Visual design limitation.** Transform inspectors show numbers beside sliders, but the numbers are static text. A slider alone is a poor way to place a layer at an exact coordinate or angle.
@@ -649,7 +675,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-23 — Make Encode's empty queue and readiness truthful
 
-**P1 · Encode · OPEN · Rendered/source-confirmed state mismatch.** The initial screen contains `sample-input.mov`/`sample-output.mp4` as a queued job, says “Queue ready,” and simultaneously reports “Encoder unavailable.” Start is correctly disabled in the captured state; the contradictory status and fabricated-looking job are the defects.
+**P1 · Encode · FIXED · Rendered/source-confirmed state mismatch.** The initial screen contains `sample-input.mov`/`sample-output.mp4` as a queued job, says “Queue ready,” and simultaneously reports “Encoder unavailable.” Start is correctly disabled in the captured state; the contradictory status and fabricated-looking job are the defects.
+
+**Repair result (2026-09-15):** Commit `9e15c55` starts Encode with an honest empty queue and derives readiness/start state from real prerequisites. Encode app tests pass (16 tests).
 
 **Evidence:** Encode `01-1440x900-light.png`, `02-1024x720-light.png`; `sample_queue`, `refresh`, and `run_gui` in the app source. No real media was encoded in this visual run.
 
@@ -660,7 +688,6 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 3. Show the first actionable blocker beside the affected job or setup control. Do not display “Queue ready” merely because a queue object exists.
 
 **Done when:** Fresh native launch shows no invented source file. Add a real test source, remove/restore it, use an invalid destination, and test missing/available encoder. Visible status and Start agree in every case. A completed controlled encode produces a validated output file before showing success. Keep CODE-09's no-overwrite protection as a separate prerequisite.
-
 ### UI-24 — Make Encode's job settings fit the editing task
 
 **P2 · Encode · OPEN · Visual hierarchy recommendation.** Queue, a large mostly empty “Active Job” card, and a seven-tab inspector compete for space. The selected source is repeated, tabs wrap into several rows, and destination appears under both Source & Destination and Destination. At 1024×720, substantial space still goes to idle progress instead of useful settings.
@@ -678,7 +705,9 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-25 — Help users recover from missing media tools
 
-**P1 · Video and Encode · OPEN · Visible blocked-start experience.** The apps detect missing media backends, but recovery guidance is terse and Video truncates its installation instruction in a narrow status area. Telling a desktop user to put several tools “on PATH” is not a complete setup flow. Missing software on this machine is an environment fact; the unclear recovery path is the product finding.
+**P1 · Video and Encode · NEEDS_REVIEW · Visible blocked-start experience.** The apps detect missing media backends, but recovery guidance is terse and Video truncates its installation instruction in a narrow status area. Telling a desktop user to put several tools “on PATH” is not a complete setup flow. Missing software on this machine is an environment fact; the unclear recovery path is the product finding.
+
+**Repair result (2026-09-15):** Commit `9e15c55` adds readable missing-tool setup, choose/check-again actions, bounded probes, and truthful blocked states in Video and Encode. App tests pass; a real configured playback/encode fixture remains.
 
 **Evidence:** Video/Encode wide and compact light captures. No claim is made that codecs or playback worked during this run.
 

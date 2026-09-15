@@ -4,20 +4,26 @@ This file is the **highest-authority engineering instruction in the repository**
 
 If another repository document, comment, old plan, screenshot, baseline, issue, model instruction, or generated report conflicts with this file, **this file wins**. If a requirement cannot be satisfied, report the blocker. Do not reinterpret, weaken, bypass, stub, hide, baseline, or redefine a requirement to make work appear complete.
 
+## Owner override — 2026-09-15 P0/P1 repair run
+
+The owner explicitly authorized this run to fix every recorded P0 and P1 audit card across the suite. For this run, the normal serial application lock is waived only for those named cards. Keep the safety, test, review, and evidence rules below. Finish each coherent milestone, run its focused checks, record the result in `TRUTH.md`, and commit and push it before starting the next milestone.
+
+For a tiny local model, use this recipe for each card: read the card; write down what the user does, what breaks, and what should happen; edit only the named functions; run the focused test; inspect the real output; then copy the command, result, commit, and remaining gap into the card's repair result. `FIXED` means the code and required focused checks passed. `NEEDS_REVIEW` means the code landed but an expert, native, cross-platform, or real-media check is still missing. Never turn a missing check into a success claim.
+
 ## Start here — one small repair at a time
 
-The owner requested the 2026-09-14 code and UI/UX audit and these repair instructions. Findings and exact repair cards live in `TRUTH.md`. Writing a card does not fix the product. All audit cards start OPEN.
+The owner requested the 2026-09-14 code and UI/UX audit and these repair instructions. Findings and exact repair cards live in `TRUTH.md`; each card keeps its original finding and records its current repair result. New findings start OPEN.
 
 For a small local coding model, including a model with a tiny context window:
 
 1. Read this section, the active gate and repair order at the top of `TRUTH.md`, and `loom-bootstrap/contracts/workflow.toml`. If they disagree, report the exact disagreement before editing product code.
-2. Select **one** OPEN card allowed by the active gate. Start with CODE-01. Read only that card and its named source functions, their callers, and applicable rules here. Do not ask a tiny model to repair the entire suite in one prompt.
+2. Normally select **one** OPEN card allowed by the active gate. Start with CODE-01. During the dated owner override above, the owner has already authorized the listed P0/P1 cards, so keep the same one-card boundaries inside each milestone while working through that explicit list. Read only the current card and its named source functions, their callers, and applicable rules here. Do not ask a tiny model to repair the entire suite in one prompt.
 3. Say what the user does, what goes wrong now, and what must happen instead. Copy the card's acceptance check into a focused regression test or a short manual interaction script. For a data-loss fix, first run the test and see it fail for the reported reason.
 4. Make the smallest coherent change. A card with several steps may need several patches. Do not mix formatting, renaming, feature work, and a bug fix. Preserve unrelated uncommitted work.
 5. Run the failing example again and the affected module's existing tests. For a UI change, also build the actual app, perform the interaction, save a fresh screenshot, and inspect it at the card's sizes/themes. A callback-only journey does not prove native focus or keyboard behavior.
 6. Check the real result: compare saved/reopened data, inspect an independently opened export, or verify the changed visible state. A success message or a green build is not proof.
 7. Record changed files, exact commands, observed result, evidence path, and remaining gaps under that card. Mark FIXED only when its check passes. Mark NEEDS_REVIEW when the code changed but a required check or expert review is missing. Do not delete the original finding.
-8. Stop after this card. Do not change acceptance, unlock the next app, refresh visual baselines, or take the next card automatically unless the current task authorizes it.
+8. Normally stop after this card. Do not change acceptance, unlock the next app, refresh visual baselines, or take the next card automatically unless the current task or the owner override above authorizes it.
 
 Useful starting commands (run from the repository root; substitute the one named app/package):
 
@@ -66,6 +72,7 @@ Delete obsolete agent residue instead of preserving it "for context". Stale inst
 ## 3. Active workflow and audit repair gate
 
 The current phase and active repair scope are recorded together in `TRUTH.md` and `loom-bootstrap/contracts/workflow.toml`. Do not infer them from old acceptance prose or this file's history.
+The dated owner override at the top of this file is the explicit exception for the 2026-09-15 P0/P1 run; it authorizes those named product edits while the machine gate remains unchanged.
 
 During `audit-repair`, new application features and new foundation consumers are locked. Read-only audits, evidence capture, focused regression tests, and documentation are allowed across the suite. Product edits are limited to the named active repair scope. The first scope is shared recovery/storage (CODE-01, CODE-02, CODE-18). Existing foundation imports may remain only for consumers enumerated in the workflow contract; retaining an import is not acceptance.
 
