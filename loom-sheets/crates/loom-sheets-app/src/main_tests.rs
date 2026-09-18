@@ -19,10 +19,46 @@ fn objects_argument_enables_the_native_object_fixture() {
 }
 
 #[test]
+fn example_argument_is_explicit() {
+    let blank = parse_args_from(["--screenshot", "/tmp/blank.png"] as [&str; 2])
+        .expect("parse blank screenshot");
+    assert!(!blank.example);
+    let example = parse_args_from(["--example"] as [&str; 1]).expect("parse --example");
+    assert!(example.example);
+}
+
+#[test]
 fn new_workbook_is_blank_and_named_untitled() {
     let sheet = blank_sheet();
     assert!(sheet.cells.is_empty());
     assert_eq!(sheet.name, "Untitled");
+}
+
+#[test]
+fn example_workbook_uses_one_unit_and_live_formulas() {
+    let sheet = starter_workbook();
+    assert_eq!(sheet.name, "Example Budget");
+    assert_eq!(sheet.raw(CellRef::parse("B1").unwrap()), Some("USD/month"));
+    assert_eq!(sheet.raw(CellRef::parse("C2").unwrap()), Some("Monthly"));
+    assert_eq!(sheet.raw(CellRef::parse("C3").unwrap()), Some("Monthly"));
+    assert_eq!(sheet.raw(CellRef::parse("C4").unwrap()), Some("Monthly"));
+    assert_eq!(
+        sheet.raw(CellRef::parse("B5").unwrap()),
+        Some("=SUM(B2:B4)")
+    );
+    assert_eq!(
+        sheet.raw(CellRef::parse("B6").unwrap()),
+        Some("=AVERAGE(B2:B4)")
+    );
+    let values = evaluate(&sheet);
+    assert_eq!(
+        values.get(&CellRef::parse("B5").unwrap()),
+        Some(&Value::Number(1800.0))
+    );
+    assert_eq!(
+        values.get(&CellRef::parse("B6").unwrap()),
+        Some(&Value::Number(600.0))
+    );
 }
 
 #[test]
@@ -1375,6 +1411,8 @@ fn every_template_card_creates_its_advertised_sheet() {
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
     register_sheet_actions(&app, &state, &menu_service);
 
+    assert_eq!(app.get_template_recents().row_count(), 0);
+
     // (template index, expected sheet name, probe cell, expected display)
     let cases = [
         (0, "Untitled", "A1", ""),
@@ -1405,6 +1443,20 @@ fn every_template_card_creates_its_advertised_sheet() {
             "template {idx} probe {probe}"
         );
     }
+    assert_eq!(
+        app.get_template_recents().iter().collect::<Vec<_>>(),
+        vec![10, 9, 8]
+    );
+    app.invoke_create_template(9);
+    assert_eq!(
+        app.get_template_recents().iter().collect::<Vec<_>>(),
+        vec![9, 10, 8]
+    );
+    app.invoke_create_template(0);
+    assert_eq!(
+        app.get_template_recents().iter().collect::<Vec<_>>(),
+        vec![0, 9, 10]
+    );
 }
 
 #[test]

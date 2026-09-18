@@ -246,7 +246,7 @@ component SheetsTemplateCard inherits Rectangle {
     callback clicked;
 
     width: 156px;
-    height: 136px;
+    height: 160px;
     accessible-role: button;
     accessible-label: root.title;
     accessible-action-default => { root.clicked(); }
@@ -272,35 +272,15 @@ component SheetsTemplateCard inherits Rectangle {
             @children
         }
 
-        // Selection pill badge or regular label
-        if root.selected : Rectangle {
-            height: 18px;
-            border-radius: 9px;
-            background: Theme.palette().success;
-            HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
-                alignment: center;
-                cross-axis-alignment: center;
-                Text {
-                    text: root.title;
-                    font-size: Theme.tokens.typography.micro;
-                    font-weight: 600;
-                    color: #ffffff;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
-        if !root.selected : Text {
+        Text {
             text: root.title;
             font-size: Theme.tokens.typography.caption;
-            font-weight: 500;
+            font-weight: root.selected ? 600 : 500;
             color: Theme.palette().ink;
             horizontal-alignment: center;
-            overflow: elide;
-            max-width: root.width - 8px;
+            wrap: word-wrap;
+            width: root.width - 8px;
+            min-height: 44px;
         }
     }
 
@@ -312,13 +292,17 @@ component SheetsTemplateCard inherits Rectangle {
 export component TemplateChooserModal inherits Rectangle {
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
+    in property <[int]> template-recents: [];
+    pure function template-title(index: int) -> string {
+        return ["Blank", "Monthly Budget", "Invoice & Expenses", "Checklist", "Table and Chart", "Expense Summary", "Sales Chart", "Budget", "Monthly Goal", "Portfolio", "Net Worth"][index];
+    }
     callback cancel-template;
     callback create-template(int);
 
     function choose-template-category(category-index: int) {
         root.template-category = category-index;
         if (category-index == 1) {
-            root.template-selected = 0;
+            root.template-selected = root.template-recents.length > 0 ? root.template-recents[0] : 0;
         } else if (category-index == 2) {
             root.template-selected = 0;
         } else if (category-index == 3) {
@@ -459,22 +443,38 @@ export component TemplateChooserModal inherits Rectangle {
                             spacing: Theme.tokens.space.xl;
                             padding-bottom: Theme.tokens.space.md;
 
-                            // Recents Section
+                            // Only templates actually created in this session appear here.
                             if root.template-category == 0 || root.template-category == 1 : VerticalLayout {
                                 spacing: Theme.tokens.space.md;
                                 Text {
-                                    text: "Recents";
+                                    text: "Recent templates (this session)";
                                     font-size: Theme.tokens.typography.title;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
+                                if root.template-recents.length == 0 : Text {
+                                    text: "No recent templates. Choose a template below or select a category.";
+                                    wrap: word-wrap;
+                                    color: Theme.palette().ink-secondary;
+                                }
                                 HorizontalLayout {
                                     spacing: Theme.tokens.space.lg;
-                                    SheetsTemplateCard {
-                                        title: "Blank";
-                                        selected: root.template-selected == 0;
-                                        clicked => { root.template-selected = 0; }
-                                        BlankPreview {}
+                                    alignment: start;
+                                    for recent in root.template-recents : SheetsTemplateCard {
+                                        title: root.template-title(recent);
+                                        selected: root.template-selected == recent;
+                                        clicked => { root.template-selected = recent; }
+                                        if recent == 0 : BlankPreview {}
+                                        if recent == 1 : MonthlyBudgetPreview {}
+                                        if recent == 2 : InvoicePreview {}
+                                        if recent == 3 : BlankBlackPreview {}
+                                        if recent == 4 : TableChartPreview {}
+                                        if recent == 5 : PivotPreview {}
+                                        if recent == 6 : ChartingPreview {}
+                                        if recent == 7 : BudgetPreview {}
+                                        if recent == 8 : MonthlyGoalPreview {}
+                                        if recent == 9 : PortfolioPreview {}
+                                        if recent == 10 : NetWorthPreview {}
                                     }
                                 }
                             }
@@ -508,6 +508,10 @@ export component TemplateChooserModal inherits Rectangle {
                                         clicked => { root.template-selected = 4; }
                                         TableChartPreview {}
                                     }
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: start;
                                     SheetsTemplateCard {
                                         title: "Expense Summary";
                                         selected: root.template-selected == 5;
@@ -552,6 +556,10 @@ export component TemplateChooserModal inherits Rectangle {
                                         clicked => { root.template-selected = 8; }
                                         MonthlyGoalPreview {}
                                     }
+                                }
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: start;
                                     SheetsTemplateCard {
                                         title: "Portfolio";
                                         selected: root.template-selected == 9;

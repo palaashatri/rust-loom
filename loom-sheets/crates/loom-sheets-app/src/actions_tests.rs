@@ -53,7 +53,7 @@ fn test_workbook_tab_add_undo_redo() {
     state.redo_stack.borrow_mut().push(tx);
     assert_eq!(state.sheets.borrow().len(), 1);
     assert_eq!(*state.active_sheet_index.borrow(), 0);
-    assert_eq!(state.current.borrow().name, "Budget");
+    assert_eq!(state.current.borrow().name, "Example Budget");
 
     // Redo re-applies the added tab.
     let tx = state.redo_stack.borrow_mut().pop().unwrap();
@@ -110,7 +110,7 @@ fn test_multi_sheet_state_creation_and_switching() {
     let state = make_test_state();
     assert_eq!(state.sheets.borrow().len(), 1);
     assert_eq!(*state.active_sheet_index.borrow(), 0);
-    assert_eq!(state.current.borrow().name, "Budget");
+    assert_eq!(state.current.borrow().name, "Example Budget");
 
     // Add a second sheet
     let mut s2 = Sheet::new("Expenses");
@@ -141,7 +141,7 @@ fn test_multi_sheet_state_creation_and_switching() {
     *state.current.borrow_mut() = state.sheets.borrow()[0].clone();
 
     assert_eq!(*state.active_sheet_index.borrow(), 0);
-    assert_eq!(state.current.borrow().name, "Budget");
+    assert_eq!(state.current.borrow().name, "Example Budget");
     assert_eq!(
         state.current.borrow().raw(CellRef::parse("A1").unwrap()),
         Some("Item")
@@ -227,7 +227,7 @@ fn test_chart_spec_validation() {
 #[test]
 fn test_sheet_renaming() {
     let state = make_test_state();
-    assert_eq!(state.current.borrow().name, "Budget");
+    assert_eq!(state.current.borrow().name, "Example Budget");
     state.current.borrow_mut().name = "Q1 Forecast".to_string();
     assert_eq!(state.current.borrow().name, "Q1 Forecast");
 }
@@ -450,7 +450,7 @@ fn test_copy_selection() {
     assert_eq!(data.len(), 2);
     assert_eq!(data[0].len(), 2);
     assert_eq!(data[0][0], "Item");
-    assert_eq!(data[0][1], "Amount");
+    assert_eq!(data[0][1], "USD/month");
     assert_eq!(data[1][0], "Rent");
     assert_eq!(data[1][1], "1200");
 }
@@ -588,7 +588,7 @@ fn test_delete_col_and_undo_redo() {
 
     let before = sheet.clone();
     assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("Item"));
-    assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("Amount"));
+    assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("USD/month"));
 
     let new_sheet = delete_col(&before, 0).expect("delete col 0");
     commit_transaction(
@@ -601,15 +601,15 @@ fn test_delete_col_and_undo_redo() {
         },
     );
 
-    // Col 0 is now "Amount"
-    assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("Amount"));
+    // Col 0 is now "USD/month"
+    assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("USD/month"));
     assert_eq!(undo.len(), 1);
 
     // Revert
     let tx = undo.pop().unwrap();
     tx.revert(&mut sheet);
     assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("Item"));
-    assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("Amount"));
+    assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("USD/month"));
 }
 
 #[test]

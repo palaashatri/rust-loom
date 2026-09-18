@@ -136,6 +136,7 @@ export component SheetsApp inherits Window {
     in-out property <bool> template-chooser-open: false;
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
+    in-out property <[int]> template-recents: [];
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
 
@@ -754,6 +755,7 @@ export component SheetsApp inherits Window {
         height: root.height;
         template-selected <=> root.template-selected;
         template-category <=> root.template-category;
+        template-recents: root.template-recents;
         cancel-template => { root.cancel-template(); }
         create-template(selected) => { root.create-template(selected); }
     }

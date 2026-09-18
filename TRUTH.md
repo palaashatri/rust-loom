@@ -31,7 +31,7 @@ Quality and permission to work are different. The owner override permits the act
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | P1 repairs landed; UI-03/04/08 and acceptance evidence remain |
+| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | P1 repairs landed; UI-03/08 and acceptance evidence remain |
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
@@ -401,11 +401,13 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 
 ### UI-04 — Use honest starter data and a clear empty-document path
 
-**P2 · Sheets · OPEN.** Startup looks like a user's Budget but contains demo values. Rent/Transport say monthly, Food says weekly, yet Total simply adds all three. No common period or currency is stated.
+**P2 · Sheets · FIXED.** Startup looked like a user's Budget but contained demo values. Rent/Transport said monthly, Food said weekly, yet Total simply added all three. No common period or currency was stated.
+
+**Repair result (2026-09-18):** The normal GUI and a plain headless screenshot now start with a blank `Untitled` workbook. The explicit `--example`/smoke/chart/object paths use a named `Example Budget` whose visible amount header is `USD/month`, whose period column is `Monthly`, and whose Total/Average cells remain live formulas. The focused example-data test and the full Sheets app suite pass. New/recovery fallback behavior stays blank unless `--example` is requested.
 
 **Evidence:** `sheets/01-start-light-1440.png`, `17-current-native-start.png`; `starter_workbook` assigns the mixed period labels.
 
-**Open:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `starter_workbook`, startup selection, and template data.
+**Open for acceptance evidence:** `loom-sheets/crates/loom-sheets-app/src/main.rs`, `starter_workbook`, startup selection, and template data.
 
 1. Make a new document blank, with an obvious path to templates/examples. If opening an example is desired, name it `Example Budget` and make that choice explicit.
 2. Give the example a single stated period and unit. Either all amounts are monthly or convert them with a visible formula and explanation before totaling.

@@ -1,7 +1,7 @@
 //! Loom Sheets desktop application.
 //!
 //! GUI mode opens a real window (winit backend). Headless modes
-//! (`--screenshot`, `--smoke`) render the same UI through the software
+//! (`--screenshot`, `--smoke`, `--example`) render the same UI through the software
 //! renderer and write a PNG, which is what the Docker visual-QA pipeline
 //! and the offline test mode exercise.
 
@@ -73,6 +73,7 @@ loom_production::define_snapshot_recovery!(SHEETS_RECOVERY, "org.loom.sheets", "
 pub(crate) struct Args {
     pub(crate) screenshot: Option<String>,
     pub(crate) smoke: bool,
+    pub(crate) example: bool,
     pub(crate) palette: bool,
     pub(crate) chart: bool,
     pub(crate) objects: bool,
@@ -97,6 +98,7 @@ where
     let mut args = Args {
         screenshot: None,
         smoke: false,
+        example: false,
         palette: false,
         chart: false,
         objects: false,
@@ -113,6 +115,7 @@ where
         match a.as_str() {
             "--screenshot" => args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?),
             "--smoke" => args.smoke = true,
+            "--example" => args.example = true,
             "--palette" => args.palette = true,
             "--chart" => args.chart = true,
             "--objects" => args.objects = true,
@@ -161,9 +164,10 @@ fn blank_sheet() -> Sheet {
     Sheet::new("Untitled")
 }
 
-/// A small, editable budget workbook used by `--smoke`, screenshots, and first launch.
+/// A small, editable budget workbook used by explicit example/smoke captures.
+/// Every amount has the same unit so the formulas show a trustworthy result.
 pub(crate) fn starter_workbook() -> Sheet {
-    let mut sheet = Sheet::new("Budget");
+    let mut sheet = Sheet::new("Example Budget");
     for (c, v) in [
         ("A1", "Item"),
         ("A2", "Rent"),
@@ -171,16 +175,16 @@ pub(crate) fn starter_workbook() -> Sheet {
         ("A4", "Transport"),
         ("A5", "Total"),
         ("A6", "Average"),
-        ("B1", "Amount"),
+        ("B1", "USD/month"),
         ("B2", "1200"),
         ("B3", "450"),
         ("B4", "150"),
         ("B5", "=SUM(B2:B4)"),
         ("B6", "=AVERAGE(B2:B4)"),
-        ("C1", "Note"),
-        ("C2", "monthly"),
-        ("C3", "weekly"),
-        ("C4", "monthly"),
+        ("C1", "Period"),
+        ("C2", "Monthly"),
+        ("C3", "Monthly"),
+        ("C4", "Monthly"),
     ] {
         sheet.set_str(c, v);
     }
@@ -2097,7 +2101,8 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     apply_headless_viewport_size(&app, w, h);
     let mut sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,
-        None => starter_workbook(),
+        None if args.example || args.smoke || args.chart || args.objects => starter_workbook(),
+        None => blank_sheet(),
     };
     if args.objects {
         object_actions::seed_demo_objects(&mut sheet);
@@ -2529,7 +2534,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             .as_deref()
             .and_then(restore_workbook_from_snapshot)
             .unwrap_or_else(|| loom_sheets_core::persistence::WorkbookFile {
-                sheets: vec![starter_workbook()],
+                sheets: vec![if args.example {
+                    starter_workbook()
+                } else {
+                    blank_sheet()
+                }],
                 active: 0,
             }),
     };
@@ -2542,7 +2551,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         FileFilter::new("Excel Spreadsheet", ["xlsx"]).map_err(|error| error.to_string())?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
     let state = Rc::new(GuiState::new(
-        starter_workbook(),
+        blank_sheet(),
         initial_path.filter(|path| is_native_workbook(path)),
         dialogs,
         workbook_filter,

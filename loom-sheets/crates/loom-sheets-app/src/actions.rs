@@ -9,7 +9,7 @@ use loom_sheets_core::{
     CellAlignment, CellRange, CellRef, ChartSeries, ChartSpec, NumberFormat, PivotAggregation,
     RangeEdit, Sheet, SheetChart, SheetModel, SheetObject,
 };
-use slint::{ComponentHandle, Image, SharedString, VecModel};
+use slint::{ComponentHandle, Image, Model, SharedString, VecModel};
 
 use crate::analysis::{
     chart_points, label_value_columns, line_path_commands, pie_wedge_commands, plan_chart,
@@ -125,6 +125,15 @@ pub(crate) fn create_template_workbook(
     menu_service: &Arc<NativeMenuBar>,
     idx: i32,
 ) {
+    let idx = idx.clamp(0, 10);
+    let mut recents: Vec<i32> = app
+        .get_template_recents()
+        .iter()
+        .filter(|recent| *recent != idx)
+        .collect();
+    recents.insert(0, idx);
+    recents.truncate(3);
+    app.set_template_recents(Rc::new(VecModel::from(recents)).into());
     let sheet = crate::template_sheet(idx);
     *state.current.borrow_mut() = sheet.clone();
     *state.sheets.borrow_mut() = vec![sheet];
