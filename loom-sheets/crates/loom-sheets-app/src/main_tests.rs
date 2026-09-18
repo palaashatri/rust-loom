@@ -652,10 +652,11 @@ fn layout_breakpoints_match_supported_width_boundaries() {
 }
 
 #[test]
-fn sheets_inspector_is_open_by_default_for_reference_windows() {
+fn sheets_inspector_is_closed_by_default_and_remembers_the_user_choice() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
-    assert!(app.get_show_inspector());
+    assert!(!app.get_show_inspector());
+    assert!(!app.get_inspector_preference());
     apply_layout_breakpoints(&app, 1024);
     assert!(app.get_overflow_toolbar());
     assert!(!app.get_inspector_available());
@@ -663,10 +664,17 @@ fn sheets_inspector_is_open_by_default_for_reference_windows() {
     apply_layout_breakpoints(&app, 1180);
     assert!(app.get_overflow_toolbar());
     assert!(app.get_inspector_available());
-    assert!(app.get_show_inspector());
+    assert!(!app.get_show_inspector());
     apply_layout_breakpoints(&app, 1280);
     assert!(app.get_overflow_toolbar());
-    assert!(app.get_inspector_available() && app.get_show_inspector());
+    assert!(app.get_inspector_available() && !app.get_show_inspector());
+    app.set_inspector_preference(true);
+    app.set_show_inspector(true);
+    apply_layout_breakpoints(&app, 1024);
+    assert!(!app.get_show_inspector());
+    apply_layout_breakpoints(&app, 1280);
+    assert!(app.get_show_inspector());
+    app.set_inspector_preference(false);
     app.set_show_inspector(false);
     apply_layout_breakpoints(&app, 1280);
     assert!(!app.get_show_inspector());

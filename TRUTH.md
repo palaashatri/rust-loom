@@ -31,7 +31,7 @@ Quality and permission to work are different. The owner override permits the act
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | P1 repairs landed; UI-02/03/04/08 and acceptance evidence remain |
+| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | P1 repairs landed; UI-03/04/08 and acceptance evidence remain |
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
@@ -370,11 +370,13 @@ All cards are OPEN. A screenshot proves only the visible state. Native observati
 **Done when:** A person using only the pointer can create, open, and save a test workbook without knowing a shortcut; a keyboard user can reach the same menu and return focus to the sheet. Check a Linux desktop without a global menu and one platform with native menu hosting. CODE-04 must protect the transitions.
 ### UI-02 — Stop opening a mostly empty Sheets inspector by default
 
-**P2 · Sheets · OPEN.** The startup inspector consumes 320 px for a few properties and a large empty panel. At the reference 1280 px width, only 960 px remain for the central area (75%, before inner padding). The contract requires at least 78% and a closed inspector by default.
+**P2 · Sheets · FIXED.** The startup inspector consumed 320 px for a few properties and a large empty panel. At the reference 1280 px width, only 960 px remained for the central area (75%, before inner padding). The contract requires at least 78% and a closed inspector by default.
+
+**Repair result (2026-09-18):** Commit `fix: close Sheets inspector by default` starts the Format inspector closed, adds a separate remembered preference, and restores that preference after compact mode instead of reopening the panel. The focused breakpoint test and all 97 Sheets app tests pass. The 1024/1280/1440 visual acceptance captures remain a gate item.
 
 **Evidence:** `sheets/01-start-light-1440.png`, `02-compact-light-1024.png`, `17-current-native-start.png`. Compact mode already gives the sheet more room; keep that strength.
 
-**Open:** Sheets `ui/app.slint` (`show-inspector`), `src/main.rs` (`INSPECTOR_WIDTH`, breakpoint handling); `loom-design-bible/contracts/desktop-ui.toml` `[app.sheets]`.
+**Open for acceptance evidence:** Sheets `ui/app.slint` (`show-inspector`), `src/main.rs` (`INSPECTOR_WIDTH`, breakpoint handling); `loom-design-bible/contracts/desktop-ui.toml` `[app.sheets]`.
 
 1. Start with the inspector closed, matching `right-inspector-default = 0`.
 2. Keep a labeled Format toggle; opening it must preserve selection and show properties for that selection.

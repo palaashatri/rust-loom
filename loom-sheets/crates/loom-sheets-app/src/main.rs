@@ -2044,12 +2044,14 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     let was_inspector_available = app.get_inspector_available();
     app.set_inspector_available(inspector_available);
     if !inspector_available {
+        if was_inspector_available {
+            app.set_inspector_preference(app.get_show_inspector());
+        }
         app.set_show_inspector(false);
     } else if !was_inspector_available {
-        // Re-entering a reference/wide window restores the contextual panel
-        // after compact mode hid it to preserve editing width. A user toggle
-        // made while already wide remains authoritative.
-        app.set_show_inspector(true);
+        // Compact mode hides the panel temporarily. Restore only the user's
+        // last explicit choice instead of reopening a panel they closed.
+        app.set_show_inspector(app.get_inspector_preference());
     }
 }
 
@@ -2936,7 +2938,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_toggle_inspector(move || {
             if let Some(app) = app_ref.upgrade() {
                 if app.get_inspector_available() {
-                    app.set_show_inspector(!app.get_show_inspector());
+                    let next = !app.get_show_inspector();
+                    app.set_inspector_preference(next);
+                    app.set_show_inspector(next);
                     sync_menu_state(&menu_service, &app, &state);
                 }
             }

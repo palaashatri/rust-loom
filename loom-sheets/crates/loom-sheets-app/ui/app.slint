@@ -29,10 +29,10 @@ export component SheetsApp inherits Window {
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
     in-out property <bool> toolbar-overflow-open: false;
-    // Wide/reference windows open the contextual inspector by default. The
-    // controller closes it below the compact breakpoint and restores it when
-    // returning to a wide window unless the user has explicitly hidden it.
-    in-out property <bool> show-inspector: true;
+    // The work surface owns the first-launch width. The Format inspector is
+    // opt-in and its preference survives compact/wide breakpoint changes.
+    in-out property <bool> show-inspector: false;
+    in-out property <bool> inspector-preference: false;
     in property <bool> inspector-available: true;
     property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
     in property <bool> can-undo: false;
