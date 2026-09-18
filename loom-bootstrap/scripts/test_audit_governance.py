@@ -1,5 +1,6 @@
 """Regression checks for contradictory acceptance claims and the repair lock."""
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,54 @@ class GovernanceTests(unittest.TestCase):
         self.assertIn(old, text)
         path.write_text(text.replace(old, new, 1))
 
+    def use_shared_repair_fixture(self):
+        """Use the historical shared-recovery fixture for lock-regression tests."""
+        workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
+        workflow = workflow_path.read_text()
+        workflow = re.sub(r'^phase = "[^"]+"$', 'phase = "audit-repair"', workflow, count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^application_development_locked = (true|false)$',
+                          'application_development_locked = true', workflow, count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^consumer_imports_allowed = (true|false)$',
+                          'consumer_imports_allowed = false', workflow, count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^next_application = "[^"]+"$',
+                          'next_application = "sheets"', workflow, count=1, flags=re.MULTILINE)
+        workflow = re.sub(r'^active_repair = "[^"]+"\n', '', workflow, count=1, flags=re.MULTILINE)
+        workflow = workflow.replace('consumer_imports_allowed = false\n',
+                                    'consumer_imports_allowed = false\nactive_repair = "shared-recovery"\n', 1)
+        workflow = re.sub(
+            r'allowed_active_prefixes = \[.*?\n\]',
+            '''allowed_active_prefixes = [
+  ".github/",
+  "AGENTS.MD",
+  "TRUTH.md",
+  "README.md",
+  "loom-bootstrap/",
+  "loom-core/crates/loom-ui/",
+  "loom-core/crates/loom-desktop/",
+  "loom-core/crates/loom-production/",
+  "loom-core/crates/loom-storage/",
+  "loom-design-bible/contracts/",
+  "loom-design-bible/tokens/",
+]''',
+            workflow, count=1, flags=re.DOTALL,
+        )
+        workflow = workflow.replace('sheets = "IN_PROGRESS"', 'sheets = "LOCKED"', 1)
+        workflow_path.write_text(workflow)
+
+        truth_path = self.root / "TRUTH.md"
+        truth = truth_path.read_text()
+        truth = re.sub(
+            r'ACTIVE PHASE: [^\n]+\nFOUNDATION STATUS: [^\n]+\nSUITE STATUS: [^\n]+\n'
+            r'APPLICATION DEVELOPMENT: [^\n]+\n(?:ACTIVE APPLICATION: [^\n]+\n)?'
+            r'(?:ACTIVE REPAIR: [^\n]+\n)?NEXT APPLICATION: [^\n]+',
+            'ACTIVE PHASE: AUDIT-REPAIR\nFOUNDATION STATUS: ACCEPTED\nSUITE STATUS: ACCEPTANCE_BLOCKED\n'
+            'APPLICATION DEVELOPMENT: LOCKED\nACTIVE REPAIR: SHARED-RECOVERY\nNEXT APPLICATION: SHEETS',
+            truth, count=1,
+        )
+        truth = truth.replace('| 1 | Sheets | IN_PROGRESS | IN_PROGRESS |',
+                              '| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |', 1)
+        truth_path.write_text(truth)
+
     def run_audit(self):
         return subprocess.run(
             [sys.executable, str(self.root / "loom-bootstrap/scripts/audit-governance.py")],
@@ -49,26 +98,37 @@ class GovernanceTests(unittest.TestCase):
         apps = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
         for phase in ("ui-foundation", "sheets", "writer", "present", "photo", "motion"):
             with self.subTest(phase=phase):
-                workflow = original_workflow.replace('phase = "audit-repair"', f'phase = "{phase}"')
-                workflow = workflow.replace('active_repair = "shared-recovery"\n', "")
+                workflow = re.sub(
+                    r'^phase = "[^"]+"$', f'phase = "{phase}"', original_workflow,
+                    count=1, flags=re.MULTILINE,
+                )
+                workflow = re.sub(r'^active_repair = "[^"]+"\n', "", workflow, count=1, flags=re.MULTILINE)
                 display_phase = "UI FOUNDATION" if phase == "ui-foundation" else phase.upper()
                 statuses = dict.fromkeys(apps, "LOCKED")
                 if phase == "ui-foundation":
                     foundation = "ACCEPTANCE_BLOCKED"
                     development = "LOCKED"
+                    workflow = re.sub(r'^application_development_locked = (true|false)$',
+                                      "application_development_locked = true", workflow, count=1, flags=re.MULTILINE)
+                    workflow = re.sub(r'^consumer_imports_allowed = (true|false)$',
+                                      "consumer_imports_allowed = false", workflow, count=1, flags=re.MULTILINE)
                     workflow = workflow.replace('"ACCEPTED"', '"ACCEPTANCE_BLOCKED"')
                 else:
                     foundation = "ACCEPTED"
                     development = "UNLOCKED"
                     next_app = apps[apps.index(phase) + 1]
-                    workflow = workflow.replace('next_application = "sheets"',
-                                                f'next_application = "{next_app}"')
-                    workflow = workflow.replace("application_development_locked = true", "application_development_locked = false")
-                    workflow = workflow.replace("consumer_imports_allowed = false", "consumer_imports_allowed = true")
+                    workflow = re.sub(r'^next_application = "[^"]+"$',
+                                      f'next_application = "{next_app}"', workflow, count=1, flags=re.MULTILINE)
+                    workflow = re.sub(r'^application_development_locked = (true|false)$',
+                                      "application_development_locked = false", workflow, count=1, flags=re.MULTILINE)
+                    workflow = re.sub(r'^consumer_imports_allowed = (true|false)$',
+                                      "consumer_imports_allowed = true", workflow, count=1, flags=re.MULTILINE)
                     for app in apps[:apps.index(phase)]:
-                        workflow = workflow.replace(f'{app} = "LOCKED"', f'{app} = "ACCEPTED"')
+                        workflow = re.sub(rf'^{app} = "(?:LOCKED|IN_PROGRESS|ACCEPTED)"$',
+                                          f'{app} = "ACCEPTED"', workflow, count=1, flags=re.MULTILINE)
                         statuses[app] = "ACCEPTED"
-                    workflow = workflow.replace(f'{phase} = "LOCKED"', f'{phase} = "IN_PROGRESS"')
+                    workflow = re.sub(rf'^{phase} = "(?:LOCKED|IN_PROGRESS|ACCEPTED)"$',
+                                      f'{phase} = "IN_PROGRESS"', workflow, count=1, flags=re.MULTILINE)
                     statuses[phase] = "IN_PROGRESS"
                 truth = (f"# Loom — Current Truth\n\nACTIVE PHASE: {display_phase}\n"
                          f"FOUNDATION STATUS: {foundation}\n"
@@ -84,6 +144,7 @@ class GovernanceTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_table_cannot_promote_an_app_during_shared_repair(self):
+        self.use_shared_repair_fixture()
         self.replace("TRUTH.md", "| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |",
                      "| 1 | Sheets | ACCEPTED | LOCKED |")
         self.rejects("Sheets product status must remain ACCEPTANCE_BLOCKED")
@@ -97,6 +158,7 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_duplicate_application_table_is_rejected(self):
+        self.use_shared_repair_fixture()
         path = self.root / "TRUTH.md"
         truth = path.read_text()
         start = truth.index("| Order | Application | Product status | Work status |")
@@ -105,19 +167,23 @@ class GovernanceTests(unittest.TestCase):
         self.rejects("exactly one ordered live application status table")
 
     def test_detailed_section_cannot_claim_a_different_status(self):
+        self.use_shared_repair_fixture()
         self.replace("TRUTH.md", "### Present\n", "### Present\n\nStatus: `ACCEPTED`\n")
         self.rejects("Present section status disagrees with the live table")
 
     def test_workflow_cannot_unlock_an_app_during_shared_repair(self):
+        self.use_shared_repair_fixture()
         self.replace("loom-bootstrap/contracts/workflow.toml", 'sheets = "LOCKED"',
                      'sheets = "IN_PROGRESS"')
         self.rejects("application sheets must remain LOCKED during shared-recovery")
 
     def test_active_phase_must_match_exactly(self):
+        self.use_shared_repair_fixture()
         self.replace("TRUTH.md", "ACTIVE PHASE: AUDIT-REPAIR", "ACTIVE PHASE: WRITER")
         self.rejects("TRUTH.md active phase disagrees with workflow")
 
     def test_live_gate_rejects_conflicting_duplicate_fields(self):
+        self.use_shared_repair_fixture()
         path = self.root / "TRUTH.md"
         original = path.read_text()
         for field, expected, conflicting in (
@@ -134,11 +200,13 @@ class GovernanceTests(unittest.TestCase):
                 self.rejects(f"TRUTH.md {field} must appear once and match workflow")
 
     def test_live_gate_cannot_be_supplied_only_by_incidental_prose(self):
+        self.use_shared_repair_fixture()
         self.replace("TRUTH.md", "ACTIVE REPAIR: SHARED-RECOVERY",
                      "Old example: ACTIVE REPAIR: SHARED-RECOVERY")
         self.rejects("TRUTH.md ACTIVE REPAIR must appear once and match workflow")
 
     def test_gate_values_allow_trailing_whitespace(self):
+        self.use_shared_repair_fixture()
         path = self.root / "TRUTH.md"
         fields = ("ACTIVE PHASE:", "FOUNDATION STATUS:", "APPLICATION DEVELOPMENT:",
                   "SUITE STATUS:", "ACTIVE REPAIR:", "NEXT APPLICATION:")
@@ -148,21 +216,25 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_duplicate_gate_values_still_fail_after_trimming(self):
+        self.use_shared_repair_fixture()
         self.replace("TRUTH.md", "ACTIVE REPAIR: SHARED-RECOVERY",
                      "ACTIVE REPAIR: SHARED-RECOVERY\nACTIVE REPAIR: SHARED-RECOVERY  ")
         self.rejects("TRUTH.md ACTIVE REPAIR must appear once and match workflow")
 
     def test_formatted_detailed_status_cannot_override_live_table(self):
+        self.use_shared_repair_fixture()
         self.replace("TRUTH.md", "### Present\n",
                      "### Present\n\n**Status:** `ACCEPTED`\n")
         self.rejects("Present section status disagrees with the live table")
 
     def test_shared_repair_cannot_expand_product_prefixes(self):
+        self.use_shared_repair_fixture()
         self.replace("loom-bootstrap/contracts/workflow.toml", "allowed_active_prefixes = [",
                      'allowed_active_prefixes = [\n  "loom-encode/",')
         self.rejects("shared-recovery allowed_active_prefixes changed")
 
     def test_shared_repair_can_narrow_optional_product_prefixes(self):
+        self.use_shared_repair_fixture()
         self.replace("loom-bootstrap/contracts/workflow.toml",
                      '  "loom-core/crates/loom-ui/",\n', "")
         result = self.run_audit()

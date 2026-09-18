@@ -5,33 +5,33 @@ This is the live product ledger and repair queue. `AGENTS.MD` defines the rules;
 ## Active gate — read this before choosing a card
 
 ```text
-ACTIVE PHASE: AUDIT-REPAIR
+ACTIVE PHASE: SHEETS
 FOUNDATION STATUS: ACCEPTED
 SUITE STATUS: ACCEPTANCE_BLOCKED
-APPLICATION DEVELOPMENT: LOCKED
-ACTIVE REPAIR: SHARED-RECOVERY
-NEXT APPLICATION: SHEETS
+APPLICATION DEVELOPMENT: UNLOCKED
+ACTIVE APPLICATION: SHEETS
+NEXT APPLICATION: WRITER
 ```
 
-The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this audit. Existing consumer imports remain compatible; new adoption and new application features are frozen. The current visual audit does not recertify the gallery or supply human acceptance. Recheck gallery evidence and human sign-off before advancing application design. Do not delete or refresh existing baselines to hide findings.
+The foundation's ACCEPTED value is the pre-existing contract record, not a new approval from this audit. Existing consumer imports remain compatible; the active application phase is now Sheets. The current visual audit does not recertify the gallery or supply human acceptance. Recheck gallery evidence and human sign-off before advancing application design. Do not delete or refresh existing baselines to hide findings.
 
-**Machine gate:** shared production recovery and storage remains the recorded workflow scope (`active_repair = shared-recovery`) so the governance validator stays truthful. **Owner override (2026-09-15):** the owner explicitly authorized this run to implement every P0/P1 repair across the suite. Those changes are recorded by commit below; they do not grant application acceptance. Keep expert review, real-media checks, and human visual approval open where the card says they are still required.
+**Machine gate:** the workflow is now in the serial Sheets phase. **Owner override (2026-09-18):** the owner authorized completing Sheets to its binary acceptance gate, then advancing to Writer. The earlier P0/P1 repairs remain recorded below; this phase does not grant application acceptance. Keep native, visual, accessibility, and persistence evidence open until each gate is actually proven.
 
-The contract's allowed prefixes are an outer file boundary, not permission to edit unrelated UI/desktop/design code during shared recovery. A newly supported repair stage also needs a reviewed update to `loom-bootstrap/scripts/audit-governance.py` and its focused tests; the present validator deliberately supports only `shared-recovery` in this phase.
+The contract's allowed prefixes are an outer file boundary for the active Sheets phase, not permission to edit later applications. A newly supported repair stage needs a reviewed update to `loom-bootstrap/scripts/audit-governance.py` and its focused tests; the validator now covers the recorded Sheets phase and its serial predecessors.
 
-**Repair order after the shared stage:** verify the foundation gate; Sheets data integrity and unsaved-work protection (CODE-03/04/07/11/06/12), then Sheets UI; Writer; Present; Photo; Motion; Video; Studio; Encode. Record a bounded plugin-host security/runtime stage for CODE-08/15 separately before implementing it. Do not release the plugin host while those defects remain. Within each app, data loss and broken output come before visual polish. No later app starts until the current app passes its full gate, unless the owner explicitly changes scope.
+**Repair order:** finish the remaining Sheets findings and acceptance evidence, mark Sheets `ACCEPTED`, then advance the workflow to Writer. Within each app, data loss and broken output come before visual polish. No later app starts until the current app passes its full gate.
 
-**How to use a card:** follow the numbered steps in `AGENTS.MD` under “Start here.” Normally select one card, reproduce it, make a small repair, run its concrete check, and record evidence under that same card. The owner override above authorized this dated P0/P1 run across the suite. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. P2 and GOV cards remain OPEN unless their own record says otherwise.
+**How to use a card:** follow the numbered steps in `AGENTS.MD` under “Start here.” Normally select one card, reproduce it, make a small repair, run its concrete check, and record evidence under that same card. The owner overrides authorize this dated P0/P1 run and the active Sheets completion run. States: OPEN, NEEDS_REVIEW, FIXED. FIXED does not mean the whole application is ACCEPTED. P2 and GOV cards remain OPEN unless their own record says otherwise.
 
 ## Current product state
 
 Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features. The audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states; the owner-authorized run repaired the recorded P1 code/UI paths listed below. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
 
-Quality and permission to work are different. The owner override permits the listed P0/P1 edits while the machine table remains LOCKED until the normal acceptance gates are completed. This is the single live application status table:
+Quality and permission to work are different. The owner override permits the active Sheets completion work while the remaining applications stay locked until their turn. This is the single live application status table:
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; visual gate and P2 findings remain |
+| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | P1 repairs landed; UI-02/03/04/08 and acceptance evidence remain |
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
@@ -64,7 +64,7 @@ These capabilities describe the current implementation and historical work, not 
 
 ### Sheets
 
-The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run now covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas; focused Sheets core/app suites pass. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
+The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas. Sheets is now the active completion phase; UI-02/03/04/08, visual acceptance, accessibility checks, and the source-size ratchet remain to be closed. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
 
 ### Writer
 
