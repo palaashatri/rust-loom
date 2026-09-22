@@ -11,16 +11,18 @@
 /// Deduplicating full-state recovery coordination for Loom applications.
 pub mod snapshot;
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const JOURNAL_FILE: &str = "operations.jsonl";
+const CHECKPOINT_LOCK_FILE: &str = ".checkpoint.lock";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";
 const CHECKPOINT_META_FILE: &str = "checkpoint.json";
 const CHECKPOINT_GENERATION_PREFIX: &str = "checkpoint-generation-";
@@ -171,6 +173,7 @@ impl RecoveryJournal {
     pub fn open(directory: impl AsRef<Path>) -> Result<Self, ProductionError> {
         let directory = directory.as_ref().to_path_buf();
         fs::create_dir_all(&directory)?;
+        let _recovery_lock = lock_recovery_writes(&directory)?;
         let read = read_records_at(&directory.join(JOURNAL_FILE), true)?;
         if read.skipped_tail {
             repair_journal(&directory, &read.records)?;
@@ -196,6 +199,23 @@ impl RecoveryJournal {
         &self.directory
     }
 
+    pub(crate) fn clear_recovery_data(&self) -> Result<(), ProductionError> {
+        let _recovery_lock = lock_recovery_writes(&self.directory)?;
+        for entry in fs::read_dir(&self.directory)? {
+            let entry = entry?;
+            if entry.file_name() == CHECKPOINT_LOCK_FILE {
+                continue;
+            }
+            let path = entry.path();
+            if fs::symlink_metadata(&path)?.file_type().is_dir() {
+                fs::remove_dir_all(path)?;
+            } else {
+                fs::remove_file(path)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Append one operation and durably flush it before returning.
     pub fn append(
         &mut self,
@@ -203,9 +223,26 @@ impl RecoveryJournal {
         label: impl Into<String>,
         payload: Vec<u8>,
     ) -> Result<JournalRecord, ProductionError> {
-        let next_sequence = checked_next_sequence(self.next_sequence)?;
+        let _recovery_lock = lock_recovery_writes(&self.directory)?;
+        let path = self.directory.join(JOURNAL_FILE);
+        let read = read_records_at(&path, true)?;
+        if read.skipped_tail {
+            repair_journal(&self.directory, &read.records)?;
+        }
+        let journal_sequence = read.records.last().map(|record| record.sequence);
+        let checkpoint_sequence = read_checkpoint_sequence(&self.directory)?;
+        let disk_next_sequence = match journal_sequence
+            .into_iter()
+            .chain(checkpoint_sequence)
+            .max()
+        {
+            Some(sequence) => checked_next_sequence(sequence)?,
+            None => 1,
+        };
+        let sequence = self.next_sequence.max(disk_next_sequence);
+        let next_sequence = checked_next_sequence(sequence)?;
         let record = JournalRecord {
-            sequence: self.next_sequence,
+            sequence,
             operation_id: operation_id.into(),
             label: label.into(),
             payload_sha256: sha256_hex(&payload),
@@ -215,19 +252,33 @@ impl RecoveryJournal {
         record.verify()?;
         let encoded = serde_json::to_vec(&record)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-        let path = self.directory.join(JOURNAL_FILE);
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        file.write_all(&encoded)?;
-        file.write_all(b"\n")?;
-        file.flush()?;
-        file.sync_data()?;
+        let existed = path.exists();
+        if existed {
+            let mut file = OpenOptions::new().append(true).open(path)?;
+            file.write_all(&encoded)?;
+            file.write_all(b"\n")?;
+            file.flush()?;
+            file.sync_data()?;
+        } else {
+            // AtomicFile also syncs the parent directory when it publishes a
+            // new file, so the first successful append survives a system
+            // crash with its directory entry intact.
+            let mut first_record = encoded;
+            first_record.push(b'\n');
+            atomic_write(&path, &first_record)?;
+        }
         self.next_sequence = next_sequence;
         Ok(record)
     }
 
     /// Return every verified journal record.
     pub fn records(&self) -> Result<Vec<JournalRecord>, ProductionError> {
-        read_records(&self.directory.join(JOURNAL_FILE))
+        let _recovery_lock = lock_recovery_writes(&self.directory)?;
+        let read = read_records_at(&self.directory.join(JOURNAL_FILE), true)?;
+        if read.skipped_tail {
+            repair_journal(&self.directory, &read.records)?;
+        }
+        Ok(read.records)
     }
 
     /// Atomically write an application checkpoint.
@@ -237,6 +288,35 @@ impl RecoveryJournal {
         schema: impl Into<String>,
         bytes: &[u8],
     ) -> Result<CheckpointMetadata, ProductionError> {
+        // All processes writing recovery data use one lock, so generation
+        // selection and pointer publication happen in one order.
+        let _recovery_lock = lock_recovery_writes(&self.directory)?;
+        let journal_read = read_records_at(&self.directory.join(JOURNAL_FILE), true)?;
+        if journal_read.skipped_tail {
+            repair_journal(&self.directory, &journal_read.records)?;
+        }
+        let current_checkpoint_sequence = read_checkpoint_sequence(&self.directory)?;
+        if let Some(current_sequence) = current_checkpoint_sequence {
+            if last_sequence < current_sequence {
+                return Err(ProductionError::Integrity(format!(
+                    "checkpoint sequence {last_sequence} cannot replace newer sequence {current_sequence}"
+                )));
+            }
+        }
+        let highest_saved_sequence = journal_read
+            .records
+            .last()
+            .map(|record| record.sequence)
+            .into_iter()
+            .chain(current_checkpoint_sequence)
+            .max()
+            .unwrap_or(0);
+        if last_sequence > highest_saved_sequence {
+            return Err(ProductionError::Integrity(format!(
+                "checkpoint sequence {last_sequence} is newer than saved recovery data {highest_saved_sequence}"
+            )));
+        }
+
         let metadata = CheckpointMetadata {
             last_sequence,
             sha256: sha256_hex(bytes),
@@ -276,12 +356,25 @@ impl RecoveryJournal {
 
     /// Load the last valid checkpoint and all operations after it.
     pub fn recover(&self) -> Result<RecoveryState, ProductionError> {
+        self.recover_with_checkpoint_hook(|| {})
+    }
+
+    fn recover_with_checkpoint_hook(
+        &self,
+        after_checkpoint_read: impl FnOnce(),
+    ) -> Result<RecoveryState, ProductionError> {
+        let _recovery_lock = lock_recovery_writes(&self.directory)?;
         let (checkpoint, checkpoint_metadata) = read_checkpoint(&self.directory)?;
+        after_checkpoint_read();
         let last_sequence = checkpoint_metadata
             .as_ref()
             .map_or(0, |metadata| metadata.last_sequence);
-        let operations = self
-            .records()?
+        let journal_read = read_records_at(&self.directory.join(JOURNAL_FILE), true)?;
+        if journal_read.skipped_tail {
+            repair_journal(&self.directory, &journal_read.records)?;
+        }
+        let operations = journal_read
+            .records
             .into_iter()
             .filter(|record| record.sequence > last_sequence)
             .collect();
@@ -294,18 +387,18 @@ impl RecoveryJournal {
 
     /// Compact the journal by retaining only records newer than `sequence`.
     pub fn compact(&self, sequence: u64) -> Result<(), ProductionError> {
-        let records: Vec<JournalRecord> = self
-            .records()?
-            .into_iter()
-            .filter(|record| record.sequence > sequence)
-            .collect();
-        let mut encoded = Vec::new();
-        for record in records {
-            serde_json::to_writer(&mut encoded, &record)
-                .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-            encoded.push(b'\n');
+        let _recovery_lock = lock_recovery_writes(&self.directory)?;
+        let checkpoint_sequence = read_checkpoint_sequence(&self.directory)?.unwrap_or(0);
+        if sequence > checkpoint_sequence {
+            return Err(ProductionError::Integrity(format!(
+                "cannot compact through sequence {sequence}; durable checkpoint is {checkpoint_sequence}"
+            )));
         }
-        atomic_write(&self.directory.join(JOURNAL_FILE), &encoded)
+        let journal_read = read_records_at(&self.directory.join(JOURNAL_FILE), true)?;
+        if journal_read.skipped_tail {
+            repair_journal(&self.directory, &journal_read.records)?;
+        }
+        compact_journal_with(&self.directory, sequence, atomic_write)
     }
 }
 
@@ -598,14 +691,25 @@ fn read_records_at(path: &Path, tolerant_tail: bool) -> Result<JournalRead, Prod
             skipped_tail: false,
         });
     }
-    let reader = BufReader::new(File::open(path)?);
-    let mut raw_lines = Vec::new();
-    for line in reader.lines() {
-        raw_lines.push(line?);
-    }
+    let bytes = fs::read(path)?;
+    let text = String::from_utf8(bytes)
+        .map_err(|error| ProductionError::InvalidData(format!("journal is not UTF-8: {error}")))?;
+    let mut raw_lines: Vec<&str> = text.lines().collect();
     let mut records = Vec::new();
     let mut previous = 0;
     let mut skipped_tail = false;
+    if !text.is_empty() && !text.ends_with('\n') {
+        if tolerant_tail {
+            // The newline is the append's commit marker. Without it, even a
+            // valid JSON object may be a write interrupted before sync.
+            raw_lines.pop();
+            skipped_tail = true;
+        } else {
+            return Err(ProductionError::InvalidData(
+                "journal ends with an incomplete record delimiter".into(),
+            ));
+        }
+    }
     for (index, line) in raw_lines.iter().enumerate() {
         if line.trim().is_empty() {
             continue;
@@ -643,13 +747,53 @@ fn read_records_at(path: &Path, tolerant_tail: bool) -> Result<JournalRead, Prod
 /// Persist only the verified prefix of a journal, dropping a torn tail so a
 /// later crash cannot make it appear interior to valid records.
 fn repair_journal(directory: &Path, records: &[JournalRecord]) -> Result<(), ProductionError> {
+    repair_journal_with(directory, records, atomic_write)
+}
+
+fn lock_recovery_writes(directory: &Path) -> Result<File, ProductionError> {
+    fs::create_dir_all(directory)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(directory.join(CHECKPOINT_LOCK_FILE))?;
+    lock.lock_exclusive()?;
+    Ok(lock)
+}
+
+fn compact_journal_with(
+    directory: &Path,
+    sequence: u64,
+    write: impl FnOnce(&Path, &[u8]) -> Result<(), ProductionError>,
+) -> Result<(), ProductionError> {
+    let records: Vec<JournalRecord> = read_records(&directory.join(JOURNAL_FILE))?
+        .into_iter()
+        .filter(|record| record.sequence > sequence)
+        .collect();
+    write_journal_with(directory, &records, write)
+}
+
+fn repair_journal_with(
+    directory: &Path,
+    records: &[JournalRecord],
+    write: impl FnOnce(&Path, &[u8]) -> Result<(), ProductionError>,
+) -> Result<(), ProductionError> {
+    write_journal_with(directory, records, write)
+}
+
+fn write_journal_with(
+    directory: &Path,
+    records: &[JournalRecord],
+    write: impl FnOnce(&Path, &[u8]) -> Result<(), ProductionError>,
+) -> Result<(), ProductionError> {
     let mut encoded = Vec::new();
     for record in records {
         serde_json::to_writer(&mut encoded, record)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
         encoded.push(b'\n');
     }
-    atomic_write(&directory.join(JOURNAL_FILE), &encoded)
+    write(&directory.join(JOURNAL_FILE), &encoded)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProductionError> {
@@ -1093,6 +1237,245 @@ mod tests {
     }
 
     #[test]
+    fn failed_compaction_staging_preserves_existing_records() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"first".to_vec())
+            .expect("append");
+        journal
+            .append("two", "Edit", b"second".to_vec())
+            .expect("append");
+
+        let result = compact_journal_with(temporary.path(), 1, |path, bytes| {
+            atomic_write_with(path, |file| {
+                file.write_all(bytes)?;
+                Err(io::Error::other("injected compaction staging failure"))
+            })
+        });
+
+        assert!(result.is_err(), "injected failure must be returned");
+        let records = journal.records().expect("read original journal");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].payload, b"first");
+        assert_eq!(records[1].payload, b"second");
+    }
+
+    #[test]
+    fn failed_torn_tail_repair_preserves_verified_prefix() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"first".to_vec())
+            .expect("append");
+        journal
+            .append("two", "Edit", b"second".to_vec())
+            .expect("append");
+        let path = temporary.path().join(JOURNAL_FILE);
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open journal");
+        file.write_all(b"{\"sequence\": 3,")
+            .expect("write torn tail");
+        file.sync_data().expect("sync torn tail");
+        drop(file);
+
+        let original_bytes = fs::read(&path).expect("read journal before repair");
+        let read = read_records_at(&path, true).expect("read verified prefix");
+        assert!(read.skipped_tail);
+        assert_eq!(read.records.len(), 2);
+
+        let result = repair_journal_with(temporary.path(), &read.records, |target, bytes| {
+            atomic_write_with(target, |file| {
+                file.write_all(bytes)?;
+                Err(io::Error::other("injected repair staging failure"))
+            })
+        });
+
+        assert!(result.is_err(), "injected failure must be returned");
+        assert_eq!(
+            fs::read(&path).expect("read original journal"),
+            original_bytes
+        );
+        let still_verified = read_records_at(&path, true).expect("read original prefix");
+        assert!(still_verified.skipped_tail);
+        assert_eq!(still_verified.records.len(), 2);
+
+        repair_journal(temporary.path(), &read.records).expect("repair on retry");
+        assert_eq!(journal.records().expect("read repaired journal").len(), 2);
+    }
+
+    #[test]
+    fn append_from_stale_handle_uses_the_latest_disk_sequence() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut first_handle = RecoveryJournal::open(temporary.path()).expect("first handle");
+        let mut stale_handle = RecoveryJournal::open(temporary.path()).expect("stale handle");
+
+        let first = first_handle
+            .append("one", "Edit", b"first".to_vec())
+            .expect("first append");
+        let second = stale_handle
+            .append("two", "Edit", b"second".to_vec())
+            .expect("append through stale handle");
+
+        assert_eq!(first.sequence, 1);
+        assert_eq!(second.sequence, 2);
+        let records = stale_handle.records().expect("records");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].payload, b"first");
+        assert_eq!(records[1].payload, b"second");
+    }
+
+    #[test]
+    fn checkpoint_cannot_claim_unwritten_journal_operations() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let journal = RecoveryJournal::open(temporary.path()).expect("journal");
+
+        let result = journal.checkpoint(1, "loom.test/1", b"not saved");
+
+        assert!(result.is_err(), "checkpoint must not skip a journal record");
+        assert!(journal
+            .recover()
+            .expect("recover no checkpoint")
+            .checkpoint
+            .is_none());
+    }
+
+    #[test]
+    fn compaction_cannot_remove_records_newer_than_checkpoint() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"saved".to_vec())
+            .expect("append saved operation");
+        journal
+            .append("two", "Edit", b"unsaved".to_vec())
+            .expect("append unsaved operation");
+        journal
+            .checkpoint(1, "loom.test/1", b"saved")
+            .expect("checkpoint saved operation");
+
+        let result = journal.compact(2);
+
+        assert!(result.is_err(), "uncheckpointed data must not be compacted");
+        let state = journal.recover().expect("recover preserved operation");
+        assert_eq!(state.checkpoint.as_deref(), Some(b"saved".as_slice()));
+        assert_eq!(state.operations.len(), 1);
+        assert_eq!(state.operations[0].payload, b"unsaved");
+    }
+
+    #[test]
+    fn concurrent_checkpoints_publish_distinct_generations_in_sequence_order() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"older".to_vec())
+            .expect("append older operation");
+        journal
+            .append("two", "Edit", b"newer".to_vec())
+            .expect("append newer operation");
+        let journal = Arc::new(journal);
+        let barrier = Arc::new(Barrier::new(3));
+        let older_journal = Arc::clone(&journal);
+        let older_barrier = Arc::clone(&barrier);
+        let older = thread::spawn(move || {
+            older_barrier.wait();
+            older_journal.checkpoint(1, "loom.test/1", b"older")
+        });
+        let newer_journal = Arc::clone(&journal);
+        let newer_barrier = Arc::clone(&barrier);
+        let newer = thread::spawn(move || {
+            newer_barrier.wait();
+            newer_journal.checkpoint(2, "loom.test/1", b"newer")
+        });
+        barrier.wait();
+
+        let older_result = older.join().expect("older checkpoint thread");
+        let newer_result = newer.join().expect("newer checkpoint thread");
+        assert!(newer_result.is_ok(), "newer checkpoint must publish");
+        if let Err(error) = older_result {
+            assert!(
+                matches!(error, ProductionError::Integrity(_)),
+                "stale checkpoint must be rejected as an integrity error"
+            );
+        }
+
+        let state = journal.recover().expect("recover newest checkpoint");
+        assert_eq!(state.checkpoint.as_deref(), Some(b"newer".as_slice()));
+        assert_eq!(
+            state.checkpoint_metadata.expect("metadata").last_sequence,
+            2
+        );
+    }
+
+    #[test]
+    fn recovery_holds_write_lock_across_checkpoint_and_journal_reads() {
+        use fs2::FileExt;
+
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"saved".to_vec())
+            .expect("append saved operation");
+        journal
+            .checkpoint(1, "loom.test/1", b"saved")
+            .expect("checkpoint");
+        journal
+            .append("two", "Edit", b"newer operation".to_vec())
+            .expect("append newer operation");
+
+        let state = journal
+            .recover_with_checkpoint_hook(|| {
+                let second_lock = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(temporary.path().join(CHECKPOINT_LOCK_FILE))
+                    .expect("open second lock handle");
+                assert!(
+                    second_lock.try_lock_exclusive().is_err(),
+                    "writers must remain blocked until both recovery reads finish"
+                );
+            })
+            .expect("recover consistent state");
+
+        assert_eq!(state.checkpoint.as_deref(), Some(b"saved".as_slice()));
+        assert_eq!(state.operations.len(), 1);
+        assert_eq!(state.operations[0].payload, b"newer operation");
+    }
+
+    #[test]
+    fn valid_json_without_final_newline_is_dropped_as_uncommitted_tail() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
+        journal
+            .append("one", "Edit", b"committed".to_vec())
+            .expect("append committed operation");
+        journal
+            .append("two", "Edit", b"interrupted".to_vec())
+            .expect("append interrupted operation");
+        let path = temporary.path().join(JOURNAL_FILE);
+        let mut bytes = fs::read(&path).expect("read journal");
+        assert_eq!(bytes.pop(), Some(b'\n'));
+        fs::write(&path, bytes).expect("simulate crash before delimiter");
+
+        let mut reopened =
+            RecoveryJournal::open(temporary.path()).expect("repair interrupted tail");
+        let records = reopened.records().expect("read repaired journal");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].payload, b"committed");
+
+        let next = reopened
+            .append("three", "Edit", b"next committed".to_vec())
+            .expect("append after repair");
+        assert_eq!(next.sequence, 2);
+        assert_eq!(reopened.records().expect("read final journal").len(), 2);
+    }
+
+    #[test]
     fn journal_recovers_after_checkpoint_and_rejects_tampering() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let mut journal = RecoveryJournal::open(temporary.path()).expect("journal");
@@ -1248,35 +1631,46 @@ mod tests {
         journal
             .checkpoint(1, "loom.test/1", b"checkpoint")
             .expect("checkpoint");
-        // Garbage checkpoint metadata (non-parseable) must surface as a
-        // bounded InvalidData/Integrity error, never a panic.
-        fs::write(
-            temporary.path().join(CHECKPOINT_META_FILE),
-            b"{\"not\": \"json\"\"",
-        )
-        .expect("corrupt metadata");
+
+        // Corrupt the active commit pointer on every platform. On Windows,
+        // new checkpoints live behind uniquely named commit files; the legacy
+        // checkpoint.json file is not the authoritative pointer there.
+        #[cfg(windows)]
+        let pointer_path = {
+            let pointer = read_latest_commit_pointer(temporary.path())
+                .expect("read published pointer")
+                .expect("published checkpoint");
+            temporary.path().join(format!(
+                "{CHECKPOINT_COMMIT_PREFIX}{}{CHECKPOINT_COMMIT_SUFFIX}",
+                pointer.generation
+            ))
+        };
+        #[cfg(not(windows))]
+        let pointer_path = temporary.path().join(CHECKPOINT_META_FILE);
+
+        let valid_pointer = fs::read(&pointer_path).expect("read active pointer");
+        let pointer: CheckpointPointer =
+            serde_json::from_slice(&valid_pointer).expect("decode active pointer");
+
+        // Garbage commit-pointer JSON must be a bounded error, never a panic.
+        fs::write(&pointer_path, b"{\"not\": \"json\"\"").expect("corrupt pointer");
         let outcome = journal.recover();
         let error = match &outcome {
             Err(error) => format!("{error}"),
-            Ok(_) => panic!("corrupt checkpoint metadata must not recover"),
+            Ok(_) => panic!("corrupt checkpoint pointer must not recover"),
         };
         assert!(
             error.contains("checkpoint") || error.to_lowercase().contains("json"),
             "error should describe the damaged checkpoint: {error}"
         );
-        // Torn checkpoint payload (metadata present, payload garbage) must
-        // also be a bounded integrity failure.
-        fs::write(temporary.path().join(CHECKPOINT_META_FILE), {
-            let metadata = CheckpointMetadata {
-                last_sequence: 1,
-                sha256: sha256_hex(b"checkpoint"),
-                timestamp_ms: unix_time_ms(),
-                schema: "loom.test/1".into(),
-            };
-            serde_json::to_vec_pretty(&metadata).expect("encode metadata")
-        })
-        .expect("restore metadata");
-        fs::write(temporary.path().join(CHECKPOINT_FILE), b"garbage").expect("torn payload");
+
+        // Restore the commit pointer, then corrupt the referenced payload.
+        fs::write(&pointer_path, valid_pointer).expect("restore pointer");
+        fs::write(
+            checkpoint_generation_payload_path(temporary.path(), pointer.generation),
+            b"garbage",
+        )
+        .expect("torn payload");
         let outcome = journal.recover();
         assert!(
             matches!(outcome, Err(ProductionError::Integrity(_))),

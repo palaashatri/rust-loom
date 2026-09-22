@@ -1,7 +1,6 @@
 //! Deduplicating full-state recovery coordinator for application packages.
 
 use crate::{ProductionError, RecoveryJournal};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Default state directory for one reverse-DNS-style application id.
@@ -137,12 +136,7 @@ impl SnapshotRecovery {
 
     /// Delete all recovery data after a document is intentionally discarded.
     pub fn clear(self) -> Result<(), ProductionError> {
-        let directory = self.journal.directory().to_path_buf();
-        drop(self.journal);
-        if directory.exists() {
-            fs::remove_dir_all(directory)?;
-        }
-        Ok(())
+        self.journal.clear_recovery_data()
     }
 }
 
@@ -237,5 +231,29 @@ mod tests {
     fn application_ids_are_validated() {
         assert!(application_state_directory("org.loom.writer").is_ok());
         assert!(application_state_directory("../escape").is_err());
+    }
+
+    #[test]
+    fn clear_removes_recovery_data_but_keeps_the_shared_lock_file() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut recovery = SnapshotRecovery::open_at(temporary.path()).expect("open");
+        recovery
+            .record("edit", b"discard this".to_vec())
+            .expect("record");
+        recovery
+            .checkpoint("loom.test/1", b"discard this".to_vec())
+            .expect("checkpoint");
+
+        recovery.clear().expect("clear recovery data");
+
+        assert!(temporary.path().join(".checkpoint.lock").exists());
+        assert!(!temporary.path().join("operations.jsonl").exists());
+        let mut reopened =
+            SnapshotRecovery::open_at(temporary.path()).expect("reopen cleared data");
+        assert!(reopened.restored_payload().is_none());
+        let next = reopened
+            .record("new document", b"fresh".to_vec())
+            .expect("record fresh state");
+        assert!(next);
     }
 }
