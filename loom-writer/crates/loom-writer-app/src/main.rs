@@ -6,6 +6,7 @@
 //! and the offline test mode exercise.
 
 mod document_formatting;
+mod recovery;
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -30,7 +31,6 @@ use loom_desktop::{
     FileDialogService, FileFilter, Menu, MenuBarService, MenuItem, MenuShortcut, NativeFileDialogs,
     NativeMenuBar, OpenFileRequest, SaveFileRequest,
 };
-use loom_production::define_snapshot_recovery;
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{
@@ -40,11 +40,6 @@ use loom_writer_core::{
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
-define_snapshot_recovery!(
-    application_id: "org.loom.writer",
-    schema: "loom.writer.package/1"
-);
-
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "loom-writer-document.loomdoc";
 const EXPORT_FILENAME: &str = "loom-writer-export.pdf";
@@ -1327,11 +1322,16 @@ fn save_current_document(
     let document = state.current.borrow().clone();
     save_file(&path, &document)?;
     *state.save_path.borrow_mut() = Some(path.clone());
-    if let Ok(bytes) = loom_writer_core::save_document(&document) {
-        let _ = checkpoint_snapshot_recovery(bytes);
-    }
+    let checkpoint_result = recovery::checkpoint_document(&document);
     *state.last_saved.borrow_mut() = document;
-    app.set_status_left(SharedString::from(format!("Saved {}", path.display())));
+    let status = match checkpoint_result {
+        Ok(()) => format!("Saved {}", path.display()),
+        Err(error) => {
+            eprintln!("Writer recovery checkpoint failed: {error}");
+            "Saved. Recovery checkpoint failed; keep another copy.".to_owned()
+        }
+    };
+    app.set_status_left(SharedString::from(status));
     Ok(true)
 }
 
@@ -2059,8 +2059,11 @@ fn apply_state(app: &WriterApp, state: &GuiState) {
     let viewport = *state.viewport.borrow();
     let current = state.current.borrow();
     apply_document_with_viewport(app, &current, viewport);
-    if let Ok(bytes) = loom_writer_core::save_document(&current) {
-        let _ = record_snapshot_recovery("writer state", bytes);
+    if let Err(error) = recovery::record_document(&current) {
+        eprintln!("Writer recovery save failed: {error}");
+        app.set_status_left(SharedString::from(
+            "Recovery failed. Save a copy now; autosave may be out of date.",
+        ));
     }
     drop(current);
     app.set_document_dirty(document_is_dirty(state));
@@ -3124,6 +3127,19 @@ fn wire_writer_shared_callbacks(
     }
 }
 
+fn initialize_recovery_for_gui(app: &WriterApp, command_line_open: bool) -> Option<WriterDocument> {
+    match recovery::initialize_editing_session(command_line_open) {
+        Ok(recovered) => recovered,
+        Err(error) => {
+            eprintln!("Writer recovery initialization failed: {error}");
+            app.set_status_left(SharedString::from(
+                "Recovery unavailable. Save regularly; crash recovery may be out of date.",
+            ));
+            None
+        }
+    }
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
@@ -3135,12 +3151,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // Every interactive editing session owns a recovery slot, including a
     // document opened from the command line.  Opening a requested file only
     // changes which document wins; it must never disable the safety net.
-    let recovered_payload = initialize_snapshot_recovery()?;
-    let recovered = if args.open.is_none() {
-        recovered_payload.and_then(|payload| loom_writer_core::load_document(&payload).ok())
-    } else {
-        None
-    };
+    let recovered = initialize_recovery_for_gui(&app, args.open.is_some());
     let document_filter =
         FileFilter::new("Loom Writer document", ["loomdoc"]).map_err(|error| error.to_string())?;
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
@@ -4396,3 +4407,5 @@ fn wire_palette(app: &WriterApp) {
 mod actions_tests;
 #[cfg(test)]
 mod audit_tests;
+#[cfg(test)]
+mod recovery_tests;

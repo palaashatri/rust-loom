@@ -280,9 +280,13 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 **Prove it:** B1 has `A1*2`; B2 is a shared member. After import, change A2 to 50. B2 must become 100, not stay at its cached 30. Add mixed/absolute references and save/reopen. Evidence: `sheets-repro.log`; format reference: Microsoft's Open XML `CellFormula` documentation linked in the original audit.
 ### CODE-13 — Turn on Writer recovery when opening a file at launch
 
-**P1 · Writer · NEEDS_REVIEW.** Opening a document from the command line must not disable its safety net.
+**P1 · Writer · FIXED.** Opening a document from the command line must not disable its safety net.
 
-**Repair result (2026-09-15):** Commit `68b2b6b` initializes Writer recovery on command-line open and reports failures. Writer tests pass; a real crash/restart recovery fixture remains to be run.
+**Repair result (2026-09-22):** Writer initializes recovery for every editing launch, including `--open`. The requested file wins over an older draft, and new edits are recorded as usual. If recovery cannot initialize, the editor still opens and shows a short warning. Recovery write/checkpoint failures keep Save available, print the detailed cause to stderr, and show a short status message that fits. Refreshed `loom-writer/Cargo.lock` so the Writer workspace records the recovery dependencies used by its shared core.
+
+**Evidence:** Added a two-process recovery test: open a saved `.loomdoc`, apply a unique unsaved edit through Writer state, exit without cleanup, and recover that edit on an ordinary launch. The original file bytes stay unchanged. Added invalid-`--open`, startup initialization failure, and recovery-write/checkpoint failure tests. All four focused tests and the full Writer app suite pass on Linux. Captured and inspected the visible warnings at `/tmp/loom-writer-recovery-init-failure.png` and `/tmp/loom-writer-recovery-write-failure.png`.
+
+**Verification:** `cargo test --manifest-path loom-writer/Cargo.toml -p loom-writer-app --locked --offline` — 76 passed. `cargo fmt --manifest-path loom-writer/Cargo.toml --all -- --check`, `git diff --check`, and `audit-governance.py` pass. Clippy exits 0 with existing warnings in `main.rs` table setup and `actions_tests.rs:1446`. `audit-code-structure.py` still reports four unrelated legacy overages in Encode, Video, and Photo; it reports no Writer file. The permission-denied injection is Unix-only; Windows recovery restart coverage was not run locally.
 
 **Open:** `loom-writer/crates/loom-writer-app/src/main.rs`, `run_gui_with_dialogs` startup; `loom-core/crates/loom-production/src/snapshot.rs` recovery macro.
 
