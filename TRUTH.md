@@ -48,7 +48,7 @@ The first audit was a code/reliability audit; it explicitly did **not** certify 
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
-- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, and the UI-17 and UI-25 repair reports/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `a9d7b52ad52714a3f22334bb20d15afaa59164d26363542813324f2e27d5e9dc`).
+- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, and the UI-17 and UI-25 repair reports/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `30d1d5e2e990de55e438e567547c464f32477fdc02bd659532ad777845f91257`).
 - Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. That sentence describes the historical audit only; the owner-authorized repair commits listed below subsequently changed application behavior.
 - Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
 - Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
@@ -406,7 +406,7 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 **Repair result (2026-09-22):** The chooser now uses a bounded vertical scroll region with full card names, shows only session-created templates in Recents, and exposes all category sections in All Templates. Left/Right keyboard selection follows the visible category with wrap-around; Return/Create uses the selected card; Escape/Cancel leaves the current workbook unchanged. The selected Invoice & Expenses card remains fully visible at 1.25× and 1.5× text scale after the scroll target is adjusted for the larger card heights. Chooser navigation moved to `template_navigation.rs` so the active Sheets source-size ceiling remains satisfied.
 
-**Evidence:** `.work/sheets-acceptance-2026-09-22/REPORT.md`; fresh captures under `.work/sheets-acceptance-2026-09-22/screenshots/`; focused test `keyboard_selection_scrolls_to_the_selected_template_in_all_templates`; full Sheets app suite (108 passed).
+**Evidence:** `.work/sheets-acceptance-2026-09-22/REPORT.md`; fresh captures under `.work/sheets-acceptance-2026-09-22/screenshots/`; focused test `keyboard_selection_scrolls_to_the_selected_template_in_all_templates`; full Sheets app suite (109 passed).
 
 **Open for overall Sheets acceptance:** Physical desktop pointer/keyboard input and screen-reader output remain unverified in this environment. Those are acceptance-gate checks, not remaining chooser code defects.
 
