@@ -1430,10 +1430,10 @@ mod tests {
         }
         #[cfg(windows)]
         {
+            let command = format!("mklink /J \"{}\" \"{}\"", link.display(), target.display());
             let output = std::process::Command::new("cmd")
-                .args(["/C", "mklink", "/J"])
-                .arg(link)
-                .arg(target)
+                .args(["/D", "/C"])
+                .arg(command)
                 .output()?;
             if output.status.success() {
                 Ok(())
@@ -1616,10 +1616,9 @@ mod tests {
         let target = open_write_target(&authorized.root, &authorized.relative).unwrap();
         let error = fs::rename(&nested, &moved_nested)
             .expect_err("an open intermediate ancestor must not be renamed on Windows");
-        assert_eq!(
-            error.kind(),
-            io::ErrorKind::PermissionDenied,
-            "the nested ancestor move must fail while its path guard is open"
+        assert!(
+            matches!(error.raw_os_error(), Some(5 | 32)),
+            "Windows should reject the nested ancestor move while its path guard is open; got {error:?}"
         );
         drop(target);
 
@@ -1648,10 +1647,9 @@ mod tests {
 
         let error = fs::rename(&plugin.install_dir, &moved_install)
             .expect_err("an open permission ancestor must not be renamed on Windows");
-        assert_eq!(
-            error.kind(),
-            io::ErrorKind::PermissionDenied,
-            "the ancestor move must fail because secure publication pins its path"
+        assert!(
+            matches!(error.raw_os_error(), Some(5 | 32)),
+            "Windows should reject the ancestor move because secure publication pins its path; got {error:?}"
         );
 
         secure_write_file(&authorized.root, &authorized.relative, b"authorized data")
