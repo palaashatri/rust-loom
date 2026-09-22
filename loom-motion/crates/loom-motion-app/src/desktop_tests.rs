@@ -456,6 +456,121 @@ fn svg_frame_export_contains_sampled_layers() {
 }
 
 #[test]
+fn svg_frame_export_uses_document_dimensions_and_sampled_transforms() {
+    let mut document = empty_motion();
+    document.width = 640;
+    document.height = 360;
+    let mut shape = MotionLayer::new("shape", "Badge & One", "VectorShape");
+    shape.add_keyframe("x", 0.0, 320.0);
+    shape.add_keyframe("y", 0.0, 180.0);
+    shape.add_keyframe("scale", 0.0, 0.75);
+    shape.add_keyframe("rotation", 0.0, 12.5);
+    document.add_layer(shape);
+
+    let svg = export_svg_frame(&document, 0.0);
+    assert!(svg.contains("width=\"640\" height=\"360\" viewBox=\"0 0 640 360\""));
+    assert!(svg.contains("translate(320.000 180.000) rotate(12.500) scale(0.75000)"));
+    assert!(svg.contains("fill=\"#b86f4b\""));
+}
+
+#[test]
+fn svg_frame_export_renders_document_colors_and_text_in_independent_renderer() {
+    let mut document = empty_motion();
+    document.width = 640;
+    document.height = 360;
+
+    let mut shape = MotionLayer::new("shape", "Badge", "VectorShape");
+    shape.add_keyframe("x", 0.0, 320.0);
+    shape.add_keyframe("y", 0.0, 180.0);
+    shape.add_keyframe("scale", 0.0, 0.75);
+    shape.add_keyframe("rotation", 0.0, 12.5);
+    document.add_layer(shape);
+
+    let mut title = MotionLayer::new("title", "Exact SVG Title", "Text");
+    title.add_keyframe("x", 0.0, 480.0);
+    title.add_keyframe("y", 0.0, 80.0);
+    document.add_layer(title);
+
+    let svg = export_svg_frame(&document, 0.0);
+    assert!(svg.contains(">Exact SVG Title</text>"));
+    let options = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_data(svg.as_bytes(), &options)
+        .expect("exported frame is valid SVG");
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(640, 360).expect("create frame image");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::default(),
+        &mut pixmap.as_mut(),
+    );
+
+    let pixel = |x: u32, y: u32| -> [u8; 4] {
+        let offset = ((y * pixmap.width() + x) * 4) as usize;
+        pixmap.data()[offset..offset + 4]
+            .try_into()
+            .expect("pixel has four channels")
+    };
+    assert_eq!(tree.size().width(), 640.0);
+    assert_eq!(tree.size().height(), 360.0);
+    assert_eq!(pixel(0, 0), [16, 18, 23, 255]);
+    assert_eq!(pixel(320, 180), [184, 111, 75, 255]);
+
+    let stage_image = stage_frame_image(&project_motion_frame(&document, 0.0))
+        .expect("build stage preview from the same SVG frame");
+    let stage_pixels = stage_image.to_rgba8().expect("rasterize stage preview");
+    assert_eq!(stage_pixels.size().width, 640);
+    assert_eq!(stage_pixels.size().height, 360);
+    let stage_pixel = |x: u32, y: u32| {
+        let offset = (y * stage_pixels.size().width + x) as usize;
+        let pixel = stage_pixels.as_slice()[offset];
+        [pixel.r, pixel.g, pixel.b, pixel.a]
+    };
+    assert_eq!(stage_pixel(0, 0), [16, 18, 23, 255]);
+    assert_eq!(stage_pixel(320, 180), [184, 111, 75, 255]);
+}
+
+#[test]
+fn exported_frame_preview_restores_exactly_after_transform_undo() {
+    let mut document = empty_motion();
+    document.width = 640;
+    document.height = 360;
+    let mut shape = MotionLayer::new("shape", "Undo Badge", "VectorShape");
+    shape.add_keyframe("x", 0.0, 200.0);
+    shape.add_keyframe("y", 0.0, 180.0);
+    document.add_layer(shape);
+
+    let before_svg = export_svg_frame(&document, 0.0);
+    let before_pixels = stage_frame_image(&project_motion_frame(&document, 0.0))
+        .expect("build initial preview")
+        .to_rgba8()
+        .expect("rasterize initial preview")
+        .as_slice()
+        .to_vec();
+
+    let mut history = MotionHistory::default();
+    history.checkpoint(&document, "move-layer");
+    assert!(edit_transform_at_frame(&mut document, 0, "x", 440.0));
+    let edited_svg = export_svg_frame(&document, 0.0);
+    let edited_pixels = stage_frame_image(&project_motion_frame(&document, 0.0))
+        .expect("build edited preview")
+        .to_rgba8()
+        .expect("rasterize edited preview")
+        .as_slice()
+        .to_vec();
+    assert_ne!(edited_svg, before_svg);
+    assert_ne!(edited_pixels, before_pixels);
+
+    assert!(history.undo(&mut document));
+    assert_eq!(export_svg_frame(&document, 0.0), before_svg);
+    let restored_pixels = stage_frame_image(&project_motion_frame(&document, 0.0))
+        .expect("build restored preview")
+        .to_rgba8()
+        .expect("rasterize restored preview")
+        .as_slice()
+        .to_vec();
+    assert_eq!(restored_pixels, before_pixels);
+}
+
+#[test]
 fn svg_frame_export_uses_non_zero_clock_time() {
     let mut document = empty_motion();
     let mut layer = MotionLayer::new("layer", "Animated", "VectorShape");

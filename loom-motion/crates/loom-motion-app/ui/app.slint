@@ -83,12 +83,10 @@ export component MotionApp inherits Window {
     in property <[string]> active-keyframe-properties: [];
     in property <[float]> layer-start-secs: [];
     in property <[float]> layer-duration-secs: [];
-    in property <[float]> layer-pos-x: [];
-    in property <[float]> layer-pos-y: [];
-    in property <[float]> layer-scale: [];
-    in property <[float]> layer-rotation: [];
-    in property <[float]> layer-opacity: [];
     in property <[bool]> layer-visible: [];
+    in property <image> frame-image;
+    in property <float> composition-width: 1920.0;
+    in property <float> composition-height: 1080.0;
     in property <string> selected-keyframe-property: "";
     in property <float> selected-keyframe-time: 0.0;
 
@@ -224,12 +222,10 @@ export component MotionApp inherits Window {
                     show-guides: root.show-guides;
                     show-safe-area: root.show-safe-area;
                     is-playing: root.is-playing;
-                    layer-pos-x: root.layer-pos-x;
-                    layer-pos-y: root.layer-pos-y;
-                    layer-scale: root.layer-scale;
-                    layer-rotation: root.layer-rotation;
-                    layer-opacity: root.layer-opacity;
                     layer-visible: root.layer-visible;
+                    frame-image: root.frame-image;
+                    composition-width: root.composition-width;
+                    composition-height: root.composition-height;
                     compact-layout: root.compact-layout;
                     transform-changed(property, value) => { root.transform-changed(property, value); }
                     transform-begin => { root.transform-begin(); }

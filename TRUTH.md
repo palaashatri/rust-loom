@@ -25,7 +25,7 @@ The contract's allowed prefixes are an outer file boundary for the active Sheets
 
 ## Current product state
 
-Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features. The audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states; the owner-authorized run repaired the recorded P1 code/UI paths listed below. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
+Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features. The audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states. The owner-authorized repair run has fixed every recorded P1 code card and the UI cards marked FIXED below; UI-14 and UI-25 remain under acceptance review. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
 
 Quality and permission to work are different. The owner override permits the active Sheets completion work while the remaining applications stay locked until their turn. This is the single live application status table:
 
@@ -35,7 +35,7 @@ Quality and permission to work are different. The owner override permits the act
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
-| 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-17 repaired in code; UI-14/18 and independent render checks remain |
+| 5 | Motion | ACCEPTANCE_BLOCKED | LOCKED | UI-17 still-frame parity verified; UI-14/18 and full video-render acceptance remain |
 | 6 | Video | ACCEPTANCE_BLOCKED | LOCKED | UI-25 repaired in code; UI-19/20 and real-media checks remain |
 | 7 | Studio | ACCEPTANCE_BLOCKED | LOCKED | CODE-10 repaired in code; audio and visual acceptance checks remain |
 | 8 | Encode | ACCEPTANCE_BLOCKED | LOCKED | CODE-09/UI-23 repaired in code; filesystem/media checks remain |
@@ -48,15 +48,15 @@ The first audit was a code/reliability audit; it explicitly did **not** certify 
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
-- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, and the 2026-09-22 Sheets screenshots/report: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `f7903621758978605e1722f7c9229202f6bb24332df843f2a21428327d5b12ff`).
+- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, and the UI-17 repair report/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `5730a03ead9f51431e79cd591cf75472f40d4cfacf19bb54f3a1bb9604bba260`).
 - Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. That sentence describes the historical audit only; the owner-authorized repair commits listed below subsequently changed application behavior.
 - Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
 - Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
 - Visual evidence covers only the states explicitly listed in the visual report. The repair run adds source and focused-test evidence, but it does not establish screen-reader compliance, complete keyboard operation, every scale/direction, all dialog outcomes, or cross-platform acceptance. Uncaptured or untested states remain unknown.
 
-**P0 findings:** none were recorded in the audit. The owner-authorized run therefore covers every recorded P1 code/UI card.
+**P0 findings:** none were recorded in the audit. All recorded P1 code cards are fixed. UI-14 and UI-25 remain open for acceptance checks; UI-17 is fixed and independently checked as a still-frame preview/export path.
 
-- Repair milestones pushed: `68df596`, `1a51c6d`, `29cb024`, `68b2b6b`, `9e15c55`, `1540a20`, `458e9ec`, and `d58202a`.
+- Repair milestones pushed: `68df596`, `1a51c6d`, `29cb024`, `68b2b6b`, `9e15c55`, `1540a20`, `458e9ec`, `d58202a`, and Motion still-frame parity with independent renderer evidence.
 - Documentation handoff checks: 18 focused governance tests pass; the governance, asset, and UI-foundation source audits pass. The current code-structure audit reports the legacy byte-ratchet ceilings for six touched files: `loom-encode/crates/loom-encode-app/src/main.rs`, `loom-sheets/crates/loom-sheets-app/src/main.rs`, `loom-sheets/crates/loom-sheets-core/src/lib.rs`, `loom-video/crates/loom-video-app/src/main.rs`, `loom-video/crates/loom-video-core/src/lib.rs`, and `loom-photo/crates/loom-photo-app/src/main.rs`. No ceiling was raised to hide that maintenance debt; extraction is a separate follow-up. The source audit recognizes pre-existing accepted baseline files; it does not supply new human visual approval. All 49 accepted screenshot paths/hashes and explicit source-file references were checked. Sixteen audited product source files still match the original code audit hashes. Verification details are saved beside the visual report.
 
 ## Existing capability inventory — preserve these while repairing
@@ -606,20 +606,11 @@ Each card shows its current state. A screenshot proves only the visible state; n
 **Done when:** All four corners are visible at fit in 1024×720 and 1440×900, for wide, tall, and square images. A click on each corner targets that image corner. Zoom/pan and reset-to-fit work, and export retains the complete original image. Check light and dark themes.
 ### UI-17 — Make Motion's preview represent the exported frame
 
-**P1 · Motion · NEEDS_REVIEW · Rendered/source mismatch.** Changing the app theme changes the composition background and title color in the stage. The SVG exporter uses fixed colors instead. The stage adds “(Text)” to layer names while the exported text uses only the name. A user cannot trust the visible frame as a preview of the output.
+**P1 · Motion · FIXED · Rendered/source mismatch.** The stage and SVG export previously represented different colors/text/geometry, so users could not trust the stage as the output preview.
 
-**Repair result (2026-09-15):** Commit `1540a20` feeds the Motion stage and SVG export from shared document colors/text. Motion app/core suites pass; an independently rendered light/dark SVG comparison remains.
+**Repair result (2026-09-22):** The repair samples the composition once into a frame projection and uses the same SVG serialization for the stage image and exported SVG. Composition dimensions, sampled text, visibility, transforms, opacity, and document colors are shared; stage guides and selection handles stay outside the output.
 
-**Evidence:** Motion `01-1440x900-light.png` versus `03-1440x900-dark.png`; source trace of `export_svg_frame`. No real video render was tested.
-
-**Open:** `loom-motion/crates/loom-motion-app/ui/stage.slint`; `loom-motion/crates/loom-motion-app/src/main.rs`, `export_svg_frame` and stage projection; existing composition/layer properties.
-
-1. Make a fixture with known text, color, position, scale, and rotation. Render the current SVG independently and compare it with the stage at the same time.
-2. Build one document-frame projection for those existing supported properties. Feed both stage and SVG export from it; the UI theme may color chrome and selection handles, not document artwork.
-3. Display the actual layer text on the stage. Put type labels such as “Text” in the layers panel, not in exported-content space.
-4. Keep unsupported effects explicitly unsupported. Do not expand this card into a new video renderer.
-
-**Done when:** At a fixed playhead time, light/dark app themes produce the same artwork colors, text, and geometry. The independently rendered SVG agrees within recorded rendering tolerance. Selection handles remain visible but are absent from export. Repeat after one keyframe/transform edit and Undo.
+**Evidence:** `.work/audit-2026-09-22/ui17/REPAIR-VERIFICATION.txt` and four 1024×720/1440×900 light/dark screenshots, preserved under `.work/audit-2026-09-22/ui17/` in the evidence ZIP. Motion app tests (33) and core tests (46) pass. Independent `resvg` rendering verified a 640×360 fixture, document color samples, text, and exact preview restoration after transform Undo. No complete video render was tested. The archive SHA-256 is `5730a03ead9f51431e79cd591cf75472f40d4cfacf19bb54f3a1bb9604bba260`.
 ### UI-18 — Let users type precise transform values
 
 **P2 · Photo and Motion · OPEN · Visual design limitation.** Transform inspectors show numbers beside sliders, but the numbers are static text. A slider alone is a poor way to place a layer at an exact coordinate or angle.

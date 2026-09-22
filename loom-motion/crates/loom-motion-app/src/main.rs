@@ -13,7 +13,7 @@ use loom_motion_core::{
     load_motion, save_motion, CompositionClock, CompositionDocument, MotionLayer,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
-use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, PhysicalSize, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -21,6 +21,10 @@ const DEFAULT_SIZE: (u32, u32) = (1280, 800);
 const SAVE_FILENAME: &str = "comp.loommotion";
 const EXPORT_FILENAME: &str = "composition-frame.svg";
 const HISTORY_LIMIT: usize = 128;
+const FRAME_BACKGROUND: &str = "#101217";
+const FRAME_FOREGROUND: &str = "#f5f2eb";
+const FRAME_ACCENT: &str = "#b86f4b";
+const FRAME_SURFACE: &str = "#303744";
 
 loom_production::define_snapshot_recovery!(MOTION_RECOVERY, "org.loom.motion", "loom.motion/1");
 
@@ -130,8 +134,76 @@ fn initial_motion(args: &Args) -> Result<CompositionDocument, String> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct ProjectedMotionLayer {
+    name: String,
+    layer_type: String,
+    x: f32,
+    y: f32,
+    scale: f32,
+    rotation: f32,
+    opacity: f32,
+    visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MotionFrameProjection {
+    width: u32,
+    height: u32,
+    time_secs: f32,
+    layers: Vec<ProjectedMotionLayer>,
+}
+
+/// Sample the composition once. The stage image and SVG export are both made
+/// from this projection so their text, visibility, transforms, and dimensions
+/// cannot drift apart.
+fn project_motion_frame(doc: &CompositionDocument, time_secs: f32) -> MotionFrameProjection {
+    let frame = doc.frame_at(time_secs);
+    let layers = doc
+        .layers
+        .iter()
+        .zip(frame.layers)
+        .map(|(layer, sample)| ProjectedMotionLayer {
+            name: layer.name.clone(),
+            layer_type: layer.layer_type.clone(),
+            x: if sample.x.is_finite() { sample.x } else { 0.0 },
+            y: if sample.y.is_finite() { sample.y } else { 0.0 },
+            scale: if sample.scale.is_finite() {
+                sample.scale.max(0.001)
+            } else {
+                1.0
+            },
+            rotation: if sample.rotation.is_finite() {
+                sample.rotation
+            } else {
+                0.0
+            },
+            opacity: if sample.opacity.is_finite() {
+                sample.opacity.clamp(0.0, 1.0)
+            } else {
+                1.0
+            },
+            visible: sample.visible,
+        })
+        .collect();
+    MotionFrameProjection {
+        width: doc.width.max(1),
+        height: doc.height.max(1),
+        time_secs: frame.time_secs,
+        layers,
+    }
+}
+
 fn xml_escape(value: &str) -> String {
     value
+        .chars()
+        .filter(|character| {
+            matches!(*character, '\t' | '\n' | '\r')
+                || ('\u{20}'..='\u{D7FF}').contains(character)
+                || ('\u{E000}'..='\u{FFFD}').contains(character)
+                || ('\u{10000}'..='\u{10FFFF}').contains(character)
+        })
+        .collect::<String>()
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -139,42 +211,46 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
-    let mut svg = String::from(
-        r##"<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
-  <rect width="1920" height="1080" fill="#101217"/>
-"##,
+fn render_projected_frame_svg(frame: &MotionFrameProjection) -> String {
+    let mut svg = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">\n  <rect width=\"{}\" height=\"{}\" fill=\"{}\"/>\n",
+        frame.width, frame.height, frame.width, frame.height, frame.width, frame.height, FRAME_BACKGROUND
     );
-    for layer in &doc.layers {
-        let sample = layer.sample(time_secs);
-        if !sample.visible {
+    for layer in &frame.layers {
+        if !layer.visible {
             continue;
         }
-        let opacity = sample.opacity.clamp(0.0, 1.0);
-        let scale = sample.scale.max(0.001);
         let name = xml_escape(&layer.name);
         let transform = format!(
             "translate({:.3} {:.3}) rotate({:.3}) scale({:.5})",
-            sample.x, sample.y, sample.rotation, scale
+            layer.x, layer.y, layer.rotation, layer.scale
         );
         match layer.layer_type.as_str() {
             "Text" => svg.push_str(&format!(
-                r##"  <text transform="{transform}" opacity="{opacity:.5}" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="72">{name}</text>
-"##
+                "  <text transform=\"{transform}\" opacity=\"{:.5}\" text-anchor=\"middle\" fill=\"{FRAME_FOREGROUND}\" font-family=\"sans-serif\" font-size=\"72\">{name}</text>\n",
+                layer.opacity
             )),
             "VectorShape" => svg.push_str(&format!(
-                r##"  <rect transform="{transform}" opacity="{opacity:.5}" x="-180" y="-100" width="360" height="200" rx="24" fill="#b86f4b"/>
-"##
+                "  <rect transform=\"{transform}\" opacity=\"{:.5}\" x=\"-180\" y=\"-100\" width=\"360\" height=\"200\" rx=\"24\" fill=\"{FRAME_ACCENT}\"/>\n",
+                layer.opacity
             )),
             _ => svg.push_str(&format!(
-                r##"  <g transform="{transform}" opacity="{opacity:.5}"><rect x="-160" y="-90" width="320" height="180" rx="16" fill="#303744" stroke="#b86f4b"/><text y="8" text-anchor="middle" fill="#f5f2eb" font-family="sans-serif" font-size="28">{name}</text></g>
-"##
+                "  <g transform=\"{transform}\" opacity=\"{:.5}\"><rect x=\"-160\" y=\"-90\" width=\"320\" height=\"180\" rx=\"16\" fill=\"{FRAME_SURFACE}\" stroke=\"{FRAME_ACCENT}\"/><text y=\"8\" text-anchor=\"middle\" fill=\"{FRAME_FOREGROUND}\" font-family=\"sans-serif\" font-size=\"28\">{name}</text></g>\n",
+                layer.opacity
             )),
         }
     }
     svg.push_str("</svg>\n");
     svg
+}
+
+fn export_svg_frame(doc: &CompositionDocument, time_secs: f32) -> String {
+    render_projected_frame_svg(&project_motion_frame(doc, time_secs))
+}
+
+fn stage_frame_image(frame: &MotionFrameProjection) -> Result<Image, String> {
+    Image::load_from_svg_data(render_projected_frame_svg(frame).as_bytes())
+        .map_err(|error| format!("could not build Motion stage preview: {error}"))
 }
 
 fn write_svg_frame(
@@ -321,39 +397,6 @@ fn keyframe_exists_at(doc: &CompositionDocument, selected: &SelectedKeyframe) ->
     time.is_finite()
 }
 
-type SampledLayerArrays = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<bool>);
-
-fn sampled_layer_arrays(doc: &CompositionDocument, time_secs: f32) -> SampledLayerArrays {
-    let mut x = Vec::with_capacity(doc.layers.len());
-    let mut y = Vec::with_capacity(doc.layers.len());
-    let mut scale = Vec::with_capacity(doc.layers.len());
-    let mut rotation = Vec::with_capacity(doc.layers.len());
-    let mut opacity = Vec::with_capacity(doc.layers.len());
-    let mut visible = Vec::with_capacity(doc.layers.len());
-    for layer in &doc.layers {
-        let sample = layer.sample(time_secs);
-        x.push(if sample.x.is_finite() { sample.x } else { 0.0 });
-        y.push(if sample.y.is_finite() { sample.y } else { 0.0 });
-        scale.push(if sample.scale.is_finite() {
-            sample.scale.max(0.0)
-        } else {
-            1.0
-        });
-        rotation.push(if sample.rotation.is_finite() {
-            sample.rotation
-        } else {
-            0.0
-        });
-        opacity.push(if sample.opacity.is_finite() {
-            sample.opacity.clamp(0.0, 1.0)
-        } else {
-            1.0
-        });
-        visible.push(sample.visible);
-    }
-    (x, y, scale, rotation, opacity, visible)
-}
-
 fn move_keyframe_at_time(
     doc: &mut CompositionDocument,
     property: &str,
@@ -408,22 +451,35 @@ fn layer_timing(doc: &CompositionDocument) -> (Vec<f32>, Vec<f32>) {
         .unzip()
 }
 
-fn apply_motion_at(app: &MotionApp, doc: &CompositionDocument, time_secs: f32, frame: u64) {
+fn apply_motion_at(
+    app: &MotionApp,
+    doc: &CompositionDocument,
+    time_secs: f32,
+    frame: u64,
+) -> Result<(), String> {
     let duration = document_duration_secs(doc);
     let time_secs = if time_secs.is_finite() {
         time_secs.clamp(0.0, duration)
     } else {
         0.0
     };
+    let projection = project_motion_frame(doc, time_secs);
+    let frame_image = stage_frame_image(&projection)?;
     let (layer_starts, layer_durations) = layer_timing(doc);
-    let (layer_pos_x, layer_pos_y, layer_scale, layer_rotation, layer_opacity, layer_visible) =
-        sampled_layer_arrays(doc, time_secs);
+    let layer_visible: Vec<bool> = projection
+        .layers
+        .iter()
+        .map(|layer| layer.visible)
+        .collect();
     let fps = if doc.frame_rate.is_finite() && doc.frame_rate > 0.0 {
         doc.frame_rate
     } else {
         60.0
     };
     app.set_comp_name(doc.name.as_str().into());
+    app.set_frame_image(frame_image);
+    app.set_composition_width(projection.width as f32);
+    app.set_composition_height(projection.height as f32);
     app.set_timecode_text(SharedString::from(format!(
         "00:00:00:00 ({} fps • {:.0}s)",
         fps, duration
@@ -431,44 +487,35 @@ fn apply_motion_at(app: &MotionApp, doc: &CompositionDocument, time_secs: f32, f
     app.set_timecode_display(format_timecode(frame, fps as f64).into());
     app.set_layer_start_secs(ModelRc::new(VecModel::from(layer_starts)));
     app.set_layer_duration_secs(ModelRc::new(VecModel::from(layer_durations)));
-    app.set_layer_pos_x(ModelRc::new(VecModel::from(layer_pos_x)));
-    app.set_layer_pos_y(ModelRc::new(VecModel::from(layer_pos_y)));
-    app.set_layer_scale(ModelRc::new(VecModel::from(layer_scale)));
-    app.set_layer_rotation(ModelRc::new(VecModel::from(layer_rotation)));
-    app.set_layer_opacity(ModelRc::new(VecModel::from(layer_opacity)));
     app.set_layer_visible(ModelRc::new(VecModel::from(layer_visible)));
     app.set_frame_rate(fps);
-    // Keep artwork text equal to the document's actual layer name. Type
-    // labels belong in the layer list and must not leak into the exported
-    // frame preview.
-    let layer_labels: Vec<SharedString> = doc
+    let layer_labels: Vec<SharedString> = projection
         .layers
         .iter()
         .map(|layer| SharedString::from(layer.name.clone()))
         .collect();
-    let layer_types: Vec<SharedString> = doc
+    let layer_types: Vec<SharedString> = projection
         .layers
         .iter()
         .map(|layer| SharedString::from(layer.layer_type.clone()))
         .collect();
     app.set_layer_labels(ModelRc::new(VecModel::from(layer_labels)));
     app.set_layer_types(ModelRc::new(VecModel::from(layer_types)));
-    let selected = doc
+    let selected = projection
         .layers
         .get(doc.active_layer_index)
         .map(|layer| layer.name.as_str())
         .unwrap_or("No layer selected");
     app.set_active_layer_index(doc.active_layer_index as i32);
-    if let Some(layer) = doc.layers.get(doc.active_layer_index) {
-        let sample = layer.sample(time_secs);
-        app.set_pos_x(sample.x);
-        app.set_pos_y(sample.y);
-        app.set_scale_val(sample.scale * 100.0);
-        app.set_rotation_val(sample.rotation);
-        app.set_opacity_val(sample.opacity * 100.0);
+    if let Some(layer) = projection.layers.get(doc.active_layer_index) {
+        app.set_pos_x(layer.x);
+        app.set_pos_y(layer.y);
+        app.set_scale_val(layer.scale * 100.0);
+        app.set_rotation_val(layer.rotation);
+        app.set_opacity_val(layer.opacity * 100.0);
     } else {
-        app.set_pos_x(960.0);
-        app.set_pos_y(540.0);
+        app.set_pos_x(projection.width as f32 / 2.0);
+        app.set_pos_y(projection.height as f32 / 2.0);
         app.set_scale_val(100.0);
         app.set_rotation_val(0.0);
         app.set_opacity_val(100.0);
@@ -484,16 +531,17 @@ fn apply_motion_at(app: &MotionApp, doc: &CompositionDocument, time_secs: f32, f
             .collect::<Vec<_>>(),
     )));
     app.set_duration_secs(duration);
-    app.set_current_time_secs(time_secs);
+    app.set_current_time_secs(projection.time_secs);
     app.set_status_left(SharedString::from(format!(
         "{} motion layers • Selected: {selected}",
         doc.len()
     )));
     app.set_status_right("Offline".into());
+    Ok(())
 }
 
-fn apply_motion(app: &MotionApp, doc: &CompositionDocument) {
-    apply_motion_at(app, doc, 0.0, 0);
+fn apply_motion(app: &MotionApp, doc: &CompositionDocument) -> Result<(), String> {
+    apply_motion_at(app, doc, 0.0, 0)
 }
 
 fn apply_theme(app: &MotionApp, theme: &str) {
@@ -696,7 +744,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     configure_responsive_layout(&app, args.size.0);
     apply_theme(&app, &args.theme);
     let doc = initial_motion(args)?;
-    apply_motion(&app, &doc);
+    apply_motion(&app, &doc)?;
     if args.palette {
         app.set_palette_query(SharedString::from("ex"));
         rebuild_palette(&app, "ex");
@@ -779,7 +827,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     };
     // Keep transport and sampled state aligned with the edited document.
     *state.clock.borrow_mut() = clock_for_document(&state.current.borrow());
-    apply_motion(&app, &state.current.borrow());
+    apply_motion(&app, &state.current.borrow())?;
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     let mut steps = Vec::new();
@@ -1231,7 +1279,10 @@ fn refresh_motion(app: &MotionApp, state: &GuiState) {
     let doc = state.current.borrow();
     let clock = state.clock.borrow();
     let time_secs = clock.frame_to_seconds(clock.current_frame) as f32;
-    apply_motion_at(app, &doc, time_secs, clock.current_frame);
+    if let Err(error) = apply_motion_at(app, &doc, time_secs, clock.current_frame) {
+        set_status(app, format!("Motion stage preview failed: {error}"));
+        return;
+    }
     let selection_invalid = state
         .selected_keyframe
         .borrow()
