@@ -6,14 +6,15 @@ use std::sync::Arc;
 use loom_desktop::{CommandAction, DesktopError, NativeMenuBar};
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{
-    CellAlignment, CellRange, CellRef, ChartSeries, ChartSpec, NumberFormat, PivotAggregation,
-    RangeEdit, Sheet, SheetChart, SheetModel, SheetObject,
+    CellAlignment, CellRange, CellRef, NumberFormat, PivotAggregation, RangeEdit, Sheet,
+    SheetChart, SheetModel, SheetObject,
 };
 use slint::{ComponentHandle, Image, Model, SharedString, VecModel};
 
+pub(crate) use crate::chart_actions::sync_chart_to_app;
+
 use crate::analysis::{
-    chart_points, label_value_columns, line_path_commands, pie_wedge_commands, plan_chart,
-    plan_pivot_sheet, unique_sheet_name,
+    label_value_columns, plan_chart_in_range, plan_pivot_sheet, unique_sheet_name,
 };
 use crate::formatting::{
     adjust_selection_font_size, cycle_selection_fill, set_selection_decimal_places,
@@ -37,66 +38,6 @@ pub(crate) fn sync_sheet_tabs(app: &SheetsApp, state: &GuiState) {
         .collect();
     app.set_sheet_names(Rc::new(VecModel::from(names)).into());
     app.set_active_sheet_index(*state.active_sheet_index.borrow() as i32);
-}
-
-/// Synchronize active chart data from the worksheet model to the Slint UI.
-pub(crate) fn sync_chart_to_app(app: &SheetsApp, sheet: &Sheet) {
-    let Some(chart) = sheet.chart.clone() else {
-        app.set_chart_visible(false);
-        return;
-    };
-    if !app.get_chart_visible() {
-        return;
-    }
-    let points = chart_points(sheet, &chart);
-    if points.is_empty() {
-        // Source data was deleted after the chart was inserted: hide rather
-        // than show a stale or empty plot.
-        app.set_chart_visible(false);
-        return;
-    }
-    let categories: Vec<SharedString> = points
-        .iter()
-        .map(|(cat, _, _)| SharedString::from(cat))
-        .collect();
-    let values: Vec<f64> = points.iter().map(|(_, num, _)| *num).collect();
-    let display_values: Vec<SharedString> = points
-        .iter()
-        .map(|(_, _, raw)| SharedString::from(raw))
-        .collect();
-    let spec = ChartSpec {
-        kind: chart.kind,
-        title: chart.title.clone(),
-        series: vec![ChartSeries {
-            name: "Series 1".into(),
-            categories: points.iter().map(|(cat, _, _)| cat.clone()).collect(),
-            values,
-        }],
-    };
-    let Ok(normalized_series) = spec.normalized_points() else {
-        app.set_chart_visible(false);
-        return;
-    };
-    let norm = normalized_series[0]
-        .iter()
-        .map(|&v| v as f32)
-        .collect::<Vec<f32>>();
-    app.set_chart_title(SharedString::from(chart.title));
-    app.set_chart_kind(SharedString::from(chart.kind.as_str()));
-    app.set_chart_categories(Rc::new(VecModel::from(categories)).into());
-    app.set_chart_values_display(Rc::new(VecModel::from(display_values)).into());
-    app.set_chart_normalized(Rc::new(VecModel::from(norm.clone())).into());
-    app.set_chart_line_commands(SharedString::from(line_path_commands(&norm)));
-    let wedges: Vec<SharedString> =
-        pie_wedge_commands(&points.iter().map(|(_, num, _)| *num).collect::<Vec<_>>())
-            .into_iter()
-            .map(SharedString::from)
-            .collect();
-    app.set_chart_pie_commands(Rc::new(VecModel::from(wedges)).into());
-    let opacities: Vec<f32> = (0..points.len())
-        .map(|i| 1.0 - (i % 5) as f32 * 0.15)
-        .collect();
-    app.set_chart_pie_opacities(Rc::new(VecModel::from(opacities)).into());
 }
 
 /// Apply a zoom level: factor drives geometry, label drives the toolbar.
@@ -562,7 +503,11 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_insert_chart(move || {
             if let Some(app) = app_ref.upgrade() {
-                if let Some(existing) = state.current.borrow().chart.clone() {
+                let range = selection_from_app(&app).range();
+                let explicit_range =
+                    range.end.col == range.start.col + 1 && range.end.row > range.start.row;
+                let existing = state.current.borrow().chart.clone();
+                if let Some(existing) = existing.as_ref().filter(|_| !explicit_range) {
                     app.set_chart_visible(true);
                     sync_chart_to_app(&app, &state.current.borrow());
                     app.set_status_left(SharedString::from(format!(
@@ -572,11 +517,25 @@ pub(crate) fn register_sheet_actions(
                     )));
                     return;
                 }
-                // Prefer the selection's columns when it spans a label/value
-                // pair; otherwise fall back to columns A (labels) and B.
-                let (cat_col, val_col) = label_value_columns(&app, &state.current.borrow());
-                match plan_chart(&state.current.borrow(), cat_col, val_col) {
-                    Ok(chart) => {
+                if !explicit_range {
+                    app.set_status_left(
+                        "Select two columns including headers and data, then Insert Chart.".into(),
+                    );
+                    return;
+                }
+                let planned = plan_chart_in_range(
+                    &state.current.borrow(),
+                    range.start.col,
+                    range.end.col,
+                    range.start.row + 1,
+                    range.end.row,
+                );
+                match planned {
+                    Ok(mut chart) => {
+                        if let Some(existing) = existing {
+                            chart.kind = existing.kind;
+                            chart.title = existing.title;
+                        }
                         let before = state.current.borrow().clone();
                         let mut after = before.clone();
                         after.chart = Some(chart.clone());

@@ -524,7 +524,14 @@ fn parse_chart(xml: &str) -> Option<SheetChart> {
         .get(1)
         .and_then(|formula| formula_column(formula))
         .unwrap_or(cat_col.saturating_add(1));
+    let rows = formulas.first().and_then(|formula| {
+        let range = formula.rsplit('!').next()?.replace('$', "");
+        let (first, last) = range.split_once(':')?;
+        Some((CellRef::parse(first)?.row, CellRef::parse(last)?.row))
+    });
     Some(SheetChart {
+        start_row: rows.map_or(1, |rows| rows.0),
+        end_row: rows.map(|rows| rows.1),
         kind,
         title,
         cat_col,
@@ -859,19 +866,26 @@ fn one_cell_anchor(cell: CellRef, width: u32, height: u32, content: &str) -> Str
 }
 
 fn render_chart_xml(sheet: &Sheet, chart: &SheetChart) -> String {
-    let end_row = sheet
-        .used_range()
-        .map(|(_, _, _, max_row)| max_row + 1)
-        .unwrap_or(2)
-        .max(2);
+    let start_row = chart.start_row + 1;
+    let end_row = chart.end_row.map(|row| row + 1).unwrap_or_else(|| {
+        sheet
+            .used_range()
+            .map(|(_, _, _, max_row)| max_row + 1)
+            .unwrap_or(2)
+            .max(2)
+    });
     let name = chart_sheet_reference(&sheet.name);
     let cat_column = column_letters(chart.cat_col as usize);
     let val_column = column_letters(chart.val_col as usize);
     // Spreadsheet quoting and XML escaping are separate operations. The
     // sheet name is quoted for the formula grammar above; escape the complete
     // generated formula before putting it in element text.
-    let cat_range = xml_escape_text(&format!("{name}!${cat_column}$2:${cat_column}${end_row}"));
-    let val_range = xml_escape_text(&format!("{name}!${val_column}$2:${val_column}${end_row}"));
+    let cat_range = xml_escape_text(&format!(
+        "{name}!${cat_column}${start_row}:${cat_column}${end_row}"
+    ));
+    let val_range = xml_escape_text(&format!(
+        "{name}!${val_column}${start_row}:${val_column}${end_row}"
+    ));
     let title = xml_escape_text(&chart.title);
     let series = match chart.kind {
         ChartKind::Scatter => format!(
@@ -1462,6 +1476,7 @@ mod tests {
             title: "Revenue".to_string(),
             cat_col: 0,
             val_col: 1,
+            ..Default::default()
         });
         let mut image =
             SheetObject::image(CellRef { row: 4, col: 0 }, "hero.png").expect("image object");
@@ -1499,6 +1514,7 @@ mod tests {
             title: "First chart".to_string(),
             cat_col: 0,
             val_col: 1,
+            ..Default::default()
         });
         let mut second = Sheet::new("Second");
         second.set_str("A1", "two");
@@ -1533,6 +1549,7 @@ mod tests {
             title: "Revenue <Q1>".to_string(),
             cat_col: 0,
             val_col: 1,
+            ..Default::default()
         });
 
         let bytes = export_xlsx_sheets(&[sheet]).expect("rich export");
@@ -1552,5 +1569,38 @@ mod tests {
             imported[0].chart.as_ref().map(|chart| chart.cat_col),
             Some(0)
         );
+    }
+    #[test]
+    fn chart_explicit_range_roundtrips_without_total_row() {
+        let mut sheet = Sheet::new("Budget");
+        for (cell, value) in [
+            ("A1", "Item"),
+            ("B1", "USD"),
+            ("A2", "Rent"),
+            ("B2", "1200"),
+            ("A3", "Food"),
+            ("B3", "450"),
+            ("A4", "Travel"),
+            ("B4", "150"),
+            ("A5", "Total"),
+            ("B5", "1800"),
+        ] {
+            sheet.set_str(cell, value);
+        }
+        let chart = SheetChart {
+            title: "Expenses".into(),
+            start_row: 1,
+            end_row: Some(3),
+            ..Default::default()
+        };
+        sheet.chart = Some(chart.clone());
+        let bytes = export_xlsx_sheets(&[sheet]).unwrap();
+        let archive = PackageArchive::from_bytes(&bytes).unwrap();
+        let xml = String::from_utf8_lossy(archive.get("xl/charts/chart1.xml").unwrap());
+        assert!(xml.contains("$A$2:$A$4"));
+        assert!(xml.contains("$B$2:$B$4"));
+        assert!(!xml.contains("$B$5"));
+        let restored = extract_xlsx_sheets(&bytes).unwrap();
+        assert_eq!(restored[0].chart, Some(chart));
     }
 }

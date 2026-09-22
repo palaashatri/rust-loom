@@ -5,6 +5,9 @@ import { Theme } from "theme.slint";
 
 export component SheetChart inherits Rectangle {
     in property <string> title: "Chart";
+    in property <string> source-range: "";
+    in property <string> series-label: "Values";
+    in property <string> unit-label: "Not specified";
     in property <string> kind: "bar";
     in property <[string]> categories: ["Development", "Design", "QA & Testing", "Total"];
     in property <[string]> values-display: ["$15,000", "$8,000", "$5,000", "$28,000"];
@@ -26,7 +29,7 @@ export component SheetChart inherits Rectangle {
     }
 
     width: 380px;
-    height: 240px;
+    height: 310px;
     background: Theme.palette().surface;
     border-width: 1px;
     border-color: Theme.palette().border;
@@ -65,6 +68,19 @@ export component SheetChart inherits Rectangle {
                 tooltip: "Dismiss chart";
                 clicked => { root.close-chart(); }
             }
+        }
+
+        Text {
+            text: "Source: " + root.source-range + " · Series: " + root.series-label + " · Unit: " + root.unit-label;
+            wrap: word-wrap;
+            color: Theme.palette().ink;
+            font-size: Theme.tokens.typography.caption;
+        }
+        Text {
+            text: "To change source: select two columns including headers, then Insert Chart.";
+            wrap: word-wrap;
+            color: Theme.palette().ink;
+            font-size: Theme.tokens.typography.caption;
         }
 
         // Plot Area

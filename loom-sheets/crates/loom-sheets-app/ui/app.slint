@@ -217,6 +217,9 @@ export component SheetsApp inherits Window {
 
     in-out property <bool> chart-visible: false;
     in-out property <string> chart-title: "Chart";
+    in-out property <string> chart-source-range: "";
+    in-out property <string> chart-series-label: "Values";
+    in-out property <string> chart-unit-label: "Not specified";
     in-out property <string> chart-kind: "bar";
     in-out property <[string]> chart-categories: [];
     in-out property <[string]> chart-values-display: [];
@@ -639,6 +642,9 @@ export component SheetsApp inherits Window {
                         x: min(parent.width - 400px, 120px);
                         y: min(parent.height - 260px, 180px);
                         title: root.chart-title;
+                        source-range: root.chart-source-range;
+                        series-label: root.chart-series-label;
+                        unit-label: root.chart-unit-label;
                         kind: root.chart-kind;
                         categories: root.chart-categories;
                         values-display: root.chart-values-display;

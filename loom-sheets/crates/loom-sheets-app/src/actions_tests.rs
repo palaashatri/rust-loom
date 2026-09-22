@@ -450,7 +450,7 @@ fn test_copy_selection() {
     assert_eq!(data.len(), 2);
     assert_eq!(data[0].len(), 2);
     assert_eq!(data[0][0], "Item");
-    assert_eq!(data[0][1], "USD/month");
+    assert_eq!(data[0][1], "Amount (USD/month)");
     assert_eq!(data[1][0], "Rent");
     assert_eq!(data[1][1], "1200");
 }
@@ -588,7 +588,10 @@ fn test_delete_col_and_undo_redo() {
 
     let before = sheet.clone();
     assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("Item"));
-    assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("USD/month"));
+    assert_eq!(
+        sheet.raw(CellRef { row: 0, col: 1 }),
+        Some("Amount (USD/month)")
+    );
 
     let new_sheet = delete_col(&before, 0).expect("delete col 0");
     commit_transaction(
@@ -601,15 +604,21 @@ fn test_delete_col_and_undo_redo() {
         },
     );
 
-    // Col 0 is now "USD/month"
-    assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("USD/month"));
+    // Col 0 is now the amount header.
+    assert_eq!(
+        sheet.raw(CellRef { row: 0, col: 0 }),
+        Some("Amount (USD/month)")
+    );
     assert_eq!(undo.len(), 1);
 
     // Revert
     let tx = undo.pop().unwrap();
     tx.revert(&mut sheet);
     assert_eq!(sheet.raw(CellRef { row: 0, col: 0 }), Some("Item"));
-    assert_eq!(sheet.raw(CellRef { row: 0, col: 1 }), Some("USD/month"));
+    assert_eq!(
+        sheet.raw(CellRef { row: 0, col: 1 }),
+        Some("Amount (USD/month)")
+    );
 }
 
 #[test]
@@ -1304,4 +1313,39 @@ fn test_borders_fill_and_font_size_toggle_undo() {
         tx.revert(&mut sheet);
     }
     assert!(sheet.cell_style(cell).is_default());
+}
+
+#[test]
+fn chart_explicit_range_excludes_totals_and_stays_live() {
+    let mut sheet = Sheet::new("Budget");
+    for (cell, value) in [
+        ("A1", "Item"),
+        ("B1", "Amount (USD/month)"),
+        ("A2", "Rent"),
+        ("B2", "1200"),
+        ("A3", "Food"),
+        ("B3", "450"),
+        ("A4", "Travel"),
+        ("B4", "150"),
+        ("A5", "Total"),
+        ("B5", "=SUM(B2:B4)"),
+    ] {
+        sheet.set_str(cell, value);
+    }
+    let chart = crate::analysis::plan_chart_in_range(&sheet, 0, 1, 1, 3).unwrap();
+    let points = crate::analysis::chart_points(&sheet, &chart);
+    assert_eq!(points.len(), 3);
+    assert_eq!(points.iter().map(|point| point.1).sum::<f64>(), 1800.0);
+    sheet.set_str("B2", "1400");
+    assert_eq!(crate::analysis::chart_points(&sheet, &chart)[0].1, 1400.0);
+    sheet.chart = Some(chart.clone());
+    let restored = loom_sheets_core::persistence::sheet_from_json(
+        &loom_sheets_core::persistence::sheet_to_json(&sheet),
+    )
+    .unwrap();
+    assert_eq!(restored.chart, Some(chart));
+    assert_eq!(
+        crate::analysis::chart_points(&restored, restored.chart.as_ref().unwrap()).len(),
+        3
+    );
 }

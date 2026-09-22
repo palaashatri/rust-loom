@@ -60,6 +60,14 @@ struct PersistedChart {
     title: String,
     cat_col: u32,
     val_col: u32,
+    #[serde(default = "default_chart_start_row")]
+    start_row: u32,
+    #[serde(default)]
+    end_row: Option<u32>,
+}
+
+fn default_chart_start_row() -> u32 {
+    1
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -184,6 +192,8 @@ impl From<&Sheet> for PersistedSheet {
                 title: chart.title.clone(),
                 cat_col: chart.cat_col,
                 val_col: chart.val_col,
+                start_row: chart.start_row,
+                end_row: chart.end_row,
             }),
             objects: sheet
                 .objects
@@ -327,6 +337,8 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
                 title: chart.title,
                 cat_col: chart.cat_col,
                 val_col: chart.val_col,
+                start_row: chart.start_row,
+                end_row: chart.end_row,
             })
         })
         .transpose()?;
@@ -553,6 +565,7 @@ mod tests {
             title: "Share \"A\"".to_string(),
             cat_col: 0,
             val_col: 1,
+            ..Default::default()
         });
         let json = sheet_to_json(&sheet);
         let back = sheet_from_json(&json).unwrap();
@@ -636,5 +649,17 @@ mod tests {
 
         let unsupported_version = r#"{"version":2,"active":0,"sheets":[{"name":"x","cells":[]}] }"#;
         assert!(workbook_from_json(unsupported_version).is_err());
+    }
+    #[test]
+    fn legacy_chart_without_row_bounds_keeps_all_rows() {
+        let mut sheet = Sheet::new("Legacy");
+        sheet.chart = Some(crate::SheetChart::default());
+        let mut json: serde_json::Value = serde_json::from_str(&sheet_to_json(&sheet)).unwrap();
+        let chart = json["chart"].as_object_mut().unwrap();
+        chart.remove("start_row");
+        chart.remove("end_row");
+        let restored = sheet_from_json(&json.to_string()).unwrap().chart.unwrap();
+        assert_eq!(restored.start_row, 1);
+        assert_eq!(restored.end_row, None);
     }
 }

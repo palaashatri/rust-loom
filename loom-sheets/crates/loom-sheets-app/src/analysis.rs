@@ -145,8 +145,23 @@ pub(crate) fn plan_pivot_sheet(
 /// `cat_col`, numbers from `val_col`, skipping the header row. Pure and
 /// unit-testable; the handlers below persist the plan as undoable edits.
 pub(crate) fn plan_chart(sheet: &Sheet, cat_col: u32, val_col: u32) -> Result<SheetChart, String> {
-    let dims = sheet.dimensions();
-    if dims.rows < 2 {
+    plan_chart_in_range(
+        sheet,
+        cat_col,
+        val_col,
+        1,
+        sheet.dimensions().rows.saturating_sub(1),
+    )
+}
+
+pub(crate) fn plan_chart_in_range(
+    sheet: &Sheet,
+    cat_col: u32,
+    val_col: u32,
+    start_row: u32,
+    end_row: u32,
+) -> Result<SheetChart, String> {
+    if end_row < start_row || start_row == 0 {
         return Err("Chart needs at least one data row below the header".to_string());
     }
     let vals = evaluate(sheet);
@@ -163,7 +178,7 @@ pub(crate) fn plan_chart(sheet: &Sheet, cat_col: u32, val_col: u32) -> Result<Sh
     .to_a1();
     let val_letter = val_letter.trim_end_matches('1');
     let mut points = 0usize;
-    for row in 1..dims.rows {
+    for row in start_row..=end_row {
         let raw = cell_value(sheet, &vals, row, val_col);
         let clean = raw.trim().trim_start_matches('$').trim_end_matches('%');
         if clean.parse::<f64>().is_ok() {
@@ -180,6 +195,8 @@ pub(crate) fn plan_chart(sheet: &Sheet, cat_col: u32, val_col: u32) -> Result<Sh
         title: format!("{} Chart", sheet.name),
         cat_col,
         val_col,
+        start_row,
+        end_row: Some(end_row),
     })
 }
 
@@ -188,7 +205,12 @@ pub(crate) fn chart_points(sheet: &Sheet, chart: &SheetChart) -> Vec<(String, f6
     let vals = evaluate(sheet);
     let dims = sheet.dimensions();
     let mut out = Vec::new();
-    for row in 1..dims.rows {
+    for row in chart.start_row
+        ..=chart
+            .end_row
+            .unwrap_or(dims.rows.saturating_sub(1))
+            .min(dims.rows.saturating_sub(1))
+    {
         let cat = cell_value(sheet, &vals, row, chart.cat_col);
         let raw = cell_value(sheet, &vals, row, chart.val_col);
         let clean = raw.trim().trim_start_matches('$').trim_end_matches('%');
