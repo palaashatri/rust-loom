@@ -1,241 +1,11 @@
 import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
-
-component BlankPreview inherits VerticalLayout {
-    spacing: 0px;
-    Rectangle { height: 16px; background: #e5e7eb; }
-    for idx in 4 : Rectangle {
-        height: 16px;
-        background: #ffffff;
-        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #f3f4f6; }
-        HorizontalLayout {
-            spacing: 0px;
-            Rectangle { width: 32px; border-width: 0.5px; border-color: #e5e7eb; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #e5e7eb; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #e5e7eb; }
-            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e5e7eb; }
-        }
-    }
-}
-
-component BlankBlackPreview inherits VerticalLayout {
-    spacing: 0px;
-    Rectangle { height: 16px; background: #27272a; }
-    for idx in 4 : Rectangle {
-        height: 16px;
-        background: #18181b;
-        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #27272a; }
-        HorizontalLayout {
-            spacing: 0px;
-            Rectangle { width: 32px; border-width: 0.5px; border-color: #3f3f46; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
-            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #3f3f46; }
-        }
-    }
-}
-
-component TableChartPreview inherits VerticalLayout {
-    spacing: 2px;
-    padding: 4px;
-    HorizontalLayout {
-        height: 44px;
-        spacing: 6px;
-        alignment: center;
-        cross-axis-alignment: end;
-        Rectangle { width: 14px; height: 18px; border-radius: 2px; background: #3b82f6; }
-        Rectangle { width: 14px; height: 32px; border-radius: 2px; background: #06b6d4; }
-        Rectangle { width: 14px; height: 24px; border-radius: 2px; background: #10b981; }
-        Rectangle { width: 14px; height: 40px; border-radius: 2px; background: #f59e0b; }
-        Rectangle { width: 14px; height: 28px; border-radius: 2px; background: #8b5cf6; }
-    }
-    Rectangle { height: 1px; background: #e5e7eb; }
-    VerticalLayout {
-        spacing: 0px;
-        Rectangle { height: 12px; background: #f1f5f9; }
-        Rectangle { height: 12px; background: #ffffff; }
-        Rectangle { height: 12px; background: #f8fafc; }
-    }
-}
-
-component PivotPreview inherits VerticalLayout {
-    spacing: 0px;
-    Rectangle { height: 14px; background: #2563eb; }
-    for idx in 4 : Rectangle {
-        height: 16px;
-        background: Math.mod(idx, 2) == 1 ? #f1f5f9 : #ffffff;
-        HorizontalLayout {
-            spacing: 0px;
-            Rectangle { width: 48px; border-width: 0.5px; border-color: #cbd5e1; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #cbd5e1; }
-            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
-        }
-    }
-}
-
-component ChartingPreview inherits HorizontalLayout {
-    padding: 4px;
-    spacing: 6px;
-    HorizontalLayout {
-        width: 60px;
-        spacing: 4px;
-        alignment: center;
-        cross-axis-alignment: end;
-        Rectangle { width: 12px; height: 22px; border-radius: 2px; background: #ef4444; }
-        Rectangle { width: 12px; height: 38px; border-radius: 2px; background: #eab308; }
-        Rectangle { width: 12px; height: 50px; border-radius: 2px; background: #10b981; }
-    }
-    VerticalLayout {
-        spacing: 4px;
-        alignment: center;
-        Rectangle { width: 56px; height: 10px; border-radius: 2px; background: #3b82f6; }
-        Rectangle { width: 40px; height: 10px; border-radius: 2px; background: #06b6d4; }
-        Rectangle { width: 48px; height: 10px; border-radius: 2px; background: #8b5cf6; }
-    }
-}
-
-component BudgetPreview inherits VerticalLayout {
-    padding: 4px;
-    spacing: 3px;
-    HorizontalLayout {
-        height: 38px;
-        spacing: 8px;
-        cross-axis-alignment: center;
-        Rectangle {
-            width: 32px;
-            height: 32px;
-            border-radius: 16px;
-            border-width: 6px;
-            border-color: #10b981;
-            background: transparent;
-        }
-        VerticalLayout {
-            spacing: 3px;
-            Rectangle { width: 50px; height: 6px; border-radius: 3px; background: #3b82f6; }
-            Rectangle { width: 36px; height: 6px; border-radius: 3px; background: #f59e0b; }
-            Rectangle { width: 44px; height: 6px; border-radius: 3px; background: #10b981; }
-        }
-    }
-    Rectangle { height: 1px; background: #e5e7eb; }
-    VerticalLayout {
-        spacing: 0px;
-        Rectangle { height: 12px; background: #dcfce7; }
-        Rectangle { height: 12px; background: #ffffff; }
-        Rectangle { height: 12px; background: #f8fafc; }
-    }
-}
-
-component MonthlyBudgetPreview inherits VerticalLayout {
-    padding: 4px;
-    spacing: 3px;
-    HorizontalLayout {
-        height: 38px;
-        spacing: 8px;
-        cross-axis-alignment: center;
-        Rectangle {
-            width: 32px;
-            height: 32px;
-            border-radius: 16px;
-            border-width: 6px;
-            border-color: #06b6d4;
-            background: transparent;
-        }
-        HorizontalLayout {
-            spacing: 4px;
-            cross-axis-alignment: end;
-            Rectangle { width: 8px; height: 20px; border-radius: 2px; background: #3b82f6; }
-            Rectangle { width: 8px; height: 28px; border-radius: 2px; background: #10b981; }
-            Rectangle { width: 8px; height: 16px; border-radius: 2px; background: #3b82f6; }
-            Rectangle { width: 8px; height: 24px; border-radius: 2px; background: #10b981; }
-        }
-    }
-    Rectangle { height: 1px; background: #e5e7eb; }
-    VerticalLayout {
-        spacing: 0px;
-        Rectangle { height: 12px; background: #e0f2fe; }
-        Rectangle { height: 12px; background: #ffffff; }
-        Rectangle { height: 12px; background: #f8fafc; }
-    }
-}
-
-component MonthlyGoalPreview inherits VerticalLayout {
-    padding: 4px;
-    spacing: 3px;
-    HorizontalLayout {
-        height: 48px;
-        spacing: 8px;
-        alignment: center;
-        cross-axis-alignment: end;
-        Rectangle { width: 18px; height: 24px; border-radius: 2px; background: #3b82f6; }
-        Rectangle { width: 18px; height: 44px; border-radius: 2px; background: #10b981; }
-        Rectangle { width: 18px; height: 32px; border-radius: 2px; background: #94a3b8; }
-    }
-    Rectangle { height: 1px; background: #e5e7eb; }
-    VerticalLayout {
-        spacing: 0px;
-        Rectangle { height: 12px; background: #f1f5f9; }
-        Rectangle { height: 12px; background: #ffffff; }
-    }
-}
-
-component PortfolioPreview inherits VerticalLayout {
-    padding: 4px;
-    spacing: 4px;
-    Rectangle { height: 14px; border-radius: 2px; background: #dcfce7; }
-    HorizontalLayout {
-        height: 10px;
-        spacing: 2px;
-        Rectangle { width: 55px; border-radius: 2px; background: #10b981; }
-        Rectangle { width: 35px; border-radius: 2px; background: #3b82f6; }
-        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #f59e0b; }
-    }
-    VerticalLayout {
-        spacing: 0px;
-        Rectangle { height: 14px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
-        Rectangle { height: 14px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
-        Rectangle { height: 14px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
-    }
-}
-
-component NetWorthPreview inherits VerticalLayout {
-    padding: 4px;
-    spacing: 4px;
-    HorizontalLayout {
-        spacing: 4px;
-        Rectangle { horizontal-stretch: 1; height: 28px; border-radius: 2px; background: #dcfce7; }
-        Rectangle { horizontal-stretch: 1; height: 28px; border-radius: 2px; background: #fee2e2; }
-    }
-    VerticalLayout {
-        spacing: 0px;
-        Rectangle { height: 14px; background: #f1f5f9; }
-        Rectangle { height: 14px; background: #ffffff; }
-        Rectangle { height: 14px; background: #f8fafc; }
-    }
-}
-
-component InvoicePreview inherits VerticalLayout {
-    padding: 4px;
-    spacing: 2px;
-    HorizontalLayout {
-        alignment: end;
-        Rectangle { width: 44px; height: 10px; border-radius: 2px; background: #0284c7; }
-    }
-    for idx in 3 : Rectangle {
-        height: 14px;
-        background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff;
-        HorizontalLayout {
-            spacing: 0px;
-            Rectangle { width: 40px; border-width: 0.5px; border-color: #cbd5e1; }
-            Rectangle { width: 28px; border-width: 0.5px; border-color: #cbd5e1; }
-            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
-        }
-    }
-    HorizontalLayout {
-        alignment: end;
-        Rectangle { width: 50px; height: 12px; border-radius: 2px; background: #e0f2fe; }
-    }
-}
+import {
+    BlankPreview, BlankBlackPreview, TableChartPreview, PivotPreview,
+    ChartingPreview, BudgetPreview, MonthlyBudgetPreview, MonthlyGoalPreview,
+    PortfolioPreview, NetWorthPreview, InvoicePreview,
+} from "template_previews.slint";
 
 component SheetsTemplateCard inherits Rectangle {
     in property <string> title: "";
@@ -243,10 +13,11 @@ component SheetsTemplateCard inherits Rectangle {
     in property <length> preview-width: 144px;
     in property <length> preview-height: 96px;
     in property <color> preview-background: #ffffff;
+    in property <float> text-scale: 1.0;
     callback clicked;
 
     width: 156px;
-    height: 160px;
+    height: max(160px, root.preview-height + 14px + 44px * root.text-scale);
     accessible-role: button;
     accessible-label: root.title;
     accessible-action-default => { root.clicked(); }
@@ -274,13 +45,13 @@ component SheetsTemplateCard inherits Rectangle {
 
         Text {
             text: root.title;
-            font-size: Theme.tokens.typography.caption;
+            font-size: Theme.tokens.typography.caption * root.text-scale;
             font-weight: root.selected ? 600 : 500;
             color: Theme.palette().ink;
             horizontal-alignment: center;
             wrap: word-wrap;
             width: root.width - 8px;
-            min-height: 44px;
+            min-height: 44px * root.text-scale;
         }
     }
 
@@ -293,6 +64,31 @@ export component TemplateChooserModal inherits Rectangle {
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
     in property <[int]> template-recents: [];
+    in-out property <int> template-scroll-position: 0;
+    in property <float> text-scale: 1.0;
+    function template-content-height() -> length {
+        let card-height = max(160px, 110px + 44px * root.text-scale);
+        let heading-height = 24px * root.text-scale;
+        let body-height = 40px * root.text-scale;
+        let inner-gap = 16px;
+        let section-gap = 24px;
+        let recent-height = heading-height + inner-gap
+            + (root.template-recents.length == 0 ? body-height : card-height);
+        let two-row-section = heading-height + 2 * inner-gap + 2 * card-height;
+        let one-row-section = heading-height + inner-gap + card-height;
+
+        if (root.template-category == 0) {
+            return recent-height + 2 * two-row-section + 3 * one-row-section
+                + 5 * section-gap + 16px;
+        }
+        if (root.template-category == 1) {
+            return recent-height + 16px;
+        }
+        if (root.template-category == 2 || root.template-category == 3) {
+            return two-row-section + 16px;
+        }
+        return one-row-section + 16px;
+    }
     pure function template-title(index: int) -> string {
         return ["Blank", "Monthly Budget", "Invoice & Expenses", "Checklist", "Table and Chart", "Expense Summary", "Sales Chart", "Budget", "Monthly Goal", "Portfolio", "Net Worth"][index];
     }
@@ -301,6 +97,7 @@ export component TemplateChooserModal inherits Rectangle {
 
     function choose-template-category(category-index: int) {
         root.template-category = category-index;
+        root.template-scroll-position = 0;
         if (category-index == 1) {
             root.template-selected = root.template-recents.length > 0 ? root.template-recents[0] : 0;
         } else if (category-index == 2) {
@@ -364,7 +161,7 @@ export component TemplateChooserModal inherits Rectangle {
                             { name: "Business", icon: "package" },
                             { name: "Education", icon: "document" },
                         ] : Rectangle {
-                            height: 30px;
+                            height: 30px * root.text-scale;
                             border-radius: Theme.tokens.metrics.radius-medium;
                             background: root.template-category == i ? Theme.palette().surface-raised : transparent;
                             HorizontalLayout {
@@ -378,12 +175,13 @@ export component TemplateChooserModal inherits Rectangle {
                                     tint: Theme.palette().success;
                                 }
                                 Text {
+                                    horizontal-stretch: 1;
                                     text: cat.name;
-                                    font-size: Theme.tokens.typography.caption;
+                                    font-size: Theme.tokens.typography.caption * root.text-scale;
                                     font-weight: root.template-category == i ? 600 : 400;
                                     color: Theme.palette().ink;
                                     vertical-alignment: center;
-                                    overflow: elide;
+                                    wrap: word-wrap;
                                 }
                             }
                             TouchArea { clicked => { root.choose-template-category(i); } }
@@ -430,39 +228,56 @@ export component TemplateChooserModal inherits Rectangle {
 
                     Text {
                         text: "Choose a Template";
-                        font-size: Theme.tokens.typography.display;
+                        font-size: Theme.tokens.typography.display * root.text-scale;
                         font-weight: 700;
                         color: Theme.palette().ink;
                     }
 
-                    Flickable {
-                        vertical-stretch: 1;
-                        viewport-height: sections.preferred-height;
+                    scroll-viewport := Rectangle {
+                        height: min(520px, max(400px, root.height - 240px));
+                        clip: true;
 
-                        sections := VerticalLayout {
-                            spacing: Theme.tokens.space.xl;
-                            padding-bottom: Theme.tokens.space.md;
+                        template-scroll := Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-height: max(template-scroll.height, root.template-content-height());
+                            viewport-y: -Math.min(
+                                Math.max(0px, root.template-scroll-position * (174px * root.text-scale)
+                                    - (template-scroll.height - 174px * root.text-scale)),
+                                Math.max(0px, root.template-content-height() - template-scroll.height)
+                            );
+
+                            sections := VerticalLayout {
+                                width: parent.width;
+                                spacing: Theme.tokens.space.xl;
+                                padding-bottom: Theme.tokens.space.md;
+                                alignment: start;
 
                             // Only templates actually created in this session appear here.
                             if root.template-category == 0 || root.template-category == 1 : VerticalLayout {
+                                vertical-stretch: 0;
                                 spacing: Theme.tokens.space.md;
+                                alignment: start;
                                 Text {
                                     text: "Recent templates (this session)";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 if root.template-recents.length == 0 : Text {
                                     text: "No recent templates. Choose a template below or select a category.";
                                     wrap: word-wrap;
+                                    font-size: Theme.tokens.typography.body * root.text-scale;
                                     color: Theme.palette().ink-secondary;
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     alignment: start;
                                     for recent in root.template-recents : SheetsTemplateCard {
                                         title: root.template-title(recent);
                                         selected: root.template-selected == recent;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = recent; }
                                         if recent == 0 : BlankPreview {}
                                         if recent == 1 : MonthlyBudgetPreview {}
@@ -481,46 +296,55 @@ export component TemplateChooserModal inherits Rectangle {
 
                             // Basic Section
                             if root.template-category == 0 || root.template-category == 2 : VerticalLayout {
+                                vertical-stretch: 0;
                                 spacing: Theme.tokens.space.md;
+                                alignment: start;
                                 Text {
                                     text: "Basic";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     SheetsTemplateCard {
                                         title: "Blank";
                                         selected: root.template-selected == 0;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 0; }
                                         BlankPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Checklist";
                                         selected: root.template-selected == 3;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 3; }
                                         BlankBlackPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Table and Chart";
                                         selected: root.template-selected == 4;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 4; }
                                         TableChartPreview {}
                                     }
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     alignment: start;
                                     SheetsTemplateCard {
                                         title: "Expense Summary";
                                         selected: root.template-selected == 5;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 5; }
                                         PivotPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Sales Chart";
                                         selected: root.template-selected == 6;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 6; }
                                         ChartingPreview {}
                                     }
@@ -529,46 +353,55 @@ export component TemplateChooserModal inherits Rectangle {
 
                             // Personal Finance Section
                             if root.template-category == 0 || root.template-category == 3 : VerticalLayout {
+                                vertical-stretch: 0;
                                 spacing: Theme.tokens.space.md;
+                                alignment: start;
                                 Text {
                                     text: "Personal Finance";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     SheetsTemplateCard {
                                         title: "Budget";
                                         selected: root.template-selected == 7;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 7; }
                                         BudgetPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Monthly Budget";
                                         selected: root.template-selected == 1;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 1; }
                                         MonthlyBudgetPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Monthly Goal";
                                         selected: root.template-selected == 8;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 8; }
                                         MonthlyGoalPreview {}
                                     }
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     alignment: start;
                                     SheetsTemplateCard {
                                         title: "Portfolio";
                                         selected: root.template-selected == 9;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 9; }
                                         PortfolioPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Net Worth";
                                         selected: root.template-selected == 10;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 10; }
                                         NetWorthPreview {}
                                     }
@@ -576,31 +409,37 @@ export component TemplateChooserModal inherits Rectangle {
                             }
 
                             // Personal Section (category 4)
-                            if root.template-category == 4 : VerticalLayout {
+                            if root.template-category == 0 || root.template-category == 4 : VerticalLayout {
+                                vertical-stretch: 0;
                                 spacing: Theme.tokens.space.md;
+                                alignment: start;
                                 Text {
                                     text: "Personal";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     SheetsTemplateCard {
                                         title: "Monthly Budget";
                                         selected: root.template-selected == 1;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 1; }
                                         MonthlyBudgetPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Monthly Goal";
                                         selected: root.template-selected == 8;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 8; }
                                         MonthlyGoalPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Net Worth";
                                         selected: root.template-selected == 10;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 10; }
                                         NetWorthPreview {}
                                     }
@@ -608,31 +447,37 @@ export component TemplateChooserModal inherits Rectangle {
                             }
 
                             // Business Section (category 5)
-                            if root.template-category == 5 : VerticalLayout {
+                            if root.template-category == 0 || root.template-category == 5 : VerticalLayout {
+                                vertical-stretch: 0;
                                 spacing: Theme.tokens.space.md;
+                                alignment: start;
                                 Text {
                                     text: "Business";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     SheetsTemplateCard {
                                         title: "Invoice & Expenses";
                                         selected: root.template-selected == 2;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 2; }
                                         InvoicePreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Table and Chart";
                                         selected: root.template-selected == 4;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 4; }
                                         TableChartPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Expense Summary";
                                         selected: root.template-selected == 5;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 5; }
                                         PivotPreview {}
                                     }
@@ -640,35 +485,42 @@ export component TemplateChooserModal inherits Rectangle {
                             }
 
                             // Education Section (category 6)
-                            if root.template-category == 6 : VerticalLayout {
+                            if root.template-category == 0 || root.template-category == 6 : VerticalLayout {
+                                vertical-stretch: 0;
                                 spacing: Theme.tokens.space.md;
+                                alignment: start;
                                 Text {
                                     text: "Education";
-                                    font-size: Theme.tokens.typography.title;
+                                    font-size: Theme.tokens.typography.title * root.text-scale;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 HorizontalLayout {
+                                    vertical-stretch: 0;
                                     spacing: Theme.tokens.space.lg;
                                     SheetsTemplateCard {
                                         title: "Sales Chart";
                                         selected: root.template-selected == 6;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 6; }
                                         ChartingPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Monthly Goal";
                                         selected: root.template-selected == 8;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 8; }
                                         MonthlyGoalPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Table and Chart";
                                         selected: root.template-selected == 4;
+                                        text-scale: root.text-scale;
                                         clicked => { root.template-selected = 4; }
                                         TableChartPreview {}
                                     }
                                 }
+                            }
                             }
                         }
                     }
@@ -718,5 +570,3 @@ export component TemplateChooserModal inherits Rectangle {
         }
     }
 }
-
-

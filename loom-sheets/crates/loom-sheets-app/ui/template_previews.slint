@@ -1,0 +1,235 @@
+export component BlankPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle { height: 16px; background: #e5e7eb; }
+    for idx in 4 : Rectangle {
+        height: 16px;
+        background: #ffffff;
+        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #f3f4f6; }
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 32px; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #e5e7eb; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e5e7eb; }
+        }
+    }
+}
+
+export component BlankBlackPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle { height: 16px; background: #27272a; }
+    for idx in 4 : Rectangle {
+        height: 16px;
+        background: #18181b;
+        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #27272a; }
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 32px; border-width: 0.5px; border-color: #3f3f46; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #3f3f46; }
+        }
+    }
+}
+
+export component TableChartPreview inherits VerticalLayout {
+    spacing: 2px;
+    padding: 4px;
+    HorizontalLayout {
+        height: 44px;
+        spacing: 6px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 14px; height: 18px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 14px; height: 32px; border-radius: 2px; background: #06b6d4; }
+        Rectangle { width: 14px; height: 24px; border-radius: 2px; background: #10b981; }
+        Rectangle { width: 14px; height: 40px; border-radius: 2px; background: #f59e0b; }
+        Rectangle { width: 14px; height: 28px; border-radius: 2px; background: #8b5cf6; }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #f1f5f9; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+export component PivotPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle { height: 14px; background: #2563eb; }
+    for idx in 4 : Rectangle {
+        height: 16px;
+        background: Math.mod(idx, 2) == 1 ? #f1f5f9 : #ffffff;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 48px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { width: 44px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
+        }
+    }
+}
+
+export component ChartingPreview inherits HorizontalLayout {
+    padding: 4px;
+    spacing: 6px;
+    HorizontalLayout {
+        width: 60px;
+        spacing: 4px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 12px; height: 22px; border-radius: 2px; background: #ef4444; }
+        Rectangle { width: 12px; height: 38px; border-radius: 2px; background: #eab308; }
+        Rectangle { width: 12px; height: 50px; border-radius: 2px; background: #10b981; }
+    }
+    VerticalLayout {
+        spacing: 4px;
+        alignment: center;
+        Rectangle { width: 56px; height: 10px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 40px; height: 10px; border-radius: 2px; background: #06b6d4; }
+        Rectangle { width: 48px; height: 10px; border-radius: 2px; background: #8b5cf6; }
+    }
+}
+
+export component BudgetPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 38px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            border-width: 6px;
+            border-color: #10b981;
+            background: transparent;
+        }
+        VerticalLayout {
+            spacing: 3px;
+            Rectangle { width: 50px; height: 6px; border-radius: 3px; background: #3b82f6; }
+            Rectangle { width: 36px; height: 6px; border-radius: 3px; background: #f59e0b; }
+            Rectangle { width: 44px; height: 6px; border-radius: 3px; background: #10b981; }
+        }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #dcfce7; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+export component MonthlyBudgetPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 38px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            border-width: 6px;
+            border-color: #06b6d4;
+            background: transparent;
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            cross-axis-alignment: end;
+            Rectangle { width: 8px; height: 20px; border-radius: 2px; background: #3b82f6; }
+            Rectangle { width: 8px; height: 28px; border-radius: 2px; background: #10b981; }
+            Rectangle { width: 8px; height: 16px; border-radius: 2px; background: #3b82f6; }
+            Rectangle { width: 8px; height: 24px; border-radius: 2px; background: #10b981; }
+        }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #e0f2fe; }
+        Rectangle { height: 12px; background: #ffffff; }
+        Rectangle { height: 12px; background: #f8fafc; }
+    }
+}
+
+export component MonthlyGoalPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 3px;
+    HorizontalLayout {
+        height: 48px;
+        spacing: 8px;
+        alignment: center;
+        cross-axis-alignment: end;
+        Rectangle { width: 18px; height: 24px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { width: 18px; height: 44px; border-radius: 2px; background: #10b981; }
+        Rectangle { width: 18px; height: 32px; border-radius: 2px; background: #94a3b8; }
+    }
+    Rectangle { height: 1px; background: #e5e7eb; }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 12px; background: #f1f5f9; }
+        Rectangle { height: 12px; background: #ffffff; }
+    }
+}
+
+export component PortfolioPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 4px;
+    Rectangle { height: 14px; border-radius: 2px; background: #dcfce7; }
+    HorizontalLayout {
+        height: 10px;
+        spacing: 2px;
+        Rectangle { width: 55px; border-radius: 2px; background: #10b981; }
+        Rectangle { width: 35px; border-radius: 2px; background: #3b82f6; }
+        Rectangle { horizontal-stretch: 1; border-radius: 2px; background: #f59e0b; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 14px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 14px; background: #f8fafc; border-width: 0.5px; border-color: #e5e7eb; }
+        Rectangle { height: 14px; background: #ffffff; border-width: 0.5px; border-color: #e5e7eb; }
+    }
+}
+
+export component NetWorthPreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 4px;
+    HorizontalLayout {
+        spacing: 4px;
+        Rectangle { horizontal-stretch: 1; height: 28px; border-radius: 2px; background: #dcfce7; }
+        Rectangle { horizontal-stretch: 1; height: 28px; border-radius: 2px; background: #fee2e2; }
+    }
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle { height: 14px; background: #f1f5f9; }
+        Rectangle { height: 14px; background: #ffffff; }
+        Rectangle { height: 14px; background: #f8fafc; }
+    }
+}
+
+export component InvoicePreview inherits VerticalLayout {
+    padding: 4px;
+    spacing: 2px;
+    HorizontalLayout {
+        alignment: end;
+        Rectangle { width: 44px; height: 10px; border-radius: 2px; background: #0284c7; }
+    }
+    for idx in 3 : Rectangle {
+        height: 14px;
+        background: Math.mod(idx, 2) == 1 ? #f8fafc : #ffffff;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 40px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { width: 28px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        Rectangle { width: 50px; height: 12px; border-radius: 2px; background: #e0f2fe; }
+    }
+}
+

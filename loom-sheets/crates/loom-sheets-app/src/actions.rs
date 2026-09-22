@@ -40,6 +40,8 @@ pub(crate) fn sync_sheet_tabs(app: &SheetsApp, state: &GuiState) {
     app.set_active_sheet_index(*state.active_sheet_index.borrow() as i32);
 }
 
+pub(crate) use crate::template_navigation::wire_template_navigation;
+
 /// Apply a zoom level: factor drives geometry, label drives the toolbar.
 /// View-only (like scrolling): no undo transaction, but the projection and
 /// menu state refresh so the new scale renders immediately.
@@ -105,6 +107,7 @@ pub(crate) fn register_sheet_actions(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) {
+    wire_template_navigation(app);
     {
         let state = state.clone();
         let app_ref = app.as_weak();

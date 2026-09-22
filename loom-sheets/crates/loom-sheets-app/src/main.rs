@@ -57,6 +57,8 @@ use palette::*;
 mod journey;
 use journey::*;
 
+mod template_navigation;
+
 mod actions;
 use actions::*;
 
@@ -93,6 +95,7 @@ pub(crate) struct Args {
     pub(crate) rtl: bool,
     pub(crate) open: Option<String>,
     pub(crate) template_chooser: bool,
+    pub(crate) text_scale: f32,
     pub(crate) zoom: Option<f32>,
 }
 
@@ -119,6 +122,7 @@ where
         rtl: false,
         open: None,
         template_chooser: false,
+        text_scale: 1.0,
         zoom: None,
     };
     let mut it = raw_args.into_iter().map(Into::into);
@@ -151,6 +155,17 @@ where
             }
             "--rtl" => args.rtl = true,
             "--template-chooser" => args.template_chooser = true,
+            "--text-scale" => {
+                let scale: f32 = it
+                    .next()
+                    .ok_or("--text-scale needs a factor")?
+                    .parse()
+                    .map_err(|_| "bad --text-scale factor")?;
+                if !(1.0..=2.0).contains(&scale) {
+                    return Err("--text-scale must be between 1.0 and 2.0".to_string());
+                }
+                args.text_scale = scale;
+            }
             "--zoom" => {
                 let v: f32 = it
                     .next()
@@ -1712,6 +1727,7 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    app.set_template_text_scale(args.text_scale);
     let (w, h) = args.size;
     app.window().set_size(PhysicalSize::new(w, h));
     apply_layout_breakpoints(&app, w);
@@ -2149,6 +2165,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
+    app.set_template_text_scale(args.text_scale);
     app.window()
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);

@@ -146,6 +146,8 @@ export component SheetsApp inherits Window {
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
     in-out property <[int]> template-recents: [];
+    in-out property <int> template-scroll-position: 0;
+    in property <float> template-text-scale: 1.0;
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
 
@@ -171,6 +173,7 @@ export component SheetsApp inherits Window {
     callback inspector-context-changed(int);
     callback toggle-inspector;
     callback create-template(int);
+    callback navigate-template-selection(int);
     callback cancel-template;
     callback save-changes-save;
     callback save-changes-discard;
@@ -304,6 +307,14 @@ export component SheetsApp inherits Window {
             }
             if (event.text == Key.Return) {
                 root.create-template(root.template-selected);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.navigate-template-selection(-1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.navigate-template-selection(1);
                 return accept;
             }
             return reject;
@@ -755,6 +766,8 @@ export component SheetsApp inherits Window {
         template-selected <=> root.template-selected;
         template-category <=> root.template-category;
         template-recents: root.template-recents;
+        template-scroll-position <=> root.template-scroll-position;
+        text-scale: root.template-text-scale;
         cancel-template => { root.cancel-template(); }
         create-template(selected) => { root.create-template(selected); }
     }

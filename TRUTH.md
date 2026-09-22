@@ -31,7 +31,7 @@ Quality and permission to work are different. The owner override permits the act
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | UI-03 keyboard/text-scale check and native accessibility checks remain |
+| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | Native desktop pointer/keyboard and screen-reader checks remain |
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
@@ -48,7 +48,7 @@ The first audit was a code/reliability audit; it explicitly did **not** certify 
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
-- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, and the UI-17 and UI-25 repair reports/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `ddd0be8f7eeeb4cd387ce60a65438df7102273839e9cf590b8cc915090047a95`).
+- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, and the UI-17 and UI-25 repair reports/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `a9d7b52ad52714a3f22334bb20d15afaa59164d26363542813324f2e27d5e9dc`).
 - Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. That sentence describes the historical audit only; the owner-authorized repair commits listed below subsequently changed application behavior.
 - Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
 - Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
@@ -402,13 +402,13 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 ### UI-03 — Reflow the template chooser and show truthful Recents
 
-**P2 · Sheets · NEEDS_REVIEW.** At 1024×720 the rightmost template previews and names were cut off. The chooser also repeated Blank under Recents and Basic, and Recents was hard-coded instead of showing actual recent choices.
+**P2 · Sheets · FIXED.** At 1024×720 the rightmost template previews and names were cut off. The chooser also repeated Blank under Recents and Basic, and Recents was hard-coded instead of showing actual recent choices.
 
-**Repair result (2026-09-22):** The chooser now wraps cards into a vertically scrollable content area and shows “No recent templates” when the session has no recent choices. The refreshed 1024×720 capture shows the category rail and footer actions fully inside the window, with full names for visible cards. Card keyboard selection and 1.25×/1.5× text-scale behavior have not been verified; keep this card in review.
+**Repair result (2026-09-22):** The chooser now uses a bounded vertical scroll region with full card names, shows only session-created templates in Recents, and exposes all category sections in All Templates. Left/Right keyboard selection follows the visible category with wrap-around; Return/Create uses the selected card; Escape/Cancel leaves the current workbook unchanged. The selected Invoice & Expenses card remains fully visible at 1.25× and 1.5× text scale after the scroll target is adjusted for the larger card heights. Chooser navigation moved to `template_navigation.rs` so the active Sheets source-size ceiling remains satisfied.
 
-**Evidence:** `.work/sheets-acceptance-2026-09-22/screenshots/1024x720-template-chooser.png` and `capture-manifest.json`.
+**Evidence:** `.work/sheets-acceptance-2026-09-22/REPORT.md`; fresh captures under `.work/sheets-acceptance-2026-09-22/screenshots/`; focused test `keyboard_selection_scrolls_to_the_selected_template_in_all_templates`; full Sheets app suite (108 passed).
 
-**Open:** `loom-sheets/crates/loom-sheets-app/ui/template_chooser.slint`, `SheetsTemplateCard`, category rows and Recents; template selection callbacks in `src/main.rs`.
+**Open for overall Sheets acceptance:** Physical desktop pointer/keyboard input and screen-reader output remain unverified in this environment. Those are acceptance-gate checks, not remaining chooser code defects.
 
 1. Compute how many full cards fit in the content area after the category sidebar and padding. Move excess cards to another row; allow vertical scrolling of this content region.
 2. Keep the entire template name and preview visible. Do not shrink the text or make the whole modal horizontally scroll.

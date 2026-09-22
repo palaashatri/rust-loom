@@ -4,6 +4,9 @@ use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::persistence::sheet_from_json;
 use slint::Model;
 
+#[path = "template_chooser_tests.rs"]
+mod template_chooser_tests;
+
 #[test]
 fn rtl_argument_is_parsed_and_applied_to_the_root() {
     let args = parse_args_from(["--rtl"] as [&str; 1]).expect("parse --rtl");
