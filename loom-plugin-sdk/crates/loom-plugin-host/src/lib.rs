@@ -1430,11 +1430,15 @@ mod tests {
         }
         #[cfg(windows)]
         {
-            let command = format!("mklink /J \"{}\" \"{}\"", link.display(), target.display());
-            let output = std::process::Command::new("cmd")
-                .args(["/D", "/C"])
-                .arg(command)
-                .output()?;
+            use std::os::windows::process::CommandExt;
+
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/D", "/C"]).raw_arg(format!(
+                "mklink /J \"{}\" \"{}\"",
+                link.display(),
+                target.display()
+            ));
+            let output = command.output()?;
             if output.status.success() {
                 Ok(())
             } else {
