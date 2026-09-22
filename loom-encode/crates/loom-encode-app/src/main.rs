@@ -454,7 +454,7 @@ fn refresh(app: &EncodeApp, queue: &EncodeQueue, backend: Option<&EncoderBackend
     app.set_backend_version(
         backend
             .map(|item| SharedString::from(item.version.as_str()))
-            .unwrap_or_else(|| "Install FFmpeg and ensure it is available on PATH".into()),
+            .unwrap_or_else(|| "Choose an FFmpeg executable or use Check again".into()),
     );
     let next_job = queue
         .next_queued_index()
@@ -2728,6 +2728,16 @@ mod tests {
         assert_eq!(snapshot(&state).queue_digest(), before);
         assert!(state.backend().is_none());
         assert!(app.get_setup_error().contains("Cannot run"));
+    }
+
+    #[test]
+    fn unavailable_backend_guidance_matches_recovery_actions() {
+        let (app, _) = test_app_and_state(ScriptedFileDialogs::default());
+
+        assert_eq!(
+            app.get_backend_version().as_str(),
+            "Choose an FFmpeg executable or use Check again"
+        );
     }
 
     #[test]

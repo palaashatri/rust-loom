@@ -3788,6 +3788,33 @@ mod tests {
     }
 
     #[test]
+    fn compact_media_recovery_actions_are_not_clipped() {
+        let (app, _) = test_app_and_state(ScriptedFileDialogs::default());
+        configure_responsive_layout(&app, 1024);
+        let image = snapshot_component(&app, 1024.0, 720.0, 1.0).unwrap();
+
+        for x in [24, 360] {
+            let mut longest = 0;
+            let mut current = 0;
+            for y in 0..image.height() {
+                let pixel = image.get_pixel(x, y).0;
+                let button_fill = pixel[0] > 180 && (50..=120).contains(&pixel[1]) && pixel[2] < 70;
+                if button_fill {
+                    current += 1;
+                    longest = longest.max(current);
+                } else {
+                    current = 0;
+                }
+            }
+
+            assert!(
+                longest >= 28,
+                "compact recovery button at x={x} is clipped to {longest}px"
+            );
+        }
+    }
+
+    #[test]
     fn new_project_creates_untitled_clean_state() {
         let scripted = ScriptedFileDialogs::default();
         let (app, state) = test_app_and_state(scripted);
