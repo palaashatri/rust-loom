@@ -31,7 +31,7 @@ Quality and permission to work are different. The owner override permits the act
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | UI-03 keyboard/text-scale check, native accessibility checks, and fresh CI/build confirmation remain |
+| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | UI-03 keyboard/text-scale check and native accessibility checks remain |
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
@@ -48,6 +48,7 @@ The first audit was a code/reliability audit; it explicitly did **not** certify 
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
+- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, and the 2026-09-22 Sheets screenshots/report: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `f7903621758978605e1722f7c9229202f6bb24332df843f2a21428327d5b12ff`).
 - Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. That sentence describes the historical audit only; the owner-authorized repair commits listed below subsequently changed application behavior.
 - Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
 - Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
@@ -64,7 +65,7 @@ These capabilities describe the current implementation and historical work, not 
 
 ### Sheets
 
-The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas. Sheets is now the active completion phase; UI-02/03/04/08, visual acceptance, accessibility checks, and the source-size ratchet remain to be closed. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
+The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas. Sheets is now the active completion phase; UI-02/03/04/08, visual acceptance, and native accessibility checks remain. Its pushed source passes the dedicated Sheets CI job; the repo-wide code-size audit still reports four unrelated legacy files outside Sheets. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
 
 ### Writer
 
@@ -98,7 +99,7 @@ FFmpeg queue/preset planning, execution/progress/cancellation, persistence/recov
 
 Oversized `main.rs`/`lib.rs` files and duplicated generic UI remain maintenance debt. Follow the byte ratchet; extract coherent responsibilities when a touched legacy file cannot grow. Do not create a parallel framework or rewrite the suite as part of one repair.
 
-A dedicated Sheets CI job is now defined in `.github/workflows/ci.yml` for formatting, Clippy, and workspace tests, with the native UI build dependencies installed. **GOV-01 · NEEDS_REVIEW:** the job must pass on the pushed branch before this CI repair is verified. A focused chart-range regression was also run once with the intentional range bug restored and failed on the expected XLSX range assertion; the fixed-source focused and full cached test harnesses pass. Keep unrelated release/package builds manual. Do not replace behavior checks with callback-count or screenshot-exists checks.
+A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formatting, Clippy, and workspace tests, with the native UI build dependencies installed. **GOV-01 · FIXED:** on pushed commit `ce2374c75fad4ec3e112b0c3a852840c39c1f928`, the job passed formatting, Clippy, and `cargo test --workspace --locked`. The separate repo-wide governance job is still red at the code-structure ratchet for four untouched files: `loom-encode/crates/loom-encode-app/src/main.rs`, `loom-video/crates/loom-video-app/src/main.rs`, `loom-video/crates/loom-video-core/src/lib.rs`, and `loom-photo/crates/loom-photo-app/src/main.rs`. That unrelated debt is not a Sheets test failure. A focused chart-range regression was also run once with the intentional range bug restored and failed on the expected XLSX range assertion; the fixed-source focused and full cached test harnesses pass. Keep unrelated release/package builds manual. Do not replace behavior checks with callback-count or screenshot-exists checks.
 
 Asset provenance and commercial redistribution rules remain in `AGENTS.MD` and `loom-bootstrap/contracts/assets.toml`. Fresh screenshots are evidence generated by this project, not imported product artwork. No third-party assets were added for this audit.
 
