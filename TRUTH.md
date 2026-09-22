@@ -223,18 +223,22 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 
 ### CODE-09 — Respect Encode's no-overwrite choice at the final write
 
-**P1 · Encode · NEEDS_REVIEW · Needs filesystem review.** Another file may appear while encoding. It still belongs to its owner.
+**P1 · Encode · NEEDS_REVIEW · Local checks and independent filesystem review pass; native Linux/Windows/macOS CI is pending.** Another file may appear while encoding. It still belongs to its owner.
 
 **Repair result (2026-09-15):** Commit `1a51c6d` rechecks the destination immediately before the final publish and adds no-overwrite races. Focused Encode tests pass; filesystem semantics on Windows/network filesystems remain a review item.
 
-**Open:** `loom-encode/crates/loom-encode-core/src/lib.rs`, `commit_encode_output`.
+**Repair result (2026-09-22):** `loom-encode/crates/loom-encode-core/src/output_publish.rs` now publishes no-overwrite results by creating a hard link from the completed same-folder temporary file to the final name. The operating system rejects the operation if another file already owns that name. Loom reports the collision, keeps the other file's bytes unchanged, and the temporary-output guard cleans up the encode result. The explicit Overwrite path remains separate. Added helper tests for a collision, a missing destination, and explicit overwrite; added a controlled-encoder race test for Unix and Windows; and added Linux, Windows, and macOS CI coverage. The independent filesystem review confirms the create-if-absent operation is appropriate; unsupported filesystems fail closed without replacing the destination.
+
+**Verified locally:** `cargo fmt --manifest-path loom-encode/Cargo.toml --all -- --check`; `cargo test --manifest-path loom-encode/Cargo.toml -p loom-encode-core --locked --offline` (51 unit tests and 1 controlled-encoder integration test passed); `cargo clippy --manifest-path loom-encode/Cargo.toml -p loom-encode-core --all-targets --locked --offline -- -D warnings`; `cargo check --manifest-path loom-encode/Cargo.toml -p loom-encode-core --tests --target x86_64-pc-windows-gnu --locked --offline`; `python3 loom-bootstrap/scripts/audit-governance.py`; and `git diff --check`. Native OS CI is pending after this push. A full app compile could not complete on this machine because the system `fontconfig` development package is absent; the app was not changed by this card.
+
+**Open:** Wait for the new native `encode-output-publish` Linux/Windows/macOS CI matrix. Remote and network filesystems are not exercised; if the platform cannot create a hard link, Encode fails safely and does not replace the destination.
 
 1. Keep encoding into a temporary file.
 2. When overwrite is false, publish with an atomic **create only if absent** operation. An earlier `exists()` check does not solve the race.
 3. On collision, preserve the existing destination, report the conflict, and clean up or offer the completed temporary result under a new name.
 4. Keep explicit overwrite=true behavior separate and test platform differences.
 
-**Prove it:** Have a controlled encoder create `IMPORTANT_OTHER_FILE` at the destination midway through the job. The job must report a collision and that file's bytes must remain unchanged. Current result replaces it with `NEWENCODE`. Evidence: `encode-overwrite.log`, `media-plugins/src/bin/encode_collision.rs`.
+**Prove it:** The controlled encoder creates `IMPORTANT_OTHER_FILE` at the destination midway through the job. The job reports a collision, leaves those exact bytes at the destination, and removes its temporary result. The helper tests also prove that an absent destination is created and that explicit Overwrite still replaces an existing file. Regression coverage: `loom-encode/crates/loom-encode-core/tests/output_publish.rs` and `loom-encode/crates/loom-encode-core/src/output_publish.rs`.
 ### CODE-10 — Preserve audio precision in Studio projects
 
 **P1 · Studio · FIXED.** Saving the project must not make quiet sounds disappear or lower every sample a little.
