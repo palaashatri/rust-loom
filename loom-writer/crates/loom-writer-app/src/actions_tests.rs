@@ -407,7 +407,7 @@ fn render_projection_keeps_character_styles_and_paragraph_geometry_visible() {
 fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
     let mut document = text_document("layout-backed selection");
     document.set_selection(TextSelection::range(0, 6));
-    let (rows, selection_rects) = writer_render_projection(
+    let (rows, selection_rects, comment_rects) = writer_render_projection(
         &document,
         PageViewport {
             zoom: 1.5,
@@ -417,6 +417,7 @@ fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
     );
 
     assert_eq!(rows.len(), 1);
+    assert!(comment_rects.is_empty());
     let row = &rows[0];
     let style = PageStyle::default();
     assert_eq!(row.x, 0.0, "rows are relative to the content box");
@@ -433,7 +434,7 @@ fn render_projection_uses_page_layout_for_rows_and_selection_overlay() {
         "a non-collapsed selection must produce a visible highlight rectangle"
     );
 
-    let (zoomed_rows, _) = writer_render_projection(
+    let (zoomed_rows, _, _) = writer_render_projection(
         &document,
         PageViewport {
             zoom: 2.0,
@@ -494,7 +495,7 @@ fn justify_is_disabled_and_persisted_projection_is_indeterminate() {
 fn persisted_justify_projection_exposes_an_explicit_unsupported_indicator() {
     let mut document = text_document("justify remains readable");
     document.blocks[0].style.alignment = loom_text::Alignment::Justify;
-    let (rows, _) = writer_render_projection(&document, PageViewport::default());
+    let (rows, _, _) = writer_render_projection(&document, PageViewport::default());
     let row = rows.first().expect("render row");
     assert_eq!(row.alignment, -1);
     assert!(
@@ -519,7 +520,7 @@ fn render_projection_keeps_long_document_rows_on_their_page_flow() {
     // as the cumulative row positions above.
     let document_len = document.editor_text().len();
     document.set_selection(TextSelection::range(0, document_len));
-    let (rows, selection_rects) = writer_render_projection(&document, PageViewport::default());
+    let (rows, selection_rects, _) = writer_render_projection(&document, PageViewport::default());
     assert_eq!(rows.len(), document.blocks.len());
     assert!(
         rows.windows(2)
@@ -540,7 +541,7 @@ fn render_projection_keeps_long_document_rows_on_their_page_flow() {
 #[test]
 fn empty_document_projection_exposes_a_visible_insertion_caret() {
     let document = WriterDocument::new("empty", "Empty");
-    let (_, selection_rects) = writer_render_projection(&document, PageViewport::default());
+    let (_, selection_rects, _) = writer_render_projection(&document, PageViewport::default());
     assert!(
         selection_rects.iter().any(|rect| rect.caret),
         "blank documents must expose a model caret for the empty insertion point"
@@ -1401,7 +1402,7 @@ fn numbered_lists_render_sequential_markers_and_markdown() {
     for index in [0usize, 1, 3] {
         document.blocks[index].kind = "list-numbered".to_string();
     }
-    let (rows, _) = writer_render_projection(&document, PageViewport::default());
+    let (rows, _, _) = writer_render_projection(&document, PageViewport::default());
     let markers: Vec<String> = rows
         .iter()
         .filter(|row| !row.marker.is_empty())
@@ -1443,7 +1444,6 @@ fn comments_add_resolve_delete_undo_and_round_trip() {
     let mut next = state.current.borrow().clone();
     let block_len = next.blocks[0].text.len_bytes();
     next.set_selection(TextSelection::range(6, 6 + block_len.min(14)));
-    let selection = next.selection().clone();
     apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
     app.invoke_add_comment(SharedString::from("Nice phrase"));
     {
@@ -1476,6 +1476,126 @@ fn comments_add_resolve_delete_undo_and_round_trip() {
     let reopened = loom_writer_core::load_document(&bytes).expect("load");
     assert_eq!(reopened.comments.len(), 1);
     assert_eq!(reopened.comments[0].body, "Persisted");
+}
+
+#[test]
+fn comment_projection_keeps_the_same_thread_id_across_wrapped_utf8_ranges() {
+    let text = "word 🌍 ".repeat(700);
+    let mut document = text_document(&text);
+    let block_id = document.blocks[0].id;
+    let start = text.find("🌍").expect("emoji anchor");
+    let end = text.rfind("🌍").expect("last emoji anchor") + "🌍".len();
+    let comment_id = document
+        .add_comment_thread(block_id, start, end, "Review this long passage")
+        .expect("add comment");
+    document.set_selection(TextSelection::range(0, 2));
+
+    let (rows, selection_rects, comment_rects) =
+        writer_render_projection(&document, PageViewport::default());
+
+    assert!(!rows.is_empty());
+    assert_eq!(
+        selection_rects.len(),
+        1,
+        "active selection stays independent"
+    );
+    assert!(
+        comment_rects.len() > 1,
+        "comment range follows wrapped lines"
+    );
+    assert!(
+        comment_rects.iter().any(|rect| rect.page_index > 0),
+        "comment range crosses into later pages"
+    );
+    assert!(comment_rects
+        .iter()
+        .all(|rect| rect.comment_id == comment_id));
+    assert_eq!(comment_rects.iter().filter(|rect| rect.marker).count(), 1);
+    assert_eq!(
+        comment_selection_range(&document, &comment_id),
+        Some((start, end)),
+        "the inspector action resolves to the same UTF-8 byte range as the page highlight"
+    );
+    assert_eq!(document.selection(), TextSelection::range(0, 2));
+}
+
+#[test]
+fn navigating_to_comment_selects_the_anchor_and_opens_the_compact_inspector() {
+    let text = "word 🌍 ".repeat(700);
+    let mut document = text_document(&text);
+    let block_id = document.blocks[0].id;
+    let start = text.rfind("🌍").expect("late emoji anchor");
+    let end = start + "🌍".len();
+    let comment_id = document
+        .add_comment_thread(block_id, start, end, "Review this phrase")
+        .expect("add comment");
+    let (app, state) = test_state(
+        document,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None])),
+    );
+    app.set_compact_inspector_layout(true);
+    app.set_inspector_available(true);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    app.invoke_navigate_comment(SharedString::from(comment_id.clone()));
+
+    assert!(
+        app.get_show_inspector(),
+        "comment review opens the inspector"
+    );
+    assert_eq!(
+        state.current.borrow().selection(),
+        TextSelection::range(start, end),
+        "the page selection matches the UTF-8 comment anchor"
+    );
+    assert!(
+        state.viewport.borrow().scroll_y > 0.0,
+        "a comment on a later page scrolls into view"
+    );
+    assert_eq!(
+        app.get_page_scroll_y(),
+        state.viewport.borrow().scroll_y,
+        "the visible page and controller share the same scroll position"
+    );
+    assert!(app
+        .get_comment_rects()
+        .iter()
+        .all(|rect| rect.comment_id == comment_id));
+}
+
+#[test]
+fn comment_anchor_rebases_with_edit_and_is_restored_by_undo_redo() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let mut document = text_document("Hello world");
+    let block_id = document.blocks[0].id;
+    document
+        .add_comment_thread(block_id, 6, 11, "Review this word")
+        .expect("add comment");
+    let (app, state) = test_state(document, dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    let mut next = state.current.borrow().clone();
+    next.set_selection(TextSelection::caret(0));
+    next.replace_selection_text("New ").expect("insert text");
+    apply_with_history(&app, &state, next, HistoryKind::DocumentAction);
+    let edited = state.current.borrow().clone();
+    let comment = &edited.comments[0];
+    let block = edited.get(comment.block_id).expect("edited block");
+    assert_eq!(&block.text.as_str()[comment.start..comment.end], "world");
+
+    app.invoke_undo();
+    let undone = state.current.borrow().clone();
+    let comment = &undone.comments[0];
+    let block = undone.get(comment.block_id).expect("undone block");
+    assert_eq!(&block.text.as_str()[comment.start..comment.end], "world");
+    assert_eq!((comment.start, comment.end), (6, 11));
+
+    app.invoke_redo();
+    let redone = state.current.borrow().clone();
+    let comment = &redone.comments[0];
+    let block = redone.get(comment.block_id).expect("redone block");
+    assert_eq!(&block.text.as_str()[comment.start..comment.end], "world");
+    assert_eq!((comment.start, comment.end), (10, 15));
 }
 
 #[test]

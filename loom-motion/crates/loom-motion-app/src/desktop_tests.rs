@@ -34,26 +34,28 @@ fn responsive_policy_transition_probes_are_exact() {
     set_platform();
     let app = MotionApp::new().expect("create MotionApp");
     let expected = [
-        (1179, true, true, false),
-        (1180, false, true, false),
-        (1279, false, true, false),
-        (1280, false, true, false),
-        (1319, false, true, false),
-        (1320, false, false, true),
+        (1179, true, true, false, true),
+        (1180, false, true, false, false),
+        (1279, false, true, false, false),
+        (1280, false, true, false, false),
+        (1319, false, true, false, false),
+        (1320, false, false, true, false),
     ];
-    for (width, icon_only, overflow, labeled) in expected {
+    for (width, icon_only, overflow, labeled, inspector_action_labeled) in expected {
         assert_eq!(
             responsive_toolbar_state(&app, width),
             ResponsiveToolbarState {
                 icon_only,
                 overflow,
                 labeled,
+                inspector_action_labeled,
             }
         );
         configure_responsive_layout(&app, width);
         assert_eq!(app.get_icon_only_toolbar(), icon_only);
         assert_eq!(app.get_overflow_toolbar(), overflow);
         assert_eq!(app.get_labeled_toolbar(), labeled);
+        assert_eq!(app.get_inspector_action_labeled(), inspector_action_labeled);
         assert_eq!(compact_layout_for_width(&app, width), icon_only);
     }
 }

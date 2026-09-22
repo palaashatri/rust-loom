@@ -1,6 +1,6 @@
 import {
     LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
-    LoomIconButton, LoomOverflowButton,
+    LoomButton, LoomIconButton, LoomOverflowButton,
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 
@@ -10,6 +10,7 @@ export component PhotoActionToolbar inherits LoomToolbar {
     in property <bool> pan-mode: false;
     in-out property <float> zoom-value: 72.0;
     in property <bool> inspector-visible: true;
+    in property <bool> inspector-action-labeled: false;
     in property <bool> labeled: false;
     in property <bool> overflow: false;
 
@@ -86,8 +87,15 @@ export component PhotoActionToolbar inherits LoomToolbar {
                 root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25;
             }
         }
-        LoomIconButton {
+        if root.inspector-action-labeled : LoomButton {
+            label: "Format";
             icon: "format";
+            selected: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        if !root.inspector-action-labeled : LoomIconButton {
+            icon: "format";
+            label: "Format inspector";
             tooltip: "Toggle Format Inspector";
             selected: root.inspector-visible;
             clicked => { root.toggle-inspector(); }
@@ -98,4 +106,3 @@ export component PhotoActionToolbar inherits LoomToolbar {
         }
     }
 }
-

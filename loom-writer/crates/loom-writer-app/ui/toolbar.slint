@@ -33,6 +33,16 @@ export component WriterActionToolbar inherits LoomToolbar {
     callback select-alignment(int);
     callback insert-table;
 
+    public function focus-inspector-trigger() {
+        inspector-button.grab-focus();
+    }
+
+    changed inspector-visible => {
+        if (!root.inspector-visible) {
+            inspector-button.grab-focus();
+        }
+    }
+
     function next-page-zoom() -> float {
         return root.page-zoom >= 1.5 ? 1.0 : root.page-zoom + 0.25;
     }
@@ -141,9 +151,9 @@ export component WriterActionToolbar inherits LoomToolbar {
             variant: "ghost";
             clicked => { root.export-pdf(); }
         }
-        LoomButton {
+        inspector-button := LoomButton {
             icon: "format";
-            label: root.wide ? "Format" : "";
+            label: "Format";
             variant: root.inspector-visible ? "primary" : "ghost";
             selected: root.inspector-visible;
             enabled: root.inspector-available;
@@ -278,9 +288,9 @@ export component WriterToolbarBody inherits HorizontalLayout {
             variant: "ghost";
             clicked => { root.export-pdf(); }
         }
-        LoomButton {
+        inspector-button := LoomButton {
             icon: "format";
-            label: root.wide ? "Format" : "";
+            label: "Format";
             variant: root.inspector-visible ? "primary" : "ghost";
             selected: root.inspector-visible;
             enabled: root.inspector-available;

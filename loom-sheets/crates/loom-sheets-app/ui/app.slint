@@ -34,7 +34,9 @@ export component SheetsApp inherits Window {
     in-out property <bool> show-inspector: false;
     in-out property <bool> inspector-preference: false;
     in property <bool> inspector-available: true;
-    property <bool> inspector-visible: root.show-inspector && root.inspector-available && !root.icon-only-toolbar;
+    property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    property <bool> inspector-docked-visible: root.inspector-visible && !root.icon-only-toolbar;
+    property <bool> compact-inspector-visible: root.inspector-visible && root.icon-only-toolbar;
     in property <bool> can-undo: false;
     in property <bool> can-redo: false;
     in-out property <int> inspector-tab: 0;
@@ -43,6 +45,13 @@ export component SheetsApp inherits Window {
     callback window-resized(length);
     changed rtl => {
         Theme.rtl = root.rtl;
+    }
+    changed inspector-visible => {
+        if (root.inspector-visible) {
+            inspector-panel.focus-inspector();
+        } else {
+            action-toolbar.focus-inspector-trigger();
+        }
     }
     changed width => {
         root.window-resized(root.width);
@@ -437,7 +446,7 @@ export component SheetsApp inherits Window {
             padding: 0px;
 
             // Numbers Unified Action Toolbar
-            SheetActionToolbar {
+            action-toolbar := SheetActionToolbar {
                 rtl: root.rtl;
                 wide: root.wide-toolbar;
                 overflow: root.overflow-toolbar;
@@ -508,53 +517,17 @@ export component SheetsApp inherits Window {
             }
 
             // Main spreadsheet workspace
-            HorizontalLayout {
-                spacing: 0px;
+            workspace := Rectangle {
+                horizontal-stretch: 1;
                 vertical-stretch: 1;
+                background: transparent;
 
-                if root.rtl && root.inspector-visible : SheetInspector {
-                    selection-range: root.selection-range;
-                    selection-value: root.selection-value;
-                    selection-formula: root.selection-formula;
-                    sheet-name: root.sheet-name;
-                    table-rows-label: root.table-rows-label;
-                    table-cols-label: root.table-cols-label;
-                    selected-row-height: root.selected-row-height;
-                    selected-col-width: root.selected-col-width;
-                    cell-format: root.cell-format;
-                    cell-alignment: root.cell-alignment;
-                    cell-bold: root.cell-bold;
-                    cell-italic: root.cell-italic;
-                    cell-underline: root.cell-underline;
-                    cell-border: root.cell-border;
-                    cell-fill: root.cell-fill;
-                    cell-font-size: root.cell-font-size;
-                    cell-font-label: root.cell-font-label;
-                    cell-decimals-label: root.cell-decimals-label;
-                    inspector-search <=> root.inspector-search;
-                    inspector-tab <=> root.inspector-tab;
-                    inspector-show-table: root.inspector-show-table;
-                    inspector-show-cell: root.inspector-show-cell;
-                    inspector-search-edited(query) => { root.inspector-search-edited(query); }
-                    inspector-context-changed(index) => { root.inspector-context-changed(index); }
-                    rename-sheet(name) => { root.rename-sheet(name); }
-                    add-table-row => { root.add-row(); }
-                    delete-table-row => { root.delete-row(); }
-                    add-table-col => { root.add-table-col(); }
-                    delete-table-col => { root.delete-col(); }
-                    adjust-row-height(delta) => { root.adjust-row-height(delta); }
-                    adjust-col-width(delta) => { root.adjust-col-width(delta); }
-                    set-cell-format(fmt) => { root.set-cell-format(fmt); }
-                    set-cell-alignment(align) => { root.set-cell-alignment(align); }
-                    toggle-bold => { root.toggle-bold(); }
-                    toggle-italic => { root.toggle-italic(); }
-                    toggle-underline => { root.toggle-underline(); }
-                    toggle-borders => { root.toggle-borders(); }
-                    cycle-fill => { root.cycle-fill(); }
-                    set-fill(idx) => { root.set-fill(idx); }
-                    adjust-font(delta) => { root.adjust-font(delta); }
-                    adjust-decimals(delta) => { root.adjust-decimals(delta); }
-                }
+                HorizontalLayout {
+                    height: parent.height;
+                    spacing: 0px;
+                    vertical-stretch: 1;
+
+                if root.rtl && root.inspector-docked-visible : Rectangle { width: 320px; background: transparent; }
 
                 Rectangle {
                     horizontal-stretch: 1;
@@ -657,48 +630,68 @@ export component SheetsApp inherits Window {
                     }
                 }
 
-                if !root.rtl && root.inspector-visible : SheetInspector {
-                    selection-range: root.selection-range;
-                    selection-value: root.selection-value;
-                    selection-formula: root.selection-formula;
-                    sheet-name: root.sheet-name;
-                    table-rows-label: root.table-rows-label;
-                    table-cols-label: root.table-cols-label;
-                    selected-row-height: root.selected-row-height;
-                    selected-col-width: root.selected-col-width;
-                    cell-format: root.cell-format;
-                    cell-alignment: root.cell-alignment;
-                    cell-bold: root.cell-bold;
-                    cell-italic: root.cell-italic;
-                    cell-underline: root.cell-underline;
-                    cell-border: root.cell-border;
-                    cell-fill: root.cell-fill;
-                    cell-font-size: root.cell-font-size;
-                    cell-font-label: root.cell-font-label;
-                    cell-decimals-label: root.cell-decimals-label;
-                    inspector-search <=> root.inspector-search;
-                    inspector-tab <=> root.inspector-tab;
-                    inspector-show-table: root.inspector-show-table;
-                    inspector-show-cell: root.inspector-show-cell;
-                    inspector-search-edited(query) => { root.inspector-search-edited(query); }
-                    inspector-context-changed(index) => { root.inspector-context-changed(index); }
-                    rename-sheet(name) => { root.rename-sheet(name); }
-                    add-table-row => { root.add-row(); }
-                    delete-table-row => { root.delete-row(); }
-                    add-table-col => { root.add-table-col(); }
-                    delete-table-col => { root.delete-col(); }
-                    adjust-row-height(delta) => { root.adjust-row-height(delta); }
-                    adjust-col-width(delta) => { root.adjust-col-width(delta); }
-                    set-cell-format(fmt) => { root.set-cell-format(fmt); }
-                    set-cell-alignment(align) => { root.set-cell-alignment(align); }
-                    toggle-bold => { root.toggle-bold(); }
-                    toggle-italic => { root.toggle-italic(); }
-                    toggle-underline => { root.toggle-underline(); }
-                    toggle-borders => { root.toggle-borders(); }
-                    cycle-fill => { root.cycle-fill(); }
-                    set-fill(idx) => { root.set-fill(idx); }
-                    adjust-font(delta) => { root.adjust-font(delta); }
-                    adjust-decimals(delta) => { root.adjust-decimals(delta); }
+                if !root.rtl && root.inspector-docked-visible : Rectangle { width: 320px; background: transparent; }
+            }
+
+                if root.compact-inspector-visible : Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    background: Theme.palette().scrim;
+                    TouchArea { clicked => { root.toggle-inspector(); } }
+                }
+
+                inspector-panel := SheetInspector {
+                    visible: root.inspector-visible;
+                    active: root.inspector-visible;
+                    x: root.rtl ? 0px : parent.width - self.width;
+                    y: 0px;
+                    width: 320px;
+                    height: parent.height;
+                    close-requested => { root.toggle-inspector(); }
+                                        selection-range: root.selection-range;
+                                        selection-value: root.selection-value;
+                                        selection-formula: root.selection-formula;
+                                        sheet-name: root.sheet-name;
+                                        table-rows-label: root.table-rows-label;
+                                        table-cols-label: root.table-cols-label;
+                                        selected-row-height: root.selected-row-height;
+                                        selected-col-width: root.selected-col-width;
+                                        cell-format: root.cell-format;
+                                        cell-alignment: root.cell-alignment;
+                                        cell-bold: root.cell-bold;
+                                        cell-italic: root.cell-italic;
+                                        cell-underline: root.cell-underline;
+                                        cell-border: root.cell-border;
+                                        cell-fill: root.cell-fill;
+                                        cell-font-size: root.cell-font-size;
+                                        cell-font-label: root.cell-font-label;
+                                        cell-decimals-label: root.cell-decimals-label;
+                                        inspector-search <=> root.inspector-search;
+                                        inspector-tab <=> root.inspector-tab;
+                                        inspector-show-table: root.inspector-show-table;
+                                        inspector-show-cell: root.inspector-show-cell;
+                                        inspector-search-edited(query) => { root.inspector-search-edited(query); }
+                                        inspector-context-changed(index) => { root.inspector-context-changed(index); }
+                                        rename-sheet(name) => { root.rename-sheet(name); }
+                                        add-table-row => { root.add-row(); }
+                                        delete-table-row => { root.delete-row(); }
+                                        add-table-col => { root.add-table-col(); }
+                                        delete-table-col => { root.delete-col(); }
+                                        adjust-row-height(delta) => { root.adjust-row-height(delta); }
+                                        adjust-col-width(delta) => { root.adjust-col-width(delta); }
+                                        set-cell-format(fmt) => { root.set-cell-format(fmt); }
+                                        set-cell-alignment(align) => { root.set-cell-alignment(align); }
+                                        toggle-bold => { root.toggle-bold(); }
+                                        toggle-italic => { root.toggle-italic(); }
+                                        toggle-underline => { root.toggle-underline(); }
+                                        toggle-borders => { root.toggle-borders(); }
+                                        cycle-fill => { root.cycle-fill(); }
+                                        set-fill(idx) => { root.set-fill(idx); }
+                                        adjust-font(delta) => { root.adjust-font(delta); }
+                                        adjust-decimals(delta) => { root.adjust-decimals(delta); }
+
                 }
             }
             LoomStatusBar {

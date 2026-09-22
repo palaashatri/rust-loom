@@ -50,6 +50,7 @@ export component SheetInspector inherits LoomPanel {
     in-out property <int> inspector-tab: 0;
     in property <bool> inspector-show-table: true;
     in property <bool> inspector-show-cell: true;
+    in property <bool> active: false;
     in property <int> cell-format: 0;
     in property <int> cell-alignment: 0;
     in property <bool> cell-bold: false;
@@ -79,13 +80,46 @@ export component SheetInspector inherits LoomPanel {
     callback set-fill(int);
     callback adjust-font(int);
     callback adjust-decimals(int);
+    callback close-requested;
+
+    public function focus-inspector() { panel-focus.focus(); }
 
     title: root.selection-range + " selection";
     width: 320px;
 
+    changed active => {
+        if (root.active) { panel-focus.focus(); }
+    }
+
+    panel-focus := FocusScope {
+        enabled: root.active;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
+        }
+
     VerticalLayout {
         spacing: Theme.tokens.space.md;
         padding: Theme.tokens.space.md;
+
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            Text {
+                text: "Format and table properties";
+                font-size: Theme.tokens.typography.caption;
+                font-weight: 600;
+                color: Theme.palette().ink-secondary;
+                horizontal-stretch: 1;
+            }
+            LoomButton {
+                label: "Close";
+                variant: "ghost";
+                clicked => { root.close-requested(); }
+            }
+        }
 
         LoomSearchField {
             placeholder: "Search properties…";
@@ -295,5 +329,6 @@ export component SheetInspector inherits LoomPanel {
                 Rectangle { vertical-stretch: 1; background: transparent; }
             }
         }
+    }
     }
 }

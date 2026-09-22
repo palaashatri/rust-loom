@@ -5,7 +5,8 @@ import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarBody, WriterPageCanvas,
-    WriterStatusBar, WriterToolbarOverflow, WriterRenderBlock, WriterSelectionRect
+    WriterStatusBar, WriterToolbarOverflow, WriterRenderBlock, WriterSelectionRect,
+    WriterCommentRect
 } from "writer_components.slint";
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
@@ -28,9 +29,12 @@ export component WriterApp inherits Window {
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in property <bool> inspector-available: true;
+    in-out property <bool> compact-inspector-layout: false;
     // The compact toolbar still exposes Format. Keep the panel available at
     // every width so the button always does something when activated.
     property <bool> inspector-visible: root.show-inspector && root.inspector-available;
+    property <bool> docked-inspector-visible: root.inspector-visible && !root.compact-inspector-layout;
+    property <bool> compact-inspector-visible: root.inspector-visible && root.compact-inspector-layout;
     callback window-resized(length);
     changed rtl => {
         Theme.rtl = root.rtl;
@@ -46,6 +50,7 @@ export component WriterApp inherits Window {
     in-out property <string> doc-content: "";
     in property <[WriterRenderBlock]> render-blocks: [];
     in property <[WriterSelectionRect]> selection-rects: [];
+    in property <[WriterCommentRect]> comment-rects: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in property <string> status-left: "";
@@ -125,6 +130,7 @@ export component WriterApp inherits Window {
     callback set-comment-resolved(string, bool);
     callback delete-comment(string);
     callback toggle-inspector;
+    callback navigate-comment(string);
     callback create-template(int);
     callback cancel-template;
     callback save-changes-save;
@@ -276,7 +282,7 @@ export component WriterApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
-            WriterActionToolbar {
+            action-toolbar := WriterActionToolbar {
                 rtl: root.rtl;
                 wide: root.wide-toolbar;
                 overflow: root.overflow-toolbar;
@@ -321,6 +327,8 @@ export component WriterApp inherits Window {
                     doc-content <=> root.doc-content;
                     render-blocks <=> root.render-blocks;
                     selection-rects <=> root.selection-rects;
+                    comment-rects: root.comment-rects;
+                    activate-comment(id) => { root.navigate-comment(id); }
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement: root.selection-announcement;
@@ -343,8 +351,12 @@ export component WriterApp inherits Window {
                     key-pressed(event) => { return reject; }
                 }
 
-                if root.inspector-visible : WriterInspector {
-                    preferred-width: 320px;
+                WriterInspector {
+                    width: root.docked-inspector-visible ? 320px : 0px;
+                    vertical-stretch: 1;
+                    visible: root.docked-inspector-visible;
+                    active: root.docked-inspector-visible;
+                    close-requested => { root.toggle-inspector(); }
                     is-bold <=> root.is-bold;
                     is-italic <=> root.is-italic;
                     is-underline <=> root.is-underline;
@@ -360,6 +372,7 @@ export component WriterApp inherits Window {
                     list-style-index <=> root.list-style-index;
                     comment-entries: root.comment-entries;
                     add-comment(body) => { root.add-comment(body); }
+                    navigate-comment(id) => { root.navigate-comment(id); }
                     set-comment-resolved(id, resolved) => { root.set-comment-resolved(id, resolved); }
                     delete-comment(id) => { root.delete-comment(id); }
                     status-left: root.status-left;
@@ -390,6 +403,8 @@ export component WriterApp inherits Window {
                     doc-content <=> root.doc-content;
                     render-blocks <=> root.render-blocks;
                     selection-rects <=> root.selection-rects;
+                    comment-rects: root.comment-rects;
+                    activate-comment(id) => { root.navigate-comment(id); }
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement: root.selection-announcement;
@@ -437,6 +452,70 @@ export component WriterApp inherits Window {
                 close-requested => { root.close-toolbar-overflow(); }
             }
         }
+    }
+
+    if root.compact-inspector-visible : Rectangle {
+        x: 0px;
+        y: Theme.tokens.metrics.toolbar-height;
+        width: root.width;
+        height: root.height - Theme.tokens.metrics.toolbar-height;
+        background: transparent;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: Theme.palette().scrim;
+            TouchArea { clicked => { root.toggle-inspector(); } }
+        }
+
+        WriterInspector {
+            x: max(0px, parent.width - 360px);
+            y: 0px;
+            width: min(360px, parent.width);
+            height: parent.height;
+            active: root.compact-inspector-visible;
+            close-requested => { root.toggle-inspector(); }
+            is-bold <=> root.is-bold;
+            is-italic <=> root.is-italic;
+            is-underline <=> root.is-underline;
+            is-strikethrough <=> root.is-strikethrough;
+            heading-level <=> root.heading-level;
+            font-family-index <=> root.font-family-index;
+            font-size-pt <=> root.font-size-pt;
+            text-alignment <=> root.text-alignment;
+            line-spacing-index <=> root.line-spacing-index;
+            page-paper-index <=> root.page-paper-index;
+            page-orientation-index <=> root.page-orientation-index;
+            page-margins-index <=> root.page-margins-index;
+            list-style-index <=> root.list-style-index;
+            comment-entries: root.comment-entries;
+            add-comment(body) => { root.add-comment(body); }
+            navigate-comment(id) => { root.navigate-comment(id); }
+            set-comment-resolved(id, resolved) => { root.set-comment-resolved(id, resolved); }
+            delete-comment(id) => { root.delete-comment(id); }
+            status-left: root.status-left;
+            word-count: root.word-count;
+            char-count: root.char-count;
+            page-count: root.page-count;
+            reading-time-mins: root.reading-time-mins;
+            toggle-bold => { root.toggle-bold(); }
+            toggle-italic => { root.toggle-italic(); }
+            toggle-underline => { root.toggle-underline(); }
+            toggle-strikethrough => { root.toggle-strikethrough(); }
+            select-heading(idx) => { root.select-heading(idx); }
+            select-font-family(idx) => { root.select-font-family(idx); }
+            increase-font-size => { root.increase-font-size(); }
+            decrease-font-size => { root.decrease-font-size(); }
+            select-alignment(idx) => { root.select-alignment(idx); }
+            indent-text => { root.indent-text(); }
+            outdent-text => { root.outdent-text(); }
+            select-line-spacing(idx) => { root.select-line-spacing(idx); }
+            select-paper-size(idx) => { root.select-paper-size(idx); }
+            select-orientation(idx) => { root.select-orientation(idx); }
+            select-margins(idx) => { root.select-margins(idx); }
+            select-list-style(idx) => { root.select-list-style(idx); }
+        }
+
     }
 
     if root.template-chooser-open : TemplateChooserModal {

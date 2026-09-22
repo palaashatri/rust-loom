@@ -1,7 +1,7 @@
 // Loom Motion - Action Toolbar
 import {
     LoomToolbar, LoomToolbarGroup, LoomToolbarSpacer, LoomToolbarDivider,
-    LoomIconButton, LoomOverflowButton
+    LoomButton, LoomIconButton, LoomOverflowButton
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 
@@ -17,6 +17,7 @@ export component MotionActionToolbar inherits LoomToolbar {
     in-out property <float> zoom-value: 68.0;
     in property <string> timecode-display: "00:00:00:00";
     in property <bool> inspector-visible: true;
+    in property <bool> inspector-action-labeled: false;
 
     callback add-layer;
     callback play-pause;
@@ -119,8 +120,15 @@ export component MotionActionToolbar inherits LoomToolbar {
             tooltip: "Zoom: " + Math.round(root.zoom-value) + "%";
             clicked => { root.zoom-value = root.zoom-value >= 150 ? 100 : root.zoom-value + 25; }
         }
-        LoomIconButton {
+        if root.inspector-action-labeled : LoomButton {
+            label: "Inspector";
             icon: "settings";
+            selected: root.inspector-visible;
+            clicked => { root.toggle-inspector(); }
+        }
+        if !root.inspector-action-labeled : LoomIconButton {
+            icon: "settings";
+            label: "Inspector";
             tooltip: "Toggle Inspector Panel";
             selected: root.inspector-visible;
             clicked => { root.toggle-inspector(); }

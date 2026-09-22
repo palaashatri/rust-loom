@@ -30,11 +30,24 @@ export struct WriterSelectionRect {
     caret: bool,
 }
 
+/// A comment range projected from the same page layout as text selection.
+export struct WriterCommentRect {
+    comment-id: string,
+    label: string,
+    page-index: int,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    marker: bool,
+}
+
 /// Writer's selection-aware text editor.
 component WriterDocumentEditor inherits Rectangle {
     in-out property <string> text: "";
     in property <[WriterRenderBlock]> render-blocks: [];
     in property <[WriterSelectionRect]> selection-rects: [];
+    in property <[WriterCommentRect]> comment-rects: [];
     in property <float> page-zoom: 1.0;
     in property <string> placeholder: "Type your text here...";
     in property <bool> enabled: true;
@@ -83,6 +96,15 @@ component WriterDocumentEditor inherits Rectangle {
         y: 0px;
         width: root.width;
         height: root.height;
+        for comment in root.comment-rects : Rectangle {
+            x: comment.x * root.page-zoom;
+            y: comment.y * root.page-zoom;
+            width: max(1px, comment.width * root.page-zoom);
+            height: max(1px, comment.height * root.page-zoom);
+            border-radius: 2px;
+            background: Theme.palette().content-accent-soft;
+            accessible-role: none;
+        }
         for selection in root.selection-rects : Rectangle {
             x: selection.x * root.page-zoom;
             y: selection.y * root.page-zoom;
@@ -200,6 +222,7 @@ export component WriterPageCanvas inherits Rectangle {
     in-out property <string> doc-content: "";
     in property <[WriterRenderBlock]> render-blocks: [];
     in property <[WriterSelectionRect]> selection-rects: [];
+    in property <[WriterCommentRect]> comment-rects: [];
     in-out property <int> selection-anchor: 0;
     in-out property <int> selection-focus: 0;
     in property <string> selection-announcement: "No text selected";
@@ -217,6 +240,7 @@ export component WriterPageCanvas inherits Rectangle {
     callback pointer-moved(length, length);
     callback pointer-released(length, length);
     callback pointer-cancelled;
+    callback activate-comment(string);
     callback page-zoom-changed(float);
     callback page-scroll-changed(length, length);
     callback key-pressed(event: KeyEvent) -> EventResult;
@@ -269,6 +293,7 @@ export component WriterPageCanvas inherits Rectangle {
                     text <=> root.doc-content;
                     render-blocks <=> root.render-blocks;
                     selection-rects <=> root.selection-rects;
+                    comment-rects: root.comment-rects;
                     selection-anchor <=> root.selection-anchor;
                     selection-focus <=> root.selection-focus;
                     selection-announcement <=> root.selection-announcement;
@@ -282,6 +307,20 @@ export component WriterPageCanvas inherits Rectangle {
                     pointer-cancelled => { root.pointer-cancelled(); }
                     key-pressed(event) => { return root.key-pressed(event); }
                 }
+            }
+            for comment in root.comment-rects : LoomButton {
+                visible: comment.marker;
+                enabled: comment.marker;
+                x: page.width - page.page-padding / 2 - self.width / 2;
+                y: page.page-padding + comment.y * root.page-zoom - self.height / 2;
+                width: 24px;
+                min-width: 24px;
+                preferred-width: 24px;
+                height: 24px;
+                icon: "comment";
+                label: comment.label;
+                variant: "ghost";
+                clicked => { root.activate-comment(comment.comment-id); }
             }
         }
     }

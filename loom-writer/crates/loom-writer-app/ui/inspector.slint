@@ -11,6 +11,7 @@ export struct WriterCommentEntry {
     author: string,
     body: string,
     resolved: bool,
+    orphaned: bool,
 }
 
 export component WriterInspector inherits LoomPanel {
@@ -28,6 +29,7 @@ export component WriterInspector inherits LoomPanel {
     in-out property <int> page-margins-index: 0;
     in-out property <int> list-style-index: 0;
     in property <[WriterCommentEntry]> comment-entries: [];
+    in property <bool> active: false;
     in-out property <string> comment-draft: "";
     in property <string> status-left: "";
     in property <int> word-count: 83;
@@ -54,19 +56,57 @@ export component WriterInspector inherits LoomPanel {
     callback add-comment(string);
     callback set-comment-resolved(string, bool);
     callback delete-comment(string);
+    callback navigate-comment(string);
+    callback close-requested;
+
+    public function focus-first-control() {
+        heading-control.grab-focus();
+    }
+
+    changed active => {
+        if (root.active) {
+            heading-control.grab-focus();
+        }
+    }
 
     title: "Format";
     width: 320px;
 
     // Content scrolls; the panel never grows past the window height, so the
     // status bar below always stays fully visible.
-    VerticalLayout {
-        spacing: Theme.tokens.space.md;
+    inspector-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if (root.active && event.text == Key.Escape) {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
+        }
 
-        Flickable {
-            vertical-stretch: 1;
-            viewport-width: parent.width;
-            viewport-height: content.preferred-height;
+        VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+            spacing: Theme.tokens.space.md;
+
+            HorizontalLayout {
+                height: Theme.tokens.metrics.control-height;
+                padding-left: Theme.tokens.space.md;
+                padding-right: Theme.tokens.space.md;
+                alignment: end;
+                LoomButton {
+                    icon: "close";
+                    label: "Close format panel";
+                    variant: "ghost";
+                    clicked => { root.close-requested(); }
+                }
+            }
+
+            Flickable {
+                vertical-stretch: 1;
+                viewport-width: self.width;
+                viewport-height: max(self.height, content.preferred-height);
 
         content := VerticalLayout {
             spacing: Theme.tokens.space.md;
@@ -79,7 +119,7 @@ export component WriterInspector inherits LoomPanel {
 
             LoomSectionHeader { title: "Paragraph Style"; }
 
-            LoomSegmentedControl {
+            heading-control := LoomSegmentedControl {
                 items: ["Body", "Title", "Sub", "H1", "H2", "H3"];
                 current <=> root.heading-level;
                 label: "Heading Style";
@@ -245,9 +285,11 @@ export component WriterInspector inherits LoomPanel {
 
             for entry in root.comment-entries : Rectangle {
                 accessible-role: AccessibleRole.text;
-                accessible-label: entry.resolved
-                    ? "Comment by " + entry.author + ", resolved: " + entry.body
-                    : "Comment by " + entry.author + ": " + entry.body;
+                accessible-label: entry.orphaned
+                    ? "Comment by " + entry.author + ", text anchor was deleted: " + entry.body
+                    : entry.resolved
+                        ? "Comment by " + entry.author + ", resolved: " + entry.body
+                        : "Comment by " + entry.author + ": " + entry.body;
                 border-radius: Theme.tokens.metrics.radius-medium;
                 background: entry.resolved
                     ? Theme.palette().surface-sunken
@@ -260,9 +302,11 @@ export component WriterInspector inherits LoomPanel {
                     spacing: Theme.tokens.space.xs;
 
                     Text {
-                        text: entry.resolved
-                            ? entry.author + " · resolved"
-                            : entry.author;
+                        text: entry.orphaned
+                            ? entry.author + " · text anchor lost"
+                            : entry.resolved
+                                ? entry.author + " · resolved"
+                                : entry.author;
                         font-size: Theme.tokens.typography.micro;
                         color: Theme.palette().ink-secondary;
                     }
@@ -277,6 +321,12 @@ export component WriterInspector inherits LoomPanel {
                         spacing: Theme.tokens.space.xs;
                         alignment: start;
 
+                        LoomButton {
+                            label: entry.orphaned ? "Anchor deleted" : "Show on page";
+                            variant: "secondary";
+                            enabled: !entry.orphaned;
+                            clicked => { root.navigate-comment(entry.id); }
+                        }
                         LoomButton {
                             label: entry.resolved ? "Reopen" : "Resolve";
                             variant: "ghost";
@@ -354,6 +404,7 @@ export component WriterInspector inherits LoomPanel {
                     overflow: elide;
                 }
             }
+        }
         }
     }
 }

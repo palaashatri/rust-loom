@@ -2,11 +2,14 @@
 //!
 //! Extends `WriterDocument` in its own module so `lib.rs` stays within its
 //! registered byte ceiling. Threads anchor to a stable block id plus a UTF-8
-//! byte range; block ids survive edits, so threads follow their text. Ranges
-//! are clamped at read time when text shrinks, and threads whose block was
-//! deleted are reported as dangling rather than surfaced.
+//! byte range. Text edits rebase each range so it remains attached to the
+//! selected words. If those words disappear completely, the thread remains
+//! visible as an explicitly orphaned review item.
 
-use crate::{pkg_json, CommentThread, ContentParser, JsonValue, WriterDocument};
+use crate::{
+    changed_text_ranges, pkg_json, CommentThread, ContentParser, JsonValue, RichBlock,
+    WriterDocument,
+};
 
 /// The display name used for comments created locally (Loom is local-first
 /// and has no accounts).
@@ -57,6 +60,7 @@ impl WriterDocument {
                 end,
                 body: body.to_string(),
                 resolved: false,
+                orphaned: false,
             });
             return Ok(id);
         }
@@ -80,12 +84,99 @@ impl WriterDocument {
         self.comments.len() != before
     }
 
-    /// Threads whose anchor block still exists, with ranges clamped to the
-    /// current text length. Threads on deleted blocks are dropped.
+    /// Rebase comment ranges through the one contiguous text change reported by
+    /// the editor. If a paragraph split makes a range cross blocks, keep the
+    /// surviving part in the block where the comment begins. If all of the
+    /// selected text disappears, keep the thread visible and mark it orphaned
+    /// instead of attaching it to unrelated words.
+    pub(crate) fn rebase_comment_anchors(
+        comments: &mut [CommentThread],
+        old_blocks: &[RichBlock],
+        new_blocks: &[RichBlock],
+    ) {
+        if comments.is_empty() {
+            return;
+        }
+        let old_text = blocks_to_text(old_blocks);
+        let new_text = blocks_to_text(new_blocks);
+        if old_text == new_text {
+            return;
+        }
+        let (old_change_start, old_change_end, new_change_start, new_change_end) =
+            changed_text_ranges(&old_text, &new_text);
+
+        for comment in comments {
+            if comment.orphaned {
+                continue;
+            }
+            let Some((old_block_start, old_block)) = block_start(old_blocks, comment.block_id)
+            else {
+                comment.orphaned = true;
+                comment.start = 0;
+                comment.end = 0;
+                continue;
+            };
+            if comment.start > comment.end
+                || comment.end > old_block.text.len_bytes()
+                || !old_block.text.as_str().is_char_boundary(comment.start)
+                || !old_block.text.as_str().is_char_boundary(comment.end)
+            {
+                comment.orphaned = true;
+                comment.start = 0;
+                comment.end = 0;
+                continue;
+            }
+
+            let old_start = old_block_start + comment.start;
+            let old_end = old_block_start + comment.end;
+            let new_start = map_comment_endpoint(
+                old_start,
+                old_change_start,
+                old_change_end,
+                new_change_start,
+                new_change_end,
+                true,
+            );
+            let new_end = map_comment_endpoint(
+                old_end,
+                old_change_start,
+                old_change_end,
+                new_change_start,
+                new_change_end,
+                false,
+            )
+            .max(new_start);
+
+            let Some((new_block, local_start)) = block_at_offset(new_blocks, new_start) else {
+                comment.orphaned = true;
+                comment.start = 0;
+                comment.end = 0;
+                continue;
+            };
+            comment.block_id = new_block.id;
+            comment.start = local_start.min(new_block.text.len_bytes());
+            comment.end = match block_at_offset(new_blocks, new_end) {
+                Some((end_block, local_end)) if end_block.id == new_block.id => local_end,
+                Some(_) => new_block.text.len_bytes(),
+                None => new_block.text.len_bytes(),
+            }
+            .max(comment.start)
+            .min(new_block.text.len_bytes());
+
+            if old_start < old_end && comment.start == comment.end {
+                comment.orphaned = true;
+            }
+        }
+    }
+
+    /// Comment threads whose text anchor still exists in the document.
+    /// Orphaned threads remain available in `comments` for review.
     pub fn live_comment_threads(&self) -> Vec<&CommentThread> {
         self.comments
             .iter()
-            .filter(|thread| self.blocks.iter().any(|block| block.id == thread.block_id))
+            .filter(|thread| {
+                !thread.orphaned && self.blocks.iter().any(|block| block.id == thread.block_id)
+            })
             .collect()
     }
 
@@ -97,7 +188,7 @@ impl WriterDocument {
                 out.push(',');
             }
             out.push_str(&format!(
-                "{{\"id\":{},\"author\":{},\"block_id\":{},\"start\":{},\"end\":{},\"body\":{},\"resolved\":{}}}",
+                "{{\"id\":{},\"author\":{},\"block_id\":{},\"start\":{},\"end\":{},\"body\":{},\"resolved\":{},\"orphaned\":{}}}",
                 pkg_json::escape(&thread.id),
                 pkg_json::escape(&thread.author),
                 thread.block_id,
@@ -105,6 +196,7 @@ impl WriterDocument {
                 thread.end,
                 pkg_json::escape(&thread.body),
                 thread.resolved,
+                thread.orphaned,
             ));
         }
         out.push(']');
@@ -133,6 +225,7 @@ pub(crate) fn comment_thread_from_raw(raw: &str) -> Option<CommentThread> {
     let mut end = 0usize;
     let mut body = String::new();
     let mut resolved = false;
+    let mut orphaned = false;
     for (k, v) in &fields {
         let text = match v {
             JsonValue::String(s) => s.clone(),
@@ -146,6 +239,7 @@ pub(crate) fn comment_thread_from_raw(raw: &str) -> Option<CommentThread> {
             "end" => end = text.parse().ok()?,
             "body" => body = text,
             "resolved" => resolved = text == "true",
+            "orphaned" => orphaned = text == "true",
             _ => {}
         }
     }
@@ -157,13 +251,82 @@ pub(crate) fn comment_thread_from_raw(raw: &str) -> Option<CommentThread> {
         end,
         body,
         resolved,
+        orphaned,
     })
+}
+
+fn blocks_to_text(blocks: &[RichBlock]) -> String {
+    blocks
+        .iter()
+        .map(|block| block.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn block_start(blocks: &[RichBlock], block_id: u64) -> Option<(usize, &RichBlock)> {
+    let mut start = 0;
+    for (index, block) in blocks.iter().enumerate() {
+        if index > 0 {
+            start += 1;
+        }
+        if block.id == block_id {
+            return Some((start, block));
+        }
+        start += block.text.len_bytes();
+    }
+    None
+}
+
+fn block_at_offset(blocks: &[RichBlock], offset: usize) -> Option<(&RichBlock, usize)> {
+    let mut start = 0;
+    for (index, block) in blocks.iter().enumerate() {
+        if index > 0 {
+            start += 1;
+        }
+        let end = start + block.text.len_bytes();
+        if offset <= end {
+            return Some((block, offset.saturating_sub(start)));
+        }
+        start = end;
+    }
+    None
+}
+
+fn map_comment_endpoint(
+    offset: usize,
+    old_start: usize,
+    old_end: usize,
+    new_start: usize,
+    new_end: usize,
+    start_endpoint: bool,
+) -> usize {
+    if old_start == old_end {
+        if offset < old_start || (offset == old_start && !start_endpoint) {
+            offset
+        } else {
+            offset.saturating_add(new_end.saturating_sub(new_start))
+        }
+    } else if offset < old_start {
+        offset
+    } else if offset == old_start {
+        new_start
+    } else if offset < old_end {
+        if start_endpoint {
+            new_start
+        } else {
+            new_end
+        }
+    } else {
+        offset
+            .saturating_sub(old_end - old_start)
+            .saturating_add(new_end - new_start)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RichBlock;
+    use crate::{RichBlock, TextSelection};
 
     fn document_with_block() -> WriterDocument {
         let mut document = WriterDocument::new("doc", "Doc");
@@ -229,6 +392,94 @@ mod tests {
         let reopened = WriterDocument::from_content_json(&json).expect("parse");
         assert_eq!(reopened.comments, document.comments);
         assert!(json.contains("\"comments\":["));
+    }
+
+    #[test]
+    fn insertion_before_comment_keeps_the_comment_on_the_same_words() {
+        let mut document = WriterDocument::new("doc", "Doc");
+        document
+            .blocks
+            .push(RichBlock::new(7, "paragraph", "Hello world"));
+        document
+            .add_comment_thread(7, 6, 11, "Keep this phrase")
+            .expect("add comment");
+
+        document.set_selection(TextSelection::caret(0));
+        document
+            .replace_selection_text("New ")
+            .expect("insert before comment");
+
+        let comment = &document.comments[0];
+        let block = document.get(comment.block_id).expect("comment block");
+        assert_eq!((comment.start, comment.end), (10, 15));
+        assert_eq!(&block.text.as_str()[comment.start..comment.end], "world");
+
+        let bytes = crate::save_document(&document).expect("save document");
+        let reopened = crate::load_document(&bytes).expect("reopen document");
+        let comment = &reopened.comments[0];
+        let block = reopened
+            .get(comment.block_id)
+            .expect("reopened comment block");
+        assert_eq!(&block.text.as_str()[comment.start..comment.end], "world");
+    }
+
+    #[test]
+    fn comment_anchor_uses_utf8_bytes_and_survives_paragraph_split_and_merge() {
+        let mut document = WriterDocument::new("doc", "Doc");
+        document
+            .blocks
+            .push(RichBlock::new(7, "paragraph", "Hello 🌍 world"));
+        document
+            .add_comment_thread(7, 6, 10, "Keep the symbol")
+            .expect("add comment");
+        document.set_selection(TextSelection::caret(0));
+        document
+            .replace_selection_text("New ")
+            .expect("insert before emoji");
+
+        let comment = &document.comments[0];
+        let block = document.get(comment.block_id).expect("emoji block");
+        assert_eq!(&block.text.as_str()[comment.start..comment.end], "🌍");
+
+        document.replace_paragraphs("New Hello\n🌍 world");
+        let comment = &document.comments[0];
+        let block = document.get(comment.block_id).expect("split comment block");
+        assert_eq!(&block.text.as_str()[comment.start..comment.end], "🌍");
+
+        document.replace_paragraphs("New Hello 🌍 world");
+        let comment = &document.comments[0];
+        let block = document
+            .get(comment.block_id)
+            .expect("merged comment block");
+        assert_eq!(&block.text.as_str()[comment.start..comment.end], "🌍");
+        assert!(!comment.orphaned);
+    }
+
+    #[test]
+    fn partial_anchor_deletion_shrinks_and_complete_deletion_is_orphaned() {
+        let mut document = WriterDocument::new("doc", "Doc");
+        document
+            .blocks
+            .push(RichBlock::new(7, "paragraph", "Hello world"));
+        document
+            .add_comment_thread(7, 6, 11, "Review this word")
+            .expect("add comment");
+
+        document.replace_paragraphs("Hello wrld");
+        let comment = &document.comments[0];
+        let block = document.get(comment.block_id).expect("shrunk anchor block");
+        assert_eq!(&block.text.as_str()[comment.start..comment.end], "wrld");
+        assert!(!comment.orphaned);
+
+        document.replace_paragraphs("Hello ");
+        assert!(document.comments[0].orphaned);
+        assert!(document.live_comment_threads().is_empty());
+        assert_eq!(document.comments[0].body, "Review this word");
+
+        let bytes = crate::save_document(&document).expect("save document");
+        let reopened = crate::load_document(&bytes).expect("reopen document");
+        assert!(reopened.comments[0].orphaned);
+        assert!(reopened.live_comment_threads().is_empty());
     }
 
     #[test]

@@ -437,6 +437,7 @@ impl WriterDocument {
             .collect();
         self.blocks = blocks;
         self.selection = normalize_text_selection(&self.editor_text(), self.selection.clone());
+        Self::rebase_comment_anchors(&mut self.comments, &old_blocks, &self.blocks);
     }
 
     /// A many-block Mutation (for undo replay). Returns a single mutation
@@ -1412,7 +1413,7 @@ fn normalized_grapheme_range(text: &str, selection: &TextSelection) -> (usize, u
     (anchor.min(focus), anchor.max(focus))
 }
 
-fn changed_text_ranges(old_text: &str, new_text: &str) -> (usize, usize, usize, usize) {
+pub(crate) fn changed_text_ranges(old_text: &str, new_text: &str) -> (usize, usize, usize, usize) {
     let old_graphemes: Vec<&str> = old_text.graphemes(true).collect();
     let new_graphemes: Vec<&str> = new_text.graphemes(true).collect();
     let prefix = old_graphemes
@@ -3296,6 +3297,9 @@ pub struct CommentThread {
     pub body: String,
     /// Whether the thread is resolved.
     pub resolved: bool,
+    /// Whether the selected text was deleted and the thread no longer has a
+    /// safe place on the page. Orphaned threads remain visible in review.
+    pub orphaned: bool,
 }
 
 /// Tracked text replacement.
@@ -3551,7 +3555,7 @@ impl WriterWorkspace {
             }
         }
         for comment in &self.comments {
-            if self.document.get(comment.block_id).is_none() {
+            if !comment.orphaned && self.document.get(comment.block_id).is_none() {
                 issues.push(format!("comment {} targets a missing block", comment.id));
             }
         }
@@ -3858,7 +3862,8 @@ impl WriterDocument {
             })
             .collect();
 
-        let selection_rects = self.selection_rectangles(&fragments, &pages, style, zoom);
+        let selection_rects =
+            self.selection_rectangles(&fragments, &pages, style, zoom, &self.selection);
 
         Ok(PageLayout {
             pages,
@@ -3883,15 +3888,36 @@ impl WriterDocument {
         self.layout(style, viewport)
     }
 
+    /// Project any text range onto an already-computed page layout.
+    ///
+    /// Reusing the layout keeps comment anchors aligned with the same wrapped
+    /// fragments as the editor without paginating the document once per
+    /// comment.
+    pub fn selection_rectangles_for(
+        &self,
+        layout: &PageLayout,
+        style: &PageStyle,
+        selection: &TextSelection,
+    ) -> Vec<SelectionRect> {
+        self.selection_rectangles(
+            &layout.fragments,
+            &layout.pages,
+            style,
+            layout.zoom,
+            selection,
+        )
+    }
+
     fn selection_rectangles(
         &self,
         fragments: &[LayoutFragment],
         pages: &[DocumentPage],
         style: &PageStyle,
         zoom: f32,
+        selection: &TextSelection,
     ) -> Vec<SelectionRect> {
         let text = self.editor_text();
-        let (selection_start, selection_end) = normalized_grapheme_range(&text, &self.selection);
+        let (selection_start, selection_end) = normalized_grapheme_range(&text, selection);
         let mut block_starts = Vec::with_capacity(self.blocks.len());
         let mut cursor = 0usize;
         for (index, block) in self.blocks.iter().enumerate() {
@@ -3972,10 +3998,9 @@ impl WriterDocument {
                     let use_fragment = strictly_inside
                         || (at_start
                             && (!has_previous_boundary
-                                || self.selection.affinity == CaretAffinity::Downstream))
+                                || selection.affinity == CaretAffinity::Downstream))
                         || (at_end
-                            && (self.selection.affinity == CaretAffinity::Upstream
-                                || is_last_fragment));
+                            && (selection.affinity == CaretAffinity::Upstream || is_last_fragment));
                     if use_fragment {
                         let local = local.clamp(0, source.text.len());
                         let prefix = &source.text[..local];
@@ -5067,6 +5092,55 @@ mod tests {
     }
 
     #[test]
+    fn explicit_selection_rectangles_reuse_layout_without_changing_document_selection() {
+        let mut document = WriterDocument::new("comment-layout", "Comment layout");
+        let text = "word ".repeat(180);
+        document.push(RichBlock::new(1, "paragraph", &text));
+        document.set_selection(TextSelection::range(0, 1));
+
+        let style = PageStyle {
+            width_pt: 140.0,
+            height_pt: 120.0,
+            margin_top_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+            margin_right_pt: 10.0,
+            body_font_size_pt: 10.0,
+            line_height: 1.2,
+        };
+        let layout = document
+            .layout(
+                &style,
+                PageViewport {
+                    width: 140.0,
+                    height: 120.0,
+                    ..PageViewport::default()
+                },
+            )
+            .expect("wrapped multi-page layout");
+        let comment_selection = TextSelection::range(25, 220);
+        let comment_rectangles =
+            document.selection_rectangles_for(&layout, &style, &comment_selection);
+
+        assert!(layout.pages.len() > 1, "fixture must cross page boundaries");
+        assert!(
+            comment_rectangles.len() > 1,
+            "comment range must follow line wrapping"
+        );
+        assert!(
+            comment_rectangles
+                .iter()
+                .map(|rect| rect.page_index)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                > 1,
+            "comment range must follow the same page fragments as the editor"
+        );
+        assert_eq!(document.selection(), TextSelection::range(0, 1));
+        assert_eq!(layout.selection_rects.len(), 1);
+    }
+
+    #[test]
     fn layout_uses_block_metrics_for_heading_spacing_and_alignment() {
         let mut document = WriterDocument::new("styled-layout", "Styled layout");
         let mut heading = RichBlock::new(1, "heading1", "Centered heading");
@@ -5451,6 +5525,7 @@ mod tests {
                 end: 4,
                 body: "Clarify".into(),
                 resolved: false,
+                orphaned: false,
             })
             .unwrap();
         assert!(workspace.set_comment_resolved("comment-1", true));

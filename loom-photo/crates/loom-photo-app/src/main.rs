@@ -417,6 +417,7 @@ struct ResponsiveToolbarState {
     icon_only: bool,
     overflow: bool,
     labeled: bool,
+    inspector_action_labeled: bool,
 }
 
 fn responsive_toolbar_state(app: &PhotoApp, width: u32) -> ResponsiveToolbarState {
@@ -426,6 +427,7 @@ fn responsive_toolbar_state(app: &PhotoApp, width: u32) -> ResponsiveToolbarStat
         icon_only: width < policy.get_priority_1_icon_only_below(),
         overflow: width < policy.get_priority_2_overflow_below(),
         labeled: width >= policy.get_priority_2_overflow_below(),
+        inspector_action_labeled: width < policy.get_priority_1_icon_only_below(),
     }
 }
 
@@ -434,6 +436,7 @@ fn configure_responsive_width(app: &PhotoApp, width: u32) {
     app.set_icon_only_toolbar(state.icon_only);
     app.set_overflow_toolbar(state.overflow);
     app.set_labeled_toolbar(state.labeled);
+    app.set_inspector_action_labeled(state.inspector_action_labeled);
     // Keep the Format/Review route usable in compact windows. The inspector
     // remains optional chrome, but the button must not become a dead control.
     app.set_inspector_available(true);

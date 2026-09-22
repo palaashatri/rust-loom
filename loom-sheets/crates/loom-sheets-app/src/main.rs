@@ -86,6 +86,7 @@ pub(crate) struct Args {
     pub(crate) palette: bool,
     pub(crate) chart: bool,
     pub(crate) objects: bool,
+    pub(crate) inspector: bool,
     pub(crate) journey: Option<String>,
     pub(crate) size: (u32, u32),
     pub(crate) theme: String,
@@ -111,6 +112,7 @@ where
         palette: false,
         chart: false,
         objects: false,
+        inspector: false,
         journey: None,
         size: DEFAULT_SIZE,
         theme: "light".to_string(),
@@ -128,6 +130,7 @@ where
             "--palette" => args.palette = true,
             "--chart" => args.chart = true,
             "--objects" => args.objects = true,
+            "--inspector" => args.inspector = true,
             "--journey" => {
                 args.journey = Some(it.next().ok_or("--journey needs an output directory")?)
             }
@@ -1668,19 +1671,9 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     if !state.overflow {
         app.set_toolbar_overflow_open(false);
     }
-    let inspector_available = !state.icon_only;
-    let was_inspector_available = app.get_inspector_available();
-    app.set_inspector_available(inspector_available);
-    if !inspector_available {
-        if was_inspector_available {
-            app.set_inspector_preference(app.get_show_inspector());
-        }
-        app.set_show_inspector(false);
-    } else if !was_inspector_available {
-        // Compact mode hides the panel temporarily. Restore only the user's
-        // last explicit choice instead of reopening a panel they closed.
-        app.set_show_inspector(app.get_inspector_preference());
-    }
+    // Keep Format available at every width. The UI moves it into a drawer
+    // when the window is compact instead of disabling the action.
+    app.set_inspector_available(true);
 }
 
 /// Size the headless grid viewport to the same canvas geometry used by the
@@ -1722,6 +1715,10 @@ fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     let (w, h) = args.size;
     app.window().set_size(PhysicalSize::new(w, h));
     apply_layout_breakpoints(&app, w);
+    if args.inspector {
+        app.set_inspector_preference(true);
+        app.set_show_inspector(true);
+    }
     apply_headless_viewport_size(&app, w, h);
     let mut sheet = match &args.open {
         Some(p) => load_sheet(Path::new(p))?,

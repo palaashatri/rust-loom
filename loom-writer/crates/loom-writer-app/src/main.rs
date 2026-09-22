@@ -1366,9 +1366,10 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
 
     app.set_doc_title(doc.title.as_str().into());
     app.set_doc_content(SharedString::from(text));
-    let (render_blocks, selection_rects) = writer_render_projection(doc, viewport);
+    let (render_blocks, selection_rects, comment_rects) = writer_render_projection(doc, viewport);
     app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
     app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
+    app.set_comment_rects(Rc::new(VecModel::from(comment_rects)).into());
     app.set_selection_anchor(selection.anchor.min(i32::MAX as usize) as i32);
     app.set_selection_focus(selection.focus.min(i32::MAX as usize) as i32);
     app.set_page_count(page_count);
@@ -1408,13 +1409,17 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
     // ~200 wpm average reading speed
     app.set_reading_time_mins(word_count.div_ceil(200).max(1).min(i32::MAX as usize) as i32);
     let comment_entries: Vec<WriterCommentEntry> = doc
-        .live_comment_threads()
+        .comments
         .iter()
+        .filter(|thread| {
+            thread.orphaned || doc.blocks.iter().any(|block| block.id == thread.block_id)
+        })
         .map(|thread| WriterCommentEntry {
             id: SharedString::from(thread.id.as_str()),
             author: SharedString::from(thread.author.as_str()),
             body: SharedString::from(thread.body.as_str()),
             resolved: thread.resolved,
+            orphaned: thread.orphaned,
         })
         .collect();
     app.set_comment_entries(Rc::new(VecModel::from(comment_entries)).into());
@@ -1429,9 +1434,10 @@ fn apply_document_with_viewport(app: &WriterApp, doc: &WriterDocument, viewport:
 /// side-effect free with respect to document content, selection, history, and
 /// recovery state; it is used by viewport and selection callbacks.
 fn refresh_writer_render_projection(app: &WriterApp, doc: &WriterDocument, viewport: PageViewport) {
-    let (render_blocks, selection_rects) = writer_render_projection(doc, viewport);
+    let (render_blocks, selection_rects, comment_rects) = writer_render_projection(doc, viewport);
     app.set_render_blocks(Rc::new(VecModel::from(render_blocks)).into());
     app.set_selection_rects(Rc::new(VecModel::from(selection_rects)).into());
+    app.set_comment_rects(Rc::new(VecModel::from(comment_rects)).into());
     let (page_count, page_stack_height) = writer_projection_metrics(doc, viewport);
     app.set_page_count(page_count);
     app.set_page_stack_height(page_stack_height);
@@ -1464,7 +1470,11 @@ fn writer_render_blocks_with_viewport(
 fn writer_render_projection(
     doc: &WriterDocument,
     viewport: PageViewport,
-) -> (Vec<WriterRenderBlock>, Vec<WriterSelectionRect>) {
+) -> (
+    Vec<WriterRenderBlock>,
+    Vec<WriterSelectionRect>,
+    Vec<WriterCommentRect>,
+) {
     let style = doc.page.page_style();
     let layout_viewport = PageViewport {
         // The layout viewport stays in page points so the projection remains
@@ -1530,6 +1540,7 @@ fn writer_render_projection(
     }
 
     let mut selection_rects = writer_selection_rects(&style, layout.as_ref());
+    let comment_rects = writer_comment_rects(doc, &style, layout.as_ref());
     if selection_rects.is_empty() && doc.blocks.is_empty() {
         selection_rects.push(WriterSelectionRect {
             page_index: 0,
@@ -1540,7 +1551,7 @@ fn writer_render_projection(
             caret: true,
         });
     }
-    (rows, selection_rects)
+    (rows, selection_rects, comment_rects)
 }
 
 fn writer_projection_metrics(doc: &WriterDocument, viewport: PageViewport) -> (i32, f32) {
@@ -1663,12 +1674,19 @@ fn writer_selection_rects(
     let Some(layout) = layout else {
         return Vec::new();
     };
+    writer_project_selection_ranges(style, layout, &layout.selection_rects)
+}
+
+fn writer_project_selection_ranges(
+    style: &PageStyle,
+    layout: &loom_writer_core::PageLayout,
+    ranges: &[loom_writer_core::SelectionRect],
+) -> Vec<WriterSelectionRect> {
     let zoom = layout.zoom.max(f32::EPSILON);
     let Some(base_page) = layout.page_bounds.first().copied() else {
         return Vec::new();
     };
-    layout
-        .selection_rects
+    ranges
         .iter()
         .filter_map(|selection| {
             layout.page_bounds.get(selection.page_index)?;
@@ -1682,6 +1700,86 @@ fn writer_selection_rects(
             })
         })
         .collect()
+}
+
+fn comment_selection_range(doc: &WriterDocument, comment_id: &str) -> Option<(usize, usize)> {
+    let thread = doc
+        .comments
+        .iter()
+        .find(|thread| thread.id == comment_id && !thread.orphaned)?;
+    let block_index = doc
+        .blocks
+        .iter()
+        .position(|block| block.id == thread.block_id)?;
+    let block = &doc.blocks[block_index];
+    let text = block.text.as_str();
+    if thread.start >= thread.end
+        || thread.end > text.len()
+        || !text.is_char_boundary(thread.start)
+        || !text.is_char_boundary(thread.end)
+    {
+        return None;
+    }
+
+    let block_start = doc.blocks[..block_index]
+        .iter()
+        .map(|previous| previous.text.as_str().len() + 1)
+        .sum::<usize>();
+    Some((block_start + thread.start, block_start + thread.end))
+}
+
+fn writer_comment_rects(
+    doc: &WriterDocument,
+    style: &PageStyle,
+    layout: Option<&loom_writer_core::PageLayout>,
+) -> Vec<WriterCommentRect> {
+    let Some(layout) = layout else {
+        return Vec::new();
+    };
+    let mut block_starts = Vec::with_capacity(doc.blocks.len());
+    let mut cursor = 0usize;
+    for (index, block) in doc.blocks.iter().enumerate() {
+        block_starts.push((block.id, cursor));
+        cursor += block.text.as_str().len() + usize::from(index + 1 < doc.blocks.len());
+    }
+
+    let mut projected = Vec::new();
+    for thread in &doc.comments {
+        if thread.orphaned {
+            continue;
+        }
+        let Some(block) = doc.get(thread.block_id) else {
+            continue;
+        };
+        if thread.start >= thread.end
+            || thread.end > block.text.as_str().len()
+            || !block.text.as_str().is_char_boundary(thread.start)
+            || !block.text.as_str().is_char_boundary(thread.end)
+        {
+            continue;
+        }
+        let Some((_, block_start)) = block_starts.iter().find(|(id, _)| *id == thread.block_id)
+        else {
+            continue;
+        };
+        let range = TextSelection::range(block_start + thread.start, block_start + thread.end);
+        let rectangles = doc.selection_rectangles_for(layout, style, &range);
+        let label = SharedString::from(format!("Show comment by {} on page", thread.author));
+        let ui_rectangles = writer_project_selection_ranges(style, layout, &rectangles);
+        for (index, rect) in ui_rectangles.into_iter().enumerate() {
+            projected.push(WriterCommentRect {
+                comment_id: SharedString::from(thread.id.as_str()),
+                label: label.clone(),
+                page_index: rect.page_index,
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                marker: index == 0,
+            });
+        }
+    }
+    projected
 }
 
 /// Convert a pointer in the editor's local (zoomed) coordinates to the
@@ -2213,10 +2311,11 @@ fn apply_layout_breakpoints(app: &WriterApp, width: u32) {
     if !state.overflow {
         app.set_toolbar_overflow_open(false);
     }
-    // Format remains available in the compact toolbar. The panel can be
-    // opened after the user asks for it instead of silently disabling the
-    // only route to formatting controls at narrow widths.
+    // Keep the same Format action available at every width. The shell layout
+    // mode is sent through this input property instead of binding it back to
+    // root.width from inside the Window's own layout tree.
     app.set_inspector_available(true);
+    app.set_compact_inspector_layout(width < 1180);
 }
 
 #[allow(dead_code)] // exercised by headless breakpoint/focus regression tests
@@ -3034,6 +3133,57 @@ fn wire_writer_shared_callbacks(
                     app.set_status_right(SharedString::from(format!("Comment failed: {error}")));
                 }
             }
+        });
+    }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_navigate_comment(move |id| {
+            let Some(app) = app_ref.upgrade() else { return };
+            let Some((start, end)) = comment_selection_range(&state.current.borrow(), id.as_str())
+            else {
+                app.set_status_right("Comment anchor is no longer available".into());
+                return;
+            };
+
+            let selection = TextSelection::range(start, end);
+            let mut current = state.current.borrow_mut();
+            let style = current.page.page_style();
+            let mut viewport = *state.viewport.borrow();
+            let layout_viewport = PageViewport {
+                width: style.width_pt,
+                height: style.height_pt,
+                zoom: normalize_page_zoom(viewport.zoom, 1.0),
+                scroll_x: normalize_page_scroll(viewport.scroll_x),
+                scroll_y: normalize_page_scroll(viewport.scroll_y),
+            };
+            if let Ok(layout) = current.layout(&style, layout_viewport) {
+                if let Some(rect) = current
+                    .selection_rectangles_for(&layout, &style, &selection)
+                    .first()
+                {
+                    // Keep the selected phrase near the top of the page viewport,
+                    // with enough room for the page margin and comment marker.
+                    viewport.scroll_y =
+                        normalize_page_scroll(viewport.scroll_y + rect.rect.y - 28.0);
+                }
+            }
+            current.set_selection(selection);
+            *state.viewport.borrow_mut() = viewport;
+            let current_snapshot = current.clone();
+            drop(current);
+
+            app.set_show_inspector(true);
+            app.set_page_scroll_x(viewport.scroll_x);
+            app.set_page_scroll_y(viewport.scroll_y);
+            apply_document_with_viewport(&app, &current_snapshot, viewport);
+            refresh_writer_registry(&app, &state);
+            let registry = state.registry.lock().unwrap();
+            rebuild_palette_with_registry(&app, &registry, app.get_palette_query().as_str());
+            drop(registry);
+            sync_writer_menu_if_present(&menu_service, &app, &state);
+            app.set_status_right("Comment anchor selected".into());
         });
     }
     {

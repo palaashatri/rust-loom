@@ -8,6 +8,7 @@ export component LoomButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> selected: false;
     callback clicked;
+    public function grab-focus() { focus.focus(); }
 
     private property <bool> primary: root.variant == "primary";
     private property <bool> destructive: root.variant == "danger";
@@ -93,6 +94,7 @@ export component LoomIconButton inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> destructive: false;
     callback clicked;
+    public function grab-focus() { focus.focus(); }
 
     width: Theme.tokens.metrics.control-height;
     height: Theme.tokens.metrics.control-height;
@@ -367,6 +369,7 @@ export component LoomToggle inherits Rectangle {
 
 export component LoomSegmentedControl inherits Rectangle {
     in property <[string]> items: [];
+    public function grab-focus() { focus.focus(); }
     in-out property <int> current: 0;
     in property <string> label: "Segmented";
     in property <bool> enabled: true;

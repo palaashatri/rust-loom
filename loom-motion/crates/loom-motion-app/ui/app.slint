@@ -23,6 +23,7 @@ export component MotionApp inherits Window {
     in property <bool> icon-only-toolbar: false;
     in property <bool> labeled-toolbar: false;
     in property <bool> overflow-toolbar: false;
+    in property <bool> inspector-action-labeled: false;
 
     callback window-resized(length);
     changed width => { root.window-resized(root.width); }
@@ -158,6 +159,7 @@ export component MotionApp inherits Window {
                 compact-layout: root.compact-layout;
                 labeled: root.labeled-toolbar;
                 overflow: root.overflow-toolbar;
+                inspector-action-labeled: root.inspector-action-labeled;
                 show-guides <=> root.show-guides;
                 show-safe-area <=> root.show-safe-area;
                 is-playing: root.is-playing;
