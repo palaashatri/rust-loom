@@ -3290,6 +3290,37 @@ fn initialize_recovery_for_gui(app: &WriterApp, command_line_open: bool) -> Opti
     }
 }
 
+fn wire_writer_inspector_toggle(
+    app: &WriterApp,
+    state: &Rc<GuiState>,
+    menu_service: Option<Arc<NativeMenuBar>>,
+) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.on_toggle_inspector(move || {
+        if let Some(app) = app_ref.upgrade() {
+            let guard = state
+                .registry
+                .lock()
+                .unwrap()
+                .invoke(&CommandInvocation::new(
+                    "view.inspector",
+                    InvocationSource::Toolbar,
+                ));
+            if guard.is_err() {
+                return;
+            }
+            if app.get_inspector_available() {
+                let visible = app.get_show_inspector();
+                app.set_show_inspector(!visible);
+                if let Some(menu_service) = menu_service.as_ref() {
+                    sync_menu_state(menu_service, &app, &state);
+                }
+            }
+        }
+    });
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     configure_direction(&app, args.rtl);
@@ -3648,31 +3679,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             app.set_status_left("Changes kept; replacement cancelled".into());
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_toggle_inspector(move || {
-            if let Some(app) = app_ref.upgrade() {
-                let guard = state
-                    .registry
-                    .lock()
-                    .unwrap()
-                    .invoke(&CommandInvocation::new(
-                        "view.inspector",
-                        InvocationSource::Toolbar,
-                    ));
-                if guard.is_err() {
-                    return;
-                }
-                if app.get_inspector_available() {
-                    let visible = app.get_show_inspector();
-                    app.set_show_inspector(!visible);
-                    sync_menu_state(&menu_service, &app, &state);
-                }
-            }
-        });
-    }
+    wire_writer_inspector_toggle(&app, &state, Some(menu_service.clone()));
 
     {
         let state = state.clone();

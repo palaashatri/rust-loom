@@ -454,7 +454,8 @@ export component WriterApp inherits Window {
         }
     }
 
-    if root.compact-inspector-visible : Rectangle {
+    Rectangle {
+        visible: root.compact-inspector-visible;
         x: 0px;
         y: Theme.tokens.metrics.toolbar-height;
         width: root.width;
@@ -468,7 +469,7 @@ export component WriterApp inherits Window {
             TouchArea { clicked => { root.toggle-inspector(); } }
         }
 
-        WriterInspector {
+        compact-inspector := WriterInspector {
             x: max(0px, parent.width - 360px);
             y: 0px;
             width: min(360px, parent.width);

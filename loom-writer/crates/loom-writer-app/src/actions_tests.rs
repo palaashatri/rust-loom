@@ -1564,6 +1564,91 @@ fn navigating_to_comment_selects_the_anchor_and_opens_the_compact_inspector() {
 }
 
 #[test]
+fn compact_comment_review_keeps_anchor_for_formatting_and_escape() {
+    let text = "Keep selection after opening review";
+    let mut document = text_document(text);
+    let block_id = document.blocks[0].id;
+    let start = text.find("selection").expect("selected word");
+    let end = start + "selection".len();
+    let comment_id = document
+        .add_comment_thread(block_id, start, end, "Keep this phrase")
+        .expect("add anchored comment");
+    let (app, state) = test_state(
+        document,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None])),
+    );
+    app.set_compact_inspector_layout(true);
+    app.set_inspector_available(true);
+    wire_writer_shared_callbacks(&app, &state, None);
+    wire_writer_inspector_toggle(&app, &state, None);
+
+    app.window().set_size(slint::PhysicalSize::new(1024, 720));
+    let _ = loom_test_support::snapshot_component(&app, 1024.0, 720.0, 1.0)
+        .expect("show Writer before comment navigation");
+    app.invoke_navigate_comment(SharedString::from(comment_id.clone()));
+    assert!(app.get_show_inspector(), "comment navigation opens review");
+    assert_eq!(
+        state.current.borrow().selection(),
+        TextSelection::range(start, end)
+    );
+
+    // A format action in the focused inspector must still use the document's
+    // selected comment anchor rather than collapsing the selection.
+    app.invoke_toggle_bold();
+    assert_eq!(
+        state.current.borrow().selection(),
+        TextSelection::range(start, end)
+    );
+    assert!(
+        formatting_state_for_selection(
+            &state.current.borrow(),
+            DocumentSelection::range(start, end),
+        )
+        .bold
+    );
+
+    // Escape must work immediately after comment navigation opens the review.
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Escape.into(),
+        });
+    assert!(!app.get_show_inspector(), "Escape closes compact review");
+
+    // Hiding the inspector returns focus to Format; Space on that focused
+    // toolbar button reopens it through the production callback.
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Space.into(),
+        });
+    assert!(
+        app.get_show_inspector(),
+        "focus returns to the Format trigger"
+    );
+    assert_eq!(
+        state.current.borrow().selection(),
+        TextSelection::range(start, end)
+    );
+
+    app.invoke_add_comment(SharedString::from("Follow-up comment"));
+    {
+        let current = state.current.borrow();
+        assert_eq!(current.comments.len(), 2);
+        assert_eq!(current.comments[1].body, "Follow-up comment");
+        assert_eq!(current.comments[1].block_id, block_id);
+        assert_eq!(
+            (current.comments[1].start, current.comments[1].end),
+            (start, end)
+        );
+    }
+    app.invoke_navigate_comment(SharedString::from(comment_id));
+    assert_eq!(
+        state.current.borrow().selection(),
+        TextSelection::range(start, end),
+        "navigation returns to the same anchored phrase after adding a comment"
+    );
+}
+
+#[test]
 fn comment_anchor_rebases_with_edit_and_is_restored_by_undo_redo() {
     let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
     let mut document = text_document("Hello world");
