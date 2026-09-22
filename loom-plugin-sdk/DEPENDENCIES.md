@@ -7,6 +7,8 @@
 | serde | 1.0.229 (locked) | schema derive | MIT OR Apache-2.0 |
 | serde_json | 1.0.151 (locked) | manifest + index JSON | MIT OR Apache-2.0 |
 | sha2 | 0.10.x | manifest_sha256 | MIT OR Apache-2.0 |
+| cap-fs-ext | 3.4.6 (locked) | no-follow directory operations for plugin writes | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| cap-std | 3.4.6 (locked) | anchored directory handles and atomic plugin-write publication | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | zip | 0.6.6 (locked) | `.loomplugin` read/write | MIT |
 
 ## Feature trimming

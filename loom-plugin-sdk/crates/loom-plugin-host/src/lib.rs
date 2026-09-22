@@ -498,9 +498,12 @@ pub fn check_permission(
 /// Write bytes through the host's permission boundary.
 ///
 /// The target must match a `file` permission for [`Capability::WriteFile`].
-/// Existing ancestors are resolved before authorization. The final write is
-/// then opened beneath a directory handle with symlink rejection, so a link
-/// swap between authorization and the write fails closed.
+/// Existing ancestors are resolved before authorization, then opened without
+/// following links. The final file is written to a temporary sibling and
+/// atomically renamed into place, so a pre-existing target hard link's other
+/// name is not modified. This confines plugin requests routed through the host
+/// API; it does not isolate the directory from another local process with the
+/// same operating-system permissions.
 pub fn write_file(plugin: &InstalledPlugin, path: &Path, bytes: &[u8]) -> Result<(), HostError> {
     let authorized = authorize_write_path(plugin, path)?;
     secure_write_file(&authorized.root, &authorized.relative, bytes).map_err(|error| {
@@ -512,7 +515,11 @@ pub fn write_file(plugin: &InstalledPlugin, path: &Path, bytes: &[u8]) -> Result
 }
 
 struct AuthorizedWritePath {
-    root: PathBuf,
+    root: cap_std::fs::Dir,
+    // On Windows the final rename resolves directory handles back to paths.
+    // Keep every ancestor handle open so none of those paths can be renamed
+    // while the path-based publication is in progress.
+    _path_guards: Vec<cap_std::fs::Dir>,
     relative: PathBuf,
     requested: PathBuf,
 }
@@ -593,8 +600,15 @@ fn authorize_write_path(
         {
             continue;
         }
+        let (root, path_guards) = open_anchored_directory(&prefix_resolved).map_err(|error| {
+            HostError::Denied(format!(
+                "cannot safely open permission root {}: {error}",
+                prefix_resolved.display()
+            ))
+        })?;
         return Ok(AuthorizedWritePath {
-            root: prefix_resolved,
+            root,
+            _path_guards: path_guards,
             relative: relative.to_path_buf(),
             requested,
         });
@@ -697,19 +711,122 @@ fn normalize_path(path: &Path) -> PathBuf {
     out
 }
 
+/// Open an absolute permission root one component at a time, starting from a
+/// filesystem root that cannot be swapped. Every child is opened without
+/// following links, and the returned handle stays attached to this directory
+/// even if a parent path is renamed later.
 #[cfg(unix)]
-fn secure_write_file(root: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()> {
-    use rustix::fs::{open, openat, Mode, OFlags};
+fn open_anchored_directory(path: &Path) -> io::Result<(cap_std::fs::Dir, Vec<cap_std::fs::Dir>)> {
+    use cap_fs_ext::DirExt;
+    use cap_std::fs::Dir;
 
-    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    let mut directory = open(root, directory_flags, Mode::empty()).map_err(io::Error::from)?;
-    let mut components = relative.components();
+    let mut components = path.components();
+    if !matches!(components.next(), Some(Component::RootDir)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "permission root must be absolute",
+        ));
+    }
+    let mut directory = Dir::open_ambient_dir(Path::new("/"), cap_std::ambient_authority())?;
+    for component in components {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "permission root must not contain dot or parent components",
+            ));
+        };
+        directory = directory.open_dir_nofollow(name)?;
+    }
+    Ok((directory, Vec::new()))
+}
+
+/// Windows paths include a drive or share prefix before their root separator.
+/// Keep each opened directory alive: cap-std uses paths for rename on Windows,
+/// and its directory handles deny delete-sharing so path components cannot be
+/// renamed while secure publication is in progress.
+#[cfg(windows)]
+fn open_anchored_directory(path: &Path) -> io::Result<(cap_std::fs::Dir, Vec<cap_std::fs::Dir>)> {
+    use cap_fs_ext::DirExt;
+    use cap_std::fs::Dir;
+    use std::path::Prefix;
+
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "permission root must have a drive or network-share prefix",
+        ));
+    };
+    if !matches!(
+        prefix.kind(),
+        Prefix::Disk(_) | Prefix::UNC(_, _) | Prefix::VerbatimDisk(_) | Prefix::VerbatimUNC(_, _)
+    ) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "permission root uses an unsupported Windows path prefix",
+        ));
+    }
+    if !matches!(components.next(), Some(Component::RootDir)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "permission root must be absolute",
+        ));
+    }
+
+    let mut volume_root = PathBuf::from(prefix.as_os_str());
+    volume_root.push("\\");
+    let mut directory = Dir::open_ambient_dir(&volume_root, cap_std::ambient_authority())?;
+    let mut path_guards = Vec::new();
+    for component in components {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "permission root must not contain dot or parent components",
+            ));
+        };
+        let child = directory.open_dir_nofollow(name)?;
+        path_guards.push(directory);
+        directory = child;
+    }
+    Ok((directory, path_guards))
+}
+
+/// Platforms without a reviewed handle-relative implementation fail closed.
+#[cfg(not(any(unix, windows)))]
+fn open_anchored_directory(_path: &Path) -> io::Result<(cap_std::fs::Dir, Vec<cap_std::fs::Dir>)> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "secure plugin writes are not supported on this platform",
+    ))
+}
+
+struct WriteTarget {
+    directory: cap_std::fs::Dir,
+    file_name: std::ffi::OsString,
+    #[cfg(windows)]
+    _path_guards: Vec<cap_std::fs::Dir>,
+}
+
+fn open_write_target(root: &cap_std::fs::Dir, relative: &Path) -> io::Result<WriteTarget> {
+    use cap_fs_ext::DirExt;
+
+    let mut directory = root.try_clone()?;
+    #[cfg(windows)]
+    let mut path_guards = Vec::new();
+    let mut components = relative.components().peekable();
     let file_name = loop {
         match components.next() {
-            Some(Component::Normal(name)) if components.clone().next().is_none() => break name,
+            Some(Component::Normal(name)) if components.peek().is_none() => {
+                break name.to_os_string()
+            }
             Some(Component::Normal(name)) => {
-                directory = openat(&directory, name, directory_flags, Mode::empty())
-                    .map_err(io::Error::from)?;
+                let child = directory.open_dir_nofollow(name)?;
+                // cap-std's Windows rename operation reconstructs absolute
+                // paths from directory handles. Keep every ancestor open so
+                // none of those path components can be renamed in between.
+                #[cfg(windows)]
+                path_guards.push(directory);
+                directory = child;
             }
             _ => {
                 return Err(io::Error::new(
@@ -719,58 +836,72 @@ fn secure_write_file(root: &Path, relative: &Path, bytes: &[u8]) -> io::Result<(
             }
         }
     };
-    let file_flags =
-        OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    let file = openat(
-        &directory,
+
+    Ok(WriteTarget {
+        directory,
         file_name,
-        file_flags,
-        Mode::from_raw_mode(0o600),
-    )
-    .map_err(io::Error::from)?;
-    let mut file: fs::File = file.into();
-    file.write_all(bytes)?;
-    file.sync_all()
+        #[cfg(windows)]
+        _path_guards: path_guards,
+    })
 }
 
-#[cfg(not(unix))]
-fn secure_write_file(root: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()> {
-    // Windows has no openat equivalent in the standard library. Reject every
-    // reparse point found before opening and use the platform no-reparse flag
-    // for the final component; the Unix implementation above is the fully
-    // race-resistant directory-handle path.
-    let mut target = root.to_path_buf();
-    let components: Vec<_> = relative.components().collect();
-    for (index, component) in components.iter().enumerate() {
-        let Component::Normal(name) = component else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "write target must be a relative file path",
-            ));
-        };
-        target.push(name);
-        if index + 1 < components.len() {
-            let metadata = fs::symlink_metadata(&target)?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "write target contains a reparse point or non-directory",
-                ));
+fn secure_write_file(root: &cap_std::fs::Dir, relative: &Path, bytes: &[u8]) -> io::Result<()> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use cap_std::fs::OpenOptions;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    // Keep this object alive through rename. On Windows it owns handles for
+    // the whole directory chain, not only the final parent.
+    let target = open_write_target(root, relative)?;
+    let directory = target.directory.try_clone()?;
+    let file_name = &target.file_name;
+
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    options.follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut temporary_name = None;
+    let result = (|| {
+        let mut file = None;
+        for _ in 0..32 {
+            let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let candidate = format!(".loom-write-{}-{sequence}", std::process::id());
+            match directory.open_with(&candidate, &options) {
+                Ok(opened) => {
+                    temporary_name = Some(candidate);
+                    file = Some(opened);
+                    break;
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
             }
         }
+        let temporary_name = temporary_name.as_deref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "could not allocate a temporary plugin-write file",
+            )
+        })?;
+        let mut file = file.expect("temporary name and file are set together");
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        directory.rename(temporary_name, &directory, file_name)
+    })();
+
+    if let Some(temporary_name) = temporary_name {
+        if result.is_err() {
+            let _ = directory.remove_file(temporary_name);
+        }
     }
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // FILE_FLAG_OPEN_REPARSE_POINT. This keeps the final path component
-        // from being followed when it is a reparse point.
-        options.custom_flags(0x0020_0000);
-    }
-    let mut file = options.open(target)?;
-    file.write_all(bytes)?;
-    file.sync_all()
+    result
 }
 
 /// Structural information discovered by the bounded WebAssembly validator.
@@ -1240,6 +1371,79 @@ fn load_manifest(install_dir: &Path) -> Option<PluginManifest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn plugin_with_write_permission(install_dir: &Path) -> InstalledPlugin {
+        let manifest = parse_manifest(
+            r#"{
+                "manifest_version": 1,
+                "plugin_id": "write-test",
+                "name": "Write Test",
+                "version": "0.1.0",
+                "license": "MIT",
+                "entry": {
+                    "kind": "command",
+                    "wasm_module": "module.wasm",
+                    "function": "invoke"
+                },
+                "capabilities": ["write-file"],
+                "permissions": [{
+                    "resource": "file",
+                    "mode": "write",
+                    "path_prefix": "allowed"
+                }],
+                "api_min_version": "0.1.0",
+                "api_max_version": "0.9.0",
+                "resource_limits": {
+                    "max_memory_bytes": 1024,
+                    "max_fs_bytes": 1024,
+                    "max_fs_entries": 8,
+                    "max_cpu_ms_per_call": 1000,
+                    "network": false
+                }
+            }"#,
+        )
+        .expect("test manifest parses");
+        InstalledPlugin {
+            id: manifest.plugin_id.clone(),
+            version: manifest.version.clone(),
+            manifest,
+            install_dir: install_dir.to_path_buf(),
+            wasm_path: install_dir.join("module.wasm"),
+            manifest_sha256: [0; 32],
+        }
+    }
+
+    fn write_plugin_fixture() -> (TempDir, InstalledPlugin) {
+        let temp = TempDir::new().expect("temporary directory");
+        let install_dir = temp.path().join("plugin");
+        fs::create_dir_all(install_dir.join("allowed")).expect("allowed directory");
+        let plugin = plugin_with_write_permission(&install_dir);
+        (temp, plugin)
+    }
+
+    #[cfg(any(unix, windows))]
+    fn create_directory_link(link: &Path, target: &Path) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, link)
+        }
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(io::Error::other(
+                    String::from_utf8_lossy(&output.stderr).into_owned(),
+                ))
+            }
+        }
+    }
 
     #[test]
     fn safe_entry_name_accepts_normal_paths() {
@@ -1298,5 +1502,168 @@ mod tests {
         let module = b"\0asm\x01\0\0\0\x05\x03\x01\x00\x02";
         let error = validate_wasm_module(module, 64 * 1024).unwrap_err();
         assert!(matches!(error, HostError::InvalidWasm(_)));
+    }
+
+    #[test]
+    fn allowed_write_still_succeeds() {
+        let (_temp, plugin) = write_plugin_fixture();
+        write_file(&plugin, Path::new("allowed/notes.txt"), b"saved").unwrap();
+        write_file(&plugin, Path::new("allowed/notes.txt"), b"updated").unwrap();
+
+        assert_eq!(
+            fs::read(plugin.install_dir.join("allowed/notes.txt")).unwrap(),
+            b"updated"
+        );
+    }
+
+    #[test]
+    fn traversal_write_is_denied() {
+        let (temp, plugin) = write_plugin_fixture();
+        let outside = temp.path().join("outside.txt");
+
+        assert!(write_file(&plugin, Path::new("allowed/../outside.txt"), b"no").is_err());
+        assert!(!outside.exists());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn nested_link_cannot_create_a_file_outside_the_permission_root() {
+        let (temp, plugin) = write_plugin_fixture();
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        create_directory_link(&plugin.install_dir.join("allowed/shortcut"), &outside).unwrap();
+
+        assert!(write_file(&plugin, Path::new("allowed/shortcut/new-file.txt"), b"no").is_err());
+        assert!(!outside.join("new-file.txt").exists());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn nested_parent_swap_after_authorization_cannot_redirect_a_write() {
+        let (temp, plugin) = write_plugin_fixture();
+        let nested = plugin.install_dir.join("allowed/nested");
+        let moved_nested = plugin.install_dir.join("allowed/nested-before-swap");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let authorized =
+            authorize_write_path(&plugin, Path::new("allowed/nested/payload.txt")).unwrap();
+
+        fs::rename(&nested, &moved_nested).unwrap();
+        create_directory_link(&nested, &outside).unwrap();
+
+        assert!(secure_write_file(&authorized.root, &authorized.relative, b"no").is_err());
+        assert!(!outside.join("payload.txt").exists());
+        assert!(!moved_nested.join("payload.txt").exists());
+    }
+
+    #[test]
+    fn hard_link_target_is_replaced_without_changing_its_other_name() {
+        let (temp, plugin) = write_plugin_fixture();
+        let outside = temp.path().join("outside.txt");
+        let allowed_link = plugin.install_dir.join("allowed/linked.txt");
+        fs::write(&outside, b"keep this outside data").unwrap();
+        fs::hard_link(&outside, &allowed_link).unwrap();
+
+        write_file(&plugin, Path::new("allowed/linked.txt"), b"plugin data").unwrap();
+
+        assert_eq!(fs::read(&outside).unwrap(), b"keep this outside data");
+        assert_eq!(fs::read(&allowed_link).unwrap(), b"plugin data");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_root_ancestor_swap_cannot_redirect_an_authorized_write() {
+        let (temp, plugin) = write_plugin_fixture();
+        let authorized = authorize_write_path(&plugin, Path::new("allowed/payload.txt")).unwrap();
+        let moved_install = temp.path().join("plugin-before-swap");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(outside.join("allowed")).unwrap();
+        fs::write(outside.join("allowed/payload.txt"), b"outside stays").unwrap();
+
+        fs::rename(&plugin.install_dir, &moved_install).unwrap();
+        create_directory_link(&plugin.install_dir, &outside)
+            .expect("create a directory link at the swapped root");
+        secure_write_file(&authorized.root, &authorized.relative, b"authorized data")
+            .expect("the pinned permission directory remains writable after its path moves");
+
+        assert_eq!(
+            fs::read(outside.join("allowed/payload.txt")).unwrap(),
+            b"outside stays",
+            "the swapped path must never redirect the write outside"
+        );
+        assert_eq!(
+            fs::read(moved_install.join("allowed/payload.txt")).unwrap(),
+            b"authorized data",
+            "a pinned permission root may still be written after its name moves"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_keeps_nested_write_ancestors_pinned_until_publication() {
+        let (temp, plugin) = write_plugin_fixture();
+        let nested = plugin.install_dir.join("allowed/nested");
+        let deeper = nested.join("deeper");
+        let moved_nested = plugin.install_dir.join("allowed/nested-before-swap");
+        let outside = temp.path().join("outside/nested/deeper");
+        fs::create_dir_all(&deeper).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("payload.txt"), b"outside stays").unwrap();
+
+        let authorized =
+            authorize_write_path(&plugin, Path::new("allowed/nested/deeper/payload.txt")).unwrap();
+        let target = open_write_target(&authorized.root, &authorized.relative).unwrap();
+        let error = fs::rename(&nested, &moved_nested)
+            .expect_err("an open intermediate ancestor must not be renamed on Windows");
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::PermissionDenied,
+            "the nested ancestor move must fail while its path guard is open"
+        );
+        drop(target);
+
+        secure_write_file(&authorized.root, &authorized.relative, b"authorized data")
+            .expect("the original nested target must remain writable");
+        assert_eq!(
+            fs::read(nested.join("deeper/payload.txt")).unwrap(),
+            b"authorized data"
+        );
+        assert_eq!(
+            fs::read(outside.join("payload.txt")).unwrap(),
+            b"outside stays"
+        );
+        assert!(!moved_nested.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_keeps_permission_ancestors_pinned_until_write_finishes() {
+        let (temp, plugin) = write_plugin_fixture();
+        let authorized = authorize_write_path(&plugin, Path::new("allowed/payload.txt")).unwrap();
+        let moved_install = temp.path().join("plugin-before-swap");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(outside.join("allowed")).unwrap();
+        fs::write(outside.join("allowed/payload.txt"), b"outside stays").unwrap();
+
+        let error = fs::rename(&plugin.install_dir, &moved_install)
+            .expect_err("an open permission ancestor must not be renamed on Windows");
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::PermissionDenied,
+            "the ancestor move must fail because secure publication pins its path"
+        );
+
+        secure_write_file(&authorized.root, &authorized.relative, b"authorized data")
+            .expect("the original authorized handle must remain writable");
+        assert_eq!(
+            fs::read(plugin.install_dir.join("allowed/payload.txt")).unwrap(),
+            b"authorized data"
+        );
+        assert_eq!(
+            fs::read(outside.join("allowed/payload.txt")).unwrap(),
+            b"outside stays"
+        );
+        assert!(!moved_install.exists());
     }
 }

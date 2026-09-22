@@ -204,11 +204,15 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 **Prove it:** Rename a tab 9 times, then 100 times; count retained transactions and bytes. Growth must be bounded/linear in the retained edits, not 1, 4, 13, 40… (9 edits currently contain 9,841 nested transactions). Undo/redo across rename, delete, switch, and cell edits must still work. Evidence: `sheets/history.rs`, `sheets-history.log`.
 ### CODE-08 — Keep plugin writes inside the allowed folder
 
-**P1 · Plugin host · NEEDS_REVIEW · Needs experienced security review.** A shortcut folder must not let a plugin write outside its permission boundary.
+**P1 · Plugin host · NEEDS_REVIEW · Native Windows/macOS test runs are pending.** A shortcut folder must not let a plugin write outside its permission boundary.
 
-**Repair result (2026-09-15):** Commit `1a51c6d` canonicalizes and validates plugin storage paths and rejects traversal/symlink escapes in focused tests. An experienced cross-platform security review is still required.
+**Repair result (2026-09-15):** Commit `1a51c6d` canonicalizes and validates plugin storage paths and rejects traversal/symlink escapes in focused tests. An experienced cross-platform security review was still required at that point.
 
-**Open:** `loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs`, `canonicalize_or_normalize`, write authorization and the actual write operation.
+**Repair result (2026-09-22):** Authorization now opens the permission root and each parent folder as a directory handle without following links. Writes go to a new sibling file and are atomically renamed over the target, so writing through an existing hard link cannot change the outside name's contents. Windows keeps each ancestor handle open while publishing because its directory rename path is resolved from names. The independent security review found no remaining escape for an untrusted plugin limited to the host's `write_file` API. It identified a temp-name race only against a separate local process with the same OS permissions; that process is outside this plugin-only boundary and already has direct filesystem access. The SDK forbids unsafe code, so the wider same-user-process case is not addressed with raw Windows FFI.
+
+**Verified locally:** `cargo fmt --manifest-path loom-plugin-sdk/Cargo.toml --all -- --check`; `cargo test --manifest-path loom-plugin-sdk/Cargo.toml --workspace --locked` (72 passed); `cargo clippy --manifest-path loom-plugin-sdk/Cargo.toml --workspace --all-targets --locked -- -D warnings`; `cargo build --manifest-path loom-plugin-sdk/Cargo.toml --workspace --release --locked`; `cargo check --manifest-path loom-plugin-sdk/Cargo.toml -p loom-plugin-host --tests --target x86_64-pc-windows-gnu --locked`; and `git diff --check` all passed. Linux executed the tests. Native Windows and macOS execution remains pending in the new CI matrix; keep this card NEEDS_REVIEW until those runs pass.
+
+**Original repair checklist (retained for audit traceability):** `loom-plugin-sdk/crates/loom-plugin-host/src/lib.rs`, `canonicalize_or_normalize`, write authorization and the actual write operation.
 
 1. Reproduce with an allowed directory containing a symlink to an outside directory and a target file that does not exist yet.
 2. Resolve existing parent directories for create targets. Compare the resolved parent with the allowed root.
@@ -216,6 +220,7 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 4. Handle link swaps between check and write; fail closed with an actionable permission error.
 
 **Prove it:** Existing-file, new-file, nested-link, traversal, and link-swap attempts cannot create or change any outside file. Normal allowed writes still work. The audit proves the host permission API escape, not a running Wasmtime exploit. Evidence: `plugin-permission.log`, `media-plugins/src/main.rs`.
+
 ### CODE-09 — Respect Encode's no-overwrite choice at the final write
 
 **P1 · Encode · NEEDS_REVIEW · Needs filesystem review.** Another file may appear while encoding. It still belongs to its owner.
