@@ -653,56 +653,20 @@ fn repair_journal(directory: &Path, records: &[JournalRecord]) -> Result<(), Pro
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProductionError> {
+    atomic_write_with(path, |file| file.write_all(bytes))
+}
+
+fn atomic_write_with(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> io::Result<()>,
+) -> Result<(), ProductionError> {
     let parent = path
         .parent()
         .ok_or_else(|| ProductionError::InvalidData("path has no parent".into()))?;
     fs::create_dir_all(parent)?;
-    let temporary = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("loom"),
-        std::process::id()
-    ));
-    let write_result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(bytes)?;
-        file.flush()?;
-        file.sync_all()?;
-        Ok::<(), io::Error>(())
-    })();
-    if let Err(error) = write_result {
-        let _ = fs::remove_file(&temporary);
-        return Err(error.into());
-    }
-
-    // Unix rename replaces the destination atomically. Windows does not
-    // expose that operation through std::fs; checkpoint publication therefore
-    // uses unique commit records there and never calls this branch for an
-    // existing checkpoint pointer.
-    #[cfg(windows)]
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    if let Err(error) = fs::rename(&temporary, path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(error.into());
-    }
-    sync_directory(parent)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), ProductionError> {
-    File::open(path)?.sync_all()?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn sync_directory(_path: &Path) -> Result<(), ProductionError> {
+    atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
+        .write(write)
+        .map_err(io::Error::from)?;
     Ok(())
 }
 
@@ -1089,6 +1053,44 @@ pub fn validate_release_matrix(targets: &[InstallerTarget]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_write_replaces_existing_destination() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let path = temporary.path().join(JOURNAL_FILE);
+        fs::write(&path, b"old journal").expect("old journal");
+
+        atomic_write(&path, b"new journal").expect("atomic replacement");
+
+        assert_eq!(fs::read(path).expect("read replacement"), b"new journal");
+    }
+
+    #[test]
+    fn failed_atomic_write_preserves_existing_destination() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let path = temporary.path().join(JOURNAL_FILE);
+        fs::write(&path, b"old journal").expect("old journal");
+
+        let result = atomic_write_with(&path, |file| {
+            file.write_all(b"partial new journal")?;
+            Err(io::Error::other("injected staging failure"))
+        });
+
+        assert!(result.is_err(), "injected failure must be returned");
+        assert_eq!(fs::read(path).expect("read old journal"), b"old journal");
+    }
+
+    #[test]
+    fn failed_atomic_publish_preserves_existing_directory() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let path = temporary.path().join(JOURNAL_FILE);
+        fs::create_dir(&path).expect("destination directory");
+        let sentinel = path.join("keep.txt");
+        fs::write(&sentinel, b"keep me").expect("sentinel");
+
+        assert!(atomic_write(&path, b"replacement file").is_err());
+        assert_eq!(fs::read(sentinel).expect("read sentinel"), b"keep me");
+    }
 
     #[test]
     fn journal_recovers_after_checkpoint_and_rejects_tampering() {

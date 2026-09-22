@@ -61,6 +61,21 @@ jobs:
         working-directory: loom-sheets
         run: cargo test --workspace --locked
 
+  recovery:
+    name: Recovery journal (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: Test recovery journal and atomic replacement
+        run: cargo test --manifest-path loom-core/Cargo.toml -p loom-production --locked
+
   ui-foundation:
     needs: governance
     runs-on: ubuntu-24.04

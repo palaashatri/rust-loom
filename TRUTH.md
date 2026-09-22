@@ -122,11 +122,13 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 **Prove it:** Record `first`, checkpoint `saved`, close, reopen, record `new unsaved edit`, close, reopen. Recovered text must be exactly `new unsaved edit`. Repeat twice. Existing result is `saved contents`. Evidence: `shared-probes/src/lib.rs`, `shared-probes.log`.
 ### CODE-02 — Publish recovery checkpoints without destroying the last good copy
 
-**P1 · Shared · NEEDS_REVIEW · Needs experienced review.** The payload and its checksum are one thing. Replacing just one half makes the saved copy unreadable.
+**P1 · Shared · NEEDS_REVIEW · Awaiting Linux/Windows CI for the replacement regression.** The payload and its checksum are one thing. Replacing just one half makes the saved copy unreadable.
 
-**Repair result (2026-09-15):** Commit `68df596` publishes payload and checksum together through the shared recovery writer and exercises failure paths. Focused tests pass; an experienced filesystem/recovery review is still required.
+**Repair result (2026-09-22):** The code change replaces the hand-written Windows delete-then-rename path with `atomicwrites::AtomicFile`, which stages beside the destination, syncs the staged file, and atomically publishes it with platform durability support. Added tests for replacing an existing journal, preserving it when staging fails, and preserving an existing directory when publish fails. Added a focused `loom-production` test job on Ubuntu and Windows.
 
-**Open:** `loom-core/crates/loom-production/src/lib.rs`, `checkpoint`, atomic replacement helper.
+**Verification:** `cargo fmt --manifest-path loom-core/Cargo.toml --all -- --check` passed locally. The new focused test command is `cargo test --manifest-path loom-core/Cargo.toml -p loom-production --locked` on Ubuntu and Windows; results are pending CI. `git diff --check` passed.
+
+**Open:** `loom-core/crates/loom-production/src/lib.rs`, `checkpoint`, atomic replacement helper. The workflow run must pass on both operating systems before this card can be marked FIXED.
 
 1. Draw the old checkpoint, new checkpoint, and journal on paper. At every filesystem operation, identify which complete copy a restart can read.
 2. Write a new generation into separate files; flush its payload and metadata. Verify both before publishing that generation through one atomic commit point.
