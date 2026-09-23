@@ -63,6 +63,7 @@ export component SheetsApp inherits Window {
 
     in property <string> sheet-name: "Untitled";
     in property <string> status-left: "";
+    in property <string> status-summary: "";
     in property <string> status-right: "";
     in property <[int]> rows: [];
     in property <[int]> cols: [];
@@ -694,7 +695,12 @@ export component SheetsApp inherits Window {
                 LoomStatusText {
                     text: root.status-left != "" ? root.status-left : "Ready";
                     strong: true;
+                    accessible-live-region: AccessibleLiveness.polite;
                     horizontal-stretch: 1;
+                }
+                LoomStatusText {
+                    text: root.status-summary;
+                    horizontal-alignment: right;
                 }
                 LoomStatusText {
                     text: root.status-right;

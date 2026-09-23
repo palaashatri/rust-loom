@@ -30,6 +30,18 @@ These screenshots come from the running desktop app via `/usr/bin/gnome-screensh
 
 The matching keyboard, AT-SPI, Orca, and cancellation observations are in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the repository's portable audit evidence archive.
 
+## Native Linux status and error feedback — 2026-09-23
+
+These live-window captures show UI-06 feedback outside the editable grid. The two 1024×752 captures come from the final UI-06 build; the save-cancel capture shows the dirty marker and visible cancellation message.
+
+![Invalid formula feedback stays visible while the cell shows its error](docs/qa-native/ui06-formula-error-live-status-linux.png)
+
+![Read-only save failure is concise and leaves the workbook marked unsaved](docs/qa-native/ui06-readonly-save-failure-live-status-linux.png)
+
+![Canceling Save As leaves the dirty marker and says Save cancelled](docs/qa-native/ui06-save-cancel-dirty-workbook-linux.png)
+
+The matching test, build, and one-time Orca announcement results are recorded in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the portable audit evidence archive.
+
 ## Core Capabilities
 
 - **Workbook Tabs & Navigation**: Multi-sheet workbook tabs with add/switch/rename/delete (all undoable), persisted with the active tab in versioned `.loomtable` packages.
@@ -44,6 +56,7 @@ The matching keyboard, AT-SPI, Orca, and cancellation observations are in [the n
 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.
 - Native Linux screenshots above verify the opened workbook, dirty title, chooser selection, and template creation at 1024×720. The Escape-preserves-workbook capture is `docs/qa-native/template-cancel-preserves-workbook-linux.png`.
+- The UI-06 captures verify visible formula errors, read-only save failure, and canceled Save As feedback; cancel and failure do not clear the unsaved marker.
 - These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root `TRUTH.md` ledger.
 
 ## Development

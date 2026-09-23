@@ -987,7 +987,7 @@ fn project_sheet_inner(
         .values()
         .filter(|c| c.raw.trim_start().starts_with('='))
         .count();
-    app.set_status_left(SharedString::from(format!(
+    app.set_status_summary(SharedString::from(format!(
         "{} cells · {} formulas",
         sheet.cells.len(),
         formulas
@@ -2134,6 +2134,18 @@ fn save_current_sheet(
     Ok(true)
 }
 
+fn save_error_feedback(action: &str, error: &str) -> String {
+    let normalized = error.to_ascii_lowercase();
+    let message = if normalized.contains("read-only") || normalized.contains("read only") {
+        "destination is read-only"
+    } else if normalized.contains("permission denied") {
+        "permission denied"
+    } else {
+        return format!("{action}: {error}");
+    };
+    format!("{action}: {message}")
+}
+
 fn run_gui(args: &Args) -> Result<(), String> {
     run_gui_with_dialogs(args, Rc::new(NativeFileDialogs))
 }
@@ -2343,7 +2355,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_save_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Err(error) = save_current_sheet(&app, &state, false) {
-                    app.set_status_left(SharedString::from(format!("Save failed: {error}")));
+                    app.set_status_left(SharedString::from(save_error_feedback(
+                        "Save failed",
+                        &error,
+                    )));
                 }
             }
         });
@@ -2354,7 +2369,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         app.on_save_as_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
                 if let Err(error) = save_current_sheet(&app, &state, true) {
-                    app.set_status_left(SharedString::from(format!("Save As failed: {error}")));
+                    app.set_status_left(SharedString::from(save_error_feedback(
+                        "Save As failed",
+                        &error,
+                    )));
                 }
             }
         });
@@ -2371,9 +2389,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                         continue_pending_replacement(&app, &state, &menu_service);
                     }
                     Ok(false) => {}
-                    Err(error) => {
-                        app.set_status_left(SharedString::from(format!("Save failed: {error}")))
-                    }
+                    Err(error) => app.set_status_left(SharedString::from(save_error_feedback(
+                        "Save failed",
+                        &error,
+                    ))),
                 }
             }
         });

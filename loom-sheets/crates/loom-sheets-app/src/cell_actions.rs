@@ -4,10 +4,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use loom_desktop::NativeMenuBar;
-use loom_sheets_core::CellRef;
+use loom_sheets_core::{CellRef, Value};
 use slint::{ComponentHandle, SharedString};
 
-use crate::{apply_sheet, commit_formula_edit, sync_menu_state, GuiState, SheetsApp};
+use crate::{apply_sheet, commit_formula_edit, evaluate, sync_menu_state, GuiState, SheetsApp};
 
 pub(crate) fn register_cell_edit_action(
     app: &SheetsApp,
@@ -29,10 +29,14 @@ pub(crate) fn register_cell_edit_action(
                 if committed {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
-                    app.set_formula_feedback(SharedString::from(format!(
-                        "Cell {} updated",
-                        cell.to_a1()
-                    )));
+                    let feedback = match evaluate(&state.current.borrow()).get(&cell) {
+                        Some(Value::Error(error)) => {
+                            format!("Formula error in {}: #{}", cell.to_a1(), error.code())
+                        }
+                        _ => format!("Cell {} updated", cell.to_a1()),
+                    };
+                    app.set_formula_feedback(SharedString::from(feedback.clone()));
+                    app.set_status_left(SharedString::from(feedback));
                 }
             }
         }

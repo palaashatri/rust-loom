@@ -136,6 +136,42 @@ fn workbook_window_title_uses_the_saved_file_or_a_truthful_unsaved_name() {
 }
 
 #[test]
+fn formula_errors_are_visible_in_a_polite_live_region() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+    app.invoke_commit_selected_cell("=1/0".into());
+
+    let expected_message = "Formula error in A1: #DIV/0!";
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+    project_current(&app, &state);
+    assert_eq!(app.get_status_left().as_str(), expected_message);
+    assert_eq!(app.get_status_summary().as_str(), "2 cells · 2 formulas");
+
+    let messages: Vec<_> =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, expected_message)
+            .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0].accessible_live_region(),
+        Some(i_slint_backend_testing::AccessibleLiveness::Polite)
+    );
+}
+
+#[test]
+fn readonly_save_error_feedback_is_short_and_actionable() {
+    assert_eq!(
+        save_error_feedback(
+            "Save failed",
+            "atomic write /tmp/locked.loomtable: io error: destination '/tmp/locked.loomtable' is read-only",
+        ),
+        "Save failed: destination is read-only"
+    );
+}
+
+#[test]
 fn formula_bar_draft_is_not_applied_before_commit() {
     let mut sheet = Sheet::new("test");
     let selected = CellRef::parse("B1").unwrap();
