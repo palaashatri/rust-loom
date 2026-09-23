@@ -1,0 +1,157 @@
+import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export struct LocalMenuEntry {
+    menu_index: int,
+    label: string,
+    command_id: string,
+    shortcut: string,
+    enabled: bool,
+    checked: bool,
+    separator: bool,
+}
+
+export component LocalMenuBar inherits Rectangle {
+    in property <[string]> labels: [];
+    in-out property <int> open-index: -1;
+
+    height: 36px;
+    background: Theme.palette().surface;
+
+    HorizontalLayout {
+        spacing: 0px;
+        padding-left: Theme.tokens.space.sm;
+
+        for label[index] in root.labels : LoomButton {
+            width: 64px;
+            height: 36px;
+            label: label;
+            variant: "ghost";
+            selected: root.open-index == index;
+            clicked => {
+                root.open-index = root.open-index == index ? -1 : index;
+            }
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: 35px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+
+export component LocalMenuPopup inherits Rectangle {
+    in property <bool> menu-enabled: true;
+    in property <[string]> labels: [];
+    in property <[LocalMenuEntry]> items: [];
+    in property <int> selected-index: -1;
+    in-out property <int> open-index: -1;
+    callback menu-action(string);
+    callback menu-opened(int);
+    callback menu-move(int);
+    callback menu-closed();
+
+    visible: root.menu-enabled && root.open-index >= 0;
+    background: transparent;
+
+    changed open-index => {
+        if (root.open-index >= 0) {
+            root.menu-opened(root.open-index);
+            menu-focus.focus();
+        } else {
+            root.menu-closed();
+        }
+    }
+
+    menu-focus := FocusScope {
+        enabled: root.menu-enabled && root.open-index >= 0;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.open-index = -1;
+                return accept;
+            }
+            if (event.modifiers.alt) {
+                if (event.text == "f" || event.text == "F") { root.open-index = 0; return accept; }
+                if (event.text == "e" || event.text == "E") { root.open-index = 1; return accept; }
+                if (event.text == "v" || event.text == "V") { root.open-index = 2; return accept; }
+                if (event.text == "t" || event.text == "T") { root.open-index = 3; return accept; }
+                if (event.text == "h" || event.text == "H") { root.open-index = 4; return accept; }
+            }
+            if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                root.menu-move(event.text == Key.DownArrow ? 1 : -1);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                let count = root.labels.length;
+                if (count > 0) {
+                    root.open-index = Math.mod(root.open-index
+                        + (event.text == Key.RightArrow ? 1 : count - 1), count);
+                }
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == Key.Space) {
+                let index = root.selected-index;
+                if (index >= 0 && index < root.items.length) {
+                    let item = root.items[index];
+                    if (item.enabled && !item.separator) {
+                        root.open-index = -1;
+                        root.menu-action(item.command_id);
+                    }
+                }
+                return accept;
+            }
+            return accept;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.open-index = -1; }
+    }
+
+    Rectangle {
+        x: 8px + root.open-index * 64px;
+        y: 0px;
+        width: 288px;
+        height: min(520px, root.height - 8px);
+        border-radius: Theme.tokens.metrics.radius-small;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().surface;
+        drop-shadow-blur: 12px;
+        drop-shadow-offset-y: 3px;
+        drop-shadow-color: Theme.palette().shadow;
+
+        VerticalLayout {
+            spacing: Theme.tokens.space.xs;
+            padding: Theme.tokens.space.sm;
+
+            for item[index] in root.items : Rectangle {
+                visible: item.menu_index == root.open-index;
+                height: item.separator ? 1px : Theme.tokens.metrics.control-height;
+
+                if item.separator : Rectangle {
+                    width: root.width;
+                    height: 1px;
+                    background: Theme.palette().border;
+                }
+
+                if !item.separator : LoomButton {
+                    width: parent.width;
+                    height: parent.height;
+                    label: (item.checked ? "✓ " : "") + item.label
+                        + (item.shortcut != "" ? "    " + item.shortcut : "");
+                    variant: "ghost";
+                    selected: root.selected-index == index;
+                    enabled: item.enabled;
+                    clicked => {
+                        root.open-index = -1;
+                        root.menu-action(item.command_id);
+                    }
+                }
+            }
+        }
+    }
+}

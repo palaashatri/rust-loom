@@ -53,6 +53,8 @@ mod chart_actions;
 
 mod local_menu;
 
+mod evaluation_cache;
+
 mod palette;
 use palette::*;
 
@@ -779,7 +781,7 @@ pub(crate) fn zoom_factor(app: &SheetsApp) -> f32 {
 pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
     sync_window_title(app, state);
     let sheet = state.current.borrow().clone();
-    let vals = evaluate_current(state);
+    let vals = recalculate_current(state);
     project_sheet_inner(app, &sheet, &vals, true);
     if let Err(error) = record_workbook_snapshot(state) {
         app.set_status_right(SharedString::from(format!(
@@ -836,12 +838,31 @@ pub(crate) fn workbook_sheets(state: &GuiState) -> (Vec<Sheet>, usize) {
 
 /// Evaluate the active tab with cross-sheet references resolved against all
 /// tabs. Single-sheet callers keep using `evaluate`.
-pub(crate) fn evaluate_current(state: &GuiState) -> std::collections::HashMap<CellRef, Value> {
+fn calculate_current_values(state: &GuiState) -> std::collections::HashMap<CellRef, Value> {
     let (siblings, active) = workbook_sheets(state);
     evaluate_workbook(&siblings)
         .into_iter()
         .nth(active)
         .unwrap_or_default()
+}
+
+/// Recalculate after an edit and save the result for later view-only updates.
+fn recalculate_current(state: &GuiState) -> Rc<std::collections::HashMap<CellRef, Value>> {
+    let active = *state.active_sheet_index.borrow();
+    state
+        .evaluation_cache
+        .borrow_mut()
+        .refresh(active, || calculate_current_values(state))
+}
+
+/// Return the saved results while the workbook has not changed. Cell
+/// selection, scrolling, and window resizing all use this path.
+pub(crate) fn evaluate_current(state: &GuiState) -> Rc<std::collections::HashMap<CellRef, Value>> {
+    let active = *state.active_sheet_index.borrow();
+    state
+        .evaluation_cache
+        .borrow_mut()
+        .get_or_calculate(active, || calculate_current_values(state))
 }
 
 fn project_sheet_inner(
@@ -1793,6 +1814,7 @@ pub(crate) struct GuiState {
     pub(crate) current: RefCell<Sheet>,
     pub(crate) sheets: RefCell<Vec<Sheet>>,
     pub(crate) active_sheet_index: RefCell<usize>,
+    evaluation_cache: RefCell<evaluation_cache::EvaluationCache>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
     /// Workbook state from the last completed save/open/new operation.
     /// Comparing document content, rather than undo depth, means undoing back
@@ -1825,6 +1847,7 @@ impl GuiState {
             current: RefCell::new(sheet.clone()),
             sheets: RefCell::new(vec![sheet]),
             active_sheet_index: RefCell::new(0),
+            evaluation_cache: RefCell::new(evaluation_cache::EvaluationCache::default()),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
             pending_replacement: Cell::new(None),

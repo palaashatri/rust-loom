@@ -10,6 +10,9 @@ mod template_chooser_tests;
 #[path = "inspector_tests.rs"]
 mod inspector_tests;
 
+#[path = "local_menu_tests.rs"]
+mod local_menu_tests;
+
 #[test]
 fn rtl_argument_is_parsed_and_applied_to_the_root() {
     let args = parse_args_from(["--rtl"] as [&str; 1]).expect("parse --rtl");
@@ -169,21 +172,6 @@ fn readonly_save_error_feedback_is_short_and_actionable() {
         ),
         "Save failed: destination is read-only"
     );
-}
-
-#[test]
-fn non_macos_window_exposes_a_local_application_menu_bar() {
-    #[cfg(not(target_os = "macos"))]
-    {
-        i_slint_backend_testing::init_no_event_loop();
-        let app = SheetsApp::new().expect("create SheetsApp");
-        for label in ["File", "Edit", "View", "Table"] {
-            let entries: Vec<_> =
-                i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, label)
-                    .collect();
-            assert!(!entries.is_empty(), "the {label} menu should be visible");
-        }
-    }
 }
 
 #[test]

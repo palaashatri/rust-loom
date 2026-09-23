@@ -3071,6 +3071,7 @@ name = "loom-sheets-app"
 version = "0.1.0"
 dependencies = [
  "i-slint-backend-testing",
+ "i-slint-common",
  "image",
  "loom-desktop",
  "loom-package",

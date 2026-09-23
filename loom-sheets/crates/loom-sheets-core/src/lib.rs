@@ -3695,14 +3695,16 @@ pub fn sheet_to_xlsx_data(
     }
 }
 
-/// Sanitize a tab name to Excel sheet-name rules: strip `[]:*?/\` and `"`,
-/// trim, truncate to 31 characters, fall back to `Sheet{N}` when empty.
+/// Sanitize a tab name to Excel sheet-name rules: strip `[]:*?/\`, `"`,
+/// and control characters; trim spaces and edge apostrophes; truncate to 31
+/// characters; and fall back to `Sheet{N}` when empty.
 pub fn sanitize_xlsx_sheet_name(name: &str, fallback_index: usize) -> String {
     let mut clean: String = name
         .chars()
-        .filter(|c| !matches!(c, '[' | ']' | ':' | '*' | '?' | '/' | '\\' | '"'))
+        .filter(|c| !matches!(c, '[' | ']' | ':' | '*' | '?' | '/' | '\\' | '"') && !c.is_control())
         .collect::<String>()
         .trim()
+        .trim_matches('\'')
         .to_string();
     while clean.chars().count() > 31 {
         clean.pop();
@@ -3712,6 +3714,50 @@ pub fn sanitize_xlsx_sheet_name(name: &str, fallback_index: usize) -> String {
     } else {
         clean
     }
+}
+
+/// Return valid, case-insensitively unique exported names and the mapping
+/// used to rewrite formulas. Duplicate source names are ambiguous, so reject
+/// them instead of silently pointing formulas at the wrong worksheet.
+pub(crate) struct XlsxSheetNames {
+    pub names: Vec<String>,
+    pub formula_mapping: Vec<(String, String)>,
+}
+
+pub(crate) fn unique_xlsx_sheet_names(sheets: &[XlsxSheetData]) -> Result<XlsxSheetNames, String> {
+    let mut source_names = HashSet::new();
+    let mut used_names = HashSet::new();
+    let mut names = Vec::with_capacity(sheets.len());
+    let mut mapping = Vec::with_capacity(sheets.len());
+
+    for (index, sheet) in sheets.iter().enumerate() {
+        if !source_names.insert(sheet.name.to_ascii_lowercase()) {
+            return Err(format!(
+                "xlsx export cannot map duplicate sheet name {:?}",
+                sheet.name
+            ));
+        }
+
+        let base = sanitize_xlsx_sheet_name(&sheet.name, index);
+        let mut candidate = base.clone();
+        let mut suffix_number = 2usize;
+        while used_names.contains(&candidate.to_ascii_lowercase()) {
+            let suffix = format!(" ({suffix_number})");
+            let prefix_chars = 31usize.saturating_sub(suffix.chars().count());
+            let prefix: String = base.chars().take(prefix_chars).collect();
+            candidate = format!("{prefix}{suffix}");
+            suffix_number += 1;
+        }
+
+        used_names.insert(candidate.to_ascii_lowercase());
+        mapping.push((sheet.name.clone(), candidate.clone()));
+        names.push(candidate);
+    }
+
+    Ok(XlsxSheetNames {
+        names,
+        formula_mapping: mapping,
+    })
 }
 
 /// Escape XML attribute text (element text plus both quote styles).
@@ -3728,11 +3774,9 @@ pub fn export_xlsx_workbook(sheets: &[XlsxSheetData]) -> Result<Vec<u8>, String>
     if sheets.is_empty() {
         return Err("xlsx export needs at least one sheet".to_string());
     }
-    let names: Vec<String> = sheets
-        .iter()
-        .enumerate()
-        .map(|(index, sheet)| sanitize_xlsx_sheet_name(&sheet.name, index))
-        .collect();
+    let unique_names = unique_xlsx_sheet_names(sheets)?;
+    let names = unique_names.names;
+    let formula_sheet_names = unique_names.formula_mapping;
 
     // Shared strings carry text displays only; numbers, booleans, and errors
     // write inline, and error displays never enter the table.
@@ -3799,6 +3843,11 @@ pub fn export_xlsx_workbook(sheets: &[XlsxSheetData]) -> Result<Vec<u8>, String>
                 open.push('>');
                 cells.push_str(&open);
                 if let Some(formula) = cell.formula.as_deref() {
+                    let formula = refs::remap_sheet_references_in_formula(
+                        &format!("={formula}"),
+                        &formula_sheet_names,
+                    );
+                    let formula = formula.strip_prefix('=').unwrap_or(&formula);
                     cells.push_str(&format!("<f>{}</f>", xml_escape_cell(formula)));
                 }
                 if let Some(number) = cell.number {
@@ -5537,6 +5586,51 @@ mod tests {
         let long = "x".repeat(40);
         assert_eq!(sanitize_xlsx_sheet_name(&long, 0).chars().count(), 31);
         assert!(export_xlsx_workbook(&[]).is_err());
+    }
+
+    #[test]
+    fn xlsx_export_keeps_sanitized_sheet_names_unique_and_rewrites_references() {
+        let mut slash_name = Sheet::new("A/B");
+        slash_name.set_str("A1", "10");
+        slash_name.set_str("B1", "20");
+        slash_name.chart = Some(SheetChart {
+            kind: ChartKind::Line,
+            cat_col: 0,
+            val_col: 1,
+            ..Default::default()
+        });
+
+        let mut exact_name = Sheet::new("AB");
+        exact_name.set_str("A1", "30");
+
+        let long_name = "Very Long Sheet Name That Exceeds 31 Characters";
+        let mut long_sheet = Sheet::new(long_name);
+        long_sheet.set_str("A1", "40");
+
+        let mut consumer = Sheet::new("Consumer");
+        consumer.set_str(
+            "A1",
+            &format!("='A/B'!A1+'AB'!A1+'{long_name}'!A1+\"A/B!A1\""),
+        );
+
+        let bytes = export_xlsx_sheets(&[slash_name, exact_name, long_sheet, consumer])
+            .expect("sanitized workbook export");
+        let imported = extract_xlsx_workbook(&bytes).expect("sanitized workbook import");
+
+        assert_eq!(imported[0].0, "AB");
+        assert_eq!(imported[1].0, "AB (2)");
+        assert_eq!(imported[2].0, sanitize_xlsx_sheet_name(long_name, 2));
+        assert_eq!(
+            imported[3].1[0][0],
+            format!(
+                "=AB!A1+'AB (2)'!A1+'{}'!A1+\"A/B!A1\"",
+                sanitize_xlsx_sheet_name(long_name, 2)
+            )
+        );
+
+        let archive = PackageArchive::from_bytes(&bytes).expect("zip archive");
+        let chart = String::from_utf8_lossy(archive.get("xl/charts/chart1.xml").unwrap());
+        assert!(chart.contains("'AB'!$A$2:$A$2"));
     }
 
     #[test]

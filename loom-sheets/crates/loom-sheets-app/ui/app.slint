@@ -11,17 +11,9 @@ import {
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
+import { LocalMenuBar, LocalMenuEntry, LocalMenuPopup } from "local_menu.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
-
-export struct LocalMenuEntry {
-    menu_index: int,
-    label: string,
-    command_id: string,
-    shortcut: string,
-    enabled: bool,
-    checked: bool,
-    separator: bool,
-}
+export { LocalMenuEntry } from "local_menu.slint";
 
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
@@ -36,7 +28,12 @@ export component SheetsApp inherits Window {
     in property <bool> local-menu-visible: true;
     in property <[string]> local-menu-labels: ["File", "Edit", "View", "Table", "Help"];
     in property <[LocalMenuEntry]> local-menu-items: [];
+    in property <[LocalMenuEntry]> local-menu-popup-items: [];
     in-out property <int> local-menu-open-index: -1;
+    in-out property <int> local-menu-selected-index: -1;
+    in-out property <int> local-menu-popup-selected-index: -1;
+    callback local-menu-opened(int);
+    callback local-menu-move(int);
     callback local-menu-action(string);
     in property <bool> wide-toolbar: false;
     in property <bool> icon-only-toolbar: false;
@@ -353,10 +350,6 @@ export component SheetsApp inherits Window {
 
         app-focus := FocusScope {
         key-pressed(event) => {
-            if (root.local-menu-open-index >= 0 && event.text == Key.Escape) {
-                root.local-menu-open-index = -1;
-                return accept;
-            }
             if (root.local-menu-visible && event.modifiers.alt) {
                 if (event.text == "f" || event.text == "F") { root.local-menu-open-index = 0; return accept; }
                 if (event.text == "e" || event.text == "E") { root.local-menu-open-index = 1; return accept; }
@@ -468,34 +461,9 @@ export component SheetsApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
-            if root.local-menu-visible : Rectangle {
-                width: root.width;
-                height: 36px;
-                background: Theme.palette().surface;
-
-                HorizontalLayout {
-                    spacing: 0px;
-                    padding-left: Theme.tokens.space.sm;
-
-                    for label[index] in root.local-menu-labels : LoomButton {
-                        width: 64px;
-                        height: 36px;
-                        label: label;
-                        variant: "ghost";
-                        selected: root.local-menu-open-index == index;
-                        clicked => {
-                            root.local-menu-open-index = root.local-menu-open-index == index ? -1 : index;
-                        }
-                    }
-                }
-
-                Rectangle {
-                    x: 0px;
-                    y: 35px;
-                    width: root.width;
-                    height: 1px;
-                    background: Theme.palette().border;
-                }
+            if root.local-menu-visible : LocalMenuBar {
+                labels: root.local-menu-labels;
+                open-index <=> root.local-menu-open-index;
             }
 
             // Numbers Unified Action Toolbar
@@ -766,60 +734,20 @@ export component SheetsApp inherits Window {
         }
     }
 
-    // Local menu fallback for desktop systems that do not display the
-    // installed native menu in a global application bar.
-    if root.local-menu-visible && root.local-menu-open-index >= 0 : Rectangle {
+    LocalMenuPopup {
         x: 0px;
         y: 36px;
         width: root.width;
         height: root.height - 36px;
-        background: transparent;
-
-        TouchArea {
-            clicked => { root.local-menu-open-index = -1; }
-        }
-
-        Rectangle {
-            x: 8px + root.local-menu-open-index * 64px;
-            y: 0px;
-            width: 288px;
-            height: min(520px, root.height - 44px);
-            border-radius: Theme.tokens.metrics.radius-small;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface;
-            drop-shadow-blur: 12px;
-            drop-shadow-offset-y: 3px;
-            drop-shadow-color: Theme.palette().shadow;
-
-            VerticalLayout {
-                spacing: Theme.tokens.space.xs;
-                padding: Theme.tokens.space.sm;
-
-                for item in root.local-menu-items : Rectangle {
-                    visible: item.menu_index == root.local-menu-open-index;
-                    height: item.separator ? 1px : Theme.tokens.metrics.control-height;
-
-                    if item.separator : Rectangle {
-                        width: root.width;
-                        height: 1px;
-                        background: Theme.palette().border;
-                    }
-
-                    if !item.separator : LoomButton {
-                        width: parent.width;
-                        height: parent.height;
-                        label: (item.checked ? "✓ " : "") + item.label + (item.shortcut != "" ? "    " + item.shortcut : "");
-                        variant: "ghost";
-                        enabled: item.enabled;
-                        clicked => {
-                            root.local-menu-open-index = -1;
-                            root.local-menu-action(item.command_id);
-                        }
-                    }
-                }
-            }
-        }
+        menu-enabled: root.local-menu-visible;
+        labels: root.local-menu-labels;
+        items: root.local-menu-popup-items;
+        open-index <=> root.local-menu-open-index;
+        selected-index: root.local-menu-popup-selected-index;
+        menu-opened(index) => { root.local-menu-opened(index); }
+        menu-move(direction) => { root.local-menu-move(direction); }
+        menu-closed => { grid-surface.focus-grid(); }
+        menu-action(id) => { root.local-menu-action(id); }
     }
 
     // Compact toolbar overflow menu

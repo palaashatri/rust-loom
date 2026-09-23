@@ -27,6 +27,10 @@ fn main() {
         "cargo:rerun-if-changed={}",
         ui.join("template_chooser.slint").display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        ui.join("local_menu.slint").display()
+    );
     slint_build::compile_with_config(
         ui.join("app.slint"),
         slint_build::CompilerConfiguration::new().with_include_paths(vec![loom_ui]),

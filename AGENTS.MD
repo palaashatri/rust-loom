@@ -10,6 +10,8 @@ The owner explicitly authorized this run to fix every recorded P0 and P1 audit c
 
 For a tiny local model, use this recipe for each card: read the card; write down what the user does, what breaks, and what should happen; edit only the named functions; run the focused test; inspect the real output; then copy the command, result, commit, and remaining gap into the card's repair result. `FIXED` means the code and required focused checks passed. `NEEDS_REVIEW` means the code landed but an expert, native, cross-platform, or real-media check is still missing. Never turn a missing check into a success claim.
 
+For a performance card, write down the exact workbook size and machine. Measure formula work, save/open, visible input delay, scrolling, and peak memory as separate checks. A fast formula test does not prove the window stays responsive; an empty memory-limit field is still an open check.
+
 ## Owner override — 2026-09-18 Sheets then Writer completion run
 
 The owner explicitly authorized advancing the workflow to Sheets and completing the recorded Sheets findings and acceptance gate, then doing the same for Writer. Work remains serial: finish Sheets, prove its binary gate, commit and push each coherent milestone, then advance the workflow to Writer. This override includes the remaining Sheets P2/UI findings, focused regression coverage, acceptance evidence, and the source-size maintenance needed for a clean Sheets gate. Keep later applications locked until their turn. Do not mark an app `ACCEPTED` from a green unit test alone; record the required native, visual, accessibility, and persistence evidence.

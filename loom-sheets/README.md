@@ -42,11 +42,11 @@ These live-window captures show UI-06 feedback outside the editable grid. The tw
 
 The matching test, build, and one-time Orca announcement results are recorded in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the portable audit evidence archive.
 
-## Non-macOS menu-bar preview — 2026-09-23
+## Non-macOS application menu — UI-01
 
-![In-window File, Edit, View, Table, and Help menus](docs/qa-renderer/ui01-local-menu-1024-linux.png)
+![Current 1024×720 renderer view with the in-window File, Edit, View, Table, and Help menu row](docs/qa-renderer/ui01-local-menu-current-1024-linux.png)
 
-This is a 1024×720 software-renderer capture of the rebuilt UI, not a live desktop screenshot. A native Linux capture is pending because Cinnamon's active screensaver covered the app during this check; see the self-audit report for the exact limitation.
+This is a 1024×720 software-renderer capture, not a native live-window screenshot. The keyboard-navigation regression and current app build are checked separately. A fresh native capture after the popup-layout fix is still pending because Cinnamon's active screensaver covers the app; the old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md) for exact results and remaining checks.
 
 ## Core Capabilities
 
@@ -64,6 +64,10 @@ This is a 1024×720 software-renderer capture of the rebuilt UI, not a live desk
 - Native Linux screenshots above verify the opened workbook, dirty title, chooser selection, and template creation at 1024×720. The Escape-preserves-workbook capture is `docs/qa-native/template-cancel-preserves-workbook-linux.png`.
 - The UI-06 captures verify visible formula errors, read-only save failure, and canceled Save As feedback; cancel and failure do not clear the unsaved marker.
 - These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root `TRUTH.md` ledger.
+
+## Performance evidence
+
+The current 10,000-formula benchmark and its measured local result are recorded in [PERFORMANCE.md](PERFORMANCE.md). That engine result does not yet prove non-blocking formula commits, million-cell scrolling, or a reviewed peak-memory limit.
 
 ## Development
 

@@ -566,6 +566,7 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
         .zip(evaluated.iter())
         .map(|(sheet, values)| super::sheet_to_xlsx_data(sheet, values))
         .collect::<Vec<_>>();
+    let exported_sheet_names = super::unique_xlsx_sheet_names(&data)?.names;
     let base = super::export_xlsx_workbook(&data)?;
     let base_archive = PackageArchive::from_bytes(&base)
         .map_err(|e| format!("xlsx export base archive failed: {e}"))?;
@@ -608,7 +609,7 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
         if has_drawing {
             let drawing_number = index + 1;
             let (drawing_xml, drawing_rels, chart_parts, image_parts, extensions) =
-                render_drawing_parts(sheet, index + 1)?;
+                render_drawing_parts(sheet, index + 1, &exported_sheet_names[index])?;
             image_extensions.extend(extensions);
             extras.insert(
                 format!("xl/drawings/drawing{drawing_number}.xml"),
@@ -763,7 +764,11 @@ type DrawingParts = (
     BTreeSet<String>,
 );
 
-fn render_drawing_parts(sheet: &Sheet, sheet_number: usize) -> Result<DrawingParts, String> {
+fn render_drawing_parts(
+    sheet: &Sheet,
+    sheet_number: usize,
+    exported_sheet_name: &str,
+) -> Result<DrawingParts, String> {
     let mut drawing = String::new();
     let mut drawing_rels = String::new();
     let mut chart_parts = Vec::new();
@@ -780,7 +785,7 @@ fn render_drawing_parts(sheet: &Sheet, sheet_number: usize) -> Result<DrawingPar
         ));
         chart_parts.push((
             format!("xl/charts/chart{sheet_number}.xml"),
-            render_chart_xml(sheet, chart),
+            render_chart_xml(sheet, chart, exported_sheet_name),
         ));
         drawing.push_str(&one_cell_anchor(
             CellRef { row: 0, col: 3 },
@@ -865,7 +870,7 @@ fn one_cell_anchor(cell: CellRef, width: u32, height: u32, content: &str) -> Str
     )
 }
 
-fn render_chart_xml(sheet: &Sheet, chart: &SheetChart) -> String {
+fn render_chart_xml(sheet: &Sheet, chart: &SheetChart, exported_sheet_name: &str) -> String {
     let start_row = chart.start_row + 1;
     let end_row = chart.end_row.map(|row| row + 1).unwrap_or_else(|| {
         sheet
@@ -874,7 +879,7 @@ fn render_chart_xml(sheet: &Sheet, chart: &SheetChart) -> String {
             .unwrap_or(2)
             .max(2)
     });
-    let name = chart_sheet_reference(&sheet.name);
+    let name = chart_sheet_reference(exported_sheet_name);
     let cat_column = column_letters(chart.cat_col as usize);
     let val_column = column_letters(chart.val_col as usize);
     // Spreadsheet quoting and XML escaping are separate operations. The

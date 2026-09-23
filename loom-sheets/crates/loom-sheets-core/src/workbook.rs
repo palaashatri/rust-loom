@@ -84,6 +84,12 @@ pub fn evaluate_workbook(sheets: &[Sheet]) -> Vec<HashMap<CellRef, Value>> {
             }
         }
     }
+    // Ordinary formulas cannot change another formula's inputs during this
+    // pass. Read snapshots are only needed when a dynamic-array formula can
+    // spill into an otherwise blank cell after another formula read it.
+    let track_spill_dependencies = parsed
+        .values()
+        .any(|formula| expression_may_spill(&formula.root));
 
     // Iterative demand-driven resolution with an explicit stack: no recursion
     // depth limits on long fill-down chains. Roots run in sorted order and
@@ -149,13 +155,24 @@ pub fn evaluate_workbook(sheets: &[Sheet]) -> Vec<HashMap<CellRef, Value>> {
                     }
                     evaluated.insert(node);
                     if let Some(formula) = parsed.get(&node) {
-                        let (value, seen) =
-                            eval_workbook_node(sheets, &names, &results, node.0, &formula.root);
-                        reads.insert(node, seen);
+                        let (value, seen) = eval_workbook_node(
+                            sheets,
+                            &names,
+                            &results,
+                            node.0,
+                            &formula.root,
+                            track_spill_dependencies,
+                        );
+                        if let Some(seen) = seen {
+                            reads.insert(node, seen);
+                        }
                         place_spill(sheets, &mut results, &mut claims, &mut placed, node, &value);
                     }
                 }
             }
+        }
+        if !track_spill_dependencies {
+            break;
         }
         // Dirty set: nodes whose recorded reads no longer match memo, plus
         // transitive readers of dirty nodes.
@@ -237,17 +254,20 @@ fn eval_workbook_node(
     results: &[HashMap<CellRef, Value>],
     index: usize,
     root: &Expr,
-) -> (Value, HashMap<Node, Value>) {
-    let seen = RefCell::new(HashMap::<Node, Value>::new());
+    track_reads: bool,
+) -> (Value, Option<HashMap<Node, Value>>) {
+    let seen = track_reads.then(|| RefCell::new(HashMap::<Node, Value>::new()));
     let foreign = collect_foreign_refs(root);
     if foreign.is_empty() {
         let lookup = |cell: CellRef| -> Value {
             let value = results[index].get(&cell).cloned().unwrap_or(Value::Empty);
-            seen.borrow_mut().insert((index, cell), value.clone());
+            if let Some(seen) = &seen {
+                seen.borrow_mut().insert((index, cell), value.clone());
+            }
             value
         };
         let value = eval_expr(root, &lookup);
-        return (value, seen.into_inner());
+        return (value, seen.map(RefCell::into_inner));
     }
     // Resolve every foreign cell up front.
     let mut overlay: HashMap<CellRef, Value> = HashMap::new();
@@ -271,7 +291,8 @@ fn eval_workbook_node(
                 let row = min_row + dr as u32;
                 let col = min_col + dc as u32;
                 let value = resolve_foreign(names, results, &name, CellRef { row, col });
-                if let Some(&target) = names.get(&name.to_ascii_lowercase()) {
+                if let (Some(seen), Some(&target)) = (&seen, names.get(&name.to_ascii_lowercase()))
+                {
                     seen.borrow_mut()
                         .insert((target, CellRef { row, col }), value.clone());
                 }
@@ -298,7 +319,7 @@ fn eval_workbook_node(
         // Substitution replaces every matching node at once, so a repeated
         // cell simply finds nothing left to replace on later passes.
         let value = resolve_foreign(names, results, &name, cell);
-        if let Some(&target) = names.get(&name.to_ascii_lowercase()) {
+        if let (Some(seen), Some(&target)) = (&seen, names.get(&name.to_ascii_lowercase())) {
             seen.borrow_mut().insert((target, cell), value.clone());
         }
         let fresh = claim_cell(&mut taken);
@@ -310,11 +331,30 @@ fn eval_workbook_node(
             return value.clone();
         }
         let value = results[index].get(&cell).cloned().unwrap_or(Value::Empty);
-        seen.borrow_mut().insert((index, cell), value.clone());
+        if let Some(seen) = &seen {
+            seen.borrow_mut().insert((index, cell), value.clone());
+        }
         value
     };
     let value = eval_expr(&rewritten, &lookup);
-    (value, seen.into_inner())
+    (value, seen.map(RefCell::into_inner))
+}
+
+/// Check whether a formula tree contains an operation that can return a
+/// dynamic array. This is deliberately conservative: it also enables spill
+/// tracking for array functions nested inside scalar functions.
+fn expression_may_spill(expr: &Expr) -> bool {
+    match expr {
+        Expr::Unary(inner) => expression_may_spill(inner),
+        Expr::Binary { lhs, rhs, .. } => expression_may_spill(lhs) || expression_may_spill(rhs),
+        Expr::Func { name, args } => {
+            ["SEQUENCE", "TRANSPOSE", "SORT", "UNIQUE", "FILTER"]
+                .iter()
+                .any(|array_function| name.eq_ignore_ascii_case(array_function))
+                || args.iter().any(expression_may_spill)
+        }
+        _ => false,
+    }
 }
 
 /// Read a foreign cell: evaluated value when available, empty for blank
@@ -344,21 +384,21 @@ fn place_spill(
     owner: Node,
     value: &Value,
 ) {
-    let (values, width, height) = match value {
-        Value::Array(values, width, height) => (values, *width, *height),
+    let (values, rows, cols) = match value {
+        Value::Array(values, rows, cols) => (values, *rows, *cols),
         _ => {
             results[owner.0].insert(owner.1, value.clone());
             return;
         }
     };
-    if width == 0 || height == 0 || values.is_empty() {
+    if rows == 0 || cols == 0 || values.is_empty() {
         results[owner.0].insert(owner.1, value.clone());
         return;
     }
     let mut targets: Vec<(Node, Value)> = Vec::new();
     let mut blocked = false;
-    for dr in 0..height {
-        for dc in 0..width {
+    for dr in 0..rows {
+        for dc in 0..cols {
             if dr == 0 && dc == 0 {
                 continue;
             }
@@ -380,7 +420,7 @@ fn place_spill(
                 blocked = true;
                 break;
             }
-            let element = values.get(dr * width + dc).cloned().unwrap_or(Value::Empty);
+            let element = values.get(dr * cols + dc).cloned().unwrap_or(Value::Empty);
             targets.push((target, element));
         }
         if blocked {
@@ -555,6 +595,72 @@ mod tests {
         report.set_str("A4", "=Missing!A1");
         report.set_str("A5", "=Data!B1*2");
         vec![data, report]
+    }
+
+    #[test]
+    fn sequence_spills_rows_and_columns_and_recalculates_earlier_readers() {
+        let mut sheet = Sheet::new("Dynamic");
+        sheet.set_str("A1", "=D2+1");
+        sheet.set_str("B1", "=SEQUENCE(2,3)");
+
+        let values = evaluate_workbook(&[sheet]).remove(0);
+        let number = |cell: &str| {
+            values
+                .get(&CellRef::parse(cell).unwrap())
+                .expect("cell has a calculated value")
+        };
+
+        assert_eq!(number("A1"), &Value::Number(7.0));
+        assert_eq!(
+            number("B1"),
+            &Value::Array(
+                vec![
+                    Value::Number(1.0),
+                    Value::Number(2.0),
+                    Value::Number(3.0),
+                    Value::Number(4.0),
+                    Value::Number(5.0),
+                    Value::Number(6.0),
+                ],
+                2,
+                3,
+            )
+        );
+        for (cell, expected) in [
+            ("C1", 2.0),
+            ("D1", 3.0),
+            ("B2", 4.0),
+            ("C2", 5.0),
+            ("D2", 6.0),
+        ] {
+            assert_eq!(
+                number(cell),
+                &Value::Number(expected),
+                "wrong spill at {cell}"
+            );
+        }
+        assert!(!values.contains_key(&CellRef::parse("B3").unwrap()));
+        assert!(!values.contains_key(&CellRef::parse("C3").unwrap()));
+    }
+
+    #[test]
+    fn blocked_sequence_spill_does_not_leave_partial_values() {
+        let mut sheet = Sheet::new("Blocked");
+        sheet.set_str("A1", "=SEQUENCE(2,2)");
+        sheet.set_str("B2", "occupied");
+
+        let values = evaluate_workbook(&[sheet]).remove(0);
+
+        assert_eq!(
+            values.get(&CellRef::parse("A1").unwrap()),
+            Some(&Value::Error(CalcError::Spill))
+        );
+        assert_eq!(
+            values.get(&CellRef::parse("B2").unwrap()),
+            Some(&Value::Text("occupied".into()))
+        );
+        assert!(!values.contains_key(&CellRef::parse("B1").unwrap()));
+        assert!(!values.contains_key(&CellRef::parse("A2").unwrap()));
     }
 
     #[test]

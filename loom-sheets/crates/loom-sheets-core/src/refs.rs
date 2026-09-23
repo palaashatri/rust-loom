@@ -342,11 +342,19 @@ pub fn validate_sheet_name(name: &str, sibling_names: &[&str]) -> Result<(), Str
 /// if needed). Matching is case-insensitive; string literals, function
 /// names, and other sheets pass through untouched.
 pub fn rename_sheet_in_formula(formula: &str, old_name: &str, new_name: &str) -> String {
+    remap_sheet_references_in_formula(formula, &[(old_name.to_string(), new_name.to_string())])
+}
+
+/// Rewrite any matching sheet qualifiers in one pass. Using a complete name
+/// map avoids accidentally rewriting a new name a second time when it also
+/// happens to be another sheet's old name.
+pub fn remap_sheet_references_in_formula(
+    formula: &str,
+    sheet_names: &[(String, String)],
+) -> String {
     if !formula.starts_with('=') {
         return formula.to_string();
     }
-    let old_normalized = old_name.to_ascii_lowercase();
-    let new_qualifier = quote_sheet_name(new_name);
     let mut result = String::with_capacity(formula.len());
     let chars: Vec<char> = formula.chars().collect();
     let mut i = 0;
@@ -375,11 +383,16 @@ pub fn rename_sheet_in_formula(formula: &str, old_name: &str, new_name: &str) ->
         // Quoted qualifier candidate.
         if chars[i] == '\'' {
             if let Some((name, after)) = scan_quoted_name(&chars, i) {
-                if chars.get(after) == Some(&'!') && name.to_ascii_lowercase() == old_normalized {
-                    result.push_str(&new_qualifier);
-                    result.push('!');
-                    i = after + 1;
-                    continue;
+                if chars.get(after) == Some(&'!') {
+                    if let Some((_, new_name)) = sheet_names
+                        .iter()
+                        .find(|(old_name, _)| old_name.eq_ignore_ascii_case(&name))
+                    {
+                        result.push_str(&quote_sheet_name(new_name));
+                        result.push('!');
+                        i = after + 1;
+                        continue;
+                    }
                 }
             }
             result.push(chars[i]);
@@ -387,7 +400,7 @@ pub fn rename_sheet_in_formula(formula: &str, old_name: &str, new_name: &str) ->
             continue;
         }
         // Unquoted qualifier candidate.
-        if chars[i].is_ascii_alphabetic() {
+        if chars[i].is_ascii_alphabetic() || chars[i] == '_' || chars[i] == '.' {
             let mut j = i;
             while j < chars.len()
                 && (chars[j].is_ascii_alphanumeric() || chars[j] == '_' || chars[j] == '.')
@@ -396,8 +409,11 @@ pub fn rename_sheet_in_formula(formula: &str, old_name: &str, new_name: &str) ->
             }
             if j > i && chars.get(j) == Some(&'!') {
                 let candidate: String = chars[i..j].iter().collect();
-                if candidate.to_ascii_lowercase() == old_normalized {
-                    result.push_str(&new_qualifier);
+                if let Some((_, new_name)) = sheet_names
+                    .iter()
+                    .find(|(old_name, _)| old_name.eq_ignore_ascii_case(&candidate))
+                {
+                    result.push_str(&quote_sheet_name(new_name));
                     result.push('!');
                 } else {
                     for ch in &chars[i..=j] {
@@ -484,6 +500,19 @@ mod tests {
         assert_eq!(
             rename_sheet_in_formula("='O''Brien'!A1", "o'brien", "OB"),
             "=OB!A1"
+        );
+    }
+
+    #[test]
+    fn remap_rewrites_all_qualifiers_once_and_leaves_text_alone() {
+        let names = vec![
+            ("A/B".to_string(), "AB".to_string()),
+            ("AB".to_string(), "AB (2)".to_string()),
+            ("_Data".to_string(), "Data Export".to_string()),
+        ];
+        assert_eq!(
+            remap_sheet_references_in_formula("=IF(A1=\"A/B!A1\",'A/B'!A1,AB!A1)+_Data!B2", &names,),
+            "=IF(A1=\"A/B!A1\",AB!A1,'AB (2)'!A1)+'Data Export'!B2"
         );
     }
 

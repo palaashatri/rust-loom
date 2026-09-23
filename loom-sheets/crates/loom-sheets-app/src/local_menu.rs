@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use loom_desktop::{DesktopError, MenuBar, MenuBarService, MenuItem, NativeMenuBar};
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::{LocalMenuEntry, SheetsApp};
 
@@ -144,7 +144,83 @@ pub(crate) fn sync(app: &SheetsApp, menu_service: &NativeMenuBar) -> Result<(), 
     Ok(())
 }
 
+pub(crate) fn wire_keyboard(app: &SheetsApp) {
+    let app_ref = app.as_weak();
+    app.on_local_menu_opened(move |menu_index| {
+        if let Some(app) = app_ref.upgrade() {
+            let items = app.get_local_menu_items();
+            let popup_items = (0..items.row_count())
+                .filter_map(|index| items.row_data(index))
+                .filter(|item| item.menu_index == menu_index)
+                .collect::<Vec<_>>();
+            let first = (0..items.row_count()).find(|index| {
+                items.row_data(*index).is_some_and(|item| {
+                    item.menu_index == menu_index && item.enabled && !item.separator
+                })
+            });
+            app.set_local_menu_selected_index(first.map_or(-1, |index| index as i32));
+            app.set_local_menu_popup_selected_index(first.map_or(-1, |index| {
+                items.row_data(index).map_or(-1, |_| {
+                    (0..=index)
+                        .filter(|position| {
+                            items
+                                .row_data(*position)
+                                .is_some_and(|item| item.menu_index == menu_index)
+                        })
+                        .count() as i32
+                        - 1
+                })
+            }));
+            app.set_local_menu_popup_items(ModelRc::new(VecModel::from(popup_items)));
+        }
+    });
+
+    let app_ref = app.as_weak();
+    app.on_local_menu_move(move |direction| {
+        if let Some(app) = app_ref.upgrade() {
+            let items = app.get_local_menu_items();
+            let count = items.row_count();
+            if count == 0 {
+                app.set_local_menu_selected_index(-1);
+                return;
+            }
+
+            let menu_index = app.get_local_menu_open_index();
+            let current = app.get_local_menu_selected_index();
+            let delta = if direction < 0 { -1 } else { 1 };
+            for offset in 1..=count {
+                let index = if current < 0 {
+                    if delta < 0 {
+                        count - offset
+                    } else {
+                        offset - 1
+                    }
+                } else {
+                    (current as isize + delta * offset as isize).rem_euclid(count as isize) as usize
+                };
+                if items.row_data(index).is_some_and(|item| {
+                    item.menu_index == menu_index && item.enabled && !item.separator
+                }) {
+                    app.set_local_menu_selected_index(index as i32);
+                    let popup_index = (0..=index)
+                        .filter(|position| {
+                            items
+                                .row_data(*position)
+                                .is_some_and(|item| item.menu_index == menu_index)
+                        })
+                        .count() as i32
+                        - 1;
+                    app.set_local_menu_popup_selected_index(popup_index);
+                    return;
+                }
+            }
+            app.set_local_menu_selected_index(-1);
+        }
+    });
+}
+
 pub(crate) fn wire_action(app: &SheetsApp, menu_service: Arc<NativeMenuBar>) {
+    wire_keyboard(app);
     let app_ref = app.as_weak();
     app.on_local_menu_action(move |id| {
         if let Err(error) = menu_service.dispatch_action(id.as_str()) {
