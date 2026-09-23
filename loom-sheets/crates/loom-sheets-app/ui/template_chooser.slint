@@ -66,6 +66,12 @@ export component TemplateChooserModal inherits Rectangle {
     in property <[int]> template-recents: [];
     in-out property <int> template-scroll-position: 0;
     in property <float> text-scale: 1.0;
+    in property <bool> keyboard-active: false;
+    in property <bool> focus-request: false;
+    accessible-role: groupbox;
+    accessible-label: "Template chooser";
+    accessible-description: root.template-title(root.template-selected)
+        + " selected. Use Left and Right to choose; Return creates it; Escape cancels.";
     function template-content-height() -> length {
         let card-height = max(160px, 110px + 44px * root.text-scale);
         let heading-height = 24px * root.text-scale;
@@ -94,6 +100,46 @@ export component TemplateChooserModal inherits Rectangle {
     }
     callback cancel-template;
     callback create-template(int);
+    callback navigate-template-selection(int);
+
+    public function focus-template-chooser() {
+        chooser-focus.focus();
+    }
+
+    changed keyboard-active => {
+        if (root.keyboard-active) {
+            chooser-focus.focus();
+        }
+    }
+
+    changed focus-request => {
+        if (root.keyboard-active) {
+            chooser-focus.focus();
+        }
+    }
+
+    chooser-focus := FocusScope {
+        enabled: root.keyboard-active;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel-template();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.create-template(root.template-selected);
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.navigate-template-selection(-1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.navigate-template-selection(1);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     function choose-template-category(category-index: int) {
         root.template-category = category-index;

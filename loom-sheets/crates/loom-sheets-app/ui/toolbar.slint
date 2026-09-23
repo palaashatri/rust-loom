@@ -220,6 +220,8 @@ export component SheetActionToolbar inherits LoomToolbar {
         LoomButton {
             icon: "export";
             label: root.labeled-export ? "Export" : "";
+            accessible-label: "Export CSV";
+            accessible-description: "Export the active worksheet as CSV";
             variant: "ghost";
             clicked => { root.export-csv(); }
         }

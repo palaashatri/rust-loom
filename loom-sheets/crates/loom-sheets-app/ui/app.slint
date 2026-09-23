@@ -14,7 +14,8 @@ import { Theme, ResponsivePolicy } from "theme.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 
 export component SheetsApp inherits Window {
-    title: "Untitled";
+    in-out property <string> window-title: "Untitled";
+    title: root.window-title;
     min-width: 900px;
     min-height: 680px;
     preferred-width: 1280px;
@@ -143,6 +144,7 @@ export component SheetsApp inherits Window {
     in-out property <float> zoom-factor: 1.0;
 
     in-out property <bool> template-chooser-open: false;
+    in-out property <bool> template-chooser-focus-request: false;
     in-out property <int> template-selected: 0;
     in-out property <int> template-category: 0;
     in-out property <[int]> template-recents: [];
@@ -265,6 +267,10 @@ export component SheetsApp inherits Window {
         grid-surface.focus-grid();
     }
 
+    public function focus-template-chooser() {
+        root.template-chooser-focus-request = !root.template-chooser-focus-request;
+    }
+
     public function focus-formula-bar() {
         root.is-editing = true;
         formula-bar.focus-formula-bar();
@@ -298,29 +304,6 @@ export component SheetsApp inherits Window {
         }
     }
 
-    template-chooser-focus := FocusScope {
-        enabled: root.template-chooser-open && !root.save-changes-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.cancel-template();
-                return accept;
-            }
-            if (event.text == Key.Return) {
-                root.create-template(root.template-selected);
-                return accept;
-            }
-            if (event.text == Key.LeftArrow) {
-                root.navigate-template-selection(-1);
-                return accept;
-            }
-            if (event.text == Key.RightArrow) {
-                root.navigate-template-selection(1);
-                return accept;
-            }
-            return reject;
-        }
-    }
-
     save-changes-focus := FocusScope {
         enabled: root.save-changes-open;
         key-pressed(event) => {
@@ -344,9 +327,11 @@ export component SheetsApp inherits Window {
 
     changed template-chooser-open => {
         if (root.template-chooser-open) {
-            template-chooser-focus.focus();
+            root.template-chooser-focus-request = !root.template-chooser-focus-request;
+        } else if (root.save-changes-open) {
+            save-changes-focus.focus();
         } else {
-            app-focus.focus();
+            grid-surface.focus-grid();
         }
     }
 
@@ -763,6 +748,8 @@ export component SheetsApp inherits Window {
     if root.template-chooser-open : TemplateChooserModal {
         width: root.width;
         height: root.height;
+        keyboard-active: !root.save-changes-open;
+        focus-request: root.template-chooser-focus-request;
         template-selected <=> root.template-selected;
         template-category <=> root.template-category;
         template-recents: root.template-recents;
@@ -770,6 +757,7 @@ export component SheetsApp inherits Window {
         text-scale: root.template-text-scale;
         cancel-template => { root.cancel-template(); }
         create-template(selected) => { root.create-template(selected); }
+        navigate-template-selection(delta) => { root.navigate-template-selection(delta); }
     }
 
     if root.save-changes-open : Rectangle {

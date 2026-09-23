@@ -1,6 +1,6 @@
 # Loom — Current Truth
 
-This is the live product ledger and repair queue. `AGENTS.MD` defines the rules; `loom-bootstrap/contracts/workflow.toml` records the work gate. Updated 2026-09-22 from a code audit, fresh UI/UX inspection, and the owner-authorized P0/P1 repair run. Finding text stays here so a future repair can be checked against the original failure.
+This is the live product ledger and repair queue. `AGENTS.MD` defines the rules; `loom-bootstrap/contracts/workflow.toml` records the work gate. Updated 2026-09-23 from the code audit, fresh UI/UX inspection, owner-authorized P0/P1 repair run, and native Sheets self-audit. Finding text stays here so a future repair can be checked against the original failure.
 
 ## Active gate — read this before choosing a card
 
@@ -25,13 +25,13 @@ The contract's allowed prefixes are an outer file boundary for the active Sheets
 
 ## Current product state
 
-Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features. The audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states. The owner-authorized repair run has fixed every recorded P1 code card and UI-14. UI-25 compact recovery layout and action-matching guidance are fixed and tested in code; real playback/encode acceptance remains open because no media backend or sample media is installed here. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
+Loom is a local-first Rust + Slint functional alpha. It has useful domain engines and real editing features. The audit found reproducible data loss, corrupt or incomplete exports, broken recovery, and misleading UI states. The owner-authorized repair run has fixed the recorded P1 code cards and UI-14. UI-25 compact recovery layout and action-matching guidance are fixed and tested in code; real playback/encode acceptance remains open because no media backend or sample media is installed here. Sheets now has native evidence for saved/dirty titles, chooser focus, keyboard selection/create/cancel, the named export control, and Orca announcements. Its full acceptance gate remains open for the remaining error/cancellation, interoperability, visual-scope, and performance checks. No application is certified by this audit as a professional replacement for mature creative software. The old 38/100 score and claims of complete Sheets acceptance are superseded; there is no defensible fresh numerical readiness score.
 
 Quality and permission to work are different. The owner override permits the active Sheets completion work while the remaining applications stay locked until their turn. This is the single live application status table:
 
 | Order | Application | Product status | Work status | Current blocking evidence |
 |---:|---|---|---|---|
-| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | Native desktop pointer/keyboard and screen-reader checks remain |
+| 1 | Sheets | IN_PROGRESS | IN_PROGRESS | Save/error/cancel matrix, full visual/interoperability/performance checks, and broader accessibility coverage remain |
 | 2 | Writer | ACCEPTANCE_BLOCKED | LOCKED | P1 code/UI repairs landed; CODE-17 and visual/manual checks remain |
 | 3 | Present | ACCEPTANCE_BLOCKED | LOCKED | CODE-04 repaired; CODE-16/19 and visual checks remain |
 | 4 | Photo | ACCEPTANCE_BLOCKED | LOCKED | CODE-04/UI-16 repaired; CODE-14, UI-14/18 and visual checks remain |
@@ -44,16 +44,16 @@ The previous ledger listed Present/Photo both LOCKED and ACCEPTED and said Sheet
 
 ## Recorded audit and evidence
 
-The first audit was a code/reliability audit; it explicitly did **not** certify UI/UX. The follow-up adds fresh rendered screenshots from all eight apps and isolated native Linux interactions in Sheets and Writer. The observations are durable in CODE-01 through CODE-19 and UI-01 through UI-25 below, including reproduction instructions so they remain usable if `.work/` is removed. UI cards distinguish reproduced failures from source-confirmed limitations and visual design recommendations.
+The first audit was a code/reliability audit; it explicitly did **not** certify UI/UX. The follow-up adds fresh rendered screenshots from all eight apps and isolated native Linux interactions in Sheets and Writer. The observations are durable in CODE-01 through CODE-19 and UI-01 through UI-27 below, including reproduction instructions so they remain usable if `.work/` is removed. UI cards distinguish reproduced failures from source-confirmed limitations and visual design recommendations.
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](.work/audit-2026-09-14/AUDIT.md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](.work/uiux-audit-2026-09-14/AUDIT.md). Build/capture commands and limitations are recorded with that report.
-- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, the 2026-09-23 native screenshot self-audit, and the UI-17 and UI-25 repair reports/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `ba2608c0aa4d9d7c282e4654730effba0a4d33eab5220304984baf2709295d19`).
-- Native screenshot self-audit: [.work/sheets-acceptance-2026-09-23/REPORT.md](.work/sheets-acceptance-2026-09-23/REPORT.md) records four native `gnome-screenshot` captures at 1024×720 in light, dark, and high-contrast states. It confirms visual layout only; native pointer/keyboard and screen-reader acceptance remain open.
+- Portable audit evidence bundle, including the code and UI/UX reports, historical audit evidence, the 2026-09-22 Sheets acceptance report/UI-14 evidence, the expanded 2026-09-23 native screenshot/interaction report and screenshots, and the UI-17 and UI-25 repair reports/screenshots: [loom-bootstrap/audit-evidence-2026-09-14-and-22.zip](loom-bootstrap/audit-evidence-2026-09-14-and-22.zip) (SHA-256 `39b49a8fe7b22adf47da56157f9359f28ebeb5d2c266084d369558e5cf5155ce`).
+- Native Sheets self-audit: [.work/sheets-acceptance-2026-09-23/REPORT.md](.work/sheets-acceptance-2026-09-23/REPORT.md) records live `gnome-screenshot` captures plus native keyboard, AT-SPI, and Orca checks at 1024×720. The 1440×900 native capture remains unavailable on this 1366×728 desktop; other themes/viewports use existing renderer evidence.
 - Audit basis: commit `8fce782` plus the existing uncommitted Sheets implementation. That sentence describes the historical audit only; the owner-authorized repair commits listed below subsequently changed application behavior.
 - Verified existing tests in the code audit: shared core 123, Sheets 98, Writer 77, Present 49, Photo 49 — **396 passing tests**. The four source/governance audits also passed before the documentation update. Three new focused recovery tests failed as intended, demonstrating CODE-01/02/18. Passing existing tests did not prevent these defects.
 - Plugin and encode probes used controlled adapters, not real Wasmtime/codec runs. Source traces are labeled separately from executable probes. The original image-recovery probe tests payload transport; CODE-11 requires a real decoded-image regression too.
-- Visual evidence covers only the states explicitly listed in the visual report. The repair run adds source and focused-test evidence, but it does not establish screen-reader compliance, complete keyboard operation, every scale/direction, all dialog outcomes, or cross-platform acceptance. Uncaptured or untested states remain unknown.
+- Visual and accessibility evidence covers only the named states in the reports. The new run confirms selected-template Orca announcements, the focused chooser/grid groups, and a named compact export control. It does not establish complete screen-reader compliance, every keyboard command, every scale/direction, all dialog outcomes, or cross-platform acceptance. Uncaptured or untested states remain unknown.
 
 **P0 findings:** none were recorded in the audit. All recorded P1 code cards are fixed in code. UI-14 is fixed with an app-level keyboard regression check. UI-25 compact recovery layout and recovery guidance are fixed in code; real playback/encode acceptance remains open because the required media tools and fixture are absent. UI-17 is independently checked as a still-frame preview/export path.
 
@@ -66,7 +66,7 @@ These capabilities describe the current implementation and historical work, not 
 
 ### Sheets
 
-The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas. Sheets is now the active completion phase; UI-02/03/04/08, visual acceptance, and native accessibility checks remain. Its pushed source passes the dedicated Sheets CI job; the repo-wide code-size audit still reports four unrelated legacy files outside Sheets. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
+The implementation includes sparse multi-sheet workbooks, formulas and cross-sheet ranges, absolute references, lazy conditionals, lookup/text/aggregate/date/financial functions, dynamic-array spills, formula-backed summaries, cell style/formatting, freeze and row/column sizing, charts, anchored shapes/images, tab operations, templates, native packages, CSV and XLSX paths, a command palette, undo, and recovery. The P1 repair run covers lossless text/recovery, bounded workbook history, valid rich XLSX chart output, embedded recovery images, and live imported formulas. Sheets is the active completion phase; native chooser/grid focus, sample keyboard create/cancel, dirty-title state, and compact export naming are now verified. UI-02/04/08, complete visual coverage, save/error/cancel outcomes, broad accessibility coverage, performance, and interoperability remain. The active Sheets sources pass the byte ceiling; the repo-wide code-size audit still reports six unrelated over-budget files in locked apps. Single-series charts and cached PivotTable import remain boundaries; unsupported OOXML must be disclosed. Do not label these boundaries as proof that all imports are safe.
 
 ### Writer
 
@@ -409,7 +409,9 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 **Evidence:** `.work/sheets-acceptance-2026-09-22/REPORT.md`; fresh captures under `.work/sheets-acceptance-2026-09-22/screenshots/`; focused test `keyboard_selection_scrolls_to_the_selected_template_in_all_templates`; full Sheets app suite (109 passed).
 
-**Open for overall Sheets acceptance:** Physical desktop pointer/keyboard input and screen-reader output remain unverified in this environment. Those are acceptance-gate checks, not remaining chooser code defects.
+**Native result (2026-09-23):** On the rebuilt Linux app, AT-SPI reports the `Template chooser` group focused and exposes the selected template plus Left/Right/Return/Escape instructions. Right selects Checklist; Orca speaks the selection and instructions; Return creates the Checklist workbook; Escape preserves the opened workbook. Both close paths restore focus to the named worksheet-grid group. Native captures are under `loom-sheets/docs/qa-native/` and the detailed results are in `.work/sheets-acceptance-2026-09-23/REPORT.md`.
+
+**Still open for overall Sheets acceptance:** test the full template catalog at all required scales/viewports and broaden screen-reader/keyboard coverage beyond this chooser workflow.
 
 1. Compute how many full cards fit in the content area after the category sidebar and padding. Move excess cards to another row; allow vertical scrolling of this content region.
 2. Keep the entire template name and preview visible. Do not shrink the text or make the whole modal horizontally scroll.
@@ -455,9 +457,11 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 **Repair result (2026-09-15):** Commit `29cb024` renders controller status/error state in the visible status bar. Sheets UI tests cover the projection.
 
-**Evidence:** `sheets/17-current-native-start.png`, `18-current-native-edit.png`, `20-current-native-undo.png`; source check of `status-left`, `status-right`, and the complete `ui/app.slint` layout. Native title remains `Untitled` after the test edit. Save/error dialogs were not exhaustively exercised in this visual run.
+**Repair result (2026-09-23):** The native window title now follows the saved workbook filename and appends `*` while the workbook differs from its saved snapshot. Undoing back to the saved content or completing a save recalculates that marker. A focused unit test covers clean/dirty filename and template titles. A live edit to A2 changed the title from `loom-sheets-native-acceptance-2026-09-23.loomtable` to the same filename with `*`; the opened and edited native screenshots are under `loom-sheets/docs/qa-native/`.
 
-**Open:** `loom-sheets/crates/loom-sheets-app/ui/app.slint`, status properties and layout; status-setting paths and document dirty state in `src/main.rs`; shared `LoomStatusBar`/`LoomStatusText`.
+**Evidence:** `sheets/17-current-native-start.png`, `18-current-native-edit.png`, `20-current-native-undo.png`; source check of `status-left`, `status-right`, and the complete `ui/app.slint` layout. Native title behavior is also captured in `opened-saved-workbook-linux.png` and `unsaved-edit-title-linux.png`. Save-cancel, forced-write-failure, and invalid-formula announcements still need the full acceptance check below.
+
+**Open:** Exercise save cancel, a forced write failure, invalid formula feedback, and their one-time screen-reader announcements in the native app. Keep the recorded controller/status paths intact.
 
 1. Render the existing status properties in the shared status bar using the contract height, outside the grid.
 2. Show a clear unsaved state tied to actual document dirtiness. Clear it only after a successful save, not after merely opening a save chooser.
@@ -731,3 +735,27 @@ Each card shows its current state. A screenshot proves only the visible state; n
 4. Keep optional installation instructions outside the main editing canvas. Do not automatically download or install tools as part of this repair.
 
 **Done when:** With tools absent, the complete explanation is readable at 1024×720. Select a valid local installation, check again without restarting, and verify the formerly blocked action becomes available. Wrong path, wrong executable, and a hanging probe produce bounded, actionable errors. Run one real playback/export/encode fixture once the backend is configured.
+
+### UI-26 — Name the compact Export CSV action for screen readers
+
+**P1 · Sheets accessibility · FIXED.** At compact width the toolbar shows Export as an icon with no visible text. Its AT-SPI button name and description were both empty, so a screen-reader user could not tell what the action does.
+
+**Reproduce:** Enable the Linux screen reader, launch Sheets at 1024×720, and inspect or navigate the compact toolbar after Chart. The export button is unnamed.
+
+**Repair result (2026-09-23):** The export button now exposes `Export CSV` as its accessible name and `Export the active worksheet as CSV` as its description while keeping the compact visual layout.
+
+**Evidence:** The rebuilt app's AT-SPI tree reports the exact name and description. Native window captures and the accessibility run are recorded in `.work/sheets-acceptance-2026-09-23/REPORT.md`.
+
+**Done when:** The compact export icon has a meaningful AT-SPI name and description, and its existing export action remains reachable. Broader screen-reader command coverage remains part of the Sheets gate.
+
+### UI-27 — Keep chooser focus and announcements inside the dialog
+
+**P1 · Sheets accessibility/keyboard · FIXED.** At launch the template chooser looked like Blank was selected, but focus belonged to an unnamed window-level scope outside the dialog. AT-SPI showed the app frame focused and the named chooser group unfocused; Orca did not announce the selected template. After Return, focus also remained on the frame instead of the new worksheet.
+
+**Reproduce:** Enable Orca, launch with `--template-chooser`, and inspect the AT-SPI focused object. Press Right and Return, then inspect focus again. Before repair, the chooser group was not focused and the newly created workbook had no focused grid group.
+
+**Repair result (2026-09-23):** The keyboard scope now lives inside the named chooser group. Opening the chooser focuses it; its description follows the selected template and its keys. Closing by Escape or Return restores focus to the worksheet grid, unless a save-changes dialog is active.
+
+**Evidence:** AT-SPI reports `Template chooser` focused on open and `Checklist worksheet grid` focused after Return. Orca spoke `Checklist selected. Use Left and Right to choose; Return creates it; Escape cancels.` Native screenshots cover selected Checklist, canceled chooser with the original workbook, and the created Checklist workbook in `loom-sheets/docs/qa-native/`. Full details: `.work/sheets-acceptance-2026-09-23/REPORT.md`.
+
+**Done when:** On the native Linux chooser, focus enters the named dialog, selection changes are announced, Return creates the visible selected template and returns focus to its grid, and Escape preserves the current workbook and returns focus to its grid. Other Sheets workflows still need broader accessibility checks.

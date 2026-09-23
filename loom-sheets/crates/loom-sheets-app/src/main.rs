@@ -775,6 +775,7 @@ pub(crate) fn zoom_factor(app: &SheetsApp) -> f32 {
 }
 
 pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
+    sync_window_title(app, state);
     let sheet = state.current.borrow().clone();
     let vals = evaluate_current(state);
     project_sheet_inner(app, &sheet, &vals, true);
@@ -1955,6 +1956,7 @@ fn replace_opened_workbook(
     apply_sheet(app, state);
     sync_sheet_tabs(app, state);
     state.mark_saved();
+    sync_window_title(app, state);
 }
 
 fn begin_new_workbook(
@@ -1973,6 +1975,7 @@ fn begin_new_workbook(
     apply_sheet(app, state);
     sync_sheet_tabs(app, state);
     state.mark_saved();
+    sync_window_title(app, state);
     sync_menu_state(menu_service, app, state);
     app.set_status_left("Created new unsaved workbook".into());
 }
@@ -1986,6 +1989,35 @@ fn workbook_display_name(state: &GuiState) -> String {
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "Untitled workbook".to_string())
+}
+
+pub(crate) fn workbook_window_title(
+    save_path: Option<&Path>,
+    sheet_name: &str,
+    dirty: bool,
+) -> String {
+    let title = save_path
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| match sheet_name {
+            "" | "Sheet1" | "Sheet 1" => "Untitled".to_string(),
+            name => name.to_string(),
+        });
+    if dirty {
+        format!("{title} *")
+    } else {
+        title
+    }
+}
+
+fn sync_window_title(app: &SheetsApp, state: &GuiState) {
+    let title = workbook_window_title(
+        state.save_path.borrow().as_deref(),
+        state.current.borrow().name.as_str(),
+        state.is_dirty(),
+    );
+    app.set_window_title(SharedString::from(title));
 }
 
 /// Return true when the replacement was deferred behind the Save Changes
@@ -2090,6 +2122,7 @@ fn save_current_sheet(
     save_workbook(&path, &state.sheets.borrow(), active)?;
     *state.save_path.borrow_mut() = Some(path.clone());
     state.mark_saved();
+    sync_window_title(app, state);
     let checkpoint = workbook_package_bytes(&state.sheets.borrow(), active)?;
     match checkpoint_snapshot_recovery(checkpoint) {
         Ok(()) => app.set_status_left(SharedString::from(format!("Saved {}", path.display()))),
@@ -2679,9 +2712,14 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     }
     app.show().map_err(|e| e.to_string())?;
     // A visible selection is not enough to receive keyboard input. Focus the
-    // grid after the native window is shown; winit may replace the focus item
-    // during presentation, so doing this before `show` is not durable.
-    app.invoke_focus_grid();
+    // initially visible view after the native window is shown; winit may
+    // replace the focus item during presentation, so doing this before `show`
+    // is not durable.
+    if args.template_chooser {
+        app.invoke_focus_template_chooser();
+    } else {
+        app.invoke_focus_grid();
+    }
     if args.objects {
         // Keep the scalar selection in sync with the projected selection list.
         app.set_selected_object(0);

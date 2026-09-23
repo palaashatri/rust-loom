@@ -596,6 +596,9 @@ export component SheetGridSurface inherits Rectangle {
     callback begin-edit(string);
 
     background: Theme.palette().canvas;
+    accessible-role: groupbox;
+    accessible-label: root.sheet-name + " worksheet grid";
+    accessible-description: root.selection-announcement;
     horizontal-stretch: 1;
     vertical-stretch: 1;
 

@@ -1,6 +1,6 @@
 # Loom Sheets
 
-Loom Sheets is a fast, local-first analytical spreadsheet application with Apple Numbers-class visual polish and recalculation integrity.
+Loom Sheets is a local-first spreadsheet application for editing workbooks, formulas, and charts on your computer.
 
 ## Screenshots
 
@@ -16,6 +16,20 @@ Loom Sheets is a fast, local-first analytical spreadsheet application with Apple
 ![Loom Sheets main window — macOS](docs/screenshot.png)
 *macOS native window capture (`screencapture -l`) of the current build. A pixel-reproducible renderer capture of the same state is at [docs/screenshot-deterministic.png](docs/screenshot-deterministic.png) (`cargo run -p loom-sheets-app -- --screenshot docs/screenshot-deterministic.png --size 1280x800 --theme light`).*
 
+## Native Linux self-audit — 2026-09-23
+
+These screenshots come from the running desktop app via `/usr/bin/gnome-screenshot -w`. Each PNG includes the native title bar and measures 1024×741 for a requested 1024×720 window.
+
+![Opened saved workbook with its saved filename — Linux](docs/qa-native/opened-saved-workbook-linux.png)
+
+![Unsaved edit with the visible title marker — Linux](docs/qa-native/unsaved-edit-title-linux.png)
+
+![Keyboard-selected Checklist template — Linux](docs/qa-native/template-chooser-checklist-selected-linux.png)
+
+![Checklist workbook created from the selected template — Linux](docs/qa-native/template-created-checklist-linux.png)
+
+The matching keyboard, AT-SPI, Orca, and cancellation observations are in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the repository's portable audit evidence archive.
+
 ## Core Capabilities
 
 - **Workbook Tabs & Navigation**: Multi-sheet workbook tabs with add/switch/rename/delete (all undoable), persisted with the active tab in versioned `.loomtable` packages.
@@ -26,12 +40,11 @@ Loom Sheets is a fast, local-first analytical spreadsheet application with Apple
 - **Command Palette & Menus**: Ctrl+K palette covering every primary command; native macOS NSMenu / Linux DBusMenu with live enablement (incl. View zoom commands).
 - **Storage & Interoperability**: Versioned `.loomtable` packages (all tabs, styles, alignments, freeze panes, charts, anchored shapes/images, and package-owned embedded image assets; legacy single-sheet files still open), formula-preserving CSV import/export with dialect sniffing, and multi-sheet XLSX import/export preserving worksheet names, formulas, cached values, cell styles/alignments, basic charts, shapes, and embedded images.
 
-## Visual QA Status
+## Visual QA Evidence
 
-- **Status**: **PASS** (shared-foundation adopted, zero app-local generic controls).
-- **Canvas**: Viewport-filling grid at every contract viewport; no wrapping, clipping, or dead fixed-size surfaces.
-- **Formulas**: Live evaluation (41 functions) with cross-sheet references, dynamic-array spills, spill errors, formula-backed pivot summaries, and undo/redo transaction history.
-- **Evidence**: `loom-sheets/.work/acceptance/` holds 18 judge-reviewed captures (4 viewports × 3 themes + chooser/palette/chart/zoom states), supplemented by the native Linux X11 captures above.
+- The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.
+- Native Linux screenshots above verify the opened workbook, dirty title, chooser selection, and template creation at 1024×720. The Escape-preserves-workbook capture is `docs/qa-native/template-cancel-preserves-workbook-linux.png`.
+- These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root `TRUTH.md` ledger.
 
 ## Development
 

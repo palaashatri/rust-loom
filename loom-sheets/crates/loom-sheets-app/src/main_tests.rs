@@ -110,6 +110,32 @@ fn csv_import_does_not_become_native_save_target() {
 }
 
 #[test]
+fn workbook_window_title_uses_the_saved_file_or_a_truthful_unsaved_name() {
+    assert_eq!(
+        workbook_window_title(
+            Some(std::path::Path::new("/tmp/Household.loomtable")),
+            "Example Budget",
+            false
+        ),
+        "Household.loomtable"
+    );
+    assert_eq!(workbook_window_title(None, "Sheet1", false), "Untitled");
+    assert_eq!(workbook_window_title(None, "Checklist", false), "Checklist");
+    assert_eq!(
+        workbook_window_title(None, "Checklist", true),
+        "Checklist *"
+    );
+    assert_eq!(
+        workbook_window_title(
+            Some(std::path::Path::new("/tmp/Household.loomtable")),
+            "Example Budget",
+            true
+        ),
+        "Household.loomtable *"
+    );
+}
+
+#[test]
 fn formula_bar_draft_is_not_applied_before_commit() {
     let mut sheet = Sheet::new("test");
     let selected = CellRef::parse("B1").unwrap();
