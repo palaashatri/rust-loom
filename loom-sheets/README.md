@@ -46,7 +46,7 @@ The matching test, build, and one-time Orca announcement results are recorded in
 
 ![Current 1024×720 renderer view with the in-window File, Edit, View, Table, and Help menu row](docs/qa-renderer/ui01-local-menu-current-1024-linux.png)
 
-This is a 1024×720 software-renderer capture, not a native live-window screenshot. The keyboard-navigation regression and current app build are checked separately. A fresh native capture after the popup-layout fix is still pending because Cinnamon's active screensaver covers the app; the old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md) for exact results and remaining checks.
+This is a 1024×720 software-renderer capture, not a native live-window screenshot. The keyboard-navigation regression and current app build are checked separately. A fresh native capture after the popup-layout fix is still pending: `cinnamon-screensaver-command -q` reported inactive, but the native screenshot captured the desktop lock/saver overlay instead of the app. The old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md) for exact results and remaining checks.
 
 ## Core Capabilities
 

@@ -2774,3 +2774,7 @@ fn main() -> Result<(), String> {
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "perf_tests.rs"]
+mod perf_tests;

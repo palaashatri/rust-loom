@@ -31,6 +31,20 @@ LOOM_ENFORCE_PERF_BUDGET=1 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 \
 
 ### Latest local result — 2026-09-24
 
-On the local Intel Core i3-2350M (2 cores, 7.7 GiB RAM), the optimized 10,000-formula test passed: calculation **100.3 ms**, JSON save preparation **127.2 ms** for 319,175 bytes, and JSON parse **20.7 ms**. The command used the release profile and the explicit 200 ms assertion. This is a recorded result on this machine; it does not establish the separate mainstream desktop profile.
+On the local Intel Core i3-2350M (2 cores, 7.7 GiB RAM), the latest optimized 10,000-formula test passed: calculation **88.5 ms**, JSON save preparation **20.4 ms** for 319,175 bytes, and JSON parse **10.4 ms**. The command used the release profile and the explicit 200 ms assertion. Raw output is `.work/sheets-acceptance-2026-09-24/formula-perf-rerun.log`. This is a recorded result on this machine; it does not establish the separate mainstream desktop profile.
 
-View-only updates now reuse the active sheet's last calculated values. A workbook edit refreshes them. Recalculation on a committed edit still runs synchronously, so the 16.7 ms UI-response rule is not yet proved. The current integration test also does not measure 1,000,000-cell scrolling or peak RSS; those need a real-window workload harness on the representative profile. The memory budget still needs a numeric owner-approved limit.
+## Million-cell projection sample — 2026-09-24
+
+The opt-in app test `million_sparse_cells_project_one_viewport_within_one_frame` fills a 2,048×2,048 address space with 1,000,000 sparse numeric cells. A fixed-key Feistel permutation assigns each cell a unique, random-looking address without allocating a second million-entry index. It checks all four workbook regions, then projects the visible cells at 60 positions for a 1,024×720 viewport, including the origin and clamped far corner. It asserts the visible-cell count is exact and each CPU projection finishes below 16.7 ms.
+
+Run the optimized assertion with:
+
+```sh
+LOOM_ENFORCE_SCROLL_BUDGET=1 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 \
+  cargo test --manifest-path loom-sheets/Cargo.toml --locked --offline --release \
+  -p loom-sheets-app million_sparse_cells_project_one_viewport_within_one_frame -- --nocapture
+```
+
+On the same Intel Core i3-2350M, the standalone release test measured **0.17 ms p95** and **0.26 ms maximum** across the 60 CPU-side projections. `/usr/bin/time -v` measured **90,308 KiB peak RSS** for the test process, which included the one-million-cell fixture and test harness; it reported **0 swaps**. This is a test-process measurement, not the complete interactive app's memory use.
+
+This is not a real-window scroll result: it excludes Slint rendering, native frame scheduling, compositing, and frame presentation. The native one-million-cell scroll check and a numeric owner-reviewed app memory cap remain open. A committed formula edit still clones workbook tabs, recalculates, and writes a recovery snapshot synchronously; the 16.7 ms input-feedback rule is not yet proved. Preserve these as separate costs when implementing a bounded background worker: moving calculation alone does not move workbook cloning or recovery-journal writes off the UI thread.
