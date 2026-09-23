@@ -174,7 +174,12 @@ Exact geometry, token, and responsive values live in the machine-readable design
 Apply the specific UI cards in `TRUTH.md`, one at a time. These rules describe the required result:
 
 - Protect work first. New/Open/Close must handle dirty documents explicitly. Save/Export/Recovery must preserve the actual content, not just show a reassuring message.
-- Make basic actions findable in the app on every supported desktop. If a desktop has no global menu host, provide a visible local route to New, Open, Save, Save As, and the command palette. A memorized shortcut is not discoverability.
+- Make basic actions findable in the app on every supported desktop. A memorized shortcut, toolbar icon, overflow button, or command palette is not a menu bar.
+- Menu placement is simple: use a global menu only when the app really installs it and the desktop actually shows it. Otherwise draw a menu bar inside the app window.
+  1. Never hide the local menu because a menu descriptor was created or DBusMenu data can be generated. Those facts do not prove a desktop displays a global menu.
+  2. If there is no API that confirms a visible global menu, keep the local menu visible. In the current Sheets code, the native installer calls the OS menu API on macOS only; Linux DBusMenu is not connected to a desktop host.
+  3. Keep the local menu connected to the same command IDs, enabled/checked state, and action handlers as the other controls. Show real commands only; hide empty menus and unsupported placeholder items.
+  4. Check the local menu on a desktop without a global menu at 1024, 1280, and 1440 px. Check the global menu separately on a platform that really hosts it.
 - Start with an honest empty document or clearly named example. Example data must make sense. Never start a real job from a made-up source path.
 - Give the document the space promised by its contract. Close optional inspectors by default where required. Do not create a large blank panel just to fill the window.
 - At narrow sizes, reflow template choices and move low-priority commands into a reachable overflow. Keep names and primary actions readable. Never solve clipping by making text tiny, hiding actions with no replacement, or making the whole toolbar scroll.

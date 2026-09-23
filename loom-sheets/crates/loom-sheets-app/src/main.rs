@@ -51,6 +51,8 @@ mod object_actions;
 
 mod chart_actions;
 
+mod local_menu;
+
 mod palette;
 use palette::*;
 
@@ -1051,7 +1053,8 @@ fn sync_menu_state_result(
     sync_history_controls(app, state);
     rebuild_palette(app, app.get_palette_query().as_str());
     let projection = menu_projection(menu_service, app)?;
-    menu_service.sync_command_states(&projection)
+    menu_service.sync_command_states(&projection)?;
+    local_menu::sync(app, menu_service)
 }
 
 pub(crate) fn sync_menu_state(menu_service: &NativeMenuBar, app: &SheetsApp, state: &GuiState) {
@@ -1726,6 +1729,7 @@ fn wire_responsive_layout(app: &SheetsApp) {
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    app.set_local_menu_visible(!cfg!(target_os = "macos"));
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.set_template_text_scale(args.text_scale);
@@ -2208,6 +2212,7 @@ pub(crate) fn register_history_actions(
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
+    app.set_local_menu_visible(!cfg!(target_os = "macos"));
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.set_template_text_scale(args.text_scale);
@@ -2655,40 +2660,10 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         )],
     );
     // Only commands with a registered Sheets/controller sink are enabled.
-    // Application/window/help entries remain disabled until a real native
-    // host bridge is installed for them.
-    menu_bar.disable_items_except([
-        "file.new",
-        "file.new_template",
-        "file.open",
-        "file.save",
-        "file.save_as",
-        "file.export_csv",
-        "file.export_xlsx",
-        "edit.undo",
-        "edit.redo",
-        "edit.cut",
-        "edit.copy",
-        "edit.paste",
-        "edit.select_all",
-        "app.palette",
-        "view.inspector",
-        "view.zoom_in",
-        "view.zoom_out",
-        "view.zoom_actual",
-        "table.add_row",
-        "table.delete_row",
-        "table.add_col",
-        "table.delete_col",
-        "table.sort_asc",
-        "table.sort_desc",
-        "table.freeze_header",
-        "table.unfreeze_panes",
-        "table.pivot_sum",
-        "sheets.insert_shape",
-        "sheets.insert_image",
-        "sheets.delete_sheet",
-    ]);
+    // Application/window entries remain disabled until a real native host
+    // bridge is installed for them; Help > Keyboard Shortcuts opens the
+    // existing command palette.
+    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
@@ -2698,6 +2673,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             schedule_menu_action(&app_ref, action)
         }))
         .map_err(|error| error.to_string())?;
+
+    local_menu::wire_action(&app, menu_service.clone());
 
     register_sheet_actions(&app, &state, &menu_service);
     object_actions::register_object_actions(&app, &state, &menu_service);

@@ -172,6 +172,21 @@ fn readonly_save_error_feedback_is_short_and_actionable() {
 }
 
 #[test]
+fn non_macos_window_exposes_a_local_application_menu_bar() {
+    #[cfg(not(target_os = "macos"))]
+    {
+        i_slint_backend_testing::init_no_event_loop();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        for label in ["File", "Edit", "View", "Table"] {
+            let entries: Vec<_> =
+                i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, label)
+                    .collect();
+            assert!(!entries.is_empty(), "the {label} menu should be visible");
+        }
+    }
+}
+
+#[test]
 fn formula_bar_draft_is_not_applied_before_commit() {
     let mut sheet = Sheet::new("test");
     let selected = CellRef::parse("B1").unwrap();

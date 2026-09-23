@@ -42,6 +42,12 @@ These live-window captures show UI-06 feedback outside the editable grid. The tw
 
 The matching test, build, and one-time Orca announcement results are recorded in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the portable audit evidence archive.
 
+## Non-macOS menu-bar preview — 2026-09-23
+
+![In-window File, Edit, View, Table, and Help menus](docs/qa-renderer/ui01-local-menu-1024-linux.png)
+
+This is a 1024×720 software-renderer capture of the rebuilt UI, not a live desktop screenshot. A native Linux capture is pending because Cinnamon's active screensaver covered the app during this check; see the self-audit report for the exact limitation.
+
 ## Core Capabilities
 
 - **Workbook Tabs & Navigation**: Multi-sheet workbook tabs with add/switch/rename/delete (all undoable), persisted with the active tab in versioned `.loomtable` packages.
@@ -49,7 +55,7 @@ The matching test, build, and one-time Orca announcement results are recorded in
 - **Spreadsheet Canvas**: Viewport-filling sheet grid with headers, live selection/range marquee, keyboard navigation (arrows/Tab/Shift-extend), dynamic-array spill/error projection, anchored worksheet objects, real zoom scaling, and a floating live chart overlay.
 - **Inspector**: `Table` tab (name, rows/columns add/remove) and `Cell` tab (raw formula, font style, data format incl. Number, decimals stepper, alignment, row/column sizing) — every control undoable and persisted.
 - **Template Chooser**: Categorized chooser (Basic, Personal Finance, Personal, Business, Education) with eleven seeded templates, each creating its advertised sheet with live formulas.
-- **Command Palette & Menus**: Ctrl+K palette covering every primary command; native macOS NSMenu / Linux DBusMenu with live enablement (incl. View zoom commands).
+- **Command Palette & Menus**: Ctrl+K palette covering every primary command; native macOS NSMenu plus an in-window File/Edit/View/Table/Help menu on non-macOS desktops. The local menu uses the same command IDs and live enablement as the native menu. Linux DBusMenu layout data is not connected to a desktop global-menu host, so Linux keeps the in-window menu visible.
 - **Storage & Interoperability**: Versioned `.loomtable` packages (all tabs, styles, alignments, freeze panes, charts, anchored shapes/images, and package-owned embedded image assets; legacy single-sheet files still open), formula-preserving CSV import/export with dialect sniffing, and multi-sheet XLSX import/export preserving worksheet names, formulas, cached values, cell styles/alignments, basic charts, shapes, and embedded images.
 
 ## Visual QA Evidence

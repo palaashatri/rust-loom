@@ -1566,7 +1566,7 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "edit.copy" | "sheets.copy" => app.invoke_copy_selection(),
         "edit.paste" | "sheets.paste" => app.invoke_paste_selection(),
         "edit.select_all" | "sheets.select-all" => app.invoke_select_all(),
-        "app.palette" => app.invoke_open_palette(),
+        "app.palette" | "help.shortcuts" => app.invoke_open_palette(),
         "view.inspector" => app.invoke_toggle_inspector(),
         "view.zoom_in" => app.invoke_zoom_in(),
         "view.zoom_out" => app.invoke_zoom_out(),
