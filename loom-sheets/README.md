@@ -28,7 +28,7 @@ These screenshots come from the running desktop app via `/usr/bin/gnome-screensh
 
 ![Checklist workbook created from the selected template — Linux](docs/qa-native/template-created-checklist-linux.png)
 
-The matching keyboard, AT-SPI, Orca, and cancellation observations are in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the repository's portable audit evidence archive.
+The matching keyboard, AT-SPI, Orca, and cancellation observations are in [the native self-audit report](../AGENTS.md#source-work-sheets-acceptance-2026-09-23-report-md) and the repository's portable audit evidence archive.
 
 ## Native Linux status and error feedback — 2026-09-23
 
@@ -40,7 +40,7 @@ These live-window captures show UI-06 feedback outside the editable grid. The tw
 
 ![Canceling Save As leaves the dirty marker and says Save cancelled](docs/qa-native/ui06-save-cancel-dirty-workbook-linux.png)
 
-The matching test, build, and one-time Orca announcement results are recorded in [the native self-audit report](../.work/sheets-acceptance-2026-09-23/REPORT.md) and the portable audit evidence archive.
+The matching test, build, and one-time Orca announcement results are recorded in [the native self-audit report](../AGENTS.md#source-work-sheets-acceptance-2026-09-23-report-md) and the portable audit evidence archive.
 
 ## Warning and menu layout repairs — 2026-09-25
 
@@ -58,7 +58,7 @@ Menu rows use the shared exported `LoomMenuItem` from `loom-core/crates/loom-ui/
 
 ![Native Linux import-warning dialog with the in-window menu row visible](docs/qa-native/ui23-xlsx-import-warning-live-linux.png)
 
-This 1024×720 image is a software-renderer capture. The native live window was captured on 2026-09-24 with the File/Edit/View/Table/Help row visible and the XLSX import-warning dialog open: [ui23-xlsx-import-warning-live-linux.png](docs/qa-native/ui23-xlsx-import-warning-live-linux.png). It confirms the row is visible and the warning copy/buttons render in the real Linux window. The popup was not opened and keyboard/focus actions were not tested because native-app controls are unavailable in this session. The old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md) for exact results and remaining checks.
+This 1024×720 image is a software-renderer capture. The native live window was captured on 2026-09-24 with the File/Edit/View/Table/Help row visible and the XLSX import-warning dialog open: [ui23-xlsx-import-warning-live-linux.png](docs/qa-native/ui23-xlsx-import-warning-live-linux.png). It confirms the row is visible and the warning copy/buttons render in the real Linux window. The popup was not opened and keyboard/focus actions were not tested because native-app controls are unavailable in this session. The old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](../AGENTS.md#source-loom-sheets-docs-qa-reports-2026-09-24-acceptance-follow-up-md) for exact results and remaining checks.
 
 ## Core Capabilities
 
@@ -75,12 +75,12 @@ This 1024×720 image is a software-renderer capture. The native live window was 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.
 - Native Linux screenshots above verify the opened workbook, dirty title, chooser selection, and template creation at 1024×720. The Escape-preserves-workbook capture is `docs/qa-native/template-cancel-preserves-workbook-linux.png`.
 - The UI-06 captures verify visible formula errors, read-only save failure, and canceled Save As feedback; cancel and failure do not clear the unsaved marker.
-- These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root `TRUTH.md` ledger.
+- These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root [current-truth section](../AGENTS.md#current-truth).
 - The XLSX loss-warning dialog passes rendered tests, including Tab navigation followed by Escape-to-Cancel. The native capture above shows the real dialog and menu row; its popup, focus, and button actions still need live interaction review.
 
 ## Performance evidence
 
-The current 10,000-formula and million-cell measurements are recorded in [PERFORMANCE.md](PERFORMANCE.md). Formula-bar edits now submit a cell delta to a background worker; one test measured 0.086 ms for edit preparation and mailbox submission only. It did not measure the full callback or visible frame. The same one-million-cell run took 43 seconds to write recovery data. Recovery also appends full workbook packages and only compacts on explicit Save, so long unsaved sessions have no automatic storage bound. Recovery freshness, normal Save/Open, full-window scrolling, and a reviewed peak-memory limit remain open. These test timings do not prove native frame rate or complete Sheets acceptance; see the [acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md).
+The current 10,000-formula and million-cell measurements are recorded in [PERFORMANCE.md](../AGENTS.md#source-loom-sheets-performance-md). Formula-bar edits now submit a cell delta to a background worker; one test measured 0.086 ms for edit preparation and mailbox submission only. It did not measure the full callback or visible frame. The same one-million-cell run took 43 seconds to write recovery data. Recovery also appends full workbook packages and only compacts on explicit Save, so long unsaved sessions have no automatic storage bound. Recovery freshness, normal Save/Open, full-window scrolling, and a reviewed peak-memory limit remain open. These test timings do not prove native frame rate or complete Sheets acceptance; see the [acceptance report](../AGENTS.md#source-loom-sheets-docs-qa-reports-2026-09-24-acceptance-follow-up-md).
 
 ## Development
 

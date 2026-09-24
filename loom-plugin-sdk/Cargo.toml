@@ -1,5 +1,5 @@
 # Loom Plugin SDK — workspace manifest.
-# See LICENSE_POLICY.md for licensing decisions (MIT OR Apache-2.0).
+# See the Licensing Policy section in root AGENTS.md (MIT OR Apache-2.0).
 
 [workspace]
 resolver = "2"

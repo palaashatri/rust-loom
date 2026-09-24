@@ -15,13 +15,42 @@ class GovernanceTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in ("AGENTS.MD", "TRUTH.md", "loom-bootstrap/contracts/workflow.toml",
+        for name in ("AGENTS.md", "loom-bootstrap/contracts/workflow.toml",
                      "loom-bootstrap/scripts/audit-governance.py"):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
 
+    def truth_text(self):
+        path = self.root / "AGENTS.md"
+        text = path.read_text()
+        match = re.search(
+            r"<!-- CURRENT TRUTH START -->\s*(.*?)\s*<!-- CURRENT TRUTH END -->",
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "fixture must contain the marked current truth section")
+        return match.group(1)
+
+    def write_truth(self, truth):
+        path = self.root / "AGENTS.md"
+        text = path.read_text()
+        updated, count = re.subn(
+            r"(<!-- CURRENT TRUTH START -->\s*).*?(\s*<!-- CURRENT TRUTH END -->)",
+            lambda match: match.group(1) + truth + match.group(2),
+            text,
+            count=1,
+            flags=re.DOTALL,
+        )
+        self.assertEqual(count, 1)
+        path.write_text(updated)
+
     def replace(self, name, old, new):
+        if name == "current_truth":
+            text = self.truth_text()
+            self.assertIn(old, text)
+            self.write_truth(text.replace(old, new, 1))
+            return
         path = self.root / name
         text = path.read_text()
         self.assertIn(old, text)
@@ -45,8 +74,7 @@ class GovernanceTests(unittest.TestCase):
             r'allowed_active_prefixes = \[.*?\n\]',
             '''allowed_active_prefixes = [
   ".github/",
-  "AGENTS.MD",
-  "TRUTH.md",
+  "AGENTS.md",
   "README.md",
   "loom-bootstrap/",
   "loom-core/crates/loom-ui/",
@@ -61,8 +89,7 @@ class GovernanceTests(unittest.TestCase):
         workflow = workflow.replace('sheets = "IN_PROGRESS"', 'sheets = "LOCKED"', 1)
         workflow_path.write_text(workflow)
 
-        truth_path = self.root / "TRUTH.md"
-        truth = truth_path.read_text()
+        truth = self.truth_text()
         truth = re.sub(
             r'ACTIVE PHASE: [^\n]+\nFOUNDATION STATUS: [^\n]+\nSUITE STATUS: [^\n]+\n'
             r'APPLICATION DEVELOPMENT: [^\n]+\n(?:ACTIVE APPLICATION: [^\n]+\n)?'
@@ -73,7 +100,7 @@ class GovernanceTests(unittest.TestCase):
         )
         truth = truth.replace('| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |',
                               '| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |', 1)
-        truth_path.write_text(truth)
+        self.write_truth(truth)
 
     def run_audit(self):
         return subprocess.run(
@@ -93,7 +120,6 @@ class GovernanceTests(unittest.TestCase):
 
     def test_older_supported_phases_remain_valid(self):
         workflow_path = self.root / "loom-bootstrap/contracts/workflow.toml"
-        truth_path = self.root / "TRUTH.md"
         original_workflow = workflow_path.read_text()
         apps = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
         for phase in ("ui-foundation", "sheets", "writer", "present", "photo", "motion"):
@@ -139,36 +165,34 @@ class GovernanceTests(unittest.TestCase):
                 truth += "".join(f"| {index} | {app.title()} | {statuses[app]} |\n"
                                  for index, app in enumerate(apps, 1))
                 workflow_path.write_text(workflow)
-                truth_path.write_text(truth)
+                self.write_truth(truth)
                 result = self.run_audit()
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_table_cannot_promote_an_app_during_shared_repair(self):
         self.use_shared_repair_fixture()
-        self.replace("TRUTH.md", "| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |",
+        self.replace("current_truth", "| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |",
                      "| 1 | Sheets | ACCEPTED | LOCKED |")
         self.rejects("Sheets product status must remain ACCEPTANCE_BLOCKED")
 
     def test_unrelated_numbered_evidence_table_is_allowed(self):
-        path = self.root / "TRUTH.md"
-        path.write_text(path.read_text() + "\n## Evidence inventory\n\n"
-                        "| Order | Check | Input | Result |\n|---|---|---|---|\n"
-                        "| 1 | Recovery | Disk | PASS |\n")
+        self.write_truth(self.truth_text() + "\n## Evidence inventory\n\n"
+                         "| Order | Check | Input | Result |\n|---|---|---|---|\n"
+                         "| 1 | Recovery | Disk | PASS |\n")
         result = self.run_audit()
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_duplicate_application_table_is_rejected(self):
         self.use_shared_repair_fixture()
-        path = self.root / "TRUTH.md"
-        truth = path.read_text()
+        truth = self.truth_text()
         start = truth.index("| Order | Application | Product status | Work status |")
         end = truth.index("\n\n", start)
-        path.write_text(truth + "\n" + truth[start:end] + "\n")
+        self.write_truth(truth + "\n" + truth[start:end] + "\n")
         self.rejects("exactly one ordered live application status table")
 
     def test_detailed_section_cannot_claim_a_different_status(self):
         self.use_shared_repair_fixture()
-        self.replace("TRUTH.md", "### Present\n", "### Present\n\nStatus: `ACCEPTED`\n")
+        self.replace("current_truth", "### Present\n", "### Present\n\nStatus: `ACCEPTED`\n")
         self.rejects("Present section status disagrees with the live table")
 
     def test_workflow_cannot_unlock_an_app_during_shared_repair(self):
@@ -179,13 +203,12 @@ class GovernanceTests(unittest.TestCase):
 
     def test_active_phase_must_match_exactly(self):
         self.use_shared_repair_fixture()
-        self.replace("TRUTH.md", "ACTIVE PHASE: AUDIT-REPAIR", "ACTIVE PHASE: WRITER")
-        self.rejects("TRUTH.md active phase disagrees with workflow")
+        self.replace("current_truth", "ACTIVE PHASE: AUDIT-REPAIR", "ACTIVE PHASE: WRITER")
+        self.rejects("AGENTS.md current truth active phase disagrees with workflow")
 
     def test_live_gate_rejects_conflicting_duplicate_fields(self):
         self.use_shared_repair_fixture()
-        path = self.root / "TRUTH.md"
-        original = path.read_text()
+        original = self.truth_text()
         for field, expected, conflicting in (
             ("ACTIVE REPAIR", "SHARED-RECOVERY", "ENCODE"),
             ("NEXT APPLICATION", "SHEETS", "ENCODE"),
@@ -194,36 +217,35 @@ class GovernanceTests(unittest.TestCase):
         ):
             with self.subTest(field=field):
                 declaration = f"{field}: {expected}"
-                path.write_text(original.replace(
+                self.write_truth(original.replace(
                     declaration, f"{declaration}\n{field}: {conflicting}", 1,
                 ))
-                self.rejects(f"TRUTH.md {field} must appear once and match workflow")
+                self.rejects(f"AGENTS.md current truth {field} must appear once and match workflow")
 
     def test_live_gate_cannot_be_supplied_only_by_incidental_prose(self):
         self.use_shared_repair_fixture()
-        self.replace("TRUTH.md", "ACTIVE REPAIR: SHARED-RECOVERY",
+        self.replace("current_truth", "ACTIVE REPAIR: SHARED-RECOVERY",
                      "Old example: ACTIVE REPAIR: SHARED-RECOVERY")
-        self.rejects("TRUTH.md ACTIVE REPAIR must appear once and match workflow")
+        self.rejects("AGENTS.md current truth ACTIVE REPAIR must appear once and match workflow")
 
     def test_gate_values_allow_trailing_whitespace(self):
         self.use_shared_repair_fixture()
-        path = self.root / "TRUTH.md"
         fields = ("ACTIVE PHASE:", "FOUNDATION STATUS:", "APPLICATION DEVELOPMENT:",
                   "SUITE STATUS:", "ACTIVE REPAIR:", "NEXT APPLICATION:")
-        path.write_text("\n".join(line + "  " if line.startswith(fields) else line
-                                  for line in path.read_text().split("\n")))
+        self.write_truth("\n".join(line + "  " if line.startswith(fields) else line
+                                    for line in self.truth_text().split("\n")))
         result = self.run_audit()
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_duplicate_gate_values_still_fail_after_trimming(self):
         self.use_shared_repair_fixture()
-        self.replace("TRUTH.md", "ACTIVE REPAIR: SHARED-RECOVERY",
+        self.replace("current_truth", "ACTIVE REPAIR: SHARED-RECOVERY",
                      "ACTIVE REPAIR: SHARED-RECOVERY\nACTIVE REPAIR: SHARED-RECOVERY  ")
-        self.rejects("TRUTH.md ACTIVE REPAIR must appear once and match workflow")
+        self.rejects("AGENTS.md current truth ACTIVE REPAIR must appear once and match workflow")
 
     def test_formatted_detailed_status_cannot_override_live_table(self):
         self.use_shared_repair_fixture()
-        self.replace("TRUTH.md", "### Present\n",
+        self.replace("current_truth", "### Present\n",
                      "### Present\n\n**Status:** `ACCEPTED`\n")
         self.rejects("Present section status disagrees with the live table")
 
@@ -251,6 +273,24 @@ class GovernanceTests(unittest.TestCase):
         path.parent.mkdir(parents=True)
         path.write_text("Conflicting instructions")
         self.rejects("nested agent authority is forbidden")
+
+    def test_non_readme_markdown_must_be_consolidated(self):
+        path = self.root / "loom-sheets/EXTRA.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("Performance notes")
+        self.rejects("non-README Markdown must be consolidated into root AGENTS.md")
+
+    def test_project_readmes_are_exempt_from_consolidation(self):
+        path = self.root / "loom-sheets/README.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("The application README stays here.")
+        result = self.run_audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_marked_current_truth_section_is_required(self):
+        path = self.root / "AGENTS.md"
+        path.write_text(path.read_text().replace("<!-- CURRENT TRUTH START -->", "", 1))
+        self.rejects("AGENTS.md must contain exactly one marked current truth section")
 
     def test_missing_workflow_reports_an_error_without_a_traceback(self):
         (self.root / "loom-bootstrap/contracts/workflow.toml").unlink()

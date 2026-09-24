@@ -59,8 +59,8 @@ MEAN_GATE="1.0"
 RATIO_GATE="0.01"
 SHOT_SECS="${VISUAL_QA_SHOT_SECS:-120}"
 BASELINE_ROOT="$PARENT/loom-design-bible/baselines"
-REPORT="$WORK/visual-qa-report.md"
-DEST_REPORT="${VISUAL_QA_DEST_REPORT:-$PARENT/visual-qa-report.md}"
+REPORT="$WORK/visual-qa-report.txt"
+DEST_REPORT="${VISUAL_QA_DEST_REPORT:-$PARENT/visual-qa-report.txt}"
 
 # Keep cleanup explicit: these are the only eight application names and the
 # only per-run artifact destinations this harness owns. Do not replace this

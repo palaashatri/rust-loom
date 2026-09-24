@@ -166,7 +166,7 @@ def main() -> int:
             report["applications"][app] = {"passed": False, "error": str(error)}
 
     writer = samples / "sample.loomdoc"
-    markdown = work / "writer.md"
+    markdown = work / "writer.txt"
     journey(
         "writer",
         [

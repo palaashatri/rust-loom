@@ -13,7 +13,7 @@ use image::RgbaImage;
 use crate::image_diff::{highlight_diff, perceptual_diff, within_tolerance, DiffReport};
 use crate::png::save_png;
 
-/// The Loom default visual-QA tolerance (design bible VISUAL_QA.md).
+/// The Loom default visual-QA tolerance (Visual QA section in root AGENTS.md).
 pub const DEFAULT_MAX_MEAN: f32 = 1.0;
 /// The Loom default maximum differing-pixel ratio.
 pub const DEFAULT_MAX_RATIO: f32 = 0.01;

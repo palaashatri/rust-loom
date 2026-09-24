@@ -9,7 +9,7 @@ source "$ROOT/scripts/lib.sh"
 SIZE="${VISUAL_QA_SIZE:-1280x800}"
 SHOT_SECS="${VISUAL_QA_SHOT_SECS:-120}"
 OUT="$WORK/theme-matrix"
-REPORT="$WORK/theme-matrix-report.md"
+REPORT="$WORK/theme-matrix-report.txt"
 mkdir -p "$OUT"
 rm -f "$OUT"/*.png "$REPORT"
 

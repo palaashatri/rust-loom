@@ -23,7 +23,7 @@ CHECKSUM="$ZIP.sha256"
 LIST="$WORK/package-filelist.txt"
 TMP_ZIP="$ZIP.tmp.$$"
 
-# These are the suite directories documented by BOOTSTRAP.md. Keep the
+# These are the suite directories documented in the bootstrap section of AGENTS.md. Keep the
 # explicit list so a partially checked-out suite cannot produce a plausible
 # but incomplete archive.
 SUITE_DIRS=(

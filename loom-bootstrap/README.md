@@ -26,7 +26,7 @@ loom-bootstrap/
 │   ├── cleanup-targets.sh       allowlisted target/temp cleanup with dry-run
 │   ├── package.sh              deterministic Loom-Complete.zip + .sha256 (regular files only)
 │   ├── verify-package.sh       extract + env-check + metadata + full workspace tests
-│   ├── generate-status-report.sh → ../VERIFICATION_REPORT.md
+│   ├── generate-status-report.sh → .work/VERIFICATION_REPORT.txt
 │   └── docker-*.sh             thin docker compose wrappers
 ├── docker/                     Dockerfile.ci / .dev / .visual, compose.yaml
 └── .github/workflows/ci.yml    GitHub Actions: fmt, clippy, test, build
@@ -92,11 +92,11 @@ its default light/dark run is not the full design-bible matrix.
 | Path | Meaning |
 |------|---------|
 | `.work/` | logs, screenshots, diffs (gitignored) |
-| `../visual-qa-report.md` | latest visual QA report |
-| `docs/visual-qa-baseline-review.md` | reviewed baseline provenance and open matrix gaps |
-| `../VERIFICATION_REPORT.md` | per-repo status stub |
+| `../visual-qa-report.txt` | latest visual QA report |
+| [Visual QA process and matrix gaps](../AGENTS.md#source-loom-design-bible-visual-qa-md) | review rules and open coverage gaps |
+| `../.work/VERIFICATION_REPORT.txt` | per-repo status stub |
 | `../Loom-Complete.zip` | packaged suite |
 | `../Loom-Complete.zip.sha256` | its checksum |
 
-See [BOOTSTRAP.md](BOOTSTRAP.md) for the full procedure and
+See [BOOTSTRAP.md](../AGENTS.md#source-loom-bootstrap-bootstrap-md) for the full procedure and
 [COMPATIBILITY.toml](COMPATIBILITY.toml) for the cross-suite contract.

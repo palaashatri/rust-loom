@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/lib.sh"
 
-REPORT="$WORK/VERIFICATION_REPORT.md"
+REPORT="$WORK/VERIFICATION_REPORT.txt"
 
 repo_app() {
   case "$1" in

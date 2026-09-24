@@ -905,7 +905,7 @@ mod tests {
             ("psd/one_pixel.psd", Format::Psd, 100),
             ("csv/accounts.csv", Format::Csv, 0),
             ("tsv/measurements.tsv", Format::Text, 0),
-            ("markdown/notes.md", Format::Markdown, 0),
+            ("markdown/notes.txt", Format::Markdown, 0),
             ("plaintext/catalog.txt", Format::Text, 0),
         ];
         let mut checked = 0usize;
@@ -913,7 +913,12 @@ mod tests {
             let path = corpus.join(relative);
             let bytes =
                 fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-            let detected = detect(&bytes, Some(relative));
+            let format_hint = if *relative == "markdown/notes.txt" {
+                "markdown/notes.md"
+            } else {
+                *relative
+            };
+            let detected = detect(&bytes, Some(format_hint));
             assert_eq!(
                 detected.format, *format,
                 "{} detected as {:?} ({})",

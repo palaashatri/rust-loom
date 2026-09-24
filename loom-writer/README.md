@@ -21,7 +21,7 @@ Loom Writer is a calm, professional local-first word processor engineered for pr
 
 - **Status**: **PASS** (section 13 acceptance evidence pass, 2026-09-06).
 - **Evidence**: an 18-capture viewport/theme matrix (1024×720 – 1920×1200 × light/dark/high-contrast) independently reviewed with no clipping, ellipsized labels, or contrast defects; native macOS `screencapture` QA across nine live states; an end-to-end GUI journey covering typing, formatting, lists, comments, tables, page setup, undo/redo, save/reopen, and export.
-- **Remaining gate items**: explicit human visual sign-off and representative performance budgets (see `TRUTH.md`).
+- **Remaining gate items**: explicit human visual sign-off and representative performance budgets (see the root [current-truth section](../AGENTS.md#current-truth)).
 
 ### Acceptance matrix (deterministic renderer)
 

@@ -1,7 +1,7 @@
 //! Minimal, deterministic PDF 1.4 writer.
 //!
 //! Used by Loom Writer, Present and Sheets for PDF export. Scope is
-//! deliberately small (see `loom-spec/docs/adrs/ADR-0005-minimal-pdf-writer.md`):
+//! deliberately small (see the Internal PDF Writer ADR in root `AGENTS.md`):
 //!
 //! * Pages with text (built-in Helvetica, WinAnsi/Latin-1 encodable text),
 //!   rectangles, lines, RGB fill and stroke colors.

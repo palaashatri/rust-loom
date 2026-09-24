@@ -2,6 +2,7 @@
 """Validate Loom's authority model and serial workflow lock."""
 from __future__ import annotations
 
+import os
 import re
 import sys
 import tomllib
@@ -9,8 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / "loom-bootstrap/contracts/workflow.toml"
-AGENTS = ROOT / "AGENTS.MD"
-TRUTH = ROOT / "TRUTH.md"
+AGENTS = ROOT / "AGENTS.md"
+TRUTH_BEGIN = "<!-- CURRENT TRUTH START -->"
+TRUTH_END = "<!-- CURRENT TRUTH END -->"
 APPS = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
 errors: list[str] = []
 workflow: dict = {}
@@ -44,7 +46,7 @@ else:
         if workflow.get("existing_foundation_consumers") != list(APPS[:5]):
             fail("existing foundation consumer list changed without an adoption gate")
         repair_prefixes = {
-            ".github/", "AGENTS.MD", "TRUTH.md", "README.md", "loom-bootstrap/",
+            ".github/", "AGENTS.md", "README.md", "loom-bootstrap/",
             "loom-core/crates/loom-ui/", "loom-core/crates/loom-desktop/",
             "loom-core/crates/loom-production/", "loom-core/crates/loom-storage/",
             "loom-design-bible/contracts/", "loom-design-bible/tokens/",
@@ -148,18 +150,22 @@ else:
         fail(f"unrecognized active phase: {phase}")
 
     if workflow.get("application_order") != list(APPS):
-        fail("serial application order drifted from AGENTS.MD")
+        fail("serial application order drifted from AGENTS.md")
 
-allowed_root_markdown = {"AGENTS.MD", "README.md", "TRUTH.md"}
-for path in ROOT.iterdir():
-    if path.is_file() and path.suffix.lower() == ".md" and path.name not in allowed_root_markdown:
-        fail(f"unauthorized root Markdown file: {path.name}")
-
-for path in ROOT.rglob("*"):
-    if not path.is_file() or path == AGENTS:
-        continue
-    if path.name.lower() == "agents.md":
-        fail(f"nested agent authority is forbidden: {path.relative_to(ROOT)}")
+for directory, child_directories, filenames in os.walk(ROOT):
+    child_directories[:] = [
+        name for name in child_directories
+        if name not in {".git", "target", "node_modules", ".venv"}
+    ]
+    for filename in filenames:
+        path = Path(directory) / filename
+        if path.name.lower().startswith("agents.") and path != AGENTS:
+            fail(f"nested agent authority is forbidden: {path.relative_to(ROOT)}")
+            continue
+        is_markdown = path.suffix.lower() in {".md", ".markdown"}
+        is_readme = path.name.lower().startswith("readme.")
+        if is_markdown and path != AGENTS and not is_readme:
+            fail(f"non-README Markdown must be consolidated into root AGENTS.md: {path.relative_to(ROOT)}")
 
 for stale in (
     ROOT / ".superpowers",
@@ -170,7 +176,14 @@ for stale in (
         fail(f"stale agent planning residue remains: {stale.relative_to(ROOT)}")
 
 agents_text = AGENTS.read_text(encoding="utf-8") if AGENTS.is_file() else ""
-truth_text = TRUTH.read_text(encoding="utf-8") if TRUTH.is_file() else ""
+truth_matches = list(re.finditer(
+    re.escape(TRUTH_BEGIN) + r"\s*(.*?)\s*" + re.escape(TRUTH_END),
+    agents_text,
+    re.DOTALL,
+))
+if len(truth_matches) != 1 or agents_text.count(TRUTH_BEGIN) != 1 or agents_text.count(TRUTH_END) != 1:
+    fail("AGENTS.md must contain exactly one marked current truth section")
+truth_text = truth_matches[0].group(1) if len(truth_matches) == 1 else ""
 agents_lower = agents_text.lower()
 truth_lower = truth_text.lower()
 for phrase in (
@@ -181,7 +194,7 @@ for phrase in (
     "commercially redistributable assets",
 ):
     if phrase.lower() not in agents_lower:
-        fail(f"AGENTS.MD missing required constitutional clause: {phrase}")
+        fail(f"AGENTS.md missing required constitutional clause: {phrase}")
 
 if phase == "audit-repair":
     truth_phrases = (
@@ -231,7 +244,7 @@ else:
 
 for phrase in truth_phrases:
     if phrase.lower() not in truth_lower:
-        fail(f"TRUTH.md missing required active-state statement: {phrase}")
+        fail(f"AGENTS.md current truth section missing required active-state statement: {phrase}")
 
 # Check the live gate, not incidental words in historical prose. Readiness is
 # evidence and explicit status, not an arbitrary number required by a regex.
@@ -239,10 +252,10 @@ if phase:
     phases = re.findall(r"^ACTIVE PHASE: (.+)$", truth_text, re.MULTILINE)
     expected_phase = "UI FOUNDATION" if phase == "ui-foundation" else phase.upper()
     if [value.strip() for value in phases] != [expected_phase]:
-        fail("TRUTH.md active phase disagrees with workflow")
+        fail("AGENTS.md current truth active phase disagrees with workflow")
     foundations = re.findall(r"^FOUNDATION STATUS: (.+)$", truth_text, re.MULTILINE)
     if [value.strip() for value in foundations] != [workflow.get("foundation_status")]:
-        fail("TRUTH.md foundation status disagrees with workflow")
+        fail("AGENTS.md current truth foundation status disagrees with workflow")
 
 if phase == "audit-repair":
     gate_fields = {
@@ -254,7 +267,7 @@ if phase == "audit-repair":
     for field, expected in gate_fields.items():
         values = re.findall(rf"^{re.escape(field)}: (.+)$", truth_text, re.MULTILINE)
         if [value.strip() for value in values] != [expected]:
-            fail(f"TRUTH.md {field} must appear once and match workflow")
+            fail(f"AGENTS.md current truth {field} must appear once and match workflow")
     tables = re.findall(
         r"^\|[ \t]*Order[ \t]*\|[ \t]*Application[ \t]*\|"
         r"[ \t]*Product status[ \t]*\|[ \t]*Work status[ \t]*\|[^\n]*\n"
@@ -266,7 +279,7 @@ if phase == "audit-repair":
         tables[0] if len(tables) == 1 else "", re.MULTILINE,
     )
     if len(tables) != 1 or [name.lower() for name, _, _ in rows] != list(APPS):
-        fail("TRUTH.md must contain exactly one ordered live application status table")
+        fail("AGENTS.md current truth must contain exactly one ordered live application status table")
     for name, quality, schedule in rows:
         if quality != "ACCEPTANCE_BLOCKED":
             fail(f"{name} product status must remain ACCEPTANCE_BLOCKED during shared-recovery")

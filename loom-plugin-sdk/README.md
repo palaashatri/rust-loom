@@ -5,7 +5,7 @@ format, manifest validation, safe installation, and permission checks.
 
 This milestone delivers the **package/manifest/host foundation** in Rust.
 WASI/Wasm execution is intentionally NOT implemented yet (see
-`ROADMAP.md` and `docs/rfcs/RFC-0009-plugin-abi-and-sandboxing.md`).
+[ROADMAP.md](../AGENTS.md#source-loom-plugin-sdk-roadmap-md) and [RFC-0009-plugin-abi-and-sandboxing.md](../AGENTS.md#source-loom-plugin-sdk-docs-rfcs-rfc-0009-plugin-abi-and-sandboxing-md)).
 
 ## Repository layout
 
@@ -43,4 +43,4 @@ No `unsafe`, no networking, no hardcoded absolute paths in this repository.
 
 ## License
 
-MIT OR Apache-2.0 (see `LICENSE_POLICY.md`).
+MIT OR Apache-2.0 (see the [plugin licensing policy](../AGENTS.md#source-loom-plugin-sdk-license-policy-md)).

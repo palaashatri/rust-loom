@@ -18,9 +18,9 @@ Shared workspaces provide package formats, runtime services, native desktop adap
 ## Current status
 
 Loom is in active productisation toward Apple Creator Studio-class depth and polish.
-The current honest product-parity estimate and application boundaries are kept in [`TRUTH.md`](TRUTH.md).
+The current honest product-parity estimate and application boundaries are kept in the [current-truth section](AGENTS.md#current-truth).
 
-The rigorous implementation programme, architecture contracts, application roadmaps, evidence gates, and final acceptance checklist are defined in [`AGENTS.MD`](AGENTS.MD).
+The engineering constitution, project references, architecture contracts, evidence gates, and acceptance rules are consolidated in [`AGENTS.md`](AGENTS.md).
 
 The 23→100 implementation programme is underway:
 - **Loom Writer**, **Loom Sheets**, and **Loom Present** have undergone Apple-class UI overhauls with structured inspectors, categorized template/theme choosers, and full desktop chrome.

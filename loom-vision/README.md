@@ -13,7 +13,7 @@ no telemetry, no remote inference, no mandatory model downloads.
 providers ship today: QR decoding (`rqrr`) and image statistics. Model-pack
 handling (manifest parsing, checksum/path/size validation, safe install) is
 complete. ONNX/Candle/GPU backends are `NOT_STARTED` (see
-[ROADMAP.md](ROADMAP.md) and [TASKS.md](TASKS.md)).
+[ROADMAP.md](../AGENTS.md#source-loom-vision-roadmap-md) and [TASKS.md](../AGENTS.md#source-loom-vision-tasks-md)).
 
 ## Repository layout
 
@@ -53,21 +53,21 @@ let mut ctx = RunContext::new();
 let output = provider.run(&input, &mut ctx)?;   // ProviderOutput::QrDecoded { text }
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the provider model and
-[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) to add a new provider.
+See [ARCHITECTURE.md](../AGENTS.md#source-loom-vision-architecture-md) for the provider model and
+[IMPLEMENTATION_GUIDE.md](../AGENTS.md#source-loom-vision-implementation-guide-md) to add a new provider.
 
 ## Documentation index
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — provider model, registry, model-pack lifecycle
-- [BUILDING.md](BUILDING.md) — build instructions and MSRV
-- [TESTING.md](TESTING.md) — test layout and gates
-- [SECURITY.md](SECURITY.md) — checksums, traversal guards, archive limits
-- [PERFORMANCE.md](PERFORMANCE.md) — benchmarking with `loom-vision bench`
-- [ROADMAP.md](ROADMAP.md) — honest status of every planned capability
-- [TASKS.md](TASKS.md) — task ledger
-- [LICENSE_POLICY.md](LICENSE_POLICY.md) / [DEPENDENCIES.md](DEPENDENCIES.md)
-- [docs/adrs/](docs/adrs/) — architecture decision records
+- [ARCHITECTURE.md](../AGENTS.md#source-loom-vision-architecture-md) — provider model, registry, model-pack lifecycle
+- [BUILDING.md](../AGENTS.md#source-loom-vision-building-md) — build instructions and MSRV
+- [TESTING.md](../AGENTS.md#source-loom-vision-testing-md) — test layout and gates
+- [SECURITY.md](../AGENTS.md#source-loom-vision-security-md) — checksums, traversal guards, archive limits
+- [PERFORMANCE.md](../AGENTS.md#source-loom-vision-performance-md) — benchmarking with `loom-vision bench`
+- [ROADMAP.md](../AGENTS.md#source-loom-vision-roadmap-md) — honest status of every planned capability
+- [TASKS.md](../AGENTS.md#source-loom-vision-tasks-md) — task ledger
+- [LICENSE_POLICY.md](../AGENTS.md#source-loom-vision-license-policy-md) / [DEPENDENCIES.md](../AGENTS.md#source-loom-vision-dependencies-md)
+- [ADR-0001](../AGENTS.md#source-loom-vision-docs-adrs-adr-0001-qr-reference-provider-md) — architecture decision records
 
 ## License
 
-MIT OR Apache-2.0. See [LICENSE_POLICY.md](LICENSE_POLICY.md).
+MIT OR Apache-2.0. See [LICENSE_POLICY.md](../AGENTS.md#source-loom-vision-license-policy-md).

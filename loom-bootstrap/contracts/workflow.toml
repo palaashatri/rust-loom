@@ -22,8 +22,7 @@ application_order = [
 # override authorizes Sheets work; keep later applications serially locked.
 allowed_active_prefixes = [
   ".github/",
-  "AGENTS.MD",
-  "TRUTH.md",
+  "AGENTS.md",
   "README.md",
   "loom-bootstrap/",
   "loom-core/",
