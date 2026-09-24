@@ -779,6 +779,7 @@ pub(crate) fn zoom_factor(app: &SheetsApp) -> f32 {
 }
 
 pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
+    state.mark_content_dirty();
     sync_window_title(app, state);
     let sheet = state.current.borrow().clone();
     let vals = recalculate_current(state);
@@ -790,9 +791,26 @@ pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
     }
 }
 
+/// Re-project after changing workbook context, such as selecting another tab,
+/// without marking its cells as edited. The selected tab is compared against
+/// the saved active index by `is_dirty`, and the recovery checkpoint still
+/// records the new workbook context.
+pub(crate) fn apply_sheet_view_change(app: &SheetsApp, state: &GuiState) {
+    sync_window_title(app, state);
+    let sheet = state.current.borrow().clone();
+    let vals = evaluate_current(state);
+    project_sheet_inner(app, &sheet, &vals, true);
+    if let Err(error) = record_workbook_snapshot(state) {
+        app.set_status_right(SharedString::from(format!(
+            "Recovery checkpoint unavailable: {error}"
+        )));
+    }
+}
+
 /// Re-project the live tab with workbook-resolved values, without recording
 /// a recovery snapshot (selection/scroll/view-only refreshes).
 pub(crate) fn project_current(app: &SheetsApp, state: &GuiState) {
+    sync_window_title(app, state);
     let sheet = state.current.borrow().clone();
     let vals = evaluate_current(state);
     project_sheet_inner(app, &sheet, &vals, true);
@@ -800,6 +818,7 @@ pub(crate) fn project_current(app: &SheetsApp, state: &GuiState) {
 
 /// Re-project without revealing the selection and without snapshotting.
 pub(crate) fn project_current_without_reveal(app: &SheetsApp, state: &GuiState) {
+    sync_window_title(app, state);
     let sheet = state.current.borrow().clone();
     let vals = evaluate_current(state);
     project_sheet_inner(app, &sheet, &vals, false);
@@ -1820,6 +1839,9 @@ pub(crate) struct GuiState {
     /// Comparing document content, rather than undo depth, means undoing back
     /// to the saved state clears the dirty flag.
     pub(crate) last_saved: RefCell<Option<(Vec<Sheet>, usize)>>,
+    /// Set by document edits so title updates do not serialize the workbook.
+    /// Undo and redo recompute exact equality against `last_saved`.
+    dirty_content: Cell<bool>,
     pub(crate) pending_replacement: Cell<Option<PendingReplacement>>,
     pub(crate) undo_stack: RefCell<Vec<SheetTransaction>>,
     pub(crate) redo_stack: RefCell<Vec<SheetTransaction>>,
@@ -1850,6 +1872,7 @@ impl GuiState {
             evaluation_cache: RefCell::new(evaluation_cache::EvaluationCache::default()),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
+            dirty_content: Cell::new(false),
             pending_replacement: Cell::new(None),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
@@ -1884,14 +1907,31 @@ impl GuiState {
 
     pub(crate) fn mark_saved(&self) {
         *self.last_saved.borrow_mut() = Some(workbook_sheets(self));
+        self.dirty_content.set(false);
+    }
+
+    pub(crate) fn mark_content_dirty(&self) {
+        self.dirty_content.set(true);
+    }
+
+    /// Recheck full content after undo/redo, where the edit marker alone would
+    /// stay set even after returning exactly to the last saved workbook.
+    pub(crate) fn recompute_dirty_from_saved(&self) {
+        let Some(saved) = self.last_saved.borrow().clone() else {
+            self.dirty_content.set(true);
+            return;
+        };
+        let current = workbook_sheets(self);
+        self.dirty_content
+            .set(workbook_to_json(&current.0, current.1) != workbook_to_json(&saved.0, saved.1));
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
-        let Some(saved) = self.last_saved.borrow().clone() else {
+        let saved = self.last_saved.borrow();
+        let Some((_, saved_active)) = saved.as_ref() else {
             return true;
         };
-        let current = workbook_sheets(self);
-        workbook_to_json(&current.0, current.1) != workbook_to_json(&saved.0, saved.1)
+        self.dirty_content.get() || *self.active_sheet_index.borrow() != *saved_active
     }
 }
 
@@ -2038,7 +2078,7 @@ pub(crate) fn workbook_window_title(
     }
 }
 
-fn sync_window_title(app: &SheetsApp, state: &GuiState) {
+pub(crate) fn sync_window_title(app: &SheetsApp, state: &GuiState) {
     let title = workbook_window_title(
         state.save_path.borrow().as_deref(),
         state.current.borrow().name.as_str(),
@@ -2203,6 +2243,8 @@ pub(crate) fn register_history_actions(
                         apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                     }
+                    state.recompute_dirty_from_saved();
+                    sync_window_title(&app, &state);
                     push_history(&mut state.redo_stack.borrow_mut(), edit);
                 }
             }
@@ -2226,6 +2268,8 @@ pub(crate) fn register_history_actions(
                         apply_sheet(&app, &state);
                         sync_menu_state(&menu_service, &app, &state);
                     }
+                    state.recompute_dirty_from_saved();
+                    sync_window_title(&app, &state);
                     push_history(&mut state.undo_stack.borrow_mut(), edit);
                 }
             }
@@ -2704,7 +2748,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
     }
-    apply_sheet(&app, &state);
+    apply_sheet_view_change(&app, &state);
     if args.objects {
         app.set_selected_object(0);
     }
@@ -2729,6 +2773,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if args.template_chooser {
         app.set_template_chooser_open(true);
     }
+    state.recompute_dirty_from_saved();
+    sync_window_title(&app, &state);
     app.show().map_err(|e| e.to_string())?;
     // A visible selection is not enough to receive keyboard input. Focus the
     // initially visible view after the native window is shown; winit may

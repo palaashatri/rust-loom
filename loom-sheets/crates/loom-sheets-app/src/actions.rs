@@ -22,7 +22,7 @@ use crate::formatting::{
     toggle_selection_borders, toggle_selection_italic, toggle_selection_underline,
 };
 use crate::{
-    apply_sheet, clear_selection, commit_formula_edit, commit_transaction,
+    apply_sheet, apply_sheet_view_change, clear_selection, commit_formula_edit, commit_transaction,
     commit_workbook_transaction, evaluate_current, image_open_request, project_current,
     select_cell, selection_from_app, set_selection_alignment, sync_current_to_tabs,
     sync_menu_state, update_selection_range, GridSelection, GuiState, SheetTransaction, SheetsApp,
@@ -55,7 +55,7 @@ pub(crate) fn set_zoom(
     app.set_zoom_factor(factor);
     let label = format!("{}%", (factor * 100.0).round() as i32);
     app.set_zoom_level(label.clone().into());
-    apply_sheet(app, state);
+    project_current(app, state);
     sync_menu_state(menu_service, app, state);
     app.set_status_left(SharedString::from(format!("Zoom set to {label}")));
 }
@@ -164,7 +164,7 @@ pub(crate) fn register_sheet_actions(
                     *state.undo_stack.borrow_mut() = target_undo;
                     *state.redo_stack.borrow_mut() = target_redo;
 
-                    apply_sheet(&app, &state);
+                    apply_sheet_view_change(&app, &state);
                     sync_sheet_tabs(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
                     app.set_status_left(SharedString::from(format!(

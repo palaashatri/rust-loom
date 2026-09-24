@@ -353,6 +353,7 @@ fn object_gestures_are_live_previewed_and_committed_as_one_undoable_change() {
         "Movable",
     ));
     state.install_workbook(vec![sheet], 0);
+    state.mark_saved();
     project_current(&app, &state);
 
     app.invoke_object_move_started(0);
@@ -365,8 +366,10 @@ fn object_gestures_are_live_previewed_and_committed_as_one_undoable_change() {
     assert!(state.undo_stack.borrow().is_empty());
     app.invoke_object_move_ended(0);
     assert_eq!(state.undo_stack.borrow().len(), 1);
+    assert!(state.is_dirty());
 
     app.invoke_undo();
+    assert!(!state.is_dirty());
     assert_eq!(
         state.current.borrow().objects[0].anchor,
         CellRef { row: 0, col: 0 }
@@ -383,7 +386,9 @@ fn object_gestures_are_live_previewed_and_committed_as_one_undoable_change() {
     );
     app.invoke_object_resize_ended(0);
     assert_eq!(state.undo_stack.borrow().len(), 1);
+    assert!(state.is_dirty());
     app.invoke_undo();
+    assert!(!state.is_dirty());
     assert_eq!(
         (
             state.current.borrow().objects[0].width,
@@ -1691,9 +1696,38 @@ fn dirty_state_clears_when_workbook_returns_to_last_saved_content() {
     assert!(!state.is_dirty());
 
     state.current.borrow_mut().set_str("A1", "unsaved");
+    state.mark_content_dirty();
     assert!(state.is_dirty());
 
     *state.current.borrow_mut() = state.sheets.borrow()[0].clone();
+    state.recompute_dirty_from_saved();
+    assert!(!state.is_dirty());
+}
+
+#[test]
+fn dirty_title_marker_updates_without_serializing_every_edit_and_rechecks_after_undo() {
+    let state = cross_sheet_state();
+    state.mark_saved();
+    assert!(!state.is_dirty());
+
+    state.mark_content_dirty();
+    assert!(state.is_dirty());
+
+    state.current.borrow_mut().set_str("A1", "unsaved");
+    *state.current.borrow_mut() = state.sheets.borrow()[0].clone();
+    state.recompute_dirty_from_saved();
+    assert!(!state.is_dirty());
+}
+
+#[test]
+fn dirty_title_marker_tracks_active_sheet_without_serializing_workbook() {
+    let state = cross_sheet_state();
+    state.mark_saved();
+
+    *state.active_sheet_index.borrow_mut() = 1;
+    assert!(state.is_dirty());
+
+    *state.active_sheet_index.borrow_mut() = 0;
     assert!(!state.is_dirty());
 }
 

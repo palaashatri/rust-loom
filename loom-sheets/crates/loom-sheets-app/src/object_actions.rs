@@ -9,8 +9,8 @@ use loom_sheets_core::{CellRef, Sheet, SheetObject};
 use slint::ComponentHandle;
 
 use crate::{
-    apply_sheet, project_current_without_reveal, push_history, sync_menu_state, GuiState,
-    SheetTransaction, SheetsApp,
+    apply_sheet, project_current, project_current_without_reveal, push_history, sync_menu_state,
+    GuiState, SheetTransaction, SheetsApp,
 };
 
 const MIN_OBJECT_WIDTH: u32 = 80;
@@ -251,7 +251,7 @@ fn finish_gesture(
     }
     if cancelled {
         *state.current.borrow_mut() = gesture.before;
-        apply_sheet(app, state);
+        project_current(app, state);
         return;
     }
     let after = state.current.borrow().clone();
@@ -266,6 +266,7 @@ fn finish_gesture(
         },
     );
     state.redo_stack.borrow_mut().clear();
+    apply_sheet(app, state);
     sync_menu_state(menu_service, app, state);
 }
 
