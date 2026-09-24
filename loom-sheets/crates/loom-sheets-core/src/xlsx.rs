@@ -77,6 +77,28 @@ mod tests {
     }
 
     #[test]
+    fn xlsx_export_links_the_styles_part_from_the_workbook() {
+        let mut sheet = Sheet::new("Styled");
+        sheet.set_str("A1", "total");
+        let mut style = sheet.cell_style(CellRef { row: 0, col: 0 });
+        style.bold = true;
+        sheet.set_cell_style(CellRef { row: 0, col: 0 }, style);
+
+        let bytes = export_xlsx_sheets(&[sheet]).expect("styled export");
+        let archive = PackageArchive::from_bytes(&bytes).expect("zip");
+        let relationships = String::from_utf8_lossy(
+            archive
+                .get("xl/_rels/workbook.xml.rels")
+                .expect("workbook relationships"),
+        );
+
+        assert!(relationships.contains(
+            "Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\""
+        ));
+        assert!(relationships.contains("Target=\"styles.xml\""));
+    }
+
+    #[test]
     fn rich_xlsx_roundtrip_keeps_drawing_relationships_per_sheet() {
         let mut first = Sheet::new("First");
         first.set_str("A1", "one");

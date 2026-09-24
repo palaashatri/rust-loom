@@ -113,6 +113,16 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
         "[Content_Types].xml".to_string(),
         render_content_types(content_types, sheets, &image_extensions).into_bytes(),
     );
+    let workbook_relationships = base_archive
+        .get("xl/_rels/workbook.xml.rels")
+        .ok_or_else(|| "generated xlsx is missing workbook relationships".to_string())?;
+    let workbook_relationships = std::str::from_utf8(workbook_relationships)
+        .map_err(|_| "workbook relationships are not valid UTF-8".to_string())?;
+    // The base exporter assigns rId1..N to sheets and rId(N+1) to shared strings.
+    replacements.insert(
+        "xl/_rels/workbook.xml.rels".to_string(),
+        add_styles_relationship(workbook_relationships, sheets.len() + 2)?.into_bytes(),
+    );
     extras.insert("xl/styles.xml".to_string(), styles_xml.into_bytes());
 
     let mut archive = PackageArchive::new();
@@ -140,6 +150,20 @@ pub fn export_xlsx_sheets(sheets: &[Sheet]) -> Result<Vec<u8>, String> {
     archive
         .to_bytes()
         .map_err(|e| format!("xlsx export failed: {e}"))
+}
+
+fn add_styles_relationship(xml: &str, relationship_id: usize) -> Result<String, String> {
+    let Some(root_end) = xml.rfind("</Relationships>") else {
+        return Err("generated workbook relationships have no closing element".to_string());
+    };
+    let relationship = format!(
+        "<Relationship Id=\"rId{relationship_id}\" Type=\"{REL_NS}/styles\" Target=\"styles.xml\"/>"
+    );
+    let mut result = String::with_capacity(xml.len() + relationship.len());
+    result.push_str(&xml[..root_end]);
+    result.push_str(&relationship);
+    result.push_str(&xml[root_end..]);
+    Ok(result)
 }
 
 type DrawingParts = (
