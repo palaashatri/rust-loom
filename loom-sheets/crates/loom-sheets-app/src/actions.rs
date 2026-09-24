@@ -1550,6 +1550,12 @@ pub(crate) fn delete_active_sheet(
 /// Dispatch canonical command IDs through the same Slint callbacks used by
 /// Sheets toolbar and palette controls.
 pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
+    // Keep every route that shares the canonical dispatcher behind the modal
+    // decision. The global native menu does not obey the Slint overlay hitbox.
+    if app.get_xlsx_import_warning_open() {
+        return false;
+    }
+
     match id {
         "file.new" | "sheets.new" => app.invoke_new_sheet(),
         "file.new_template" | "sheets.new-template" => {
@@ -1619,6 +1625,11 @@ pub(crate) fn schedule_menu_action(
     let error_id = action.id.clone();
     app_ref
         .upgrade_in_event_loop(move |app| {
+            // A native menu event can be queued immediately before an import
+            // warning opens, so check again when the event reaches the UI.
+            if app.get_xlsx_import_warning_open() {
+                return;
+            }
             let id = action.id.as_str();
             if !dispatch_command(&app, id) {
                 app.set_status_left(SharedString::from(format!(

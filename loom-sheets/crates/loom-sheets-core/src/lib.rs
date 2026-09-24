@@ -28,7 +28,9 @@ pub use persistence::{
     sheet_from_json, sheet_to_json, workbook_from_json, workbook_to_json, WorkbookFile,
 };
 pub use style::{CellAlignment, CellStyle};
-pub use xlsx::{export_xlsx_sheets, extract_xlsx_sheets};
+pub use xlsx::{
+    export_xlsx_sheets, extract_xlsx_sheets, import_xlsx_sheets, XlsxImport, XlsxImportWarning,
+};
 
 /// Default width of a worksheet column in the desktop editor, in pixels.
 ///

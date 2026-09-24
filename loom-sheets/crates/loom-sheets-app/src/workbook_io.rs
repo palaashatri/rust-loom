@@ -5,7 +5,8 @@ use std::path::Path;
 use loom_package::manifest::{json as pkg_json, Checksum, Manifest, ManifestEntry};
 use loom_package::{MimeType, PackageArchive, PackageKind, SchemaVersion};
 use loom_sheets_core::{
-    from_csv_sniffed, sheet_from_json, workbook_from_json, workbook_to_json, Sheet,
+    from_csv_sniffed, import_xlsx_sheets, sheet_from_json, workbook_from_json, workbook_to_json,
+    Sheet, XlsxImportWarning,
 };
 
 use crate::assets;
@@ -268,9 +269,18 @@ pub(crate) fn load_sheet(path: &Path) -> Result<Sheet, String> {
 
 /// Load a workbook: all tabs plus the active tab index. Legacy single-sheet
 /// packages (`content/sheet.json`) load as a one-tab workbook.
+pub(crate) struct LoadedWorkbook {
+    pub(crate) workbook: loom_sheets_core::persistence::WorkbookFile,
+    pub(crate) warnings: Vec<XlsxImportWarning>,
+}
+
 pub(crate) fn load_workbook(
     path: &Path,
 ) -> Result<loom_sheets_core::persistence::WorkbookFile, String> {
+    Ok(load_workbook_with_report(path)?.workbook)
+}
+
+pub(crate) fn load_workbook_with_report(path: &Path) -> Result<LoadedWorkbook, String> {
     use loom_sheets_core::persistence::WorkbookFile;
     let bytes = std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
     if path
@@ -279,9 +289,12 @@ pub(crate) fn load_workbook(
         .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
     {
         let csv = std::str::from_utf8(&bytes).map_err(|e| format!("csv utf8: {e}"))?;
-        return Ok(WorkbookFile {
-            sheets: vec![from_csv_sniffed("imported", csv)],
-            active: 0,
+        return Ok(LoadedWorkbook {
+            workbook: WorkbookFile {
+                sheets: vec![from_csv_sniffed("imported", csv)],
+                active: 0,
+            },
+            warnings: Vec::new(),
         });
     }
     if path
@@ -289,14 +302,23 @@ pub(crate) fn load_workbook(
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
     {
-        let sheets = loom_sheets_core::extract_xlsx_sheets(&bytes)?;
-        if sheets.is_empty() {
+        let imported = import_xlsx_sheets(&bytes)?;
+        if imported.sheets.is_empty() {
             return Err("xlsx workbook has no worksheets".to_string());
         }
-        return Ok(WorkbookFile { sheets, active: 0 });
+        return Ok(LoadedWorkbook {
+            workbook: WorkbookFile {
+                sheets: imported.sheets,
+                active: 0,
+            },
+            warnings: imported.warnings,
+        });
     }
     let arch = PackageArchive::from_bytes(&bytes).map_err(|e| format!("archive: {e}"))?;
-    workbook_from_package(&arch)
+    Ok(LoadedWorkbook {
+        workbook: workbook_from_package(&arch)?,
+        warnings: Vec::new(),
+    })
 }
 
 pub(crate) fn save_sheet(path: &Path, sheet: &Sheet) -> Result<(), String> {

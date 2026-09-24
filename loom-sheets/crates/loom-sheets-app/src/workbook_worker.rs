@@ -65,6 +65,7 @@ struct InitializationRequest {
     revision: u64,
     active_sheet: usize,
     sheets: Vec<Sheet>,
+    record_recovery: bool,
     reply: SyncSender<WorkerModel>,
 }
 
@@ -212,6 +213,27 @@ impl WorkbookWorker {
         active_sheet: usize,
         sheets: Vec<Sheet>,
     ) -> Result<WorkerModel, String> {
+        self.initialize_workbook_inner(revision, active_sheet, sheets, true)
+    }
+
+    /// Install a temporary startup model without replacing a previous
+    /// recovery payload. Used when an import is waiting for user confirmation.
+    pub(crate) fn initialize_workbook_without_recovery(
+        &self,
+        revision: u64,
+        active_sheet: usize,
+        sheets: Vec<Sheet>,
+    ) -> Result<WorkerModel, String> {
+        self.initialize_workbook_inner(revision, active_sheet, sheets, false)
+    }
+
+    fn initialize_workbook_inner(
+        &self,
+        revision: u64,
+        active_sheet: usize,
+        sheets: Vec<Sheet>,
+        record_recovery: bool,
+    ) -> Result<WorkerModel, String> {
         let (reply, response) = mpsc::sync_channel(1);
         let mut mailbox = self
             .shared
@@ -228,6 +250,7 @@ impl WorkbookWorker {
             revision,
             active_sheet,
             sheets,
+            record_recovery,
             reply,
         });
         drop(mailbox);
@@ -425,6 +448,7 @@ fn run_worker(
                     continue;
                 }
                 last_revision = initialization.revision;
+                let record_recovery = initialization.record_recovery;
                 sheets = initialization.sheets;
                 if sheets.is_empty() {
                     sheets.push(Sheet::new("Untitled"));
@@ -451,27 +475,29 @@ fn run_worker(
                 let mut recovery_package_duration = Duration::ZERO;
                 #[cfg(test)]
                 let mut recovery_journal_duration = Duration::ZERO;
-                if let Some(recovery) = recovery.as_mut() {
-                    #[cfg(test)]
-                    let package_started = Instant::now();
-                    let package = workbook_package_bytes(&sheets, active_sheet);
-                    #[cfg(test)]
-                    {
-                        recovery_package_duration = package_started.elapsed();
-                    }
-                    #[cfg(test)]
-                    let journal_started = Instant::now();
-                    match package {
-                        Ok(payload) => {
-                            if let Err(error) = recovery.record("sheets state", payload) {
-                                recovery_error = Some(error.to_string());
-                            }
+                if record_recovery {
+                    if let Some(recovery) = recovery.as_mut() {
+                        #[cfg(test)]
+                        let package_started = Instant::now();
+                        let package = workbook_package_bytes(&sheets, active_sheet);
+                        #[cfg(test)]
+                        {
+                            recovery_package_duration = package_started.elapsed();
                         }
-                        Err(error) => recovery_error = Some(error),
-                    }
-                    #[cfg(test)]
-                    {
-                        recovery_journal_duration = journal_started.elapsed();
+                        #[cfg(test)]
+                        let journal_started = Instant::now();
+                        match package {
+                            Ok(payload) => {
+                                if let Err(error) = recovery.record("sheets state", payload) {
+                                    recovery_error = Some(error.to_string());
+                                }
+                            }
+                            Err(error) => recovery_error = Some(error),
+                        }
+                        #[cfg(test)]
+                        {
+                            recovery_journal_duration = journal_started.elapsed();
+                        }
                     }
                 }
                 publish_result(
@@ -858,6 +884,37 @@ mod tests {
         );
         assert_eq!(result.values, expected_values);
         assert_eq!(value(&result, "B1"), &Value::Number(10.0));
+    }
+
+    #[test]
+    fn initializing_a_cancelable_startup_import_does_not_replace_recovery() {
+        let temporary = ScratchDirectory::new();
+        let recovery_dir = temporary.path();
+        let mut previous = Sheet::new("Recovered");
+        previous.set_str("A1", "keep this recovery");
+        let previous_payload = workbook_package_bytes(std::slice::from_ref(&previous), 0)
+            .expect("package previous recovery");
+        let mut recovery = SnapshotRecovery::open_at(&recovery_dir).expect("open recovery");
+        recovery
+            .record("previous workbook", previous_payload.clone())
+            .expect("write previous recovery");
+        drop(recovery);
+
+        let (worker, startup) =
+            WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1").expect("start worker");
+        assert_eq!(startup.restored_payload, Some(previous_payload.clone()));
+        worker
+            .initialize_workbook_without_recovery(1, 0, vec![Sheet::new("Untitled")])
+            .expect("show blank workbook until import confirmation");
+        worker.wait_for_result(1).expect("blank initial values");
+        drop(worker);
+
+        let mut reopened = SnapshotRecovery::open_at(&recovery_dir).expect("reopen recovery");
+        assert_eq!(
+            reopened.take_restored_payload(),
+            Some(previous_payload),
+            "cancelling startup import must not replace recoverable work"
+        );
     }
 
     #[test]

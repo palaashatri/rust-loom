@@ -3098,6 +3098,7 @@ version = "0.1.0"
 dependencies = [
  "loom-command",
  "loom-package",
+ "quick-xml",
  "serde",
  "serde_json",
 ]

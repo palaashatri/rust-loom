@@ -906,6 +906,268 @@ fn workbook_file_roundtrip_preserves_tabs_styles_and_freeze() {
 }
 
 #[test]
+fn app_import_loader_returns_supported_workbook_and_loss_report_together() {
+    let mut source = Sheet::new("Budget");
+    source.set_str("A1", "Rent");
+    source.set_str("B1", "1200");
+    let exported = loom_sheets_core::export_xlsx_sheets(&[source]).expect("export base XLSX");
+    let original = PackageArchive::from_bytes(&exported).expect("read base XLSX");
+    let mut rebuilt = PackageArchive::new();
+    for part in original.paths() {
+        let bytes = original.get(part).expect("XLSX part");
+        let bytes = if part == "xl/workbook.xml" {
+            String::from_utf8(bytes.to_vec())
+                .expect("workbook XML")
+                .replace(
+                    "</workbook>",
+                    "<definedNames><definedName name=\"BudgetTotal\">Budget!$B$1</definedName></definedNames></workbook>",
+                )
+                .into_bytes()
+        } else {
+            bytes.to_vec()
+        };
+        rebuilt.add(part, bytes).expect("copy XLSX part");
+    }
+    let xlsx = rebuilt.to_bytes().expect("build XLSX fixture");
+    let directory =
+        std::env::temp_dir().join(format!("loom-sheets-import-report-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("create temp directory");
+    let path = directory.join("budget.xlsx");
+    std::fs::write(&path, xlsx).expect("write XLSX fixture");
+
+    let loaded = load_workbook_with_report(&path).expect("load XLSX with import report");
+    assert_eq!(loaded.workbook.sheets[0].name, "Budget");
+    assert_eq!(
+        loaded.workbook.sheets[0].raw(CellRef { row: 0, col: 0 }),
+        Some("Rent")
+    );
+    assert_eq!(
+        loaded.warnings,
+        vec![loom_sheets_core::XlsxImportWarning::DefinedNames]
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn cancel_xlsx_import_warning_preserves_current_workbook_and_recovery_state() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let recovery_dir = attach_test_worker(&app, &state, "cancel-import-warning");
+    let original_path = std::env::temp_dir().join("current-workbook.loomtable");
+    *state.save_path.borrow_mut() = Some(original_path.clone());
+    state
+        .current
+        .borrow_mut()
+        .set_str("C1", "unsaved current value");
+    state.mark_content_dirty();
+    state
+        .undo_stack
+        .borrow_mut()
+        .push(SheetTransaction::Range(RangeEdit::replace(
+            &state.current.borrow(),
+            CellRef { row: 0, col: 2 },
+            Some("before edit".to_string()),
+        )));
+    apply_sheet(&app, &state);
+    let revision = state.worker_revision.get();
+    let result = state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .expect("recovery worker")
+        .wait_for_result(revision)
+        .expect("persist current workbook before warning");
+    assert!(apply_workbook_worker_result(&app, &state, result));
+    let original_current = sheet_to_json(&state.current.borrow());
+    let original_sheets = workbook_sheets(&state).0;
+    let original_active = *state.active_sheet_index.borrow();
+    let original_workbook = workbook_to_json(&original_sheets, original_active);
+    let original_recovery = workbook_package_bytes(&original_sheets, original_active)
+        .expect("package current recovery");
+    let original_undo_len = state.undo_stack.borrow().len();
+    let original_revision = state.worker_revision.get();
+    let original_dirty = state.is_dirty();
+
+    let mut candidate = Sheet::new("Imported");
+    candidate.set_str("A1", "replacement value");
+    stage_xlsx_import(
+        &app,
+        &state,
+        PathBuf::from("incoming.xlsx"),
+        loom_sheets_core::persistence::WorkbookFile {
+            sheets: vec![candidate],
+            active: 0,
+        },
+        vec![loom_sheets_core::XlsxImportWarning::DefinedNames],
+    );
+    assert!(app.get_xlsx_import_warning_open());
+    assert!(app
+        .get_xlsx_import_warning_message()
+        .contains("defined names and named ranges"));
+    assert!(app
+        .get_xlsx_import_warning_message()
+        .contains("Continue replaces the workbook that is open now"));
+    assert_eq!(sheet_to_json(&state.current.borrow()), original_current);
+
+    cancel_pending_xlsx_import(&app, &state);
+
+    assert!(!app.get_xlsx_import_warning_open());
+    assert!(state.pending_xlsx_import.borrow().is_none());
+    assert_eq!(sheet_to_json(&state.current.borrow()), original_current);
+    let (sheets_after_cancel, active_after_cancel) = workbook_sheets(&state);
+    assert_eq!(
+        workbook_to_json(&sheets_after_cancel, active_after_cancel),
+        original_workbook
+    );
+    assert_eq!(*state.active_sheet_index.borrow(), original_active);
+    assert_eq!(*state.save_path.borrow(), Some(original_path));
+    assert_eq!(state.undo_stack.borrow().len(), original_undo_len);
+    assert_eq!(state.worker_revision.get(), original_revision);
+    assert_eq!(state.is_dirty(), original_dirty);
+
+    drop(state.workbook_worker.borrow_mut().take());
+    let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
+        .expect("open existing recovery after cancel");
+    assert_eq!(
+        recovery.take_restored_payload(),
+        Some(original_recovery),
+        "Cancel must leave the last durable workbook unchanged"
+    );
+    std::fs::remove_dir_all(recovery_dir).ok();
+}
+
+#[test]
+fn continue_xlsx_import_replaces_the_workbook_only_after_confirmation() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    state
+        .current
+        .borrow_mut()
+        .set_str("C1", "unsaved current value");
+    state.mark_content_dirty();
+
+    let mut candidate = Sheet::new("Imported");
+    candidate.set_str("A1", "replacement value");
+    stage_xlsx_import(
+        &app,
+        &state,
+        PathBuf::from("incoming.xlsx"),
+        loom_sheets_core::persistence::WorkbookFile {
+            sheets: vec![candidate],
+            active: 0,
+        },
+        vec![loom_sheets_core::XlsxImportWarning::DefinedNames],
+    );
+
+    assert_eq!(state.current.borrow().name, "Data");
+    assert!(state.is_dirty());
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    continue_pending_xlsx_import(&app, &state, &menu_service);
+
+    assert!(!app.get_xlsx_import_warning_open());
+    assert!(state.pending_xlsx_import.borrow().is_none());
+    assert_eq!(state.current.borrow().name, "Imported");
+    assert_eq!(
+        state.current.borrow().raw(CellRef { row: 0, col: 0 }),
+        Some("replacement value")
+    );
+    assert_eq!(state.sheets.borrow().len(), 1);
+    assert_eq!(*state.active_sheet_index.borrow(), 0);
+    assert!(state.undo_stack.borrow().is_empty());
+    assert!(state.redo_stack.borrow().is_empty());
+    assert!(state.save_path.borrow().is_none());
+    assert!(!state.is_dirty());
+    assert!(app
+        .get_status_left()
+        .contains("dropped: defined names and named ranges"));
+}
+
+#[test]
+fn startup_xlsx_warning_keeps_recovered_workbook_visible_until_confirmation() {
+    let mut recovered = Sheet::new("Recovered");
+    recovered.set_str("A1", "keep this workbook");
+    let recovered_payload =
+        workbook_package_bytes(&[recovered], 0).expect("build recovery package");
+
+    let mut candidate = Sheet::new("Imported");
+    candidate.set_str("A1", "incoming value");
+    let loaded = LoadedWorkbook {
+        workbook: loom_sheets_core::persistence::WorkbookFile {
+            sheets: vec![candidate],
+            active: 0,
+        },
+        warnings: vec![loom_sheets_core::XlsxImportWarning::DefinedNames],
+    };
+
+    let fallback = restore_workbook_from_snapshot(&recovered_payload)
+        .expect("restore previous workbook for startup fallback");
+    let (current, pending) =
+        prepare_startup_import(PathBuf::from("incoming.xlsx"), loaded, fallback);
+
+    assert_eq!(current.sheets[0].name, "Recovered");
+    assert_eq!(
+        current.sheets[0].raw(CellRef { row: 0, col: 0 }),
+        Some("keep this workbook")
+    );
+    let pending = pending.expect("candidate should wait for confirmation");
+    assert_eq!(pending.path, PathBuf::from("incoming.xlsx"));
+    assert_eq!(pending.workbook.sheets[0].name, "Imported");
+    assert_eq!(
+        pending.workbook.sheets[0].raw(CellRef { row: 0, col: 0 }),
+        Some("incoming value")
+    );
+    assert_eq!(
+        pending.warnings,
+        vec![loom_sheets_core::XlsxImportWarning::DefinedNames]
+    );
+}
+
+#[test]
+fn xlsx_import_warning_renders_and_escape_uses_cancel_callback() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_xlsx_import_warning_message(
+        "Loom will drop conditional formatting and named ranges.".into(),
+    );
+    let closed = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render without warning");
+
+    let cancelled = Rc::new(Cell::new(false));
+    let cancelled_ref = cancelled.clone();
+    app.on_xlsx_import_cancel(move || cancelled_ref.set(true));
+    app.set_local_menu_visible(true);
+    app.set_local_menu_open_index(0);
+    app.set_xlsx_import_warning_open(true);
+    app.invoke_focus_xlsx_import_warning();
+    let open = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render import warning");
+    assert_eq!(
+        app.get_local_menu_open_index(),
+        -1,
+        "rendering the warning must close any menu behind the modal"
+    );
+    assert_ne!(
+        open.as_raw(),
+        closed.as_raw(),
+        "warning layer must be visible"
+    );
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Tab.into(),
+        });
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Escape.into(),
+        });
+    assert!(
+        cancelled.get(),
+        "Escape must invoke cancel instead of import"
+    );
+}
+
+#[test]
 fn loomsheet_embeds_image_payload_and_reopens_without_source_file() {
     const PNG_BYTES: &[u8] = &[
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
@@ -1081,6 +1343,23 @@ fn native_menu_and_palette_share_sheets_callback_dispatch() {
         .contains("failed to schedule Sheets menu command"));
 
     assert_eq!(calls.get(), 2);
+}
+
+#[test]
+fn xlsx_import_warning_blocks_shared_command_dispatch() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let calls = Rc::new(std::cell::Cell::new(0));
+    let calls_ref = calls.clone();
+    app.on_new_sheet(move || calls_ref.set(calls_ref.get() + 1));
+    app.set_xlsx_import_warning_open(true);
+
+    assert!(!dispatch_command(&app, "file.new"));
+    assert_eq!(
+        calls.get(),
+        0,
+        "native and palette commands must not bypass the import decision"
+    );
 }
 
 #[test]

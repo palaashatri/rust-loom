@@ -165,6 +165,8 @@ export component SheetsApp inherits Window {
     in property <float> template-text-scale: 1.0;
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
+    in-out property <bool> xlsx-import-warning-open: false;
+    in-out property <string> xlsx-import-warning-message: "";
 
     callback new-sheet;
     callback open-sheet;
@@ -193,6 +195,8 @@ export component SheetsApp inherits Window {
     callback save-changes-save;
     callback save-changes-discard;
     callback save-changes-cancel;
+    callback xlsx-import-continue;
+    callback xlsx-import-cancel;
     callback select-sheet(int);
     callback add-sheet;
     callback add-row;
@@ -280,6 +284,10 @@ export component SheetsApp inherits Window {
         grid-surface.focus-grid();
     }
 
+    public function focus-xlsx-import-warning() {
+        xlsx-import-warning-focus.focus();
+    }
+
     public function focus-template-chooser() {
         root.template-chooser-focus-request = !root.template-chooser-focus-request;
     }
@@ -338,18 +346,40 @@ export component SheetsApp inherits Window {
         }
     }
 
-    changed template-chooser-open => {
-        if (root.template-chooser-open) {
-            root.template-chooser-focus-request = !root.template-chooser-focus-request;
+    changed xlsx-import-warning-open => {
+        if (root.xlsx-import-warning-open) {
+            root.palette-open = false;
+            root.toolbar-overflow-open = false;
+            root.local-menu-open-index = -1;
+            xlsx-import-warning-focus.focus();
         } else if (root.save-changes-open) {
             save-changes-focus.focus();
+        } else if (root.template-chooser-open) {
+            root.template-chooser-focus-request = !root.template-chooser-focus-request;
+        } else {
+            app-focus.focus();
+        }
+    }
+
+    changed template-chooser-open => {
+        if (root.template-chooser-open) {
+            if (root.xlsx-import-warning-open) {
+                xlsx-import-warning-focus.focus();
+            } else {
+                root.template-chooser-focus-request = !root.template-chooser-focus-request;
+            }
+        } else if (root.save-changes-open) {
+            save-changes-focus.focus();
+        } else if (root.xlsx-import-warning-open) {
+            xlsx-import-warning-focus.focus();
         } else {
             grid-surface.focus-grid();
         }
     }
 
-        app-focus := FocusScope {
+    app-focus := FocusScope {
         key-pressed(event) => {
+            if (root.xlsx-import-warning-open) { return reject; }
             if (root.local-menu-visible && event.modifiers.alt) {
                 if (event.text == "f" || event.text == "F") { root.local-menu-open-index = 0; return accept; }
                 if (event.text == "e" || event.text == "E") { root.local-menu-open-index = 1; return accept; }
@@ -357,7 +387,7 @@ export component SheetsApp inherits Window {
                 if (event.text == "t" || event.text == "T") { root.local-menu-open-index = 3; return accept; }
                 if (event.text == "h" || event.text == "H") { root.local-menu-open-index = 4; return accept; }
             }
-            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open) { return reject; }
+            if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open || root.xlsx-import-warning-open) { return reject; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -864,6 +894,82 @@ export component SheetsApp inherits Window {
                         label: "Save";
                         variant: "primary";
                         clicked => { root.save-changes-save(); }
+                    }
+                }
+            }
+        }
+    }
+
+    xlsx-import-warning-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.xlsx-import-warning-open;
+        visible: root.xlsx-import-warning-open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.xlsx-import-cancel();
+                return accept;
+            }
+            return reject;
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            background: Theme.palette().scrim;
+            accessible-role: groupbox;
+            accessible-label: "Excel import warning";
+
+            TouchArea { clicked => { xlsx-import-warning-focus.focus(); } }
+
+            Rectangle {
+                x: (root.width - min(560px, root.width - 32px)) / 2;
+                y: (root.height - min(456px, root.height - 32px)) / 2;
+                width: min(560px, root.width - 32px);
+                height: min(456px, root.height - 32px);
+                border-radius: Theme.tokens.metrics.radius-large;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                background: Theme.palette().surface;
+                drop-shadow-blur: 18px;
+                drop-shadow-offset-y: 6px;
+                drop-shadow-color: Theme.palette().shadow;
+
+                VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    padding: Theme.tokens.space.xl;
+
+                    Text {
+                        text: "This Excel file has features Loom cannot keep";
+                        font-size: Theme.tokens.typography.heading;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.xlsx-import-warning-message;
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                        vertical-stretch: 1;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        alignment: end;
+                        LoomButton {
+                            label: "Cancel import";
+                            variant: "secondary";
+                            clicked => { root.xlsx-import-cancel(); }
+                        }
+                        LoomButton {
+                            label: "Import with feature loss";
+                            variant: "danger";
+                            clicked => { root.xlsx-import-continue(); }
+                        }
                     }
                 }
             }
