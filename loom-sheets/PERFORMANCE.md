@@ -47,4 +47,18 @@ LOOM_ENFORCE_SCROLL_BUDGET=1 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARG
 
 On the same Intel Core i3-2350M, the standalone release test measured **0.17 ms p95** and **0.26 ms maximum** across the 60 CPU-side projections. `/usr/bin/time -v` measured **90,308 KiB peak RSS** for the test process, which included the one-million-cell fixture and test harness; it reported **0 swaps**. This is a test-process measurement, not the complete interactive app's memory use.
 
-This is not a real-window scroll result: it excludes Slint rendering, native frame scheduling, compositing, and frame presentation. The native one-million-cell scroll check and a numeric owner-reviewed app memory cap remain open. A committed formula edit still clones workbook tabs, recalculates, and writes a recovery snapshot synchronously; the 16.7 ms input-feedback rule is not yet proved. Preserve these as separate costs when implementing a bounded background worker: moving calculation alone does not move workbook cloning or recovery-journal writes off the UI thread.
+This is not a real-window scroll result: it excludes Slint rendering, native frame scheduling, compositing, and frame presentation. The native one-million-cell scroll check and a numeric owner-reviewed app memory cap remain open.
+
+## App-level million-cell edit sample — 2026-09-24
+
+The opt-in app test also commits one cell in the same one-million-cell workbook. It records the UI's edit preparation, mailbox submission, worker evaluation, package creation, and recovery-journal write as separate timings. Run it with:
+
+```sh
+LOOM_ENFORCE_SCROLL_BUDGET=1 SLINT_EMIT_DEBUG_INFO=1 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 \
+  cargo test --manifest-path loom-sheets/Cargo.toml --locked --offline \
+  -p loom-sheets-app million_sparse_cells_project_one_viewport_within_one_frame -- --nocapture
+```
+
+On the Intel Core i3-2350M (2 cores, 7.7 GiB RAM), the test-profile run projected 60 CPU-side viewports at **1.39 ms p95 / 1.43 ms maximum**. For the edit, the test timed only `commit_formula_edit` preparation (**0.049 ms**) and worker mailbox submission (**0.037 ms**; 0.086 ms combined). Those two steps are below 16.7 ms, but the test does **not** time the full formula-bar callback, selection/workbook synchronization, menu/status updates, Slint model projection, repaint, or native frame presentation. It therefore does not establish end-to-end input feedback or a visible frame within 16.7 ms. The worker then spent **2,561.653 ms** evaluating formulas, **12,721.371 ms** creating the recovery package, and **43,046.444 ms** writing the recovery journal. `/usr/bin/time -v` measured **2,612,252 KiB peak RSS** and zero swaps for the test process. This test-profile number includes the million-cell fixture and test harness; it is not interactive-app RSS. The test removes its temporary recovery directory when it exits. Exact raw output: `.work/sheets-acceptance-2026-09-24/cell-commit-perf-time.log`.
+
+The result proves only that the two measured cell-commit steps are quick. Recovery can lag badly on this million-cell workbook, and that lag creates a crash-recovery window; package and journal costs are still too high at this scale. Regular Save/Open and XLSX/CSV work still run synchronously, and non-cell edits still copy the workbook to send a replacement to the worker. Keep those as separate blockers. The CPU projection and test-process RSS do not prove native 60 fps or the full app's memory limit. Sheets remains `ACCEPTANCE_BLOCKED`.
