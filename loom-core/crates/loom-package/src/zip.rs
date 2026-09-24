@@ -971,6 +971,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_deflated_entries_with_unsigned_data_descriptors() {
+        let mut bytes = include_bytes!("../tests/fixtures/deflated-descriptor-entry.zip").to_vec();
+        let descriptor_signature = bytes
+            .windows(4)
+            .rposition(|window| window == [0x50, 0x4b, 0x07, 0x08])
+            .expect("descriptor signature");
+        let eocd = bytes
+            .windows(4)
+            .rposition(|window| window == [0x50, 0x4b, 0x05, 0x06])
+            .expect("end of central directory");
+        let central_directory_offset =
+            u32::from_le_bytes(bytes[eocd + 16..eocd + 20].try_into().unwrap());
+
+        bytes.drain(descriptor_signature..descriptor_signature + 4);
+        let eocd = eocd - 4;
+        bytes[eocd + 16..eocd + 20].copy_from_slice(&(central_directory_offset - 4).to_le_bytes());
+
+        let archive = PackageArchive::from_bytes(&bytes).expect("read unsigned descriptor");
+        assert!(archive.get("xl/workbook.xml").is_some());
+    }
+
+    #[test]
     fn deflated_entries_respect_uncompressed_size_limits() {
         let bytes = include_bytes!("../tests/fixtures/deflated-entry.zip");
         let limits = ArchiveLimits {
