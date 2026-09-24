@@ -1,5 +1,28 @@
 use super::*;
 
+fn first_dark_menu_text_x(image: &image::RgbaImage) -> Option<u32> {
+    (18..280).find(|&x| {
+        (44..69).any(|y| {
+            let pixel = image.get_pixel(x, y);
+            pixel[0] < 80 && pixel[1] < 80 && pixel[2] < 80
+        })
+    })
+}
+
+fn longest_white_menu_panel_run(image: &image::RgbaImage, x: u32) -> u32 {
+    let mut longest = 0;
+    let mut current = 0;
+    for y in 0..image.height() {
+        if image.get_pixel(x, y) == &image::Rgba([255, 255, 255, 255]) {
+            current += 1;
+            longest = longest.max(current);
+        } else {
+            current = 0;
+        }
+    }
+    longest
+}
+
 #[test]
 fn non_macos_window_exposes_a_local_application_menu_bar() {
     #[cfg(not(target_os = "macos"))]
@@ -72,7 +95,23 @@ fn local_application_menu_supports_keyboard_navigation_and_activation() {
                 .upgrade()
                 .expect("grid should own focus before opening the menu");
         app.set_local_menu_open_index(0);
-        let _ = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render File menu");
+        let menu_image = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render File menu");
+        loom_test_support::png::save_png(
+            &std::env::temp_dir().join("loom-sheets-menu-popup-aligned.png"),
+            &menu_image,
+        )
+        .expect("save local menu popup capture");
+        let first_text_x = first_dark_menu_text_x(&menu_image)
+            .expect("the first File menu item should render text");
+        assert!(
+            (20..74).contains(&first_text_x),
+            "menu labels should start near the popup's left edge, not float in the middle; first dark text pixel was x={first_text_x}"
+        );
+        let empty_panel_run = longest_white_menu_panel_run(&menu_image, 20);
+        assert!(
+            empty_panel_run < 180,
+            "a three-item dropdown should fit its rows instead of showing a 520px blank panel; got {empty_panel_run}px"
+        );
         assert_eq!(app.get_local_menu_popup_items().row_count(), 3);
         app.window()
             .dispatch_event(slint::platform::WindowEvent::KeyPressed {

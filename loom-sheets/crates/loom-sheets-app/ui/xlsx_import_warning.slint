@@ -4,6 +4,7 @@ import { Theme } from "theme.slint";
 export component XlsxImportWarningDialog inherits Rectangle {
     in property <bool> open: false;
     in property <string> warning-message: "";
+    in property <float> text-scale: 1.0;
     in property <bool> save-changes-open: false;
     in property <bool> template-chooser-open: false;
 
@@ -76,11 +77,11 @@ export component XlsxImportWarningDialog inherits Rectangle {
 
             TouchArea { clicked => { warning-focus.focus(); } }
 
-            Rectangle {
+            dialog-surface := Rectangle {
                 x: (root.width - min(560px, root.width - 32px)) / 2;
-                y: (root.height - min(456px, root.height - 32px)) / 2;
+                y: (root.height - dialog-surface.height) / 2;
                 width: min(560px, root.width - 32px);
-                height: min(456px, root.height - 32px);
+                height: min(dialog-layout.preferred-height, root.height - 32px);
                 border-radius: Theme.tokens.metrics.radius-large;
                 border-width: 1px;
                 border-color: Theme.palette().border;
@@ -89,25 +90,37 @@ export component XlsxImportWarningDialog inherits Rectangle {
                 drop-shadow-offset-y: 6px;
                 drop-shadow-color: Theme.palette().shadow;
 
-                VerticalLayout {
+                dialog-layout := VerticalLayout {
                     spacing: Theme.tokens.space.md;
                     padding: Theme.tokens.space.xl;
+                    alignment: start;
 
-                    Text {
+                    dialog-title := Text {
                         text: "This Excel file has features Loom cannot keep";
-                        font-size: Theme.tokens.typography.heading;
+                        font-size: Theme.tokens.typography.heading * root.text-scale;
                         font-weight: 700;
                         color: Theme.palette().ink;
                         wrap: word-wrap;
                     }
-                    Text {
-                        text: root.warning-message;
-                        font-size: Theme.tokens.typography.body;
-                        color: Theme.palette().ink-secondary;
-                        wrap: word-wrap;
-                        vertical-stretch: 1;
+
+                    warning-scroll := Flickable {
+                        width: parent.width;
+                        height: min(warning-copy.preferred-height,
+                            max(72px, root.height - dialog-title.preferred-height
+                                - action-row.preferred-height - 82px));
+                        viewport-width: parent.width;
+                        viewport-height: max(warning-scroll.height, warning-copy.preferred-height);
+
+                        warning-copy := Text {
+                            width: parent.width;
+                            text: root.warning-message;
+                            font-size: Theme.tokens.typography.body * root.text-scale;
+                            color: Theme.palette().ink-secondary;
+                            wrap: word-wrap;
+                        }
                     }
-                    HorizontalLayout {
+
+                    action-row := HorizontalLayout {
                         spacing: Theme.tokens.space.sm;
                         alignment: end;
                         LoomButton {

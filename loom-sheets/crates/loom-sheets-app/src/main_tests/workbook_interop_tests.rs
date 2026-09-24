@@ -1,5 +1,32 @@
 use super::*;
 
+fn longest_white_run(image: &image::RgbaImage, x: u32) -> u32 {
+    let mut longest = 0;
+    let mut current = 0;
+    for y in 0..image.height() {
+        if image.get_pixel(x, y) == &image::Rgba([255, 255, 255, 255]) {
+            current += 1;
+            longest = longest.max(current);
+        } else {
+            current = 0;
+        }
+    }
+    longest
+}
+
+fn has_button_border_near_bottom(image: &image::RgbaImage, surface_height: u32) -> bool {
+    let bottom = image
+        .height()
+        .saturating_sub((image.height().saturating_sub(surface_height)) / 2);
+    let border = image::Rgba([215, 215, 222, 255]);
+    (bottom.saturating_sub(50)..bottom.saturating_sub(39)).any(|y| {
+        (550..780)
+            .filter(|&x| image.get_pixel(x, y) == &border)
+            .count()
+            >= 100
+    })
+}
+
 #[test]
 fn workbook_file_roundtrip_preserves_tabs_styles_and_freeze() {
     let dir =
@@ -298,6 +325,61 @@ fn xlsx_import_warning_renders_and_escape_uses_cancel_callback() {
     assert!(
         cancelled.get(),
         "Escape must invoke cancel instead of import"
+    );
+}
+
+#[test]
+fn xlsx_import_warning_fits_short_copy_and_keeps_actions_visible_for_long_copy() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_xlsx_import_warning_open(true);
+    app.set_xlsx_import_warning_message("Loom will drop one unsupported feature.".into());
+
+    let short = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render short warning");
+    loom_test_support::png::save_png(
+        &std::env::temp_dir().join("loom-sheets-ui28-short-warning.png"),
+        &short,
+    )
+    .expect("save short warning capture");
+    let short_height = longest_white_run(&short, 238);
+    assert!(
+        short_height < 320,
+        "short warning should fit its content instead of reserving a tall blank area; got {short_height}px"
+    );
+
+    app.set_template_text_scale(2.0);
+    let large_text =
+        snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render short warning at 2x text size");
+    loom_test_support::png::save_png(
+        &std::env::temp_dir().join("loom-sheets-ui28-short-warning-2x.png"),
+        &large_text,
+    )
+    .expect("save 2x short warning capture");
+    let large_text_height = longest_white_run(&large_text, 238);
+    assert!(
+        large_text_height > short_height,
+        "2x text should make the dialog grow to fit its larger copy"
+    );
+
+    let long_message = (1..=30)
+        .map(|number| format!("Unsupported feature {number}: this data will not be imported."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.set_xlsx_import_warning_message(long_message.into());
+    let long_text =
+        snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render long warning at 2x text size");
+    let long_height = longest_white_run(&long_text, 238);
+    eprintln!("long warning dialog surface height: {long_height}px");
+    let diagnostic = std::env::temp_dir().join("loom-sheets-ui28-long-warning.png");
+    loom_test_support::png::save_png(&diagnostic, &long_text)
+        .expect("save long warning diagnostic capture");
+    assert!(
+        long_height <= 688,
+        "long warning must stay inside the window; got {long_height}px"
+    );
+    assert!(
+        has_button_border_near_bottom(&long_text, long_height),
+        "the import action buttons must remain visible below a long warning"
     );
 }
 

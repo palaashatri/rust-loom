@@ -226,6 +226,105 @@ export component LoomMenu inherits Rectangle {
     }
 }
 
+// One reusable row for a menu/list popup. Labels stay at the reading edge,
+// shortcuts stay at the opposite edge, and the optional check mark has a
+// fixed slot so checked and unchecked rows line up.
+export component LoomMenuItem inherits Rectangle {
+    in property <string> label: "Menu item";
+    in property <string> shortcut: "";
+    in property <bool> checked: false;
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback activated;
+
+    height: Theme.tokens.metrics.control-height;
+    border-radius: Theme.tokens.metrics.radius-small;
+    background: !root.enabled ? transparent
+        : root.selected ? Theme.palette().selection-soft
+        : touch.has-hover ? Theme.palette().surface-raised
+        : transparent;
+    accessible-role: list-item;
+    accessible-label: root.label;
+    accessible-description: root.shortcut;
+    accessible-action-default => {
+        if (root.enabled) { root.activated(); }
+    }
+
+    if !Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: Theme.tokens.metrics.icon-size;
+            height: Theme.tokens.metrics.icon-size;
+            background: transparent;
+            if root.checked : Icon {
+                size: Theme.tokens.metrics.icon-size;
+                icon: "check";
+                tint: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+            }
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.shortcut != "" : Text {
+            text: root.shortcut;
+            font-size: Theme.tokens.typography.caption;
+            color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    if Theme.rtl : HorizontalLayout {
+        spacing: Theme.tokens.space.sm;
+        padding-left: Theme.tokens.space.md;
+        padding-right: Theme.tokens.space.md;
+        cross-axis-alignment: center;
+
+        if root.shortcut != "" : Text {
+            text: root.shortcut;
+            font-size: Theme.tokens.typography.caption;
+            color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: root.label;
+            font-size: Theme.tokens.typography.body;
+            font-weight: root.selected ? 600 : 500;
+            color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        Rectangle {
+            width: Theme.tokens.metrics.icon-size;
+            height: Theme.tokens.metrics.icon-size;
+            background: transparent;
+            if root.checked : Icon {
+                size: Theme.tokens.metrics.icon-size;
+                icon: "check";
+                tint: root.enabled ? Theme.palette().accent : Theme.palette().ink-disabled;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.activated(); }
+    }
+}
+
 export component LoomPopover inherits Rectangle {
     in property <string> label: "Popover";
     in property <string> title: "";

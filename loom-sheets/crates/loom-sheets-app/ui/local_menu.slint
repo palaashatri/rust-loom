@@ -1,4 +1,4 @@
-import { LoomButton } from "foundation.slint";
+import { LoomButton, LoomMenuItem } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 export struct LocalMenuEntry {
@@ -115,7 +115,7 @@ export component LocalMenuPopup inherits Rectangle {
         x: 8px + root.open-index * 64px;
         y: 0px;
         width: 288px;
-        height: min(520px, root.height - 8px);
+        height: min(min(520px, root.height - 8px), popup-layout.preferred-height + 2px);
         border-radius: Theme.tokens.metrics.radius-small;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -124,7 +124,7 @@ export component LocalMenuPopup inherits Rectangle {
         drop-shadow-offset-y: 3px;
         drop-shadow-color: Theme.palette().shadow;
 
-        VerticalLayout {
+        popup-layout := VerticalLayout {
             spacing: Theme.tokens.space.xs;
             padding: Theme.tokens.space.sm;
 
@@ -138,15 +138,15 @@ export component LocalMenuPopup inherits Rectangle {
                     background: Theme.palette().border;
                 }
 
-                if !item.separator : LoomButton {
+                if !item.separator : LoomMenuItem {
                     width: parent.width;
                     height: parent.height;
-                    label: (item.checked ? "✓ " : "") + item.label
-                        + (item.shortcut != "" ? "    " + item.shortcut : "");
-                    variant: "ghost";
+                    label: item.label;
+                    shortcut: item.shortcut;
+                    checked: item.checked;
                     selected: root.selected-index == index;
                     enabled: item.enabled;
-                    clicked => {
+                    activated => {
                         root.open-index = -1;
                         root.menu-action(item.command_id);
                     }

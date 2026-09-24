@@ -2,7 +2,7 @@ import { Theme } from "../theme.slint";
 import { GallerySection } from "sections-a.slint";
 import {
     LoomButton, LoomListRow,
-    LoomMenu, LoomPopover, LoomDialog,
+    LoomMenu, LoomMenuItem, LoomPopover, LoomDialog,
     LoomTableRow, LoomEmptyState, LoomErrorState,
     LoomCanvasHandle, LoomTimelineRuler, LoomTimelineMarker,
 } from "../foundation.slint";
@@ -72,6 +72,21 @@ export component OverlaysSection inherits Rectangle {
                     text: "Menus expose a closed state and long labels without clipping action text";
                     font-size: Theme.tokens.typography.caption;
                     color: Theme.palette().ink-secondary;
+                }
+                Rectangle {
+                    width: 360px;
+                    preferred-height: menu-items-layout.preferred-height;
+                    background: Theme.palette().surface;
+                    border-width: 1px;
+                    border-color: Theme.palette().border;
+                    border-radius: Theme.tokens.metrics.radius-medium;
+                    menu-items-layout := VerticalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        padding: Theme.tokens.space.xs;
+                        LoomMenuItem { label: "Rename worksheet"; shortcut: "F2"; }
+                        LoomMenuItem { label: "Freeze top row"; checked: true; selected: true; }
+                        LoomMenuItem { label: "Delete worksheet"; enabled: false; }
+                    }
                 }
                 HorizontalLayout {
                     spacing: Theme.tokens.space.xxl;
