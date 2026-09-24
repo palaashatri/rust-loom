@@ -71,7 +71,7 @@ class GovernanceTests(unittest.TestCase):
             'APPLICATION DEVELOPMENT: LOCKED\nACTIVE REPAIR: SHARED-RECOVERY\nNEXT APPLICATION: SHEETS',
             truth, count=1,
         )
-        truth = truth.replace('| 1 | Sheets | IN_PROGRESS | IN_PROGRESS |',
+        truth = truth.replace('| 1 | Sheets | ACCEPTANCE_BLOCKED | IN_PROGRESS |',
                               '| 1 | Sheets | ACCEPTANCE_BLOCKED | LOCKED |', 1)
         truth_path.write_text(truth)
 
