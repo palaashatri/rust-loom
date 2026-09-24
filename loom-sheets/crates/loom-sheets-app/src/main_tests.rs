@@ -1732,6 +1732,111 @@ fn dirty_title_marker_tracks_active_sheet_without_serializing_workbook() {
 }
 
 #[test]
+fn sheet_mutations_are_sent_to_the_background_workbook_worker() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let mut sheet = Sheet::new("background");
+    sheet.set_str("A1", "4");
+    sheet.set_str("B1", "=A1+3");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let state = Rc::new(GuiState::new(
+        sheet.clone(),
+        None,
+        dialogs,
+        FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+    ));
+    state.install_workbook(vec![sheet], 0);
+    state.mark_saved();
+
+    let recovery_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-main-worker-test-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&recovery_dir);
+    let (worker, startup) =
+        workbook_worker::WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1")
+            .expect("start workbook worker");
+    assert!(startup.recovery_error.is_none());
+    *state.workbook_worker.borrow_mut() = Some(worker);
+
+    apply_sheet(&app, &state);
+
+    let revision = state.worker_revision.get();
+    assert_eq!(revision, 1, "sheet mutation must reach the worker mailbox");
+    let result = state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(revision)
+        .expect("worker result");
+    assert_eq!(result.active_sheet, 0);
+    assert_eq!(
+        result.values.get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(7.0))
+    );
+    assert!(apply_workbook_worker_result(&app, &state, result));
+    assert_eq!(
+        evaluate_current(&state).get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(7.0))
+    );
+
+    drop(state);
+    let _ = std::fs::remove_dir_all(recovery_dir);
+}
+
+#[test]
+fn active_tab_changes_are_revisioned_without_replacing_the_workbook() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    state.mark_saved();
+    let recovery_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-main-active-worker-test-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&recovery_dir);
+    let (worker, startup) =
+        workbook_worker::WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1")
+            .expect("start workbook worker");
+    assert!(startup.recovery_error.is_none());
+    *state.workbook_worker.borrow_mut() = Some(worker);
+
+    record_workbook_snapshot(&state).expect("send startup workbook");
+    state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(1)
+        .expect("initial calculation");
+    *state.active_sheet_index.borrow_mut() = 1;
+    *state.current.borrow_mut() = state.sheets.borrow()[1].clone();
+    apply_sheet_view_change(&app, &state);
+
+    let revision = state.worker_revision.get();
+    assert_eq!(revision, 2);
+    let result = state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(revision)
+        .expect("active tab calculation");
+    assert_eq!(result.active_sheet, 1);
+    assert_eq!(
+        result.values.get(&CellRef::parse("A1").unwrap()),
+        Some(&Value::Number(25.0))
+    );
+
+    drop(state);
+    let _ = std::fs::remove_dir_all(recovery_dir);
+}
+
+#[test]
 fn add_sheet_skips_taken_generated_names() {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");

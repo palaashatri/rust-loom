@@ -11,6 +11,29 @@ pub(crate) struct EvaluationCache {
 }
 
 impl EvaluationCache {
+    /// Return the last accepted worker values, or an empty projection while a
+    /// calculation for this tab is still running. This path never evaluates.
+    pub(crate) fn cached_or_empty(&mut self, active_sheet: usize) -> Rc<HashMap<CellRef, Value>> {
+        if self.active_sheet == Some(active_sheet) {
+            if let Some(values) = &self.values {
+                return Rc::clone(values);
+            }
+        }
+        self.set_values(active_sheet, HashMap::new())
+    }
+
+    /// Install calculated values returned by the workbook worker.
+    pub(crate) fn set_values(
+        &mut self,
+        active_sheet: usize,
+        values: HashMap<CellRef, Value>,
+    ) -> Rc<HashMap<CellRef, Value>> {
+        let values = Rc::new(values);
+        self.active_sheet = Some(active_sheet);
+        self.values = Some(Rc::clone(&values));
+        values
+    }
+
     /// Return the saved values, calculating once when the cache is empty.
     pub(crate) fn get_or_calculate(
         &mut self,

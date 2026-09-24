@@ -39,3 +39,20 @@ fn current_sheet_values_are_reused_until_a_workbook_edit_refreshes_them() {
     assert_eq!(evaluations.get(), 3);
     assert!(!Rc::ptr_eq(&switched, &refreshed));
 }
+
+#[test]
+fn worker_values_replace_the_cache_without_running_a_calculation() {
+    let mut cache = EvaluationCache::default();
+    let address = CellRef::parse("A1").expect("valid cell");
+
+    let pending = cache.cached_or_empty(0);
+    assert!(pending.is_empty());
+    let completed = cache.set_values(0, HashMap::from([(address, Value::Number(9.0))]));
+    let reused = cache.cached_or_empty(0);
+
+    assert!(Rc::ptr_eq(&completed, &reused));
+    assert_eq!(reused.get(&address), Some(&Value::Number(9.0)));
+
+    let switched = cache.cached_or_empty(1);
+    assert!(switched.is_empty());
+}

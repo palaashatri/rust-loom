@@ -36,6 +36,18 @@ pub(crate) struct WorkerStartup {
     pub(crate) recovery_error: Option<String>,
 }
 
+pub(crate) struct WorkerModel {
+    pub(crate) sheets: Vec<Sheet>,
+    pub(crate) active_sheet: usize,
+}
+
+struct InitializationRequest {
+    revision: u64,
+    active_sheet: usize,
+    sheets: Vec<Sheet>,
+    reply: SyncSender<WorkerModel>,
+}
+
 enum PendingUpdate {
     Cell(CellUpdate),
     Replace {
@@ -98,6 +110,7 @@ struct CheckpointRequest {
 
 #[derive(Default)]
 struct Mailbox {
+    initialization: Option<InitializationRequest>,
     pending: Option<PendingBatch>,
     checkpoint: Option<CheckpointRequest>,
     stopping: bool,
@@ -171,6 +184,39 @@ impl WorkbookWorker {
         self.queue(PendingUpdate::Cell(update))
     }
 
+    /// Move the startup model to the worker and receive its UI-owned copy.
+    /// The worker keeps the original as its mirror for later cell deltas.
+    pub(crate) fn initialize_workbook(
+        &self,
+        revision: u64,
+        active_sheet: usize,
+        sheets: Vec<Sheet>,
+    ) -> Result<WorkerModel, String> {
+        let (reply, response) = mpsc::sync_channel(1);
+        let mut mailbox = self
+            .shared
+            .mailbox
+            .lock()
+            .map_err(|_| "workbook worker mailbox is unavailable".to_string())?;
+        if mailbox.stopping {
+            return Err("workbook worker is stopping".to_string());
+        }
+        if mailbox.initialization.is_some() {
+            return Err("workbook initialization is already pending".to_string());
+        }
+        mailbox.initialization = Some(InitializationRequest {
+            revision,
+            active_sheet,
+            sheets,
+            reply,
+        });
+        drop(mailbox);
+        self.shared.work_available.notify_one();
+        response
+            .recv()
+            .map_err(|error| format!("workbook initialization failed: {error}"))
+    }
+
     pub(crate) fn submit_replacement(
         &self,
         revision: u64,
@@ -238,7 +284,7 @@ impl WorkbookWorker {
     }
 
     #[cfg(test)]
-    fn wait_for_result(&self, revision: u64) -> Option<WorkbookResult> {
+    pub(super) fn wait_for_result(&self, revision: u64) -> Option<WorkbookResult> {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut latest = self.shared.latest_result.lock().ok()?;
         loop {
@@ -262,7 +308,7 @@ impl WorkbookWorker {
     }
 
     #[cfg(test)]
-    fn start_at(
+    pub(super) fn start_at(
         directory: PathBuf,
         schema: impl Into<String>,
     ) -> Result<(Self, WorkerStartup), String> {
@@ -307,6 +353,7 @@ fn open_recovery(
 }
 
 enum WorkerAction {
+    Initialize(InitializationRequest),
     Batch(PendingBatch),
     Checkpoint(CheckpointRequest),
     Stop,
@@ -315,6 +362,9 @@ enum WorkerAction {
 fn next_action(shared: &Shared) -> WorkerAction {
     let mut mailbox = shared.mailbox.lock().expect("workbook worker mailbox");
     loop {
+        if let Some(initialization) = mailbox.initialization.take() {
+            return WorkerAction::Initialize(initialization);
+        }
         if let Some(batch) = mailbox.pending.take() {
             return WorkerAction::Batch(batch);
         }
@@ -341,6 +391,50 @@ fn run_worker(
     let mut last_revision = 0;
     loop {
         match next_action(&shared) {
+            WorkerAction::Initialize(initialization) => {
+                if initialization.revision <= last_revision {
+                    continue;
+                }
+                last_revision = initialization.revision;
+                sheets = initialization.sheets;
+                if sheets.is_empty() {
+                    sheets.push(Sheet::new("Untitled"));
+                }
+                let active_sheet = initialization
+                    .active_sheet
+                    .min(sheets.len().saturating_sub(1));
+                let model = WorkerModel {
+                    sheets: sheets.clone(),
+                    active_sheet,
+                };
+                let _ = initialization.reply.send(model);
+
+                let values = evaluate_workbook(&sheets)
+                    .into_iter()
+                    .nth(active_sheet)
+                    .unwrap_or_default();
+                let mut recovery_error = startup_error.clone();
+                if let Some(recovery) = recovery.as_mut() {
+                    match workbook_package_bytes(&sheets, active_sheet) {
+                        Ok(payload) => {
+                            if let Err(error) = recovery.record("sheets state", payload) {
+                                recovery_error = Some(error.to_string());
+                            }
+                        }
+                        Err(error) => recovery_error = Some(error),
+                    }
+                }
+                publish_result(
+                    &shared,
+                    WorkbookResult {
+                        revision: initialization.revision,
+                        active_sheet,
+                        values,
+                        recovery_error,
+                        input_error: None,
+                    },
+                );
+            }
             WorkerAction::Batch(batch) => {
                 if batch.revision <= last_revision {
                     continue;
@@ -589,6 +683,93 @@ mod tests {
         assert_eq!(second.revision, 2);
         assert_eq!(value(&second, "B1"), &Value::Number(7.0));
         assert!(second.recovery_error.is_none());
+    }
+
+    #[test]
+    fn startup_restores_the_saved_active_tab_and_worker_values_match_evaluation() {
+        let temporary = ScratchDirectory::new();
+        let mut source = Sheet::new("Data");
+        source.set_str("B1", "4");
+        let mut report = Sheet::new("Report");
+        report.set_str("A1", "=Data!B1+3");
+        let sheets = vec![source, report];
+        let payload = workbook_package_bytes(&sheets, 1).expect("package workbook");
+        let mut recovery = SnapshotRecovery::open_at(temporary.path()).expect("open recovery");
+        recovery
+            .record("startup fixture", payload)
+            .expect("write recovered workbook");
+        drop(recovery);
+
+        let (worker, startup) =
+            WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("start worker");
+        let recovered = crate::restore_workbook_from_snapshot(
+            startup
+                .restored_payload
+                .as_deref()
+                .expect("startup recovery payload"),
+        )
+        .expect("restore startup workbook");
+        assert_eq!(recovered.active, 1);
+        let expected = evaluate_workbook(&recovered.sheets)[recovered.active].clone();
+        worker
+            .initialize_workbook(1, recovered.active, recovered.sheets)
+            .expect("initialize restored workbook on worker");
+        let result = worker.wait_for_result(1).expect("initial values");
+
+        assert_eq!(result.active_sheet, recovered.active);
+        assert_eq!(result.values, expected);
+        assert_eq!(
+            result.values.get(&CellRef::parse("A1").unwrap()),
+            Some(&Value::Number(7.0))
+        );
+    }
+
+    #[test]
+    fn initialize_workbook_returns_worker_owned_ui_copy_and_calculates_values() {
+        let temporary = ScratchDirectory::new();
+        let (worker, startup) =
+            WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("worker");
+        assert!(startup.recovery_error.is_none());
+
+        let mut sheet = Sheet::new("initialized");
+        sheet.set_str("A1", "6");
+        sheet.set_str("B1", "=A1+4");
+        let expected_values = evaluate_workbook(std::slice::from_ref(&sheet))[0].clone();
+        let model = worker
+            .initialize_workbook(1, 0, vec![sheet])
+            .expect("initialize workbook on worker");
+        let result = worker.wait_for_result(1).expect("initial calculation");
+
+        assert_eq!(model.active_sheet, 0);
+        assert_eq!(model.sheets.len(), 1);
+        assert_eq!(
+            model.sheets[0].raw(CellRef::parse("B1").unwrap()),
+            Some("=A1+4")
+        );
+        assert_eq!(result.values, expected_values);
+        assert_eq!(value(&result, "B1"), &Value::Number(10.0));
+    }
+
+    #[test]
+    fn save_checkpoint_flushes_pending_work_and_compacts_recovery() {
+        let temporary = ScratchDirectory::new();
+        let recovery_path = temporary.path();
+        let (worker, _) =
+            WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("worker");
+        let mut sheet = Sheet::new("checkpoint");
+        sheet.set_str("A1", "12");
+        let payload = workbook_package_bytes(std::slice::from_ref(&sheet), 0)
+            .expect("saved workbook package");
+
+        worker
+            .submit_replacement(1, 0, vec![sheet])
+            .expect("queue pending workbook");
+        worker
+            .checkpoint(payload.clone())
+            .expect("worker checkpoint");
+
+        let mut recovery = SnapshotRecovery::open_at(&recovery_path).expect("reopen recovery");
+        assert_eq!(recovery.take_restored_payload(), Some(payload));
     }
 
     #[test]

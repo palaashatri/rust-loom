@@ -9,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use loom_desktop::{
     build_standard_menu_bar, CommandAction, CommandStateProjection, DesktopError,
@@ -83,8 +84,6 @@ const TABLE_HORIZONTAL_MARGIN: f32 = 48.0;
 const SHELL_VERTICAL_CHROME: f32 = 252.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
-
-loom_production::define_snapshot_recovery!(SHEETS_RECOVERY, "org.loom.sheets", "loom.sheets/1");
 
 pub(crate) struct Args {
     pub(crate) screenshot: Option<String>,
@@ -782,9 +781,18 @@ pub(crate) fn zoom_factor(app: &SheetsApp) -> f32 {
 pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
     state.mark_content_dirty();
     sync_window_title(app, state);
-    let sheet = state.current.borrow().clone();
-    let vals = recalculate_current(state);
+    let worker_running = state.workbook_worker.borrow().is_some();
+    let vals = if worker_running {
+        values_for_projection(state)
+    } else {
+        recalculate_current(state)
+    };
+    let sheet = state.current.borrow();
     project_sheet_inner(app, &sheet, &vals, true);
+    drop(sheet);
+    if worker_running {
+        app.set_status_left("Calculating…".into());
+    }
     if let Err(error) = record_workbook_snapshot(state) {
         app.set_status_right(SharedString::from(format!(
             "Recovery checkpoint unavailable: {error}"
@@ -798,13 +806,26 @@ pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
 /// records the new workbook context.
 pub(crate) fn apply_sheet_view_change(app: &SheetsApp, state: &GuiState) {
     sync_window_title(app, state);
-    let sheet = state.current.borrow().clone();
-    let vals = evaluate_current(state);
+    let active = *state.active_sheet_index.borrow();
+    let worker_running = {
+        let worker = state.workbook_worker.borrow();
+        if let Some(worker) = worker.as_ref() {
+            let revision = state.next_worker_revision();
+            if let Err(error) = worker.submit_active(revision, active) {
+                app.set_status_right(SharedString::from(format!(
+                    "Workbook calculation unavailable: {error}"
+                )));
+            }
+            true
+        } else {
+            false
+        }
+    };
+    let vals = values_for_projection(state);
+    let sheet = state.current.borrow();
     project_sheet_inner(app, &sheet, &vals, true);
-    if let Err(error) = record_workbook_snapshot(state) {
-        app.set_status_right(SharedString::from(format!(
-            "Recovery checkpoint unavailable: {error}"
-        )));
+    if worker_running {
+        app.set_status_left("Calculating…".into());
     }
 }
 
@@ -812,16 +833,16 @@ pub(crate) fn apply_sheet_view_change(app: &SheetsApp, state: &GuiState) {
 /// a recovery snapshot (selection/scroll/view-only refreshes).
 pub(crate) fn project_current(app: &SheetsApp, state: &GuiState) {
     sync_window_title(app, state);
-    let sheet = state.current.borrow().clone();
-    let vals = evaluate_current(state);
+    let sheet = state.current.borrow();
+    let vals = values_for_projection(state);
     project_sheet_inner(app, &sheet, &vals, true);
 }
 
 /// Re-project without revealing the selection and without snapshotting.
 pub(crate) fn project_current_without_reveal(app: &SheetsApp, state: &GuiState) {
     sync_window_title(app, state);
-    let sheet = state.current.borrow().clone();
-    let vals = evaluate_current(state);
+    let sheet = state.current.borrow();
+    let vals = values_for_projection(state);
     project_sheet_inner(app, &sheet, &vals, false);
 }
 
@@ -835,12 +856,16 @@ pub(crate) fn project_sheet_without_reveal(app: &SheetsApp, sheet: &Sheet) {
     project_sheet_inner(app, sheet, &vals, false);
 }
 
-/// Snapshot the full workbook (all tabs, active sheet first-class) so crash
-/// recovery restores tabs, not just the visible sheet.
+/// Send the full workbook to the worker after a non-cell mutation. The worker
+/// evaluates it and records a recovery snapshot away from the UI thread.
 pub(crate) fn record_workbook_snapshot(state: &GuiState) -> Result<(), String> {
-    let (siblings, active) = workbook_sheets(state);
-    let payload = workbook_package_bytes(&siblings, active)?;
-    record_snapshot_recovery("sheets state", payload)
+    let worker = state.workbook_worker.borrow();
+    let Some(worker) = worker.as_ref() else {
+        return Ok(());
+    };
+    let (sheets, active) = workbook_sheets(state);
+    let revision = state.next_worker_revision();
+    worker.submit_replacement(revision, active, sheets)
 }
 
 /// All tabs with the live current sheet synced into its slot, plus the
@@ -883,6 +908,15 @@ pub(crate) fn evaluate_current(state: &GuiState) -> Rc<std::collections::HashMap
         .evaluation_cache
         .borrow_mut()
         .get_or_calculate(active, || calculate_current_values(state))
+}
+
+fn values_for_projection(state: &GuiState) -> Rc<std::collections::HashMap<CellRef, Value>> {
+    if state.workbook_worker.borrow().is_some() {
+        let active = *state.active_sheet_index.borrow();
+        state.evaluation_cache.borrow_mut().cached_or_empty(active)
+    } else {
+        evaluate_current(state)
+    }
 }
 
 fn project_sheet_inner(
@@ -1929,6 +1963,14 @@ impl GuiState {
         revision
     }
 
+    pub(crate) fn checkpoint_recovery(&self, payload: Vec<u8>) -> Result<(), String> {
+        let worker = self.workbook_worker.borrow();
+        match worker.as_ref() {
+            Some(worker) => worker.checkpoint(payload),
+            None => Ok(()),
+        }
+    }
+
     /// Recheck full content after undo/redo, where the edit marker alone would
     /// stay set even after returning exactly to the last saved workbook.
     pub(crate) fn recompute_dirty_from_saved(&self) {
@@ -2102,6 +2144,66 @@ pub(crate) fn sync_window_title(app: &SheetsApp, state: &GuiState) {
     app.set_window_title(SharedString::from(title));
 }
 
+/// Apply a worker result only while it still represents the current workbook
+/// revision and active tab. Old results may finish while a newer edit is
+/// already queued, so they must never replace newer visible values.
+pub(crate) fn apply_workbook_worker_result(
+    app: &SheetsApp,
+    state: &GuiState,
+    result: workbook_worker::WorkbookResult,
+) -> bool {
+    let active = *state.active_sheet_index.borrow();
+    if result.revision != state.worker_revision.get() || result.active_sheet != active {
+        return false;
+    }
+    let values = state
+        .evaluation_cache
+        .borrow_mut()
+        .set_values(result.active_sheet, result.values);
+    let sheet = state.current.borrow();
+    let formula_draft = app.get_formula_edit_buffer();
+    project_sheet_inner(app, &sheet, &values, true);
+    app.set_formula_edit_buffer(formula_draft);
+    drop(sheet);
+
+    if let Some(error) = result.recovery_error {
+        app.set_status_right(SharedString::from(format!(
+            "Recovery checkpoint unavailable: {error}"
+        )));
+    }
+    if let Some(error) = result.input_error {
+        app.set_status_right(SharedString::from(format!(
+            "Workbook update failed: {error}"
+        )));
+    }
+    if app.get_status_left().as_str() == "Calculating…" {
+        app.set_status_left("Ready".into());
+    }
+    true
+}
+
+fn start_workbook_worker_timer(app: &SheetsApp, state: &Rc<GuiState>) -> slint::Timer {
+    let timer = slint::Timer::default();
+    let app_ref = app.as_weak();
+    let state = Rc::clone(state);
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(16),
+        move || {
+            let result = state
+                .workbook_worker
+                .borrow()
+                .as_ref()
+                .and_then(workbook_worker::WorkbookWorker::take_latest_result);
+            let Some(result) = result else { return };
+            if let Some(app) = app_ref.upgrade() {
+                apply_workbook_worker_result(&app, &state, result);
+            }
+        },
+    );
+    timer
+}
+
 /// Return true when the replacement was deferred behind the Save Changes
 /// dialog. Clean work can proceed immediately.
 fn request_workbook_replacement(
@@ -2206,7 +2308,7 @@ fn save_current_sheet(
     state.mark_saved();
     sync_window_title(app, state);
     let checkpoint = workbook_package_bytes(&state.sheets.borrow(), active)?;
-    match checkpoint_snapshot_recovery(checkpoint) {
+    match state.checkpoint_recovery(checkpoint) {
         Ok(()) => app.set_status_left(SharedString::from(format!("Saved {}", path.display()))),
         Err(error) => app.set_status_left(SharedString::from(format!(
             "Saved {}, but recovery checkpoint failed: {error}",
@@ -2302,10 +2404,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
 
-    let recovered = initialize_snapshot_recovery()?;
-    let initial = match &args.open {
+    let (worker, startup) =
+        workbook_worker::WorkbookWorker::start("org.loom.sheets", "loom.sheets/1")?;
+    let startup_recovery_error = startup.recovery_error.clone();
+    let mut initial = match &args.open {
         Some(path) => load_workbook(Path::new(path))?,
-        None => recovered
+        None => startup
+            .restored_payload
             .as_deref()
             .and_then(restore_workbook_from_snapshot)
             .unwrap_or_else(|| loom_sheets_core::persistence::WorkbookFile {
@@ -2317,6 +2422,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
                 active: 0,
             }),
     };
+    if initial.sheets.is_empty() {
+        initial.sheets.push(blank_sheet());
+    }
+    initial.active = initial.active.min(initial.sheets.len() - 1);
+    let initial_sheet = &mut initial.sheets[initial.active];
+    if args.objects {
+        object_actions::seed_demo_objects(initial_sheet);
+    }
+    if args.chart {
+        let chart = if initial_sheet.name == "Example Budget" {
+            plan_chart_in_range(initial_sheet, 0, 1, 1, 3).ok()
+        } else {
+            plan_chart(initial_sheet, 0, 1).ok()
+        };
+        if let Some(chart) = chart {
+            initial_sheet.chart = Some(chart);
+        }
+    }
     let workbook_filter = FileFilter::new("Loom Sheets workbook", ["loomtable"])
         .map_err(|error| error.to_string())?;
     let import_filter =
@@ -2334,13 +2457,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         csv_filter,
         xlsx_filter,
     ));
-    state.install_workbook(initial.sheets, initial.active);
+    let initial_revision = state.next_worker_revision();
+    let initial_model =
+        worker.initialize_workbook(initial_revision, initial.active, initial.sheets)?;
+    state.install_workbook(initial_model.sheets, initial_model.active_sheet);
     state.mark_saved();
+    *state.workbook_worker.borrow_mut() = Some(worker);
     if args.objects {
-        let active = *state.active_sheet_index.borrow();
-        let mut sheet = state.current.borrow_mut();
-        object_actions::seed_demo_objects(&mut sheet);
-        state.sheets.borrow_mut()[active] = sheet.clone();
         app.set_selected_object(0);
     }
     // One menu adapter owns the application sink for its entire lifetime so
@@ -2763,7 +2886,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
     }
-    apply_sheet_view_change(&app, &state);
     if args.objects {
         app.set_selected_object(0);
     }
@@ -2771,16 +2893,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
     if args.chart {
-        let chart = {
-            let sheet = state.current.borrow();
-            if sheet.name == "Example Budget" {
-                plan_chart_in_range(&sheet, 0, 1, 1, 3).ok()
-            } else {
-                plan_chart(&sheet, 0, 1).ok()
-            }
-        };
-        if let Some(chart) = chart {
-            state.current.borrow_mut().chart = Some(chart);
+        if state.current.borrow().chart.is_some() {
             app.set_chart_visible(true);
             sync_chart_to_app(&app, &state.current.borrow());
         }
@@ -2788,9 +2901,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if args.template_chooser {
         app.set_template_chooser_open(true);
     }
+    project_current(&app, &state);
+    app.set_status_left("Calculating…".into());
+    if let Some(error) = startup_recovery_error {
+        app.set_status_right(SharedString::from(format!(
+            "Recovery journal unavailable: {error}"
+        )));
+    }
     state.recompute_dirty_from_saved();
     sync_window_title(&app, &state);
     app.show().map_err(|e| e.to_string())?;
+    let _worker_completion_timer = start_workbook_worker_timer(&app, &state);
     // A visible selection is not enough to receive keyboard input. Focus the
     // initially visible view after the native window is shown; winit may
     // replace the focus item during presentation, so doing this before `show`
