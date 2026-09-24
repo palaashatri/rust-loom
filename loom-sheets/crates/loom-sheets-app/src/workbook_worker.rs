@@ -29,6 +29,26 @@ pub(crate) struct WorkbookResult {
     pub(crate) values: HashMap<CellRef, Value>,
     pub(crate) recovery_error: Option<String>,
     pub(crate) input_error: Option<String>,
+    #[cfg(test)]
+    pub(crate) update_kind: WorkerUpdateKind,
+    #[cfg(test)]
+    pub(crate) cell_updates: usize,
+    #[cfg(test)]
+    pub(crate) evaluation_duration: Duration,
+    #[cfg(test)]
+    pub(crate) recovery_package_duration: Duration,
+    #[cfg(test)]
+    pub(crate) recovery_journal_duration: Duration,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkerUpdateKind {
+    InitialModel,
+    CellDelta,
+    FullReplacement,
+    ActiveTab,
+    Mixed,
 }
 
 pub(crate) struct WorkerStartup {
@@ -285,7 +305,16 @@ impl WorkbookWorker {
 
     #[cfg(test)]
     pub(super) fn wait_for_result(&self, revision: u64) -> Option<WorkbookResult> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        self.wait_for_result_timeout(revision, Duration::from_secs(5))
+    }
+
+    #[cfg(test)]
+    pub(super) fn wait_for_result_timeout(
+        &self,
+        revision: u64,
+        timeout: Duration,
+    ) -> Option<WorkbookResult> {
+        let deadline = Instant::now() + timeout;
         let mut latest = self.shared.latest_result.lock().ok()?;
         loop {
             if latest
@@ -409,19 +438,40 @@ fn run_worker(
                 };
                 let _ = initialization.reply.send(model);
 
+                #[cfg(test)]
+                let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
                     .into_iter()
                     .nth(active_sheet)
                     .unwrap_or_default();
+                #[cfg(test)]
+                let evaluation_duration = evaluation_started.elapsed();
                 let mut recovery_error = startup_error.clone();
+                #[cfg(test)]
+                let mut recovery_package_duration = Duration::ZERO;
+                #[cfg(test)]
+                let mut recovery_journal_duration = Duration::ZERO;
                 if let Some(recovery) = recovery.as_mut() {
-                    match workbook_package_bytes(&sheets, active_sheet) {
+                    #[cfg(test)]
+                    let package_started = Instant::now();
+                    let package = workbook_package_bytes(&sheets, active_sheet);
+                    #[cfg(test)]
+                    {
+                        recovery_package_duration = package_started.elapsed();
+                    }
+                    #[cfg(test)]
+                    let journal_started = Instant::now();
+                    match package {
                         Ok(payload) => {
                             if let Err(error) = recovery.record("sheets state", payload) {
                                 recovery_error = Some(error.to_string());
                             }
                         }
                         Err(error) => recovery_error = Some(error),
+                    }
+                    #[cfg(test)]
+                    {
+                        recovery_journal_duration = journal_started.elapsed();
                     }
                 }
                 publish_result(
@@ -432,6 +482,16 @@ fn run_worker(
                         values,
                         recovery_error,
                         input_error: None,
+                        #[cfg(test)]
+                        update_kind: WorkerUpdateKind::InitialModel,
+                        #[cfg(test)]
+                        cell_updates: 0,
+                        #[cfg(test)]
+                        evaluation_duration,
+                        #[cfg(test)]
+                        recovery_package_duration,
+                        #[cfg(test)]
+                        recovery_journal_duration,
                     },
                 );
             }
@@ -440,6 +500,15 @@ fn run_worker(
                     continue;
                 }
                 last_revision = batch.revision;
+                #[cfg(test)]
+                let cell_updates = batch.cells.len();
+                #[cfg(test)]
+                let update_kind = match (batch.replacement.is_some(), cell_updates > 0) {
+                    (true, true) => WorkerUpdateKind::Mixed,
+                    (true, false) => WorkerUpdateKind::FullReplacement,
+                    (false, true) => WorkerUpdateKind::CellDelta,
+                    (false, false) => WorkerUpdateKind::ActiveTab,
+                };
                 if let Some(replacement) = batch.replacement {
                     sheets = replacement;
                     if sheets.is_empty() {
@@ -463,19 +532,40 @@ fn run_worker(
                     }
                 }
                 let active_sheet = batch.active_sheet.min(sheets.len().saturating_sub(1));
+                #[cfg(test)]
+                let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
                     .into_iter()
                     .nth(active_sheet)
                     .unwrap_or_default();
+                #[cfg(test)]
+                let evaluation_duration = evaluation_started.elapsed();
                 let mut recovery_error = startup_error.clone();
+                #[cfg(test)]
+                let mut recovery_package_duration = Duration::ZERO;
+                #[cfg(test)]
+                let mut recovery_journal_duration = Duration::ZERO;
                 if let Some(recovery) = recovery.as_mut() {
-                    match workbook_package_bytes(&sheets, active_sheet) {
+                    #[cfg(test)]
+                    let package_started = Instant::now();
+                    let package = workbook_package_bytes(&sheets, active_sheet);
+                    #[cfg(test)]
+                    {
+                        recovery_package_duration = package_started.elapsed();
+                    }
+                    #[cfg(test)]
+                    let journal_started = Instant::now();
+                    match package {
                         Ok(payload) => {
                             if let Err(error) = recovery.record("sheets state", payload) {
                                 recovery_error = Some(error.to_string());
                             }
                         }
                         Err(error) => recovery_error = Some(error),
+                    }
+                    #[cfg(test)]
+                    {
+                        recovery_journal_duration = journal_started.elapsed();
                     }
                 }
                 publish_result(
@@ -486,6 +576,16 @@ fn run_worker(
                         values,
                         recovery_error,
                         input_error,
+                        #[cfg(test)]
+                        update_kind,
+                        #[cfg(test)]
+                        cell_updates,
+                        #[cfg(test)]
+                        evaluation_duration,
+                        #[cfg(test)]
+                        recovery_package_duration,
+                        #[cfg(test)]
+                        recovery_journal_duration,
                     },
                 );
             }
@@ -630,6 +730,11 @@ mod tests {
                 values: HashMap::new(),
                 recovery_error: None,
                 input_error: None,
+                update_kind: WorkerUpdateKind::InitialModel,
+                cell_updates: 0,
+                evaluation_duration: Duration::ZERO,
+                recovery_package_duration: Duration::ZERO,
+                recovery_journal_duration: Duration::ZERO,
             },
         );
         publish_result(
@@ -640,6 +745,11 @@ mod tests {
                 values: HashMap::new(),
                 recovery_error: None,
                 input_error: None,
+                update_kind: WorkerUpdateKind::InitialModel,
+                cell_updates: 0,
+                evaluation_duration: Duration::ZERO,
+                recovery_package_duration: Duration::ZERO,
+                recovery_journal_duration: Duration::ZERO,
             },
         );
 

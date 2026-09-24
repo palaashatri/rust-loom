@@ -1,9 +1,29 @@
 use std::collections::HashMap;
-use std::time::Instant;
+use std::fs;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use loom_sheets_core::{CellRef, Sheet, SheetDimensions, SheetViewport, Value};
 
-use super::project_sheet_grid_with_values;
+use super::workbook_worker::{CellUpdate, WorkbookWorker};
+use super::{commit_formula_edit, project_sheet_grid_with_values};
+
+struct RecoveryScratchDirectory(PathBuf);
+
+impl RecoveryScratchDirectory {
+    fn new() -> Self {
+        let path =
+            std::env::temp_dir().join(format!("loom-sheets-perf-recovery-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        Self(path)
+    }
+}
+
+impl Drop for RecoveryScratchDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 /// Opt-in CPU-side virtualization check. This measures building the visible
 /// cell projection, not native window painting or frame presentation.
@@ -77,6 +97,77 @@ fn million_sparse_cells_project_one_viewport_within_one_frame() {
     assert!(
         max_ms < 16.7,
         "visible-cell projection exceeded the 16.7 ms frame budget: {max_ms:.2} ms"
+    );
+
+    let recovery_directory = RecoveryScratchDirectory::new();
+    let (worker, startup) = WorkbookWorker::start_at(recovery_directory.0.clone(), "loom.sheets/1")
+        .expect("start performance workbook worker");
+    assert!(startup.recovery_error.is_none());
+    let model = worker
+        .initialize_workbook(1, 0, vec![sheet])
+        .expect("initialize million-cell workbook on worker");
+    let mut ui_sheet = model
+        .sheets
+        .into_iter()
+        .next()
+        .expect("worker returns UI workbook copy");
+    worker
+        .wait_for_result_timeout(1, Duration::from_secs(120))
+        .expect("complete initial calculation and recovery write");
+
+    let address = pseudorandom_address(CELLS as u32 - 1);
+    let cell = CellRef {
+        row: address / SIDE,
+        col: address % SIDE,
+    };
+    assert_eq!(ui_sheet.raw(cell), Some("42"));
+    let mut undo = Vec::new();
+    let mut redo = Vec::new();
+    let preparation_started = Instant::now();
+    assert!(commit_formula_edit(
+        &mut ui_sheet,
+        &mut undo,
+        &mut redo,
+        cell,
+        "43"
+    ));
+    let raw = ui_sheet.raw(cell).map(str::to_owned);
+    let preparation = preparation_started.elapsed();
+
+    let mailbox_started = Instant::now();
+    worker
+        .submit_cell(CellUpdate {
+            revision: 2,
+            active_sheet: 0,
+            sheet: 0,
+            cell,
+            raw,
+        })
+        .expect("submit million-cell edit");
+    let mailbox = mailbox_started.elapsed();
+    let result = worker
+        .wait_for_result_timeout(2, Duration::from_secs(120))
+        .expect("calculate edited workbook");
+    assert_eq!(
+        result.update_kind,
+        super::workbook_worker::WorkerUpdateKind::CellDelta
+    );
+    assert_eq!(result.cell_updates, 1);
+    assert_eq!(result.values.get(&cell), Some(&Value::Number(43.0)));
+
+    eprintln!(
+        "PERF cell_commit cells={CELLS} ui_prepare_ms={:.3} mailbox_ms={:.3} worker_evaluation_ms={:.3} recovery_package_ms={:.3} recovery_journal_ms={:.3}",
+        preparation.as_secs_f64() * 1_000.0,
+        mailbox.as_secs_f64() * 1_000.0,
+        result.evaluation_duration.as_secs_f64() * 1_000.0,
+        result.recovery_package_duration.as_secs_f64() * 1_000.0,
+        result.recovery_journal_duration.as_secs_f64() * 1_000.0,
+    );
+    let ui_total = preparation + mailbox;
+    assert!(
+        ui_total.as_secs_f64() * 1_000.0 < 16.7,
+        "cell preparation and mailbox submission exceeded 16.7 ms: {:.3} ms",
+        ui_total.as_secs_f64() * 1_000.0
     );
 }
 

@@ -1587,6 +1587,31 @@ fn cross_sheet_state() -> Rc<GuiState> {
     state
 }
 
+fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> PathBuf {
+    let recovery_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-cell-worker-{name}-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&recovery_dir);
+    let (worker, startup) =
+        workbook_worker::WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1")
+            .expect("start test worker");
+    assert!(startup.recovery_error.is_none());
+    let revision = state.next_worker_revision();
+    let (sheets, active) = workbook_sheets(state);
+    let model = worker
+        .initialize_workbook(revision, active, sheets)
+        .expect("initialize test workbook");
+    state.install_workbook(model.sheets, model.active_sheet);
+    state.mark_saved();
+    let result = worker
+        .wait_for_result(revision)
+        .expect("initial worker result");
+    assert!(apply_workbook_worker_result(app, state, result));
+    *state.workbook_worker.borrow_mut() = Some(worker);
+    recovery_dir
+}
+
 #[test]
 fn cross_sheet_formulas_evaluate_save_and_reopen() {
     let state = cross_sheet_state();
@@ -1832,6 +1857,197 @@ fn active_tab_changes_are_revisioned_without_replacing_the_workbook() {
         Some(&Value::Number(25.0))
     );
 
+    drop(state);
+    let _ = std::fs::remove_dir_all(recovery_dir);
+}
+
+#[test]
+fn worker_result_rejects_old_revisions_and_other_tabs_without_changing_draft() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let recovery_dir = attach_test_worker(&app, &state, "stale-results");
+    let worker = state.workbook_worker.borrow();
+    let current = worker
+        .as_ref()
+        .unwrap()
+        .wait_for_result(1)
+        .expect("current result");
+    drop(worker);
+
+    app.set_formula_edit_buffer("=A1*5".into());
+    let draft = app.get_formula_edit_buffer();
+    state.next_worker_revision();
+    let mut old = current.clone();
+    old.revision = 1;
+    assert!(!apply_workbook_worker_result(&app, &state, old));
+    let mut wrong_tab = current;
+    wrong_tab.revision = state.worker_revision.get();
+    wrong_tab.active_sheet = 1;
+    assert!(!apply_workbook_worker_result(&app, &state, wrong_tab));
+
+    assert_eq!(app.get_formula_edit_buffer(), draft);
+    assert_eq!(
+        state
+            .evaluation_cache
+            .borrow_mut()
+            .cached_or_empty(0)
+            .get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(20.0))
+    );
+
+    drop(app);
+    drop(state);
+    let _ = std::fs::remove_dir_all(recovery_dir);
+}
+
+#[test]
+fn worker_result_refresh_preserves_scrolled_viewport_and_formula_draft() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_grid_viewport_width(360.0);
+    app.set_grid_viewport_height(280.0);
+    let state = cross_sheet_state();
+    {
+        let mut current = state.current.borrow_mut();
+        current.set_str("AZ1000", "tail");
+        state.sheets.borrow_mut()[0] = current.clone();
+    }
+    let recovery_dir = attach_test_worker(&app, &state, "preserve-viewport");
+    let worker = state.workbook_worker.borrow();
+    let result = worker
+        .as_ref()
+        .unwrap()
+        .wait_for_result(1)
+        .expect("current worker result");
+    drop(worker);
+
+    // The user has moved away from the selected cell while calculation runs.
+    app.set_grid_scroll_x(-180.0);
+    app.set_grid_scroll_y(-672.0);
+    let scroll_before = (app.get_grid_scroll_x(), app.get_grid_scroll_y());
+    assert!(scroll_before.0 < -100.0);
+    assert!(scroll_before.1 < -600.0);
+    app.set_formula_edit_buffer("=A1*5".into());
+    let draft = app.get_formula_edit_buffer();
+
+    assert!(apply_workbook_worker_result(&app, &state, result));
+
+    assert_eq!(
+        (app.get_grid_scroll_x(), app.get_grid_scroll_y()),
+        scroll_before
+    );
+    assert_eq!(app.get_formula_edit_buffer(), draft);
+    assert!(app.get_view_row_origin() > 1);
+    assert!(app.get_view_col_origin() > 1);
+
+    drop(app);
+    drop(state);
+    let _ = std::fs::remove_dir_all(recovery_dir);
+}
+
+#[test]
+fn newer_workbook_result_clears_superseded_cell_calculating_feedback() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let recovery_dir = attach_test_worker(&app, &state, "superseded-cell-feedback");
+    let worker = state.workbook_worker.borrow();
+    let mut result = worker
+        .as_ref()
+        .unwrap()
+        .wait_for_result(1)
+        .expect("initial worker result");
+    drop(worker);
+
+    let pending_revision = state.next_worker_revision();
+    let cell = CellRef::parse("A1").unwrap();
+    state
+        .pending_cell_commit
+        .set(Some((pending_revision, cell)));
+    let revision = state.next_worker_revision();
+    app.set_formula_edit_buffer("=A1*5".into());
+    app.set_formula_feedback("Calculating…".into());
+    app.set_status_left("Calculating…".into());
+    result.revision = revision;
+
+    assert!(apply_workbook_worker_result(&app, &state, result));
+
+    assert_eq!(state.pending_cell_commit.get(), None);
+    assert_eq!(app.get_formula_feedback().as_str(), "");
+    assert_eq!(app.get_status_left().as_str(), "Ready");
+    assert_eq!(app.get_formula_edit_buffer().as_str(), "=A1*5");
+
+    drop(app);
+    drop(state);
+    let _ = std::fs::remove_dir_all(recovery_dir);
+}
+
+#[test]
+fn formula_bar_commit_sends_a_cell_delta_and_keeps_old_values_until_result() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let recovery_dir = attach_test_worker(&app, &state, "cell-delta");
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_cell_edit_action(&app, &state, &menu_service);
+    app.set_selected_cell("A1".into());
+
+    app.invoke_commit_selected_cell("12".into());
+
+    let immediate_status = app.get_status_left();
+    let immediate_feedback = app.get_formula_feedback();
+    let committed_raw = state
+        .current
+        .borrow()
+        .raw(CellRef::parse("A1").unwrap())
+        .map(str::to_owned);
+    let previous_b1 = state
+        .evaluation_cache
+        .borrow_mut()
+        .cached_or_empty(0)
+        .get(&CellRef::parse("B1").unwrap())
+        .cloned();
+    let revision = state.worker_revision.get();
+
+    assert_eq!(revision, 2);
+    assert_eq!(committed_raw.as_deref(), Some("12"));
+    assert_eq!(previous_b1, Some(Value::Number(20.0)));
+
+    app.set_formula_edit_buffer("=A1*3".into());
+    let result = state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .wait_for_result(revision)
+        .expect("calculated cell result");
+
+    assert_eq!(
+        result.update_kind,
+        workbook_worker::WorkerUpdateKind::CellDelta
+    );
+    assert_eq!(result.cell_updates, 1);
+    assert_eq!(
+        result.values.get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(24.0))
+    );
+    assert_eq!(immediate_status.as_str(), "Calculating…");
+    assert_eq!(immediate_feedback.as_str(), "Calculating…");
+    assert_eq!(
+        state
+            .evaluation_cache
+            .borrow_mut()
+            .cached_or_empty(0)
+            .get(&CellRef::parse("B1").unwrap()),
+        Some(&Value::Number(20.0))
+    );
+    assert!(apply_workbook_worker_result(&app, &state, result));
+    assert_eq!(app.get_formula_edit_buffer().as_str(), "=A1*3");
+    assert_eq!(app.get_formula_feedback().as_str(), "Cell A1 updated");
+    assert_eq!(app.get_status_left().as_str(), "Ready");
+
+    drop(app);
     drop(state);
     let _ = std::fs::remove_dir_all(recovery_dir);
 }

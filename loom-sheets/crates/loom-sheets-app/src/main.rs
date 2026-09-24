@@ -1871,6 +1871,7 @@ pub(crate) struct GuiState {
     evaluation_cache: RefCell<evaluation_cache::EvaluationCache>,
     pub(crate) workbook_worker: RefCell<Option<workbook_worker::WorkbookWorker>>,
     pub(crate) worker_revision: Cell<u64>,
+    pub(crate) pending_cell_commit: Cell<Option<(u64, CellRef)>>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
     /// Workbook state from the last completed save/open/new operation.
     /// Comparing document content, rather than undo depth, means undoing back
@@ -1909,6 +1910,7 @@ impl GuiState {
             evaluation_cache: RefCell::new(evaluation_cache::EvaluationCache::default()),
             workbook_worker: RefCell::new(None),
             worker_revision: Cell::new(0),
+            pending_cell_commit: Cell::new(None),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
             dirty_content: Cell::new(false),
@@ -2156,13 +2158,27 @@ pub(crate) fn apply_workbook_worker_result(
     if result.revision != state.worker_revision.get() || result.active_sheet != active {
         return false;
     }
+    let pending_cell = state.pending_cell_commit.get();
+    let cell_feedback = pending_cell.and_then(|(revision, cell)| {
+        (revision == result.revision).then(|| match result.values.get(&cell) {
+            Some(Value::Error(error)) => {
+                format!("Formula error in {}: #{}", cell.to_a1(), error.code())
+            }
+            _ => format!("Cell {} updated", cell.to_a1()),
+        })
+    });
+    let superseded_pending_cell =
+        pending_cell.is_some_and(|(revision, _)| revision < result.revision);
+    if pending_cell.is_some_and(|(revision, _)| revision <= result.revision) {
+        state.pending_cell_commit.set(None);
+    }
     let values = state
         .evaluation_cache
         .borrow_mut()
         .set_values(result.active_sheet, result.values);
     let sheet = state.current.borrow();
     let formula_draft = app.get_formula_edit_buffer();
-    project_sheet_inner(app, &sheet, &values, true);
+    project_sheet_inner(app, &sheet, &values, false);
     app.set_formula_edit_buffer(formula_draft);
     drop(sheet);
 
@@ -2175,6 +2191,11 @@ pub(crate) fn apply_workbook_worker_result(
         app.set_status_right(SharedString::from(format!(
             "Workbook update failed: {error}"
         )));
+    }
+    if let Some(feedback) = cell_feedback {
+        app.set_formula_feedback(SharedString::from(feedback));
+    } else if superseded_pending_cell && app.get_formula_feedback().as_str() == "Calculating…" {
+        app.set_formula_feedback("".into());
     }
     if app.get_status_left().as_str() == "Calculating…" {
         app.set_status_left("Ready".into());
@@ -2892,11 +2913,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     sync_sheet_tabs(&app, &state);
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
-    if args.chart {
-        if state.current.borrow().chart.is_some() {
-            app.set_chart_visible(true);
-            sync_chart_to_app(&app, &state.current.borrow());
-        }
+    if args.chart && state.current.borrow().chart.is_some() {
+        app.set_chart_visible(true);
+        sync_chart_to_app(&app, &state.current.borrow());
     }
     if args.template_chooser {
         app.set_template_chooser_open(true);
