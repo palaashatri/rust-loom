@@ -3090,6 +3090,9 @@ dependencies = [
 [[package]]
 name = "loom-package"
 version = "0.1.0"
+dependencies = [
+ "flate2",
+]
 
 [[package]]
 name = "loom-production"

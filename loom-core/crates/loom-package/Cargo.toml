@@ -7,5 +7,6 @@ rust-version.workspace = true
 description = "Loom versioned, inspectable document package container"
 
 [dependencies]
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]

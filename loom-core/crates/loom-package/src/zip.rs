@@ -1,14 +1,15 @@
-//! A minimal, dependency-free ZIP reader/writer for Loom packages.
+//! A minimal ZIP reader/writer for Loom packages.
 //!
-//! Entries are stored uncompressed (method 0) in this foundational version;
-//! a compression feature is planned behind `.cargo/config.toml` feature flags.
-//! We implement CRC-32 and SHA-256 ourselves so the crate has zero mandatory
-//! dependencies. Safety limits guard against archive bombs and malformed
-//! content, and paths are normalized to prevent traversal.
+//! The writer emits stored entries (method 0); the reader accepts stored and
+//! DEFLATE-compressed entries (method 8), including ZIP data descriptors.
+//! Safety limits guard against archive bombs and malformed content, and paths
+//! are normalized to prevent traversal.
 
 use crate::manifest::{Checksum, ManifestError};
+use flate2::read::DeflateDecoder;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io::Read;
 
 /// Maximum number of entries permitted in an archive.
 pub const MAX_ENTRIES: usize = 4096;
@@ -350,6 +351,7 @@ pub fn normalize_path(p: &str) -> Result<String, ArchiveError> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LocalHeader {
+    flags: u16,
     method: u16,
     crc: u32,
     compressed_size: u32,
@@ -455,6 +457,7 @@ impl PackageArchive {
                 path.clone(),
                 offset,
                 LocalHeader {
+                    flags: 0,
                     method: 0,
                     crc: crc_val,
                     compressed_size: data.len() as u32,
@@ -584,11 +587,11 @@ impl PackageArchive {
             }
             let _made_by = parser.read_u16()?;
             let needed = parser.read_u16()?;
-            let _flags = parser.read_u16()?;
+            let flags = parser.read_u16()?;
             let method = parser.read_u16()?;
             let _time = parser.read_u16()?;
             let _date = parser.read_u16()?;
-            let _crc_val = parser.read_u32()?;
+            let crc_val = parser.read_u32()?;
             let compressed_size = parser.read_u32()?;
             let uncompressed_size = parser.read_u32()?;
             let name_len = parser.read_u16()? as usize;
@@ -619,8 +622,22 @@ impl PackageArchive {
                 // We don't support anything requiring newer features.
                 return Err(ArchiveError::UnsupportedVersion(needed));
             }
-            if method != 0 {
+            if flags & 0x0041 != 0 {
+                return Err(ArchiveError::Corrupt(
+                    "encrypted ZIP entries are unsupported".into(),
+                ));
+            }
+            if method != 0 && method != 8 {
                 return Err(ArchiveError::UnsupportedMethod(method));
+            }
+            if uncompressed_size as u64 > limits.max_entry_size {
+                return Err(ArchiveError::EntryTooLarge(name, uncompressed_size as u64));
+            }
+            let new_total_size = total_size
+                .checked_add(uncompressed_size as u64)
+                .ok_or(ArchiveError::TotalTooLarge(u64::MAX))?;
+            if new_total_size > limits.max_total_size {
+                return Err(ArchiveError::TotalTooLarge(new_total_size));
             }
             if local_offset as usize > data.len() {
                 return Err(ArchiveError::Truncated);
@@ -628,39 +645,89 @@ impl PackageArchive {
             // The local header must be fully inside the archive. We do NOT
             // compare it against the central directory cursor position; that
             // comparison is meaningless and would reject valid archives.
-            let local = read_local_header(&mut Cursor {
+            let mut local_cursor = Cursor {
                 data,
                 pos: local_offset as usize,
-            })?;
-            if local.method != 0 {
+            };
+            let local = read_local_header(&mut local_cursor)?;
+            if local.flags != flags {
+                return Err(ArchiveError::Corrupt("flags mismatch local/central".into()));
+            }
+            if local.flags & 0x0041 != 0 {
+                return Err(ArchiveError::Corrupt(
+                    "encrypted ZIP entries are unsupported".into(),
+                ));
+            }
+            if local.method != method {
+                return Err(ArchiveError::Corrupt(
+                    "method mismatch local/central".into(),
+                ));
+            }
+            if local.method != 0 && local.method != 8 {
                 return Err(ArchiveError::UnsupportedMethod(local.method));
             }
-            if local.compressed_size as u64 != compressed_size as u64
-                || local.uncompressed_size as u64 != uncompressed_size as u64
+            let has_data_descriptor = flags & 0x0008 != 0;
+            if has_data_descriptor {
+                if (local.crc != 0 && local.crc != crc_val)
+                    || (local.compressed_size != 0 && local.compressed_size != compressed_size)
+                    || (local.uncompressed_size != 0
+                        && local.uncompressed_size != uncompressed_size)
+                {
+                    return Err(ArchiveError::Corrupt(
+                        "local header disagrees with central directory".into(),
+                    ));
+                }
+            } else if local.crc != crc_val
+                || local.compressed_size != compressed_size
+                || local.uncompressed_size != uncompressed_size
             {
-                return Err(ArchiveError::Corrupt("size mismatch local/central".into()));
+                return Err(ArchiveError::Corrupt(
+                    "metadata mismatch local/central".into(),
+                ));
             }
             if usize::from(local.name_len) != name_len {
                 return Err(ArchiveError::Corrupt("name length mismatch".into()));
             }
-            let data_start =
-                local_offset as usize + 30 + local.name_len as usize + local.extra_len as usize;
-            let data_end = data_start + local.compressed_size as usize;
-            if data_end > data.len() {
+            let local_name = local_cursor.read(local.name_len as usize)?;
+            if local_name != raw_name {
+                return Err(ArchiveError::Corrupt("name mismatch local/central".into()));
+            }
+            local_cursor.skip(local.extra_len as usize)?;
+            let data_start = local_cursor.pos;
+            let data_end = data_start
+                .checked_add(compressed_size as usize)
+                .ok_or(ArchiveError::Truncated)?;
+            if data_end > cd_offset as usize || data_end > data.len() {
                 return Err(ArchiveError::Truncated);
             }
-            let content = &data[data_start..data_end];
-            if content.len() as u64 > limits.max_entry_size {
-                return Err(ArchiveError::EntryTooLarge(name, content.len() as u64));
+            if has_data_descriptor {
+                validate_data_descriptor(
+                    data,
+                    data_end,
+                    cd_offset as usize,
+                    crc_val,
+                    compressed_size,
+                    uncompressed_size,
+                )?;
             }
-            total_size += content.len() as u64;
-            if total_size > limits.max_total_size {
-                return Err(ArchiveError::TotalTooLarge(total_size));
-            }
-            if crc.checksum(content) != local.crc {
+            let compressed = &data[data_start..data_end];
+            let content = match method {
+                0 => {
+                    if compressed_size != uncompressed_size {
+                        return Err(ArchiveError::Corrupt(
+                            "stored entry has mismatched sizes".into(),
+                        ));
+                    }
+                    compressed.to_vec()
+                }
+                8 => inflate_deflate(compressed, uncompressed_size)?,
+                other => return Err(ArchiveError::UnsupportedMethod(other)),
+            };
+            if crc.checksum(&content) != crc_val {
                 return Err(ArchiveError::ChecksumMismatch(name));
             }
-            entries.insert(name, content.to_vec());
+            total_size = new_total_size;
+            entries.insert(name, content);
         }
         Ok(Self { entries, limits })
     }
@@ -712,7 +779,7 @@ fn read_local_header(c: &mut Cursor<'_>) -> Result<LocalHeader, ArchiveError> {
         });
     }
     let _ver = c.read_u16()?;
-    let _flags = c.read_u16()?;
+    let flags = c.read_u16()?;
     let method = c.read_u16()?;
     let _time = c.read_u16()?;
     let _date = c.read_u16()?;
@@ -722,6 +789,7 @@ fn read_local_header(c: &mut Cursor<'_>) -> Result<LocalHeader, ArchiveError> {
     let name_len = c.read_u16()?;
     let extra_len = c.read_u16()?;
     Ok(LocalHeader {
+        flags,
         method,
         crc,
         compressed_size,
@@ -729,6 +797,55 @@ fn read_local_header(c: &mut Cursor<'_>) -> Result<LocalHeader, ArchiveError> {
         name_len,
         extra_len,
     })
+}
+
+fn inflate_deflate(compressed: &[u8], expected_size: u32) -> Result<Vec<u8>, ArchiveError> {
+    let mut decoder = DeflateDecoder::new(compressed);
+    let mut output = Vec::new();
+    let max_output = expected_size as u64 + 1;
+    (&mut decoder)
+        .take(max_output)
+        .read_to_end(&mut output)
+        .map_err(|error| ArchiveError::Corrupt(format!("invalid DEFLATE stream: {error}")))?;
+    if output.len() != expected_size as usize {
+        return Err(ArchiveError::Corrupt(
+            "DEFLATE output size does not match the central directory".into(),
+        ));
+    }
+    if decoder.total_in() != compressed.len() as u64 {
+        return Err(ArchiveError::Corrupt(
+            "DEFLATE stream does not consume the compressed entry".into(),
+        ));
+    }
+    Ok(output)
+}
+
+fn validate_data_descriptor(
+    data: &[u8],
+    offset: usize,
+    central_directory_start: usize,
+    crc: u32,
+    compressed_size: u32,
+    uncompressed_size: u32,
+) -> Result<(), ArchiveError> {
+    let available_end = central_directory_start.min(data.len());
+    let remaining = data
+        .get(offset..available_end)
+        .ok_or(ArchiveError::Truncated)?;
+    let values_match = |bytes: &[u8]| {
+        bytes.len() >= 12
+            && u32::from_le_bytes(bytes[0..4].try_into().expect("four bytes")) == crc
+            && u32::from_le_bytes(bytes[4..8].try_into().expect("four bytes")) == compressed_size
+            && u32::from_le_bytes(bytes[8..12].try_into().expect("four bytes")) == uncompressed_size
+    };
+    let signed_descriptor_matches = remaining.len() >= 16
+        && u32::from_le_bytes(remaining[0..4].try_into().expect("four bytes")) == 0x08074b50
+        && values_match(&remaining[4..]);
+    if signed_descriptor_matches || values_match(remaining) {
+        Ok(())
+    } else {
+        Err(ArchiveError::Corrupt("invalid ZIP data descriptor".into()))
+    }
 }
 
 struct Cursor<'a> {
@@ -824,6 +941,93 @@ mod tests {
         );
         assert_eq!(b.get("content/document.json").unwrap(), br#"{"x":1}"#);
         assert_eq!(b.len(), 2);
+    }
+
+    #[test]
+    fn reads_deflated_entries() {
+        let bytes = include_bytes!("../tests/fixtures/deflated-entry.zip");
+        let archive = PackageArchive::from_bytes(bytes).expect("read deflated entry");
+
+        assert_eq!(
+            archive.get("xl/workbook.xml"),
+            Some(
+                &b"<?xml version=\"1.0\"?><sheet>standard deflate and descriptor checks</sheet>"[..]
+            )
+        );
+    }
+
+    #[test]
+    fn reads_deflated_entries_with_data_descriptors() {
+        let bytes = include_bytes!("../tests/fixtures/deflated-descriptor-entry.zip");
+        let archive =
+            PackageArchive::from_bytes(bytes).expect("read deflated entry with descriptor");
+
+        assert_eq!(
+            archive.get("xl/workbook.xml"),
+            Some(
+                &b"<?xml version=\"1.0\"?><sheet>standard deflate and descriptor checks</sheet>"[..]
+            )
+        );
+    }
+
+    #[test]
+    fn deflated_entries_respect_uncompressed_size_limits() {
+        let bytes = include_bytes!("../tests/fixtures/deflated-entry.zip");
+        let limits = ArchiveLimits {
+            max_entry_size: 8,
+            ..ArchiveLimits::default()
+        };
+
+        assert!(matches!(
+            PackageArchive::from_bytes_with_limits(bytes, limits),
+            Err(ArchiveError::EntryTooLarge(path, size))
+                if path == "xl/workbook.xml" && size > 8
+        ));
+    }
+
+    #[test]
+    fn deflated_entries_respect_total_uncompressed_size_limit() {
+        let bytes = include_bytes!("../tests/fixtures/deflated-entry.zip");
+        let limits = ArchiveLimits {
+            max_total_size: 8,
+            ..ArchiveLimits::default()
+        };
+
+        assert!(matches!(
+            PackageArchive::from_bytes_with_limits(bytes, limits),
+            Err(ArchiveError::TotalTooLarge(size)) if size > 8
+        ));
+    }
+
+    #[test]
+    fn verifies_crc_after_inflating_deflated_entries() {
+        let mut bytes = include_bytes!("../tests/fixtures/deflated-entry.zip").to_vec();
+        let central_header = bytes
+            .windows(4)
+            .position(|window| window == [0x50, 0x4b, 0x01, 0x02])
+            .expect("central directory header");
+        bytes[14] ^= 0x80;
+        bytes[central_header + 16] ^= 0x80;
+
+        assert!(matches!(
+            PackageArchive::from_bytes(&bytes),
+            Err(ArchiveError::ChecksumMismatch(path)) if path == "xl/workbook.xml"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_corrupt_data_descriptor() {
+        let mut bytes = include_bytes!("../tests/fixtures/deflated-descriptor-entry.zip").to_vec();
+        let signature = bytes
+            .windows(4)
+            .rposition(|window| window == [0x50, 0x4b, 0x07, 0x08])
+            .expect("descriptor signature");
+        bytes[signature + 4] ^= 0x80;
+
+        assert!(matches!(
+            PackageArchive::from_bytes(&bytes),
+            Err(ArchiveError::Corrupt(message)) if message == "invalid ZIP data descriptor"
+        ));
     }
 
     #[test]
