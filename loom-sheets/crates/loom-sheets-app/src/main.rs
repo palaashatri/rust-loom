@@ -54,6 +54,7 @@ mod chart_actions;
 mod local_menu;
 
 mod evaluation_cache;
+mod workbook_worker;
 
 mod palette;
 use palette::*;
@@ -1834,6 +1835,8 @@ pub(crate) struct GuiState {
     pub(crate) sheets: RefCell<Vec<Sheet>>,
     pub(crate) active_sheet_index: RefCell<usize>,
     evaluation_cache: RefCell<evaluation_cache::EvaluationCache>,
+    pub(crate) workbook_worker: RefCell<Option<workbook_worker::WorkbookWorker>>,
+    pub(crate) worker_revision: Cell<u64>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
     /// Workbook state from the last completed save/open/new operation.
     /// Comparing document content, rather than undo depth, means undoing back
@@ -1870,6 +1873,8 @@ impl GuiState {
             sheets: RefCell::new(vec![sheet]),
             active_sheet_index: RefCell::new(0),
             evaluation_cache: RefCell::new(evaluation_cache::EvaluationCache::default()),
+            workbook_worker: RefCell::new(None),
+            worker_revision: Cell::new(0),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
             dirty_content: Cell::new(false),
@@ -1912,6 +1917,16 @@ impl GuiState {
 
     pub(crate) fn mark_content_dirty(&self) {
         self.dirty_content.set(true);
+    }
+
+    pub(crate) fn next_worker_revision(&self) -> u64 {
+        let revision = self
+            .worker_revision
+            .get()
+            .checked_add(1)
+            .expect("Sheets workbook revision exhausted");
+        self.worker_revision.set(revision);
+        revision
     }
 
     /// Recheck full content after undo/redo, where the edit marker alone would
