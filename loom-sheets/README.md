@@ -46,7 +46,9 @@ The matching test, build, and one-time Orca announcement results are recorded in
 
 ![Current 1024×720 renderer view with the in-window File, Edit, View, Table, and Help menu row](docs/qa-renderer/ui01-local-menu-current-1024-linux.png)
 
-This is a 1024×720 software-renderer capture, not a native live-window screenshot. The keyboard-navigation regression and current app build are checked separately. Fresh native captures after the popup-layout fix and for the XLSX import-warning dialog are still pending. On the latest attempt Cinnamon reported that its screensaver was active, so the locked desktop was left untouched. The old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md) for exact results and remaining checks.
+![Native Linux import-warning dialog with the in-window menu row visible](docs/qa-native/ui23-xlsx-import-warning-live-linux.png)
+
+This 1024×720 image is a software-renderer capture. The native live window was captured on 2026-09-24 with the File/Edit/View/Table/Help row visible and the XLSX import-warning dialog open: [ui23-xlsx-import-warning-live-linux.png](docs/qa-native/ui23-xlsx-import-warning-live-linux.png). It confirms the row is visible and the warning copy/buttons render in the real Linux window. The popup was not opened and keyboard/focus actions were not tested because native-app controls are unavailable in this session. The old native Edit capture at [ui01-edit-menu-open-before-fix-linux.png](docs/qa-native/ui01-edit-menu-open-before-fix-linux.png) shows the bug before the fix and must not be read as current behavior. See the [2026-09-24 acceptance report](docs/qa-reports/2026-09-24-acceptance-follow-up.md) for exact results and remaining checks.
 
 ## Core Capabilities
 
@@ -64,7 +66,7 @@ This is a 1024×720 software-renderer capture, not a native live-window screensh
 - Native Linux screenshots above verify the opened workbook, dirty title, chooser selection, and template creation at 1024×720. The Escape-preserves-workbook capture is `docs/qa-native/template-cancel-preserves-workbook-linux.png`.
 - The UI-06 captures verify visible formula errors, read-only save failure, and canceled Save As feedback; cancel and failure do not clear the unsaved marker.
 - These captures are evidence for the named states, not a blanket acceptance claim. Remaining Sheets checks are tracked in the root `TRUTH.md` ledger.
-- The XLSX loss-warning dialog passes rendered tests, including Tab navigation followed by Escape-to-Cancel. A native capture and pointer/keyboard inspection of that dialog remain pending because Cinnamon reports that the desktop screensaver is active; no locked-screen capture was taken.
+- The XLSX loss-warning dialog passes rendered tests, including Tab navigation followed by Escape-to-Cancel. The native capture above shows the real dialog and menu row; its popup, focus, and button actions still need live interaction review.
 
 ## Performance evidence
 
