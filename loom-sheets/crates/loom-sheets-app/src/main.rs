@@ -26,7 +26,7 @@ use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
     evaluate, to_csv_with_formulas, workbook_to_json, CellAlignment, CellRange, CellRef,
     GridSelection, NumberFormat, RangeEdit, Sheet, SheetDimensions, SheetViewport, Value,
-    XlsxImportWarning, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{
@@ -50,11 +50,25 @@ pub(crate) use workbook_io::{
     workbook_package_bytes, LoadedWorkbook,
 };
 
+mod xlsx_import;
+use xlsx_import::{
+    cancel_pending_xlsx_import, continue_pending_xlsx_import, open_workbook_from_picker,
+    prepare_startup_import, stage_xlsx_import, PendingXlsxImport,
+};
+
 mod object_actions;
 
 mod chart_actions;
 
 mod local_menu;
+
+mod cli;
+#[cfg(test)]
+use cli::parse_args_from;
+use cli::{parse_args, Args};
+
+mod headless;
+use headless::render_headless;
 
 mod evaluation_cache;
 mod workbook_worker;
@@ -86,112 +100,6 @@ const TABLE_HORIZONTAL_MARGIN: f32 = 48.0;
 const SHELL_VERTICAL_CHROME: f32 = 252.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
-
-pub(crate) struct Args {
-    pub(crate) screenshot: Option<String>,
-    pub(crate) smoke: bool,
-    pub(crate) example: bool,
-    pub(crate) palette: bool,
-    pub(crate) chart: bool,
-    pub(crate) objects: bool,
-    pub(crate) inspector: bool,
-    pub(crate) journey: Option<String>,
-    pub(crate) size: (u32, u32),
-    pub(crate) theme: String,
-    pub(crate) rtl: bool,
-    pub(crate) open: Option<String>,
-    pub(crate) template_chooser: bool,
-    pub(crate) text_scale: f32,
-    pub(crate) zoom: Option<f32>,
-}
-
-fn parse_args() -> Result<Args, String> {
-    parse_args_from(std::env::args().skip(1))
-}
-
-fn parse_args_from<I, S>(raw_args: I) -> Result<Args, String>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<String>,
-{
-    let mut args = Args {
-        screenshot: None,
-        smoke: false,
-        example: false,
-        palette: false,
-        chart: false,
-        objects: false,
-        inspector: false,
-        journey: None,
-        size: DEFAULT_SIZE,
-        theme: "light".to_string(),
-        rtl: false,
-        open: None,
-        template_chooser: false,
-        text_scale: 1.0,
-        zoom: None,
-    };
-    let mut it = raw_args.into_iter().map(Into::into);
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--screenshot" => args.screenshot = Some(it.next().ok_or("--screenshot needs a path")?),
-            "--smoke" => args.smoke = true,
-            "--example" => args.example = true,
-            "--palette" => args.palette = true,
-            "--chart" => args.chart = true,
-            "--objects" => args.objects = true,
-            "--inspector" => args.inspector = true,
-            "--journey" => {
-                args.journey = Some(it.next().ok_or("--journey needs an output directory")?)
-            }
-            "--size" => {
-                let v = it.next().ok_or("--size needs WxH")?;
-                let (w, h) = v.split_once('x').ok_or("--size must be WxH")?;
-                args.size = (
-                    w.parse().map_err(|_| "bad --size width")?,
-                    h.parse().map_err(|_| "bad --size height")?,
-                );
-            }
-            "--theme" => {
-                let t = it.next().ok_or("--theme needs a name")?;
-                if !matches!(t.as_str(), "light" | "dark" | "high-contrast") {
-                    return Err(format!("unknown theme: {t}"));
-                }
-                args.theme = t;
-            }
-            "--rtl" => args.rtl = true,
-            "--template-chooser" => args.template_chooser = true,
-            "--text-scale" => {
-                let scale: f32 = it
-                    .next()
-                    .ok_or("--text-scale needs a factor")?
-                    .parse()
-                    .map_err(|_| "bad --text-scale factor")?;
-                if !(1.0..=2.0).contains(&scale) {
-                    return Err("--text-scale must be between 1.0 and 2.0".to_string());
-                }
-                args.text_scale = scale;
-            }
-            "--zoom" => {
-                let v: f32 = it
-                    .next()
-                    .ok_or("--zoom needs a factor")?
-                    .parse()
-                    .map_err(|_| "bad --zoom factor")?;
-                if !(0.5..=3.0).contains(&v) {
-                    return Err("--zoom must be between 0.5 and 3.0".to_string());
-                }
-                args.zoom = Some(v);
-            }
-            "--open" => args.open = Some(it.next().ok_or("--open needs a path")?),
-            other if !other.starts_with('-') && args.open.is_none() => {
-                args.open = Some(other.to_string())
-            }
-            other => return Err(format!("unknown argument: {other}")),
-        }
-    }
-    Ok(args)
-}
 
 pub(crate) fn cell_value(
     sheet: &Sheet,
@@ -1772,11 +1680,8 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     app.set_inspector_available(true);
 }
 
-/// Size the headless grid viewport to the same canvas geometry used by the
-/// native layout. `snapshot_component` resizes and renders immediately,
-/// without running a native resize event through the Slint loop, so relying
-/// only on `grid-viewport-changed` would leave the projection at its
-/// construction-time fallback size.
+/// Size the headless projection like the native canvas. Snapshot rendering
+/// skips the native resize event, so compute the viewport before projecting.
 pub(crate) fn apply_headless_viewport_size(app: &SheetsApp, width: u32, height: u32) {
     let policy = ResponsivePolicy::get(app);
     let inspector_width = if (width as f32) >= policy.get_priority_1_icon_only_below() {
@@ -1803,90 +1708,10 @@ fn wire_responsive_layout(app: &SheetsApp) {
     });
 }
 
-fn render_headless(args: &Args, out: &str) -> Result<(), String> {
-    set_platform();
-    let app = SheetsApp::new().map_err(|e| e.to_string())?;
-    app.set_local_menu_visible(!cfg!(target_os = "macos"));
-    configure_direction(&app, args.rtl);
-    apply_theme(&app, &args.theme);
-    app.set_template_text_scale(args.text_scale);
-    let (w, h) = args.size;
-    app.window().set_size(PhysicalSize::new(w, h));
-    apply_layout_breakpoints(&app, w);
-    if args.inspector {
-        app.set_inspector_preference(true);
-        app.set_show_inspector(true);
-    }
-    apply_headless_viewport_size(&app, w, h);
-    let mut sheet = match &args.open {
-        Some(p) => load_sheet(Path::new(p))?,
-        None if args.example || args.smoke || args.chart || args.objects => starter_workbook(),
-        None => blank_sheet(),
-    };
-    if args.objects {
-        object_actions::seed_demo_objects(&mut sheet);
-        app.set_selected_object(0);
-    }
-    if let Some(zoom) = args.zoom {
-        app.set_zoom_factor(zoom);
-    }
-    project_sheet(&app, &sheet);
-    if args.palette {
-        app.set_palette_query(SharedString::from("ex"));
-        rebuild_palette(&app, "ex");
-        // The filtered screenshot probe has one matching export command.
-        // Keep the preview selection within that list so the Flickable does
-        // not scroll its only row into the clipped viewport.
-        app.set_palette_selected(0);
-        app.set_palette_open(true);
-    }
-    if args.template_chooser {
-        app.set_template_chooser_open(true);
-    }
-    if args.chart {
-        let planned = if sheet.name == "Example Budget" {
-            plan_chart_in_range(&sheet, 0, 1, 1, 3)
-        } else {
-            plan_chart(&sheet, 0, 1)
-        };
-        if let Ok(chart) = planned {
-            sheet.chart = Some(chart);
-            app.set_chart_visible(true);
-            sync_chart_to_app(&app, &sheet);
-        }
-    }
-    let img = snapshot_component(&app, w as f32, h as f32, 1.0).map_err(|e| e.to_string())?;
-    loom_test_support::png::save_png(Path::new(out), &img).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 #[derive(Debug, Clone, Copy)]
 enum PendingReplacement {
     NewWorkbook,
     OpenWorkbook,
-}
-
-struct PendingXlsxImport {
-    path: PathBuf,
-    workbook: WorkbookFile,
-    warnings: Vec<XlsxImportWarning>,
-}
-
-fn prepare_startup_import(
-    path: PathBuf,
-    loaded: LoadedWorkbook,
-    fallback: WorkbookFile,
-) -> (WorkbookFile, Option<PendingXlsxImport>) {
-    if loaded.warnings.is_empty() {
-        return (loaded.workbook, None);
-    }
-
-    let pending = PendingXlsxImport {
-        path,
-        workbook: loaded.workbook,
-        warnings: loaded.warnings,
-    };
-    (fallback, Some(pending))
 }
 
 pub(crate) struct GuiState {
@@ -2267,130 +2092,6 @@ fn request_workbook_replacement(
     app.set_save_changes_open(true);
     app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
     true
-}
-
-fn xlsx_import_warning_message(warnings: &[XlsxImportWarning]) -> String {
-    let items = warnings
-        .iter()
-        .map(|warning| format!("• {}", warning.label()))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "Loom will import the supported content and drop these Excel features:\n{items}\n\nContinue replaces the workbook that is open now. Cancel leaves it as it is.\nThe original .xlsx file will stay unchanged."
-    )
-}
-
-fn stage_xlsx_import(
-    app: &SheetsApp,
-    state: &GuiState,
-    path: PathBuf,
-    workbook: WorkbookFile,
-    warnings: Vec<XlsxImportWarning>,
-) {
-    if warnings.is_empty() {
-        return;
-    }
-    app.set_xlsx_import_warning_message(SharedString::from(xlsx_import_warning_message(&warnings)));
-    *state.pending_xlsx_import.borrow_mut() = Some(PendingXlsxImport {
-        path,
-        workbook,
-        warnings,
-    });
-    app.set_xlsx_import_warning_open(true);
-    app.set_status_left("Review the Excel import warning before replacing this workbook".into());
-}
-
-fn handle_loaded_workbook(
-    app: &SheetsApp,
-    state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
-    path: PathBuf,
-    loaded: LoadedWorkbook,
-) {
-    if !loaded.warnings.is_empty() {
-        stage_xlsx_import(app, state, path, loaded.workbook, loaded.warnings);
-        return;
-    }
-    let imported = !is_native_workbook(&path);
-    let tabs = loaded.workbook.sheets.len();
-    replace_opened_workbook(
-        app,
-        state,
-        path.clone(),
-        loaded.workbook.sheets,
-        loaded.workbook.active,
-    );
-    sync_menu_state(menu_service, app, state);
-    app.set_status_left(SharedString::from(if imported {
-        format!(
-            "Imported {}; use Save As for a Loom workbook",
-            path.display()
-        )
-    } else {
-        format!(
-            "Opened {} ({} {})",
-            path.display(),
-            tabs,
-            if tabs == 1 { "sheet" } else { "sheets" }
-        )
-    }));
-}
-
-fn continue_pending_xlsx_import(
-    app: &SheetsApp,
-    state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
-) {
-    let Some(pending) = state.pending_xlsx_import.borrow_mut().take() else {
-        app.set_xlsx_import_warning_open(false);
-        return;
-    };
-    app.set_xlsx_import_warning_open(false);
-    let tabs = pending.workbook.sheets.len();
-    let omitted = pending
-        .warnings
-        .iter()
-        .map(|warning| warning.label())
-        .collect::<Vec<_>>()
-        .join(", ");
-    replace_opened_workbook(
-        app,
-        state,
-        pending.path.clone(),
-        pending.workbook.sheets,
-        pending.workbook.active,
-    );
-    sync_menu_state(menu_service, app, state);
-    app.set_status_left(SharedString::from(format!(
-        "Imported {} ({} {}); dropped: {omitted}. Use Save As for a Loom workbook",
-        pending.path.display(),
-        tabs,
-        if tabs == 1 { "sheet" } else { "sheets" }
-    )));
-}
-
-fn cancel_pending_xlsx_import(app: &SheetsApp, state: &GuiState) {
-    state.pending_xlsx_import.borrow_mut().take();
-    app.set_xlsx_import_warning_open(false);
-    app.set_xlsx_import_warning_message(SharedString::new());
-    app.set_status_left("Import cancelled; workbook and recovery were left unchanged".into());
-}
-
-fn open_workbook_from_picker(
-    app: &SheetsApp,
-    state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
-) {
-    match state.dialogs.open_file(&open_request(state)) {
-        Ok(Some(path)) => match load_workbook_with_report(&path) {
-            Ok(loaded) => handle_loaded_workbook(app, state, menu_service, path, loaded),
-            Err(error) => app.set_status_left(SharedString::from(format!("Open failed: {error}"))),
-        },
-        Ok(None) => app.set_status_left("Open cancelled".into()),
-        Err(error) => {
-            app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
-        }
-    }
 }
 
 fn continue_pending_replacement(

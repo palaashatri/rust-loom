@@ -1,0 +1,96 @@
+import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component SaveChangesDialog inherits Rectangle {
+    in property <bool> open: false;
+    in property <string> document-name: "";
+    callback cancel;
+    callback discard;
+    callback save;
+
+    visible: root.open;
+
+    public function focus-dialog() {
+        dialog-focus.focus();
+    }
+
+    dialog-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.open;
+        visible: root.open;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            return reject;
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            background: Theme.palette().scrim;
+            accessible-role: groupbox;
+            accessible-label: "Save changes dialog";
+
+            TouchArea { clicked => { dialog-focus.focus(); } }
+
+            Rectangle {
+                x: (root.width - min(520px, root.width - 32px)) / 2;
+                y: (root.height - 208px) / 2;
+                width: min(520px, root.width - 32px);
+                height: 208px;
+                border-radius: Theme.tokens.metrics.radius-large;
+                border-width: 1px;
+                border-color: Theme.palette().border;
+                background: Theme.palette().surface;
+                drop-shadow-blur: 18px;
+                drop-shadow-offset-y: 6px;
+                drop-shadow-color: Theme.palette().shadow;
+
+                VerticalLayout {
+                    spacing: Theme.tokens.space.md;
+                    padding: Theme.tokens.space.xl;
+
+                    Text {
+                        text: "Save changes?";
+                        font-size: Theme.tokens.typography.heading;
+                        font-weight: 700;
+                        color: Theme.palette().ink;
+                    }
+                    Text {
+                        text: "Save changes to \"" + root.document-name + "\" before replacing it?";
+                        font-size: Theme.tokens.typography.body;
+                        color: Theme.palette().ink-secondary;
+                        wrap: word-wrap;
+                        vertical-stretch: 1;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        alignment: end;
+                        LoomButton {
+                            label: "Cancel";
+                            variant: "secondary";
+                            clicked => { root.cancel(); }
+                        }
+                        LoomButton {
+                            label: "Discard";
+                            variant: "danger";
+                            clicked => { root.discard(); }
+                        }
+                        LoomButton {
+                            label: "Save";
+                            variant: "primary";
+                            clicked => { root.save(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
