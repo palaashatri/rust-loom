@@ -8,6 +8,9 @@ use crate::SheetsApp;
 /// Dispatch canonical command IDs through the same Slint callbacks used by
 /// Sheets toolbar and palette controls.
 pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
+    if app.get_close_draining() {
+        return true;
+    }
     // Keep every route that shares the canonical dispatcher behind the modal
     // decision. The global native menu does not obey the Slint overlay hitbox.
     if app.get_xlsx_import_warning_open() {

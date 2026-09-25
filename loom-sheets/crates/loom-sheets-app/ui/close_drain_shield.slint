@@ -1,0 +1,17 @@
+export component CloseDrainShield inherits Rectangle {
+    in property <bool> active: false;
+    in property <length> window-width: 0px;
+    in property <length> window-height: 0px;
+    callback activated;
+
+    visible: root.active;
+    width: root.window-width;
+    height: root.window-height;
+    background: transparent;
+
+    changed active => {
+        if (root.active) { root.activated(); }
+    }
+
+    TouchArea { clicked => { } }
+}

@@ -24,6 +24,7 @@ fn attach_save_worker(app: &SheetsApp, state: &Rc<GuiState>) -> PathBuf {
     let model = worker
         .initialize_workbook(revision, active, sheets)
         .expect("initialize Save journey workbook");
+    state.last_queued_worker_revision.set(revision);
     state.install_workbook(model.sheets, model.active_sheet);
     state.mark_saved();
     let result = worker
@@ -86,11 +87,13 @@ fn deliver_save_completion(
     checkpoint_result: Option<Result<(), String>>,
     baseline: Option<(Vec<Sheet>, usize)>,
 ) {
+    let completion_sequence = operation.operation_id;
     state
         .save_operations
         .borrow()
         .sender()
         .send(crate::save_operations::SaveCompletion {
+            completion_sequence,
             operation,
             path,
             write_result,

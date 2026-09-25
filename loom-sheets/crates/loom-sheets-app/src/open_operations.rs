@@ -359,6 +359,10 @@ impl OpenOperations {
         self.coordinator.document_generation
     }
 
+    pub(crate) fn has_active_operation(&self) -> bool {
+        self.coordinator.active.is_some()
+    }
+
     pub(crate) fn is_current(&self, operation: OpenOperation) -> bool {
         self.coordinator.is_current(operation)
     }
@@ -493,6 +497,9 @@ pub(super) fn begin_new_workbook(
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) {
+    if crate::close_operations::reject_admission(app, state) {
+        return;
+    }
     state.open_operations.borrow_mut().document_replaced();
     let sheet = blank_sheet();
     *state.current.borrow_mut() = sheet.clone();
@@ -555,6 +562,9 @@ pub(super) fn open_workbook_from_picker(
     _menu_service: &Arc<loom_desktop::NativeMenuBar>,
     authorized_dirty_revision: Option<u64>,
 ) {
+    if crate::close_operations::reject_admission(app, state) {
+        return;
+    }
     match state.dialogs.open_file(&open_request(state)) {
         Ok(Some(path)) => {
             let open_text = format!("Opening {}…", path.display());
@@ -590,6 +600,9 @@ pub(super) fn start_startup_open(
     path: PathBuf,
     options: StartupOpenOptions,
 ) {
+    if crate::close_operations::reject_admission(app, state) {
+        return;
+    }
     let status = format!("Opening {}…", path.display());
     let result = state.open_operations.borrow_mut().start_startup_load(
         path,
@@ -753,6 +766,9 @@ fn request_workbook_replacement(
     state: &GuiState,
     replacement: PendingReplacement,
 ) -> bool {
+    if crate::close_operations::reject_admission(app, state) {
+        return true;
+    }
     if state.pending_replacement.get().is_some() {
         return true;
     }
@@ -769,15 +785,19 @@ fn request_workbook_replacement(
     state.advance_pending_replacement_token();
     app.set_save_changes_document(SharedString::from(workbook_display_name(state)));
     app.set_save_changes_open(true);
-    app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
+    let replacement_prompt = "Unsaved changes — choose Save, Discard, or Cancel";
+    let status = crate::worker_failure::status_message(state)
+        .map(|failure| format!("{failure} · {replacement_prompt}"))
+        .unwrap_or_else(|| replacement_prompt.to_string());
+    app.set_status_left(SharedString::from(status));
     true
 }
 
-pub(super) fn has_formula_draft(app: &SheetsApp) -> bool {
+pub(crate) fn has_formula_draft(app: &SheetsApp) -> bool {
     app.get_formula_edit_buffer() != app.get_selection_formula()
 }
 
-pub(super) fn save_changes_and_resume(
+pub(crate) fn save_changes_and_resume(
     app: &SheetsApp,
     state: &GuiState,
     _menu_service: &Arc<loom_desktop::NativeMenuBar>,
@@ -785,7 +805,7 @@ pub(super) fn save_changes_and_resume(
     super::save_current_sheet(app, state, false)
 }
 
-pub(super) fn discard_changes_and_resume(
+pub(crate) fn discard_changes_and_resume(
     app: &SheetsApp,
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
@@ -885,7 +905,7 @@ pub(super) fn cancel_pending_replacement(app: &SheetsApp, state: &GuiState) {
     }
 }
 
-pub(super) fn cancel_save_changes_dialog(app: &SheetsApp, state: &GuiState) {
+pub(crate) fn cancel_save_changes_dialog(app: &SheetsApp, state: &GuiState) {
     let save_in_progress = state.save_operations.borrow().is_active();
     cancel_pending_replacement(app, state);
     app.set_save_changes_open(false);

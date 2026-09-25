@@ -12,8 +12,12 @@ mod local_menu_tests;
 
 #[path = "main_tests/app_startup_tests.rs"]
 mod app_startup_tests;
+#[path = "main_tests/close_operation_journeys.rs"]
+mod close_operation_journeys;
 #[path = "main_tests/command_dispatch_tests.rs"]
 mod command_dispatch_tests;
+#[path = "main_tests/export_operation_journeys.rs"]
+mod export_operation_journeys;
 #[path = "main_tests/grid_interaction_tests.rs"]
 mod grid_interaction_tests;
 #[path = "main_tests/layout_tests.rs"]
@@ -75,6 +79,7 @@ fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> Path
     let model = worker
         .initialize_workbook(revision, active, sheets)
         .expect("initialize test workbook");
+    state.last_queued_worker_revision.set(revision);
     state.install_workbook(model.sheets, model.active_sheet);
     state.mark_saved();
     let result = worker

@@ -47,6 +47,42 @@ fn value<'a>(result: &'a WorkbookResult, address: &str) -> &'a Value {
         .expect("calculated cell value")
 }
 
+fn export_operation(
+    operation_id: u64,
+    generation: u64,
+    revision: u64,
+    format: crate::export_operations::ExportFormat,
+    path: PathBuf,
+) -> crate::export_operations::ExportOperation {
+    crate::export_operations::ExportOperation {
+        operation_id,
+        document_generation: generation,
+        target_revision: revision,
+        format,
+        path,
+        source_name: "Test workbook".into(),
+    }
+}
+
+fn start_worker_with_exports(
+    temporary: &ScratchDirectory,
+) -> (
+    WorkbookWorker,
+    std::sync::mpsc::Receiver<crate::export_operations::ExportCompletion>,
+) {
+    let (save_tx, _save_rx) = std::sync::mpsc::channel();
+    let (export_tx, export_rx) = std::sync::mpsc::channel();
+    let (worker, startup) = WorkbookWorker::start_at_with_file_completions(
+        temporary.path(),
+        "loom.sheets/1",
+        save_tx,
+        export_tx,
+    )
+    .expect("start worker with export completion channel");
+    assert!(startup.recovery_error.is_none());
+    (worker, export_rx)
+}
+
 #[test]
 fn pending_updates_keep_latest_value_per_cell_and_keep_other_cells() {
     let a1 = CellRef::parse("A1").unwrap();
@@ -174,6 +210,247 @@ fn worker_evaluates_replacement_then_a_cell_delta() {
     assert_eq!(second.revision, 2);
     assert_eq!(value(&second, "B1"), &Value::Number(7.0));
     assert!(second.recovery_error.is_none());
+}
+
+#[test]
+fn csv_export_barrier_exports_revision_n_before_later_edit_n_plus_one() {
+    let temporary = ScratchDirectory::new();
+    let (worker, exports) = start_worker_with_exports(&temporary);
+    let mut data = Sheet::new("Data");
+    data.set_str("A1", "100");
+    let mut report = Sheet::new("Report");
+    report.set_str("A1", "1");
+    report.set_str("B1", "=A1+1");
+    worker
+        .initialize_workbook(1, 1, vec![data, report])
+        .expect("initialize workbook");
+    worker.wait_for_result(1).expect("initial workbook result");
+
+    let target = temporary.path().join("revision-n.csv");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 2,
+            active_sheet: 1,
+            sheet: 1,
+            cell: CellRef::parse("A1").unwrap(),
+            raw: Some("2".into()),
+        })
+        .expect("queue revision N");
+    worker
+        .queue_export(export_operation(
+            1,
+            1,
+            2,
+            crate::export_operations::ExportFormat::Csv,
+            target.clone(),
+        ))
+        .expect("queue export barrier at revision N");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 3,
+            active_sheet: 1,
+            sheet: 1,
+            cell: CellRef::parse("A1").unwrap(),
+            raw: Some("3".into()),
+        })
+        .expect("queue revision N plus one");
+
+    let completion = exports
+        .recv_timeout(Duration::from_secs(5))
+        .expect("CSV export completion");
+    assert_eq!(completion.operation.operation_id, 1);
+    assert_eq!(
+        completion.result,
+        Ok(crate::export_operations::ExportOutputSummary::Csv {
+            sheet_name: "Report".into()
+        })
+    );
+    let exported = std::fs::read_to_string(&target).expect("read independently written CSV");
+    let exported_sheet = loom_sheets_core::from_csv("Export", &exported);
+    assert_eq!(exported_sheet.raw(CellRef::parse("A1").unwrap()), Some("2"));
+    assert_eq!(
+        exported_sheet.raw(CellRef::parse("B1").unwrap()),
+        Some("=A1+1")
+    );
+    let final_result = worker
+        .wait_for_result(3)
+        .expect("revision N plus one result");
+    assert_eq!(final_result.revision, 3);
+    assert_eq!(final_result.active_sheet, 1);
+    assert_eq!(value(&final_result, "B1"), &Value::Number(4.0));
+    eprintln!(
+        "CSV worker export fixture: 2 sheets, active Report sheet, 1 edited cell, worker duration {} us",
+        completion.worker_duration.as_micros()
+    );
+}
+
+#[test]
+fn export_completions_keep_fifo_order_across_success_and_atomic_write_failure() {
+    let temporary = ScratchDirectory::new();
+    let (worker, exports) = start_worker_with_exports(&temporary);
+    let mut sheet = Sheet::new("Data");
+    sheet.set_str("A1", "=A2+1");
+    worker
+        .initialize_workbook(1, 0, vec![sheet])
+        .expect("initialize workbook");
+    worker.wait_for_result(1).expect("initial workbook result");
+    let blocked_parent = temporary.path().join("parent-file");
+    std::fs::write(&blocked_parent, b"regular file").expect("create regular-file parent");
+
+    let first = temporary.path().join("first.csv");
+    let failed = blocked_parent.join("nested.csv");
+    let last = temporary.path().join("last.csv");
+    for (operation_id, path) in [(1, first.clone()), (2, failed.clone()), (3, last.clone())] {
+        worker
+            .queue_export(export_operation(
+                operation_id,
+                1,
+                1,
+                crate::export_operations::ExportFormat::Csv,
+                path,
+            ))
+            .expect("queue export");
+    }
+
+    let completions = (0..3)
+        .map(|_| {
+            exports
+                .recv_timeout(Duration::from_secs(5))
+                .expect("export completion")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        completions
+            .iter()
+            .map(|completion| completion.operation.operation_id)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert!(completions[0].result.is_ok());
+    assert!(completions[1]
+        .result
+        .as_ref()
+        .expect_err("regular-file parent must fail")
+        .contains("CSV write failed"));
+    assert!(completions[2].result.is_ok());
+    assert!(first.exists());
+    assert!(!failed.exists());
+    assert!(last.exists());
+}
+
+#[test]
+fn worker_completion_sequence_tracks_export_before_save() {
+    let temporary = ScratchDirectory::new();
+    let (save_tx, save_rx) = std::sync::mpsc::channel();
+    let (export_tx, export_rx) = std::sync::mpsc::channel();
+    let (worker, startup) = WorkbookWorker::start_at_with_file_completions(
+        temporary.path(),
+        "loom.sheets/1",
+        save_tx,
+        export_tx,
+    )
+    .expect("start worker with both completion channels");
+    assert!(startup.recovery_error.is_none());
+    worker
+        .initialize_workbook(1, 0, vec![Sheet::new("Data")])
+        .expect("initialize workbook");
+    worker.wait_for_result(1).expect("initial workbook result");
+
+    let blocked_parent = temporary.path().join("regular-file-parent");
+    fs::write(&blocked_parent, b"regular file").expect("create regular file parent");
+    let export_path = blocked_parent.join("export.csv");
+    let save_path = temporary.path().join("saved.loomtable");
+    worker
+        .queue_export(export_operation(
+            1,
+            1,
+            1,
+            crate::export_operations::ExportFormat::Csv,
+            export_path,
+        ))
+        .expect("queue Export first");
+    worker
+        .queue_save(1, 1, 1, None, save_path)
+        .expect("queue Save second");
+
+    let export = export_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("Export completion");
+    let save = save_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("Save completion");
+    assert_eq!(export.completion_sequence, 1);
+    assert_eq!(save.completion_sequence, 2);
+    assert!(export.result.is_err());
+    assert!(save.write_result.is_ok());
+}
+
+#[test]
+fn xlsx_export_uses_every_worker_owned_sheet() {
+    let temporary = ScratchDirectory::new();
+    let (worker, exports) = start_worker_with_exports(&temporary);
+    let mut data = Sheet::new("Data");
+    data.set_str("A1", "source");
+    let mut report = Sheet::new("Report");
+    report.set_str("A1", "=Data!A1");
+    worker
+        .initialize_workbook(1, 1, vec![data, report])
+        .expect("initialize workbook");
+    worker.wait_for_result(1).expect("initial workbook result");
+    let path = temporary.path().join("all-sheets.xlsx");
+    worker
+        .queue_export(export_operation(
+            1,
+            1,
+            1,
+            crate::export_operations::ExportFormat::Xlsx,
+            path.clone(),
+        ))
+        .expect("queue XLSX export");
+
+    let completion = exports
+        .recv_timeout(Duration::from_secs(5))
+        .expect("XLSX export completion");
+    assert!(completion.result.is_ok(), "{:?}", completion.result);
+    let bytes = std::fs::read(path).expect("read independently written XLSX");
+    let imported = loom_sheets_core::extract_xlsx_sheets(&bytes).expect("inspect XLSX sheets");
+    assert_eq!(imported.len(), 2);
+    assert_eq!(imported[0].name, "Data");
+    assert_eq!(imported[1].name, "Report");
+    assert_eq!(
+        imported[1].raw(CellRef::parse("A1").unwrap()),
+        Some("=Data!A1")
+    );
+}
+
+#[test]
+fn export_returns_an_error_when_its_target_revision_is_unavailable() {
+    let temporary = ScratchDirectory::new();
+    let (worker, exports) = start_worker_with_exports(&temporary);
+    worker
+        .initialize_workbook(1, 0, vec![Sheet::new("Data")])
+        .expect("initialize workbook");
+    worker.wait_for_result(1).expect("initial workbook result");
+    let target = temporary.path().join("unavailable.csv");
+    worker
+        .queue_export(export_operation(
+            1,
+            1,
+            2,
+            crate::export_operations::ExportFormat::Csv,
+            target.clone(),
+        ))
+        .expect("queue export for unavailable revision");
+
+    let completion = exports
+        .recv_timeout(Duration::from_secs(5))
+        .expect("unavailable export completion");
+    assert_eq!(completion.operation.target_revision, 2);
+    assert!(completion
+        .result
+        .expect_err("export must fail at a mismatched revision")
+        .contains("revision 2 is unavailable; worker is at revision 1"));
+    assert!(!target.exists());
 }
 
 #[test]

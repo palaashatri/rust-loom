@@ -3,7 +3,9 @@ import { Theme } from "theme.slint";
 
 export component SaveChangesDialog inherits Rectangle {
     in property <bool> open: false;
+    in property <bool> close-mode: false;
     in property <string> document-name: "";
+    in property <string> prompt: "";
     callback cancel;
     callback discard;
     callback save;
@@ -64,7 +66,8 @@ export component SaveChangesDialog inherits Rectangle {
                         color: Theme.palette().ink;
                     }
                     Text {
-                        text: "Save changes to \"" + root.document-name + "\" before replacing it?";
+                        text: root.prompt;
+                        accessible-label: root.prompt;
                         font-size: Theme.tokens.typography.body;
                         color: Theme.palette().ink-secondary;
                         wrap: word-wrap;
@@ -78,13 +81,13 @@ export component SaveChangesDialog inherits Rectangle {
                             variant: "secondary";
                             clicked => { root.cancel(); }
                         }
-                        LoomButton {
+                        if !root.close-mode : LoomButton {
                             label: "Discard";
                             variant: "danger";
                             clicked => { root.discard(); }
                         }
                         LoomButton {
-                            label: "Save";
+                            label: root.close-mode ? "Save and close" : "Save";
                             variant: "primary";
                             clicked => { root.save(); }
                         }

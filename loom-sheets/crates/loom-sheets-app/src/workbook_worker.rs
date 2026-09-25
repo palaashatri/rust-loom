@@ -4,12 +4,18 @@ use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 #[cfg(test)]
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 use loom_production::snapshot::SnapshotRecovery;
 use loom_sheets_core::workbook::evaluate_workbook;
 use loom_sheets_core::{workbook_to_json, CellRef, Sheet, Value};
 
+use crate::export_operations::{
+    ExportCompletion, ExportFormat, ExportOperation, ExportOutputSummary,
+};
+use crate::save_operations::SaveCompletion;
 use crate::workbook_io::workbook_package_bytes;
 
 #[derive(Debug, Clone)]
@@ -136,6 +142,12 @@ enum WorkerMessage {
     Initialize(InitializationRequest),
     Batch(PendingBatch),
     Checkpoint(CheckpointRequest),
+    Export(crate::export_operations::ExportOperation),
+    #[cfg(test)]
+    TestGate {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    },
 }
 
 #[derive(Default)]
@@ -158,8 +170,6 @@ enum RecoveryLocation {
     Directory(PathBuf),
 }
 
-use crate::save_operations::SaveCompletion;
-
 pub(crate) struct WorkbookWorker {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
@@ -170,11 +180,13 @@ impl WorkbookWorker {
         application_id: impl Into<String>,
         schema: impl Into<String>,
         save_completions: mpsc::Sender<SaveCompletion>,
+        export_completions: mpsc::Sender<ExportCompletion>,
     ) -> Result<(Self, WorkerStartup), String> {
         Self::spawn(
             RecoveryLocation::Application(application_id.into()),
             schema.into(),
             save_completions,
+            export_completions,
         )
     }
 
@@ -182,6 +194,7 @@ impl WorkbookWorker {
         location: RecoveryLocation,
         schema: String,
         save_completions: mpsc::Sender<SaveCompletion>,
+        export_completions: mpsc::Sender<ExportCompletion>,
     ) -> Result<(Self, WorkerStartup), String> {
         let shared = Arc::new(Shared::default());
         let worker_shared = Arc::clone(&shared);
@@ -206,6 +219,7 @@ impl WorkbookWorker {
                         &schema,
                         startup_error,
                         save_completions,
+                        export_completions,
                     );
                 }
             })
@@ -370,6 +384,59 @@ impl WorkbookWorker {
         Ok(())
     }
 
+    /// Queue an export barrier at its accepted worker revision.
+    pub(crate) fn queue_export(&self, operation: ExportOperation) -> Result<(), String> {
+        let mut mailbox = self
+            .shared
+            .mailbox
+            .lock()
+            .map_err(|_| "workbook worker mailbox is unavailable".to_string())?;
+        if mailbox.stopping {
+            return Err("workbook worker is stopping".to_string());
+        }
+        mailbox.queue.push_back(WorkerMessage::Export(operation));
+        drop(mailbox);
+        self.shared.work_available.notify_one();
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn enqueue_test_gate(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        self.shared
+            .mailbox
+            .lock()
+            .expect("workbook worker mailbox")
+            .queue
+            .push_back(WorkerMessage::TestGate {
+                entered: entered_tx,
+                release: release_rx,
+            });
+        self.shared.work_available.notify_one();
+        (entered_rx, release_tx)
+    }
+
+    #[cfg(test)]
+    pub(super) fn reject_submissions_for_test(&self) {
+        let mut mailbox = self.shared.mailbox.lock().expect("workbook worker mailbox");
+        mailbox.stopping = true;
+        drop(mailbox);
+        self.shared.work_available.notify_one();
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_exports_for_test(&self) -> usize {
+        self.shared
+            .mailbox
+            .lock()
+            .expect("workbook worker mailbox")
+            .queue
+            .iter()
+            .filter(|message| matches!(message, WorkerMessage::Export(_)))
+            .count()
+    }
+
     #[cfg(test)]
     pub(super) fn wait_for_result(&self, revision: u64) -> Option<WorkbookResult> {
         self.wait_for_result_timeout(revision, Duration::from_secs(5))
@@ -418,10 +485,27 @@ impl WorkbookWorker {
         schema: impl Into<String>,
         save_completions: mpsc::Sender<SaveCompletion>,
     ) -> Result<(Self, WorkerStartup), String> {
+        let (export_completions, _receiver) = mpsc::channel();
+        Self::start_at_with_file_completions(
+            directory,
+            schema,
+            save_completions,
+            export_completions,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn start_at_with_file_completions(
+        directory: PathBuf,
+        schema: impl Into<String>,
+        save_completions: mpsc::Sender<SaveCompletion>,
+        export_completions: mpsc::Sender<ExportCompletion>,
+    ) -> Result<(Self, WorkerStartup), String> {
         Self::spawn(
             RecoveryLocation::Directory(directory),
             schema.into(),
             save_completions,
+            export_completions,
         )
     }
 }
@@ -466,6 +550,12 @@ enum WorkerAction {
     Initialize(InitializationRequest),
     Batch(PendingBatch),
     Checkpoint(CheckpointRequest),
+    Export(ExportOperation),
+    #[cfg(test)]
+    TestGate {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    },
     Stop,
 }
 
@@ -477,6 +567,11 @@ fn next_action(shared: &Shared) -> WorkerAction {
                 WorkerMessage::Initialize(req) => WorkerAction::Initialize(req),
                 WorkerMessage::Batch(batch) => WorkerAction::Batch(batch),
                 WorkerMessage::Checkpoint(req) => WorkerAction::Checkpoint(req),
+                WorkerMessage::Export(operation) => WorkerAction::Export(operation),
+                #[cfg(test)]
+                WorkerMessage::TestGate { entered, release } => {
+                    WorkerAction::TestGate { entered, release }
+                }
             };
         }
         if mailbox.stopping {
@@ -489,17 +584,26 @@ fn next_action(shared: &Shared) -> WorkerAction {
     }
 }
 
+fn next_completion_sequence(sequence: &mut u64) -> u64 {
+    *sequence = sequence
+        .checked_add(1)
+        .expect("Sheets file completion sequence exhausted");
+    *sequence
+}
+
 fn run_worker(
     shared: Arc<Shared>,
     recovery: &mut Option<SnapshotRecovery>,
     schema: &str,
     startup_error: Option<String>,
     save_completions: mpsc::Sender<crate::save_operations::SaveCompletion>,
+    export_completions: mpsc::Sender<crate::export_operations::ExportCompletion>,
 ) {
     let mut sheets = Vec::new();
     let mut active_sheet = 0;
     let mut last_revision = 0;
     let mut baseline: Option<(Vec<Sheet>, usize)> = None;
+    let mut completion_sequence = 0;
     loop {
         match next_action(&shared) {
             WorkerAction::Initialize(initialization) => {
@@ -686,6 +790,7 @@ fn run_worker(
             WorkerAction::Checkpoint(checkpoint) => {
                 if last_revision != checkpoint.revision {
                     let _ = save_completions.send(crate::save_operations::SaveCompletion {
+                        completion_sequence: next_completion_sequence(&mut completion_sequence),
                         operation: crate::save_operations::SaveOperation {
                             operation_id: checkpoint.operation_id,
                             document_generation: checkpoint.document_generation,
@@ -727,6 +832,7 @@ fn run_worker(
                 };
 
                 let _ = save_completions.send(crate::save_operations::SaveCompletion {
+                    completion_sequence: next_completion_sequence(&mut completion_sequence),
                     operation: crate::save_operations::SaveOperation {
                         operation_id: checkpoint.operation_id,
                         document_generation: checkpoint.document_generation,
@@ -739,7 +845,62 @@ fn run_worker(
                     baseline: saved_baseline,
                 });
             }
+            WorkerAction::Export(operation) => {
+                #[cfg(test)]
+                let started = Instant::now();
+                let result = export_at_revision(&sheets, active_sheet, last_revision, &operation);
+                #[cfg(test)]
+                let worker_duration = started.elapsed();
+                let _ = export_completions.send(ExportCompletion {
+                    completion_sequence: next_completion_sequence(&mut completion_sequence),
+                    operation,
+                    result,
+                    #[cfg(test)]
+                    worker_duration,
+                });
+            }
+            #[cfg(test)]
+            WorkerAction::TestGate { entered, release } => {
+                let _ = entered.send(());
+                let _ = release.recv();
+            }
             WorkerAction::Stop => return,
+        }
+    }
+}
+
+fn export_at_revision(
+    sheets: &[Sheet],
+    active_sheet: usize,
+    last_revision: u64,
+    operation: &ExportOperation,
+) -> Result<ExportOutputSummary, String> {
+    if last_revision != operation.target_revision {
+        return Err(format!(
+            "revision {} is unavailable; worker is at revision {last_revision}",
+            operation.target_revision
+        ));
+    }
+    match operation.format {
+        ExportFormat::Csv => {
+            let sheet = sheets
+                .get(active_sheet)
+                .ok_or_else(|| format!("active sheet {} is unavailable", active_sheet + 1))?;
+            let csv = loom_sheets_core::to_csv_with_formulas(sheet);
+            loom_storage::atomic_write(&operation.path, csv.as_bytes())
+                .map_err(|error| format!("CSV write failed: {error}"))?;
+            Ok(ExportOutputSummary::Csv {
+                sheet_name: sheet.name.clone(),
+            })
+        }
+        ExportFormat::Xlsx => {
+            let bytes = loom_sheets_core::export_xlsx_sheets(sheets)
+                .map_err(|error| format!("XLSX generation failed: {error}"))?;
+            loom_storage::atomic_write(&operation.path, &bytes)
+                .map_err(|error| format!("XLSX write failed: {error}"))?;
+            Ok(ExportOutputSummary::Xlsx {
+                sheet_count: sheets.len(),
+            })
         }
     }
 }

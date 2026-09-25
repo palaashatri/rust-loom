@@ -23,6 +23,9 @@ pub(crate) fn register_cell_edit_action(
     let menu_service = menu_service.clone();
     app.on_commit_selected_cell(move |draft| {
         if let Some(app) = app_ref.upgrade() {
+            if crate::close_operations::reject_admission(&app, &state) {
+                return;
+            }
             if let Some(cell) = CellRef::parse(app.get_selected_cell().as_str()) {
                 let committed = {
                     let mut current = state.current.borrow_mut();
@@ -53,11 +56,13 @@ pub(crate) fn register_cell_edit_action(
                         sync_menu_state(&menu_service, &app, &state);
                         match submitted {
                             Ok(()) => {
+                                state.last_queued_worker_revision.set(revision);
                                 state.pending_cell_commit.set(Some((revision, cell)));
                                 app.set_formula_feedback("Calculating…".into());
                                 app.set_status_left("Calculating…".into());
                             }
                             Err(error) => {
+                                state.mark_worker_submission_failure(revision, error.clone());
                                 state.pending_cell_commit.set(None);
                                 let feedback = format!("Calculation unavailable: {error}");
                                 app.set_formula_feedback(SharedString::from(feedback.clone()));

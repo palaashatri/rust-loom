@@ -1,0 +1,11 @@
+import { LoomStatusText } from "foundation.slint";
+
+export component SheetsOperationStatusText inherits LoomStatusText {
+    in property <string> message: "";
+
+    text: root.message != "" ? root.message : "Ready";
+    strong: true;
+    accessible-live-region: AccessibleLiveness.polite;
+    accessible-label: root.message != "" ? root.message : "Ready";
+    horizontal-stretch: 1;
+}

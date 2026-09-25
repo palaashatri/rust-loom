@@ -67,6 +67,7 @@ impl SaveOperationCoordinator {
 }
 
 pub(crate) struct SaveCompletion {
+    pub(crate) completion_sequence: u64,
     pub(crate) operation: SaveOperation,
     pub(crate) path: PathBuf,
     pub(crate) write_result: Result<(), String>,
@@ -137,6 +138,7 @@ impl SaveOperations {
     }
 }
 
+#[cfg(test)]
 pub(super) fn process_completions(
     app: &SheetsApp,
     state: &GuiState,
@@ -144,20 +146,26 @@ pub(super) fn process_completions(
 ) -> usize {
     let completions = state.save_operations.borrow().drain();
     let count = completions.len();
-    let current_generation = state.open_operations.borrow().document_generation();
+    let mut outcomes = Vec::new();
     for completion in completions {
-        handle_completion(app, state, menu_service, completion, current_generation);
+        let current_generation = state.open_operations.borrow().document_generation();
+        if let Some(outcome) =
+            handle_completion(app, state, menu_service, completion, current_generation)
+        {
+            outcomes.push(outcome);
+        }
     }
+    crate::file_operation_completions::publish_status(app, &outcomes);
     count
 }
 
-fn handle_completion(
+pub(super) fn handle_completion(
     app: &SheetsApp,
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
     completion: SaveCompletion,
     current_generation: u64,
-) {
+) -> Option<crate::file_operation_completions::FileOperationStatus> {
     if completion.write_result.is_ok() {
         state
             .open_operations
@@ -173,7 +181,7 @@ fn handle_completion(
         .borrow_mut()
         .clear(completion.operation);
     if !is_current {
-        return;
+        return None;
     }
 
     let SaveCompletion {
@@ -182,6 +190,7 @@ fn handle_completion(
         write_result,
         checkpoint_result,
         baseline,
+        ..
     } = completion;
 
     match write_result {
@@ -206,6 +215,7 @@ fn handle_completion(
                 crate::sync_window_title(app, state);
             }
 
+            let status_succeeded = matches!(&checkpoint_result, Some(Ok(())));
             let save_status = match checkpoint_result {
                 Some(Ok(())) => format!("Saved {}", path.display()),
                 Some(Err(error)) => format!(
@@ -234,15 +244,21 @@ fn handle_completion(
             } else {
                 save_status
             };
-            app.set_status_left(slint::SharedString::from(status));
-
             if pending_replacement_is_current && !unsaved_changes_remain {
                 app.set_save_changes_open(false);
                 continue_pending_replacement_after_dialog(app, state, menu_service);
             }
+            Some(if status_succeeded {
+                crate::file_operation_completions::FileOperationStatus::Success(status)
+            } else {
+                crate::file_operation_completions::FileOperationStatus::Failure(status)
+            })
         }
-        Err(error) => {
-            app.set_status_left(slint::SharedString::from(format!("Save failed: {error}")));
-        }
+        Err(error) => Some(
+            crate::file_operation_completions::FileOperationStatus::Failure(format!(
+                "Save failed: {error} at {}",
+                path.display()
+            )),
+        ),
     }
 }

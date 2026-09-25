@@ -1,6 +1,8 @@
 import { TemplateChooserModal } from "template_chooser.slint";
 import { XlsxImportWarningDialog } from "xlsx_import_warning.slint";
 import { SaveChangesDialog } from "save_changes_dialog.slint";
+import { CloseDrainShield } from "close_drain_shield.slint";
+import { SheetsOperationStatusText } from "operation_status_text.slint";
 import {
     LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
 } from "foundation.slint";
@@ -167,6 +169,11 @@ export component SheetsApp inherits Window {
     in property <float> template-text-scale: 1.0;
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
+    in-out property <bool> save-changes-close-mode: false;
+    out property <string> save-changes-prompt: root.save-changes-close-mode
+        ? "Save changes to \"" + root.save-changes-document + "\" before closing?"
+        : "Save changes to \"" + root.save-changes-document + "\" before replacing it?";
+    in-out property <bool> close-draining: false;
     in-out property <bool> xlsx-import-warning-open: false;
     in-out property <string> xlsx-import-warning-message: "";
 
@@ -339,6 +346,7 @@ export component SheetsApp inherits Window {
 
     app-focus := FocusScope {
         key-pressed(event) => {
+            if (root.close-draining && !root.save-changes-open) { return accept; }
             if (root.xlsx-import-warning-open) { return reject; }
             if (root.local-menu-visible && event.modifiers.alt) {
                 if (event.text == "f" || event.text == "F") { root.local-menu-open-index = 0; return accept; }
@@ -706,12 +714,7 @@ export component SheetsApp inherits Window {
                 }
             }
             LoomStatusBar {
-                LoomStatusText {
-                    text: root.status-left != "" ? root.status-left : "Ready";
-                    strong: true;
-                    accessible-live-region: AccessibleLiveness.polite;
-                    horizontal-stretch: 1;
-                }
+                SheetsOperationStatusText { message: root.status-left; }
                 LoomStatusText {
                     text: root.status-summary;
                     horizontal-alignment: right;
@@ -803,6 +806,8 @@ export component SheetsApp inherits Window {
         height: root.height;
         open: root.save-changes-open;
         document-name: root.save-changes-document;
+        close-mode: root.save-changes-close-mode;
+        prompt: root.save-changes-prompt;
         cancel => { root.save-changes-cancel(); }
         discard => { root.save-changes-discard(); }
         save => { root.save-changes-save(); }
@@ -854,5 +859,12 @@ export component SheetsApp inherits Window {
             root.palette-open = false;
             root.palette-close();
         }
+    }
+
+    close-drain-shield := CloseDrainShield {
+        active: root.close-draining && !root.save-changes-open;
+        window-width: root.width;
+        window-height: root.height;
+        activated => { app-focus.focus(); }
     }
 }

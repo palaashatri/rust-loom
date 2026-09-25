@@ -24,9 +24,8 @@ use loom_sheets_core::workbook::evaluate_workbook;
 #[cfg(test)]
 use loom_sheets_core::CellEditTransaction;
 use loom_sheets_core::{
-    evaluate, to_csv_with_formulas, workbook_to_json, CellAlignment, CellRange, CellRef,
-    GridSelection, NumberFormat, RangeEdit, Sheet, SheetDimensions, SheetViewport, Value,
-    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+    evaluate, workbook_to_json, CellAlignment, CellRange, CellRef, GridSelection, NumberFormat,
+    RangeEdit, Sheet, SheetDimensions, SheetViewport, Value, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
 };
 use loom_test_support::capture::{set_platform, snapshot_component};
 use slint::{
@@ -72,13 +71,17 @@ use cli::{parse_args, Args};
 mod headless;
 use headless::render_headless;
 
+mod close_operations;
 mod evaluation_cache;
+mod export_operations;
+mod file_operation_completions;
 mod open_operations;
 mod save_operations;
+mod worker_failure;
 use open_operations::{
-    begin_new_workbook, discard_changes_and_resume, open_workbook_from_picker,
-    request_replacement_after_dialog, save_changes_and_resume, start_file_timer_after_show,
-    start_startup_open, OpenOperations, PendingReplacement, StartupOpenOptions,
+    begin_new_workbook, open_workbook_from_picker, request_replacement_after_dialog,
+    start_file_timer_after_show, start_startup_open, OpenOperations, PendingReplacement,
+    StartupOpenOptions,
 };
 mod workbook_worker;
 
@@ -716,8 +719,11 @@ pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
         app.set_status_left("Calculating…".into());
     }
     if let Err(error) = record_workbook_snapshot(state) {
+        app.set_status_left(SharedString::from(format!(
+            "Calculation unavailable; workbook update was not queued: {error}"
+        )));
         app.set_status_right(SharedString::from(format!(
-            "Recovery checkpoint unavailable: {error}"
+            "Workbook update unavailable: {error}"
         )));
     }
 }
@@ -727,6 +733,9 @@ pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
 /// the saved active index by `is_dirty`, and the recovery checkpoint still
 /// records the new workbook context.
 pub(crate) fn apply_sheet_view_change(app: &SheetsApp, state: &GuiState) {
+    if close_operations::reject_admission(app, state) {
+        return;
+    }
     sync_window_title(app, state);
     let active = *state.active_sheet_index.borrow();
     let worker_running = {
@@ -734,11 +743,15 @@ pub(crate) fn apply_sheet_view_change(app: &SheetsApp, state: &GuiState) {
         if let Some(worker) = worker.as_ref() {
             let revision = state.next_worker_revision();
             if let Err(error) = worker.submit_active(revision, active) {
+                state.mark_worker_submission_failure(revision, error.clone());
                 app.set_status_right(SharedString::from(format!(
                     "Workbook calculation unavailable: {error}"
                 )));
+                false
+            } else {
+                state.last_queued_worker_revision.set(revision);
+                true
             }
-            true
         } else {
             false
         }
@@ -746,7 +759,11 @@ pub(crate) fn apply_sheet_view_change(app: &SheetsApp, state: &GuiState) {
     let vals = values_for_projection(state);
     let sheet = state.current.borrow();
     project_sheet_inner(app, &sheet, &vals, true);
-    if worker_running {
+    if let Some(message) = state.unaccepted_worker_revision_message() {
+        app.set_status_left(SharedString::from(format!(
+            "Calculation unavailable: {message}"
+        )));
+    } else if worker_running {
         app.set_status_left("Calculating…".into());
     }
 }
@@ -781,13 +798,24 @@ pub(crate) fn project_sheet_without_reveal(app: &SheetsApp, sheet: &Sheet) {
 /// Send the full workbook to the worker after a non-cell mutation. The worker
 /// evaluates it and records a recovery snapshot away from the UI thread.
 pub(crate) fn record_workbook_snapshot(state: &GuiState) -> Result<(), String> {
+    if close_operations::blocks_admission(state) {
+        return Err("workbook edits are paused while the window is closing".into());
+    }
     let worker = state.workbook_worker.borrow();
     let Some(worker) = worker.as_ref() else {
         return Ok(());
     };
     let (sheets, active) = workbook_sheets(state);
+    let document_generation = state.open_operations.borrow().document_generation();
     let revision = state.next_worker_revision();
-    worker.submit_replacement(revision, active, sheets)
+    if let Err(error) = worker.submit_replacement(revision, active, sheets) {
+        state.mark_worker_submission_failure(revision, error.clone());
+        return Err(error);
+    }
+    state.last_queued_worker_revision.set(revision);
+    worker_failure::mark_full_resync_accepted(state, document_generation, revision);
+    state.clear_worker_submission_failure();
+    Ok(())
 }
 
 /// All tabs with the live current sheet synced into its slot, plus the
@@ -1727,6 +1755,21 @@ pub(crate) struct GuiState {
     evaluation_cache: RefCell<evaluation_cache::EvaluationCache>,
     pub(crate) workbook_worker: RefCell<Option<workbook_worker::WorkbookWorker>>,
     pub(crate) worker_revision: Cell<u64>,
+    /// Highest workbook revision whose worker submission was accepted.
+    pub(crate) last_queued_worker_revision: Cell<u64>,
+    /// A failed worker submission leaves the UI model ahead of canonical worker
+    /// state. Only a later accepted full replacement can clear this marker.
+    worker_submission_failure: RefCell<Option<(u64, String)>>,
+    /// An accepted worker input can still fail to apply. Preserve that failure
+    /// until an accepted full replacement at or beyond its revision completes.
+    pub(crate) worker_input_failure: RefCell<Option<worker_failure::WorkerInputFailure>>,
+    /// Latest full replacement accepted by the worker, scoped to its document.
+    pub(crate) worker_full_resync_revision: Cell<Option<(u64, u64)>>,
+    /// Highest worker result removed from the result mailbox, whether or not it
+    /// was still current enough to project into the UI.
+    pub(crate) applied_worker_result_revision: Cell<u64>,
+    pub(crate) close_state: Cell<close_operations::CloseState>,
+    pub(crate) deferred_close_recovery_error: RefCell<Option<(u64, String)>>,
     pub(crate) worker_saved_baseline_generation: Cell<Option<u64>>,
     pub(crate) worker_saved_baseline_revision: Cell<Option<u64>>,
     pub(crate) pending_cell_commit: Cell<Option<(u64, CellRef)>>,
@@ -1742,6 +1785,9 @@ pub(crate) struct GuiState {
     pub(crate) pending_replacement_token: Cell<u64>,
     pub(crate) open_operations: RefCell<OpenOperations>,
     pub(crate) save_operations: RefCell<save_operations::SaveOperations>,
+    pub(crate) export_operations: RefCell<export_operations::ExportOperations>,
+    pub(crate) file_operation_completions:
+        RefCell<file_operation_completions::FileOperationCompletions>,
     pending_xlsx_import: RefCell<Option<PendingXlsxImport>>,
     pub(crate) undo_stack: RefCell<Vec<SheetTransaction>>,
     pub(crate) redo_stack: RefCell<Vec<SheetTransaction>>,
@@ -1772,6 +1818,13 @@ impl GuiState {
             evaluation_cache: RefCell::new(evaluation_cache::EvaluationCache::default()),
             workbook_worker: RefCell::new(None),
             worker_revision: Cell::new(0),
+            last_queued_worker_revision: Cell::new(0),
+            worker_submission_failure: RefCell::new(None),
+            worker_input_failure: RefCell::new(None),
+            worker_full_resync_revision: Cell::new(None),
+            applied_worker_result_revision: Cell::new(0),
+            close_state: Cell::new(close_operations::CloseState::Idle),
+            deferred_close_recovery_error: RefCell::new(None),
             worker_saved_baseline_generation: Cell::new(None),
             worker_saved_baseline_revision: Cell::new(None),
             pending_cell_commit: Cell::new(None),
@@ -1782,6 +1835,10 @@ impl GuiState {
             pending_replacement_token: Cell::new(0),
             open_operations: RefCell::new(OpenOperations::default()),
             save_operations: RefCell::new(save_operations::SaveOperations::default()),
+            export_operations: RefCell::new(export_operations::ExportOperations::default()),
+            file_operation_completions: RefCell::new(
+                file_operation_completions::FileOperationCompletions::default(),
+            ),
             pending_xlsx_import: RefCell::new(None),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
@@ -1847,6 +1904,34 @@ impl GuiState {
         revision
     }
 
+    pub(crate) fn mark_worker_submission_failure(&self, revision: u64, error: String) {
+        *self.worker_submission_failure.borrow_mut() = Some((revision, error));
+    }
+
+    pub(crate) fn clear_worker_submission_failure(&self) {
+        self.worker_submission_failure.borrow_mut().take();
+    }
+
+    pub(crate) fn unaccepted_worker_revision_message(&self) -> Option<String> {
+        let mut messages = Vec::new();
+        if let Some((revision, error)) = self.worker_submission_failure.borrow().clone() {
+            messages.push(format!(
+                "workbook revision {revision} was not accepted by the calculation worker: {error}"
+            ));
+        }
+        if let Some(message) = worker_failure::admission_message(self) {
+            messages.push(message);
+        }
+        let allocated = self.worker_revision.get();
+        let accepted = self.last_queued_worker_revision.get();
+        if allocated > accepted {
+            messages.push(format!(
+                "workbook revision {allocated} was not accepted by the calculation worker"
+            ));
+        }
+        (!messages.is_empty()).then(|| messages.join("; "))
+    }
+
     /// Recheck full content after undo/redo, where the edit marker alone would
     /// stay set even after returning exactly to the last saved workbook.
     pub(crate) fn recompute_dirty_from_saved(&self) {
@@ -1860,6 +1945,9 @@ impl GuiState {
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
+        if worker_failure::has_current_failure(self) {
+            return true;
+        }
         let saved = self.last_saved.borrow();
         let Some((_, saved_active)) = saved.as_ref() else {
             return true;
@@ -1918,7 +2006,36 @@ fn export_xlsx_request(state: &GuiState) -> SaveFileRequest {
     }
 }
 
-fn workbook_display_name(state: &GuiState) -> String {
+pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
+    {
+        let state = Rc::clone(state);
+        let app_ref = app.as_weak();
+        app.on_export_csv(move || {
+            if let Some(app) = app_ref.upgrade() {
+                export_operations::export_with_picker(
+                    &app,
+                    &state,
+                    export_operations::ExportFormat::Csv,
+                );
+            }
+        });
+    }
+    {
+        let state = Rc::clone(state);
+        let app_ref = app.as_weak();
+        app.on_export_xlsx(move || {
+            if let Some(app) = app_ref.upgrade() {
+                export_operations::export_with_picker(
+                    &app,
+                    &state,
+                    export_operations::ExportFormat::Xlsx,
+                );
+            }
+        });
+    }
+}
+
+pub(crate) fn workbook_display_name(state: &GuiState) -> String {
     state
         .save_path
         .borrow()
@@ -1966,9 +2083,24 @@ pub(crate) fn apply_workbook_worker_result(
     state: &GuiState,
     result: workbook_worker::WorkbookResult,
 ) -> bool {
+    state.applied_worker_result_revision.set(
+        state
+            .applied_worker_result_revision
+            .get()
+            .max(result.revision),
+    );
     let active = *state.active_sheet_index.borrow();
     if result.revision != state.worker_revision.get() || result.active_sheet != active {
         return false;
+    }
+    let generation = state.open_operations.borrow().document_generation();
+    let previous_input_failure_status = worker_failure::status_message(state);
+    let mut input_failure_resolved = false;
+    if let Some(error) = result.input_error.as_ref() {
+        worker_failure::record_input_failure(state, generation, result.revision, error.clone());
+    } else {
+        input_failure_resolved =
+            worker_failure::clear_after_successful_resync(state, generation, result.revision);
     }
     let pending_cell = state.pending_cell_commit.get();
     let cell_feedback = pending_cell.and_then(|(revision, cell)| {
@@ -1999,12 +2131,11 @@ pub(crate) fn apply_workbook_worker_result(
             "Recovery checkpoint unavailable: {error}"
         )));
     }
-    if let Some(error) = result.input_error {
+    if let Some(error) = result.input_error.as_ref() {
         app.set_status_right(SharedString::from(format!(
             "Workbook update failed: {error}"
         )));
     }
-    let generation = state.open_operations.borrow().document_generation();
     if state.worker_saved_baseline_generation.get() == Some(generation)
         && state
             .worker_saved_baseline_revision
@@ -2013,12 +2144,30 @@ pub(crate) fn apply_workbook_worker_result(
     {
         state.dirty_content.set(result.dirty);
     }
+    if worker_failure::has_current_failure(state) {
+        state.dirty_content.set(true);
+    }
     if let Some(feedback) = cell_feedback {
         app.set_formula_feedback(SharedString::from(feedback));
     } else if superseded_pending_cell && app.get_formula_feedback().as_str() == "Calculating…" {
         app.set_formula_feedback("".into());
     }
-    if app.get_status_left().as_str() == "Calculating…" {
+    if let Some(failure) = worker_failure::status_message(state) {
+        app.set_status_left(SharedString::from(failure));
+    } else if input_failure_resolved {
+        let status = app.get_status_left().to_string();
+        if let Some(previous_failure) =
+            previous_input_failure_status.filter(|failure| status.contains(failure))
+        {
+            let remaining = status.replace(&previous_failure, "");
+            let remaining = remaining.trim().trim_matches('·').trim();
+            app.set_status_left(if remaining.is_empty() {
+                "Ready".into()
+            } else {
+                SharedString::from(remaining)
+            });
+        }
+    } else if app.get_status_left().as_str() == "Calculating…" {
         app.set_status_left("Ready".into());
     }
     true
@@ -2038,16 +2187,7 @@ fn start_workbook_worker_timer(
         Duration::from_millis(16),
         move || {
             if let Some(app) = app_ref.upgrade() {
-                save_operations::process_completions(&app, &state, &menu_service);
-            }
-            let result = state
-                .workbook_worker
-                .borrow()
-                .as_ref()
-                .and_then(workbook_worker::WorkbookWorker::take_latest_result);
-            let Some(result) = result else { return };
-            if let Some(app) = app_ref.upgrade() {
-                apply_workbook_worker_result(&app, &state, result);
+                close_operations::process_worker_tick(&app, &state, &menu_service);
             }
         },
     );
@@ -2066,17 +2206,26 @@ fn sync_current_to_tabs(state: &GuiState) {
     sheets[active] = current;
 }
 
-fn save_current_sheet(
+pub(crate) fn save_current_sheet(
     app: &SheetsApp,
     state: &GuiState,
     force_picker: bool,
 ) -> Result<bool, String> {
+    if close_operations::reject_admission(app, state) {
+        return Err("workbook file operations are paused while the window is closing".into());
+    }
     if state.save_operations.borrow().is_active() {
         return Err("a Save operation is already in progress".into());
+    }
+    if let Some(message) = state.unaccepted_worker_revision_message() {
+        return Err(format!("Cannot save because {message}"));
     }
     let draft = app.get_formula_edit_buffer();
     if draft != app.get_selection_formula() {
         app.invoke_commit_selected_cell(draft);
+    }
+    if let Some(message) = state.unaccepted_worker_revision_message() {
+        return Err(format!("Cannot save because {message}"));
     }
 
     let current_path = (!force_picker)
@@ -2094,7 +2243,7 @@ fn save_current_sheet(
         return Ok(false);
     };
     let document_generation = state.open_operations.borrow().document_generation();
-    let target_revision = state.worker_revision.get();
+    let target_revision = state.last_queued_worker_revision.get();
     let pending_replacement_token = (app.get_save_changes_open()
         && state.pending_replacement.get().is_some())
     .then(|| state.pending_replacement_token.get());
@@ -2209,10 +2358,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     let save_operations = save_operations::SaveOperations::default();
     let save_completion_sender = save_operations.sender();
+    let export_operations = export_operations::ExportOperations::default();
+    let export_completion_sender = export_operations.sender();
     let (worker, startup) = workbook_worker::WorkbookWorker::start(
         "org.loom.sheets",
         "loom.sheets/1",
         save_completion_sender,
+        export_completion_sender,
     )?;
     let startup_recovery_error = startup.recovery_error.clone();
     let fallback = startup
@@ -2266,6 +2418,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         xlsx_filter,
     ));
     *state.save_operations.borrow_mut() = save_operations;
+    *state.export_operations.borrow_mut() = export_operations;
     let initial_revision = state.next_worker_revision();
     let initial_model = if startup_open.is_some() {
         worker.initialize_workbook_without_recovery(
@@ -2276,6 +2429,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     } else {
         worker.initialize_workbook(initial_revision, initial.active, initial.sheets)?
     };
+    state.last_queued_worker_revision.set(initial_revision);
+    let initial_generation = state.open_operations.borrow().document_generation();
+    worker_failure::mark_full_resync_accepted(&state, initial_generation, initial_revision);
     state.install_workbook(initial_model.sheets, initial_model.active_sheet);
     state.mark_saved();
     *state.workbook_worker.borrow_mut() = Some(worker);
@@ -2424,102 +2580,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }
         });
     }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_save_changes_save(move || {
-            if let Some(app) = app_ref.upgrade() {
-                if let Err(error) = save_changes_and_resume(&app, &state, &menu_service) {
-                    app.set_status_left(SharedString::from(save_error_feedback(
-                        "Save failed",
-                        &error,
-                    )));
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        let menu_service = menu_service.clone();
-        app.on_save_changes_discard(move || {
-            if let Some(app) = app_ref.upgrade() {
-                discard_changes_and_resume(&app, &state, &menu_service);
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_save_changes_cancel(move || {
-            if let Some(app) = app_ref.upgrade() {
-                open_operations::cancel_save_changes_dialog(&app, &state);
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_export_csv(move || {
-            if let Some(app) = app_ref.upgrade() {
-                match state.dialogs.save_file(&export_request(&state)) {
-                    Ok(Some(path)) => {
-                        let sheet = state.current.borrow().clone();
-                        let csv = to_csv_with_formulas(&sheet);
-                        let name = sheet.name.clone();
-                        match loom_storage::atomic_write(&path, csv.as_bytes()) {
-                            Ok(()) => app.set_status_left(SharedString::from(format!(
-                                "Exported {name} to {} (formulas preserved)",
-                                path.display()
-                            ))),
-                            Err(error) => app.set_status_left(SharedString::from(format!(
-                                "Export failed: {error}"
-                            ))),
-                        }
-                    }
-                    Ok(None) => app.set_status_left("Export cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Export dialog failed: {error}"
-                    ))),
-                }
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let app_ref = app.as_weak();
-        app.on_export_xlsx(move || {
-            if let Some(app) = app_ref.upgrade() {
-                match state.dialogs.save_file(&export_xlsx_request(&state)) {
-                    Ok(Some(path)) => {
-                        let (siblings, _) = workbook_sheets(&state);
-                        let tabs = siblings.len();
-                        match loom_sheets_core::export_xlsx_sheets(&siblings) {
-                            Ok(bytes) => match loom_storage::atomic_write(&path, &bytes) {
-                                Ok(()) => app.set_status_left(SharedString::from(format!(
-                                    "Exported {} {} to {} (formulas kept)",
-                                    tabs,
-                                    if tabs == 1 { "sheet" } else { "sheets" },
-                                    path.display()
-                                ))),
-                                Err(error) => app.set_status_left(SharedString::from(format!(
-                                    "Export failed: {error}"
-                                ))),
-                            },
-                            Err(error) => app.set_status_left(SharedString::from(format!(
-                                "Excel generation failed: {error}"
-                            ))),
-                        }
-                    }
-                    Ok(None) => app.set_status_left("Export cancelled".into()),
-                    Err(error) => app.set_status_left(SharedString::from(format!(
-                        "Export dialog failed: {error}"
-                    ))),
-                }
-            }
-        });
-    }
+    close_operations::wire_save_changes_callbacks(&app, &state, &menu_service);
+    wire_export_callbacks(&app, &state);
+    close_operations::wire_window_close_handler(&app, &state);
     register_history_actions(&app, &state, &menu_service);
     {
         let state = state.clone();
