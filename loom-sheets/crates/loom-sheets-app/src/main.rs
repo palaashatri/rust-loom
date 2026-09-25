@@ -44,17 +44,17 @@ use analysis::{plan_chart, plan_chart_in_range};
 mod assets;
 
 mod workbook_io;
+#[cfg(test)]
+pub(crate) use workbook_io::load_workbook_with_report;
 pub(crate) use workbook_io::{
-    blank_sheet, load_sheet, load_workbook, load_workbook_with_report,
-    restore_workbook_from_snapshot, save_sheet, save_workbook, starter_workbook, template_sheet,
-    workbook_package_bytes, LoadedWorkbook,
+    blank_sheet, load_sheet, load_workbook, restore_workbook_from_snapshot, save_sheet,
+    save_workbook, starter_workbook, template_sheet, workbook_package_bytes, LoadedWorkbook,
 };
 
 mod xlsx_import;
-use xlsx_import::{
-    cancel_pending_xlsx_import, continue_pending_xlsx_import, open_workbook_from_picker,
-    prepare_startup_import, stage_xlsx_import, PendingXlsxImport,
-};
+use xlsx_import::{cancel_pending_xlsx_import, continue_pending_xlsx_import, PendingXlsxImport};
+#[cfg(test)]
+use xlsx_import::{prepare_startup_import, stage_xlsx_import};
 
 mod object_actions;
 
@@ -71,6 +71,13 @@ mod headless;
 use headless::render_headless;
 
 mod evaluation_cache;
+mod open_operations;
+use open_operations::{
+    begin_new_workbook, cancel_pending_replacement, discard_changes_and_resume,
+    open_workbook_from_picker, request_replacement_after_dialog, save_changes_and_resume,
+    start_file_timer_after_show, start_startup_open, OpenOperations, PendingReplacement,
+    StartupOpenOptions,
+};
 mod workbook_worker;
 
 mod palette;
@@ -1708,12 +1715,6 @@ fn wire_responsive_layout(app: &SheetsApp) {
     });
 }
 
-#[derive(Debug, Clone, Copy)]
-enum PendingReplacement {
-    NewWorkbook,
-    OpenWorkbook,
-}
-
 pub(crate) struct GuiState {
     pub(crate) current: RefCell<Sheet>,
     pub(crate) sheets: RefCell<Vec<Sheet>>,
@@ -1731,6 +1732,7 @@ pub(crate) struct GuiState {
     /// Undo and redo recompute exact equality against `last_saved`.
     dirty_content: Cell<bool>,
     pub(crate) pending_replacement: Cell<Option<PendingReplacement>>,
+    pub(crate) open_operations: RefCell<OpenOperations>,
     pending_xlsx_import: RefCell<Option<PendingXlsxImport>>,
     pub(crate) undo_stack: RefCell<Vec<SheetTransaction>>,
     pub(crate) redo_stack: RefCell<Vec<SheetTransaction>>,
@@ -1766,6 +1768,7 @@ impl GuiState {
             last_saved: RefCell::new(None),
             dirty_content: Cell::new(false),
             pending_replacement: Cell::new(None),
+            open_operations: RefCell::new(OpenOperations::default()),
             pending_xlsx_import: RefCell::new(None),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
@@ -1852,19 +1855,6 @@ fn initial_directory(path: Option<&Path>) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn open_request(state: &GuiState) -> OpenFileRequest {
-    OpenFileRequest {
-        title: "Open or Import Loom Sheets Workbook".into(),
-        initial_directory: initial_directory(state.save_path.borrow().as_deref()),
-        suggested_name: None,
-        filters: vec![
-            state.workbook_filter.clone(),
-            state.import_filter.clone(),
-            state.xlsx_filter.clone(),
-        ],
-    }
-}
-
 pub(crate) fn image_open_request(state: &GuiState) -> Result<OpenFileRequest, String> {
     let filter = FileFilter::new("Images", ["png", "jpg", "jpeg", "webp", "gif", "svg"])
         .map_err(|error| error.to_string())?;
@@ -1907,55 +1897,6 @@ fn export_xlsx_request(state: &GuiState) -> SaveFileRequest {
         suggested_name: Some(format!("{}.xlsx", state.current.borrow().name)),
         filters: vec![state.xlsx_filter.clone()],
     }
-}
-
-fn is_native_workbook(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("loomtable"))
-}
-
-fn replace_opened_workbook(
-    app: &SheetsApp,
-    state: &GuiState,
-    path: PathBuf,
-    sheets: Vec<Sheet>,
-    active: usize,
-) {
-    let active = active.min(sheets.len().saturating_sub(1));
-    *state.current.borrow_mut() = sheets[active].clone();
-    *state.sheets.borrow_mut() = sheets;
-    *state.active_sheet_index.borrow_mut() = active;
-    *state.save_path.borrow_mut() = is_native_workbook(&path).then_some(path);
-    state.undo_stack.borrow_mut().clear();
-    state.redo_stack.borrow_mut().clear();
-    *state.sheet_histories.borrow_mut() =
-        vec![(Vec::new(), Vec::new()); state.sheets.borrow().len()];
-    apply_sheet(app, state);
-    sync_sheet_tabs(app, state);
-    state.mark_saved();
-    sync_window_title(app, state);
-}
-
-fn begin_new_workbook(
-    app: &SheetsApp,
-    state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
-) {
-    let sheet = blank_sheet();
-    *state.current.borrow_mut() = sheet.clone();
-    *state.sheets.borrow_mut() = vec![sheet];
-    *state.active_sheet_index.borrow_mut() = 0;
-    *state.save_path.borrow_mut() = None;
-    state.undo_stack.borrow_mut().clear();
-    state.redo_stack.borrow_mut().clear();
-    *state.sheet_histories.borrow_mut() = vec![(Vec::new(), Vec::new())];
-    apply_sheet(app, state);
-    sync_sheet_tabs(app, state);
-    state.mark_saved();
-    sync_window_title(app, state);
-    sync_menu_state(menu_service, app, state);
-    app.set_status_left("Created new unsaved workbook".into());
 }
 
 fn workbook_display_name(state: &GuiState) -> String {
@@ -2075,37 +2016,6 @@ fn start_workbook_worker_timer(app: &SheetsApp, state: &Rc<GuiState>) -> slint::
         },
     );
     timer
-}
-
-/// Return true when the replacement was deferred behind the Save Changes
-/// dialog. Clean work can proceed immediately.
-fn request_workbook_replacement(
-    app: &SheetsApp,
-    state: &GuiState,
-    replacement: PendingReplacement,
-) -> bool {
-    if !state.is_dirty() {
-        return false;
-    }
-    state.pending_replacement.set(Some(replacement));
-    app.set_save_changes_document(SharedString::from(workbook_display_name(state)));
-    app.set_save_changes_open(true);
-    app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
-    true
-}
-
-fn continue_pending_replacement(
-    app: &SheetsApp,
-    state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
-) {
-    match state.pending_replacement.take() {
-        Some(PendingReplacement::NewWorkbook) => begin_new_workbook(app, state, menu_service),
-        Some(PendingReplacement::OpenWorkbook) => {
-            open_workbook_from_picker(app, state, menu_service)
-        }
-        None => {}
-    }
 }
 
 /// Copy the live current sheet back into its tab slot so multi-tab
@@ -2257,21 +2167,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             }],
             active: 0,
         });
-    let mut pending_startup_import = None;
-    let mut initial = match &args.open {
-        Some(path) => {
-            let loaded = load_workbook_with_report(Path::new(path))?;
-            let (current, pending) = prepare_startup_import(PathBuf::from(path), loaded, fallback);
-            pending_startup_import = pending;
-            current
-        }
-        None => fallback,
-    };
+    let startup_open = args.open.as_ref().map(PathBuf::from);
+    let mut initial = fallback;
     if initial.sheets.is_empty() {
         initial.sheets.push(blank_sheet());
     }
     initial.active = initial.active.min(initial.sheets.len() - 1);
-    if pending_startup_import.is_none() {
+    if startup_open.is_none() {
         let initial_sheet = &mut initial.sheets[initial.active];
         if args.objects {
             object_actions::seed_demo_objects(initial_sheet);
@@ -2294,13 +2196,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let csv_filter = import_filter.clone();
     let xlsx_filter =
         FileFilter::new("Excel Spreadsheet", ["xlsx"]).map_err(|error| error.to_string())?;
-    let initial_path = pending_startup_import
-        .is_none()
-        .then(|| args.open.as_ref().map(PathBuf::from))
-        .flatten();
     let state = Rc::new(GuiState::new(
         blank_sheet(),
-        initial_path.filter(|path| is_native_workbook(path)),
+        None,
         dialogs,
         workbook_filter,
         import_filter,
@@ -2308,7 +2206,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         xlsx_filter,
     ));
     let initial_revision = state.next_worker_revision();
-    let initial_model = if pending_startup_import.is_some() {
+    let initial_model = if startup_open.is_some() {
         worker.initialize_workbook_without_recovery(
             initial_revision,
             initial.active,
@@ -2320,7 +2218,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     state.install_workbook(initial_model.sheets, initial_model.active_sheet);
     state.mark_saved();
     *state.workbook_worker.borrow_mut() = Some(worker);
-    if args.objects && pending_startup_import.is_none() {
+    if args.objects && startup_open.is_none() {
         app.set_selected_object(0);
     }
     // One menu adapter owns the application sink for its entire lifetime so
@@ -2345,7 +2243,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_new_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                if !request_workbook_replacement(&app, &state, PendingReplacement::NewWorkbook) {
+                if !request_replacement_after_dialog(&app, &state, PendingReplacement::NewWorkbook)
+                {
                     begin_new_workbook(&app, &state, &menu_service);
                 }
             }
@@ -2410,7 +2309,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_open_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
-                if !request_workbook_replacement(&app, &state, PendingReplacement::OpenWorkbook) {
+                if !request_replacement_after_dialog(&app, &state, PendingReplacement::OpenWorkbook)
+                {
                     open_workbook_from_picker(&app, &state, &menu_service);
                 }
             }
@@ -2469,16 +2369,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_save_changes_save(move || {
             if let Some(app) = app_ref.upgrade() {
-                match save_current_sheet(&app, &state, false) {
-                    Ok(true) => {
-                        app.set_save_changes_open(false);
-                        continue_pending_replacement(&app, &state, &menu_service);
-                    }
-                    Ok(false) => {}
-                    Err(error) => app.set_status_left(SharedString::from(save_error_feedback(
+                if let Err(error) = save_changes_and_resume(&app, &state, &menu_service) {
+                    app.set_status_left(SharedString::from(save_error_feedback(
                         "Save failed",
                         &error,
-                    ))),
+                    )));
                 }
             }
         });
@@ -2489,8 +2384,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let menu_service = menu_service.clone();
         app.on_save_changes_discard(move || {
             if let Some(app) = app_ref.upgrade() {
-                app.set_save_changes_open(false);
-                continue_pending_replacement(&app, &state, &menu_service);
+                discard_changes_and_resume(&app, &state, &menu_service);
             }
         });
     }
@@ -2499,7 +2393,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_save_changes_cancel(move || {
             if let Some(app) = app_ref.upgrade() {
-                state.pending_replacement.set(None);
+                cancel_pending_replacement(&app, &state);
                 app.set_save_changes_open(false);
                 app.set_status_left("Replacement cancelled; your workbook is unchanged".into());
             }
@@ -2762,17 +2656,17 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     if let Some(zoom) = args.zoom {
         app.set_zoom_factor(zoom);
     }
-    if args.objects && pending_startup_import.is_none() {
+    if args.objects && startup_open.is_none() {
         app.set_selected_object(0);
     }
     sync_sheet_tabs(&app, &state);
     sync_menu_state_result(&menu_service, &app, &state).map_err(|error| error.to_string())?;
     wire_palette(&app);
-    if args.chart && pending_startup_import.is_none() && state.current.borrow().chart.is_some() {
+    if args.chart && startup_open.is_none() && state.current.borrow().chart.is_some() {
         app.set_chart_visible(true);
         sync_chart_to_app(&app, &state.current.borrow());
     }
-    if args.template_chooser && pending_startup_import.is_none() {
+    if args.template_chooser && startup_open.is_none() {
         app.set_template_chooser_open(true);
     }
     project_current(&app, &state);
@@ -2782,19 +2676,19 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             "Recovery journal unavailable: {error}"
         )));
     }
-    if let Some(pending) = pending_startup_import.take() {
-        stage_xlsx_import(
-            &app,
-            &state,
-            pending.path,
-            pending.workbook,
-            pending.warnings,
-        );
-    }
     state.recompute_dirty_from_saved();
     sync_window_title(&app, &state);
     app.show().map_err(|e| e.to_string())?;
     let _worker_completion_timer = start_workbook_worker_timer(&app, &state);
+    let _open_completion_timer = start_file_timer_after_show(&app, &state, &menu_service);
+    if let Some(path) = startup_open {
+        start_startup_open(
+            &app,
+            &state,
+            path,
+            StartupOpenOptions::new(args.objects, args.chart, args.template_chooser),
+        );
+    }
     // A visible selection is not enough to receive keyboard input. Focus the
     // initially visible view after the native window is shown; winit may
     // replace the focus item during presentation, so doing this before `show`
@@ -2806,7 +2700,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     } else {
         app.invoke_focus_grid();
     }
-    if args.objects {
+    if args.objects && args.open.is_none() {
         // Keep the scalar selection in sync with the projected selection list.
         app.set_selected_object(0);
         let app_ref = app.as_weak();

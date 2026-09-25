@@ -7,14 +7,18 @@ use loom_sheets_core::persistence::WorkbookFile;
 use loom_sheets_core::XlsxImportWarning;
 use slint::SharedString;
 
+use super::open_operations::{is_native_workbook, OpenOperation, StartupOpenOptions};
 use super::*;
 
 pub(super) struct PendingXlsxImport {
     pub(super) path: PathBuf,
     pub(super) workbook: WorkbookFile,
     pub(super) warnings: Vec<XlsxImportWarning>,
+    pub(super) operation: Option<OpenOperation>,
+    pub(super) startup_options: Option<StartupOpenOptions>,
 }
 
+#[cfg(test)]
 pub(super) fn prepare_startup_import(
     path: PathBuf,
     loaded: LoadedWorkbook,
@@ -28,6 +32,8 @@ pub(super) fn prepare_startup_import(
         path,
         workbook: loaded.workbook,
         warnings: loaded.warnings,
+        operation: None,
+        startup_options: None,
     };
     (fallback, Some(pending))
 }
@@ -43,12 +49,25 @@ fn warning_message(warnings: &[XlsxImportWarning]) -> String {
     )
 }
 
+#[cfg(test)]
 pub(super) fn stage_xlsx_import(
     app: &SheetsApp,
     state: &GuiState,
     path: PathBuf,
     workbook: WorkbookFile,
     warnings: Vec<XlsxImportWarning>,
+) {
+    stage_xlsx_import_candidate(app, state, path, workbook, warnings, None, None);
+}
+
+pub(super) fn stage_xlsx_import_candidate(
+    app: &SheetsApp,
+    state: &GuiState,
+    path: PathBuf,
+    workbook: WorkbookFile,
+    warnings: Vec<XlsxImportWarning>,
+    operation: Option<OpenOperation>,
+    startup_options: Option<StartupOpenOptions>,
 ) {
     if warnings.is_empty() {
         return;
@@ -58,25 +77,38 @@ pub(super) fn stage_xlsx_import(
         path,
         workbook,
         warnings,
+        operation,
+        startup_options,
     });
     app.set_xlsx_import_warning_open(true);
+    app.invoke_focus_xlsx_import_warning();
     app.set_status_left("Review the Excel import warning before replacing this workbook".into());
 }
 
-fn handle_loaded_workbook(
+pub(super) fn handle_loaded_workbook(
     app: &SheetsApp,
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
     path: PathBuf,
     loaded: LoadedWorkbook,
+    operation: OpenOperation,
+    startup_options: Option<StartupOpenOptions>,
 ) {
     if !loaded.warnings.is_empty() {
-        stage_xlsx_import(app, state, path, loaded.workbook, loaded.warnings);
+        stage_xlsx_import_candidate(
+            app,
+            state,
+            path,
+            loaded.workbook,
+            loaded.warnings,
+            Some(operation),
+            startup_options,
+        );
         return;
     }
     let imported = !is_native_workbook(&path);
     let tabs = loaded.workbook.sheets.len();
-    replace_opened_workbook(
+    super::open_operations::replace_opened_workbook(
         app,
         state,
         path.clone(),
@@ -109,6 +141,25 @@ pub(super) fn continue_pending_xlsx_import(
         return;
     };
     app.set_xlsx_import_warning_open(false);
+    if let Some(operation) = pending.operation {
+        if !state.open_operations.borrow().is_current(operation) {
+            app.set_xlsx_import_warning_message(SharedString::new());
+            return;
+        }
+        let changed_since = state
+            .open_operations
+            .borrow()
+            .changed_since(operation, state.worker_revision.get());
+        if (changed_since && state.is_dirty()) || super::open_operations::has_formula_draft(app) {
+            *state.pending_xlsx_import.borrow_mut() = Some(pending);
+            super::open_operations::request_replacement_after_dialog(
+                app,
+                state,
+                PendingReplacement::OpenCandidate,
+            );
+            return;
+        }
+    }
     let tabs = pending.workbook.sheets.len();
     let omitted = pending
         .warnings
@@ -116,7 +167,7 @@ pub(super) fn continue_pending_xlsx_import(
         .map(|warning| warning.label())
         .collect::<Vec<_>>()
         .join(", ");
-    replace_opened_workbook(
+    super::open_operations::replace_opened_workbook(
         app,
         state,
         pending.path.clone(),
@@ -124,6 +175,9 @@ pub(super) fn continue_pending_xlsx_import(
         pending.workbook.active,
     );
     sync_menu_state(menu_service, app, state);
+    if let Some(options) = pending.startup_options {
+        super::open_operations::apply_startup_projection(app, state, options);
+    }
     app.set_status_left(SharedString::from(format!(
         "Imported {} ({} {}); dropped: {omitted}. Use Save As for a Loom workbook",
         pending.path.display(),
@@ -133,25 +187,12 @@ pub(super) fn continue_pending_xlsx_import(
 }
 
 pub(super) fn cancel_pending_xlsx_import(app: &SheetsApp, state: &GuiState) {
-    state.pending_xlsx_import.borrow_mut().take();
+    if let Some(pending) = state.pending_xlsx_import.borrow_mut().take() {
+        if let Some(operation) = pending.operation {
+            state.open_operations.borrow_mut().cancel(operation);
+        }
+    }
     app.set_xlsx_import_warning_open(false);
     app.set_xlsx_import_warning_message(SharedString::new());
     app.set_status_left("Import cancelled; workbook and recovery were left unchanged".into());
-}
-
-pub(super) fn open_workbook_from_picker(
-    app: &SheetsApp,
-    state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
-) {
-    match state.dialogs.open_file(&open_request(state)) {
-        Ok(Some(path)) => match load_workbook_with_report(&path) {
-            Ok(loaded) => handle_loaded_workbook(app, state, menu_service, path, loaded),
-            Err(error) => app.set_status_left(SharedString::from(format!("Open failed: {error}"))),
-        },
-        Ok(None) => app.set_status_left("Open cancelled".into()),
-        Err(error) => {
-            app.set_status_left(SharedString::from(format!("Open dialog failed: {error}")))
-        }
-    }
 }

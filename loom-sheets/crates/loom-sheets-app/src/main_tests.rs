@@ -18,6 +18,8 @@ mod command_dispatch_tests;
 mod grid_interaction_tests;
 #[path = "main_tests/layout_tests.rs"]
 mod layout_tests;
+#[path = "main_tests/open_operation_journeys.rs"]
+mod open_operation_journeys;
 #[path = "main_tests/sheet_action_tests.rs"]
 mod sheet_action_tests;
 #[path = "main_tests/workbook_interop_tests.rs"]

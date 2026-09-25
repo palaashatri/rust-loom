@@ -1,4 +1,5 @@
 use super::*;
+use crate::open_operations::{is_native_workbook, open_request};
 
 #[test]
 fn rtl_argument_is_parsed_and_applied_to_the_root() {
