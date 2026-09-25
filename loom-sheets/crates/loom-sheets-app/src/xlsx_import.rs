@@ -136,6 +136,12 @@ pub(super) fn continue_pending_xlsx_import(
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) {
+    if state.save_operations.borrow().is_active() {
+        app.set_status_left(
+            "Save in progress — wait for it to finish before importing this workbook".into(),
+        );
+        return;
+    }
     let Some(pending) = state.pending_xlsx_import.borrow_mut().take() else {
         app.set_xlsx_import_warning_open(false);
         return;
@@ -146,11 +152,23 @@ pub(super) fn continue_pending_xlsx_import(
             app.set_xlsx_import_warning_message(SharedString::new());
             return;
         }
-        let changed_since = state
+        if super::open_operations::reload_candidate_after_save_if_needed(
+            app,
+            state,
+            pending.path.clone(),
+            operation,
+            pending.startup_options,
+        ) {
+            app.set_xlsx_import_warning_message(SharedString::new());
+            return;
+        }
+        let dirty_replacement_allowed = state
             .open_operations
             .borrow()
-            .changed_since(operation, state.worker_revision.get());
-        if (changed_since && state.is_dirty()) || super::open_operations::has_formula_draft(app) {
+            .allows_dirty_replacement(operation, state.worker_revision.get());
+        if (state.is_dirty() && !dirty_replacement_allowed)
+            || super::open_operations::has_formula_draft(app)
+        {
             *state.pending_xlsx_import.borrow_mut() = Some(pending);
             super::open_operations::request_replacement_after_dialog(
                 app,

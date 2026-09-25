@@ -16,6 +16,8 @@ pub(crate) struct OpenOperation {
     operation_id: u64,
     document_generation: u64,
     pub(crate) target_revision: u64,
+    native_write_epoch: u64,
+    authorized_dirty_revision: Option<u64>,
 }
 
 #[derive(Default)]
@@ -26,7 +28,7 @@ pub(crate) struct OpenOperationCoordinator {
 }
 
 impl OpenOperationCoordinator {
-    pub(crate) fn begin(&mut self, target_revision: u64) -> OpenOperation {
+    pub(crate) fn begin(&mut self, target_revision: u64, native_write_epoch: u64) -> OpenOperation {
         self.next_operation_id = self
             .next_operation_id
             .checked_add(1)
@@ -35,6 +37,8 @@ impl OpenOperationCoordinator {
             operation_id: self.next_operation_id,
             document_generation: self.document_generation,
             target_revision,
+            native_write_epoch,
+            authorized_dirty_revision: None,
         };
         self.active = Some(operation);
         operation
@@ -275,6 +279,7 @@ pub(crate) struct OpenOperations {
     coordinator: OpenOperationCoordinator,
     completions: OpenCompletionQueue,
     pending_candidate: Option<OpenFileCompletion>,
+    native_write_epoch: u64,
 }
 
 impl Default for OpenCompletionQueue {
@@ -286,7 +291,20 @@ impl Default for OpenCompletionQueue {
 impl OpenOperations {
     pub(crate) fn begin_operation(&mut self, target_revision: u64) -> OpenOperation {
         self.pending_candidate = None;
-        self.coordinator.begin(target_revision)
+        self.coordinator
+            .begin(target_revision, self.native_write_epoch)
+    }
+
+    pub(crate) fn note_successful_native_write(&mut self) {
+        self.native_write_epoch = self
+            .native_write_epoch
+            .checked_add(1)
+            .expect("Sheets native write epoch exhausted");
+    }
+
+    fn candidate_needs_reload(&self, operation: OpenOperation) -> bool {
+        self.coordinator.is_current(operation)
+            && operation.native_write_epoch != self.native_write_epoch
     }
 
     pub(crate) fn start_picker_load(
@@ -296,6 +314,24 @@ impl OpenOperations {
     ) -> Result<OpenOperation, String> {
         let operation = self.begin_operation(target_revision);
         if let Err(error) = self.completions.start_load(operation, path) {
+            self.coordinator.cancel(operation);
+            return Err(error);
+        }
+        Ok(operation)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_picker_load_with<F>(
+        &mut self,
+        path: PathBuf,
+        target_revision: u64,
+        load: F,
+    ) -> Result<OpenOperation, String>
+    where
+        F: FnOnce(&Path) -> Result<LoadedWorkbook, String> + Send + 'static,
+    {
+        let operation = self.begin_operation(target_revision);
+        if let Err(error) = self.completions.start_load_with(operation, path, load) {
             self.coordinator.cancel(operation);
             return Err(error);
         }
@@ -319,24 +355,58 @@ impl OpenOperations {
         Ok(operation)
     }
 
+    pub(crate) fn document_generation(&self) -> u64 {
+        self.coordinator.document_generation
+    }
+
     pub(crate) fn is_current(&self, operation: OpenOperation) -> bool {
         self.coordinator.is_current(operation)
     }
 
-    pub(crate) fn changed_since(&self, operation: OpenOperation, revision: u64) -> bool {
-        operation.target_revision != revision
+    pub(super) fn allows_dirty_replacement(
+        &self,
+        operation: OpenOperation,
+        current_revision: u64,
+    ) -> bool {
+        self.coordinator.is_current(operation)
+            && self
+                .coordinator
+                .active
+                .is_some_and(|active| active.authorized_dirty_revision == Some(current_revision))
+    }
+
+    pub(crate) fn authorize_dirty_replacement(&mut self, operation: OpenOperation, revision: u64) {
+        if !self.coordinator.is_current(operation) {
+            return;
+        }
+        if let Some(active) = self.coordinator.active.as_mut() {
+            active.authorized_dirty_revision = Some(revision);
+        }
+    }
+
+    fn authorized_dirty_revision(&self, operation: OpenOperation) -> Option<u64> {
+        self.coordinator
+            .is_current(operation)
+            .then(|| {
+                self.coordinator
+                    .active
+                    .and_then(|active| active.authorized_dirty_revision)
+            })
+            .flatten()
     }
 
     pub(crate) fn acknowledge_revision(
         &mut self,
         operation: OpenOperation,
         revision: u64,
+        authorized_dirty_revision: Option<u64>,
     ) -> Option<OpenOperation> {
         if !self.coordinator.is_current(operation) {
             return None;
         }
         let active = self.coordinator.active.as_mut()?;
         active.target_revision = revision;
+        active.authorized_dirty_revision = authorized_dirty_revision;
         Some(*active)
     }
 
@@ -483,6 +553,7 @@ pub(super) fn open_workbook_from_picker(
     app: &SheetsApp,
     state: &GuiState,
     _menu_service: &Arc<loom_desktop::NativeMenuBar>,
+    authorized_dirty_revision: Option<u64>,
 ) {
     match state.dialogs.open_file(&open_request(state)) {
         Ok(Some(path)) => {
@@ -492,7 +563,15 @@ pub(super) fn open_workbook_from_picker(
                 .borrow_mut()
                 .start_picker_load(path, state.worker_revision.get());
             match result {
-                Ok(_) => app.set_status_left(SharedString::from(open_text)),
+                Ok(operation) => {
+                    if let Some(revision) = authorized_dirty_revision {
+                        state
+                            .open_operations
+                            .borrow_mut()
+                            .authorize_dirty_replacement(operation, revision);
+                    }
+                    app.set_status_left(SharedString::from(open_text));
+                }
                 Err(error) => {
                     app.set_status_left(SharedString::from(format!("Open failed: {error}")))
                 }
@@ -542,6 +621,9 @@ fn handle_completion(
         result,
         startup_options,
     } = completion;
+    if reload_candidate_after_save_if_needed(app, state, path.clone(), operation, startup_options) {
+        return;
+    }
     let loaded = match result {
         Ok(loaded) => loaded,
         Err(error) => {
@@ -550,12 +632,11 @@ fn handle_completion(
             return;
         }
     };
-    let revision = state.worker_revision.get();
-    let changed_since = state
+    let dirty_replacement_allowed = state
         .open_operations
         .borrow()
-        .changed_since(operation, revision);
-    if (changed_since && state.is_dirty()) || has_formula_draft(app) {
+        .allows_dirty_replacement(operation, state.worker_revision.get());
+    if (state.is_dirty() && !dirty_replacement_allowed) || has_formula_draft(app) {
         state
             .open_operations
             .borrow_mut()
@@ -590,12 +671,60 @@ pub(super) fn process_completions(
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) -> usize {
+    if state.save_operations.borrow().is_active() {
+        return 0;
+    }
     let completions = state.open_operations.borrow().drain();
     let count = completions.len();
     for completion in completions {
         handle_completion(app, state, menu_service, completion);
     }
     count
+}
+
+pub(super) fn reload_candidate_after_save_if_needed(
+    app: &SheetsApp,
+    state: &GuiState,
+    path: PathBuf,
+    operation: OpenOperation,
+    startup_options: Option<StartupOpenOptions>,
+) -> bool {
+    let (candidate_needs_reload, authorized_dirty_revision) = {
+        let operations = state.open_operations.borrow();
+        (
+            operations.candidate_needs_reload(operation),
+            operations.authorized_dirty_revision(operation),
+        )
+    };
+    if !candidate_needs_reload {
+        return false;
+    }
+
+    let revision = state.worker_revision.get();
+    let result = {
+        let mut operations = state.open_operations.borrow_mut();
+        match startup_options {
+            Some(options) => operations.start_startup_load(path, revision, options),
+            None => operations.start_picker_load(path, revision),
+        }
+    };
+    match result {
+        Ok(reloaded_operation) => {
+            if let Some(revision) = authorized_dirty_revision {
+                state
+                    .open_operations
+                    .borrow_mut()
+                    .authorize_dirty_replacement(reloaded_operation, revision);
+            }
+            app.set_status_left(
+                "The workbook was saved while it was opening; reloading the saved file".into(),
+            )
+        }
+        Err(error) => app.set_status_left(SharedString::from(format!(
+            "Open failed while reloading the saved file: {error}"
+        ))),
+    }
+    true
 }
 
 pub(super) fn start_completion_timer(
@@ -627,10 +756,17 @@ fn request_workbook_replacement(
     if state.pending_replacement.get().is_some() {
         return true;
     }
+    if state.save_operations.borrow().is_active() {
+        app.set_status_left(
+            "Save in progress — wait for it to finish before replacing this workbook".into(),
+        );
+        return true;
+    }
     if !state.is_dirty() && !has_formula_draft(app) {
         return false;
     }
     state.pending_replacement.set(Some(replacement));
+    state.advance_pending_replacement_token();
     app.set_save_changes_document(SharedString::from(workbook_display_name(state)));
     app.set_save_changes_open(true);
     app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
@@ -644,18 +780,9 @@ pub(super) fn has_formula_draft(app: &SheetsApp) -> bool {
 pub(super) fn save_changes_and_resume(
     app: &SheetsApp,
     state: &GuiState,
-    menu_service: &Arc<loom_desktop::NativeMenuBar>,
+    _menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) -> Result<bool, String> {
-    let draft = app.get_formula_edit_buffer();
-    if draft != app.get_selection_formula() {
-        app.invoke_commit_selected_cell(draft);
-    }
-    let saved = super::save_current_sheet(app, state, false)?;
-    if saved {
-        app.set_save_changes_open(false);
-        continue_pending_replacement_after_dialog(app, state, menu_service);
-    }
-    Ok(saved)
+    super::save_current_sheet(app, state, false)
 }
 
 pub(super) fn discard_changes_and_resume(
@@ -663,22 +790,31 @@ pub(super) fn discard_changes_and_resume(
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) {
+    if state.save_operations.borrow().is_active() {
+        app.set_status_left(
+            "Save in progress — wait for it to finish before discarding this workbook".into(),
+        );
+        return;
+    }
     app.invoke_reset_formula_edit_buffer();
     app.set_save_changes_open(false);
-    continue_pending_replacement_after_dialog(app, state, menu_service);
+    let authorized_dirty_revision = state.worker_revision.get();
+    continue_pending_replacement(app, state, menu_service, Some(authorized_dirty_revision));
 }
 
 fn resume_open_candidate(
     app: &SheetsApp,
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
+    authorized_dirty_revision: Option<u64>,
 ) {
     let candidate = state.open_operations.borrow_mut().take_candidate();
     if let Some(mut completion) = candidate {
-        let ticket = state
-            .open_operations
-            .borrow_mut()
-            .acknowledge_revision(completion.operation, state.worker_revision.get());
+        let ticket = state.open_operations.borrow_mut().acknowledge_revision(
+            completion.operation,
+            state.worker_revision.get(),
+            authorized_dirty_revision,
+        );
         let Some(ticket) = ticket else { return };
         completion.operation = ticket;
         handle_completion(app, state, menu_service, completion);
@@ -691,11 +827,11 @@ fn resume_open_candidate(
         .as_ref()
         .and_then(|pending| pending.operation);
     if let Some(ticket) = ticket {
-        let Some(ticket) = state
-            .open_operations
-            .borrow_mut()
-            .acknowledge_revision(ticket, state.worker_revision.get())
-        else {
+        let Some(ticket) = state.open_operations.borrow_mut().acknowledge_revision(
+            ticket,
+            state.worker_revision.get(),
+            authorized_dirty_revision,
+        ) else {
             return;
         };
         if let Some(pending) = state.pending_xlsx_import.borrow_mut().as_mut() {
@@ -709,13 +845,20 @@ fn continue_pending_replacement(
     app: &SheetsApp,
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
+    authorized_dirty_revision: Option<u64>,
 ) {
-    match state.pending_replacement.take() {
+    let pending = state.pending_replacement.take();
+    if pending.is_some() {
+        state.advance_pending_replacement_token();
+    }
+    match pending {
         Some(PendingReplacement::NewWorkbook) => begin_new_workbook(app, state, menu_service),
         Some(PendingReplacement::OpenWorkbook) => {
-            open_workbook_from_picker(app, state, menu_service)
+            open_workbook_from_picker(app, state, menu_service, authorized_dirty_revision)
         }
-        Some(PendingReplacement::OpenCandidate) => resume_open_candidate(app, state, menu_service),
+        Some(PendingReplacement::OpenCandidate) => {
+            resume_open_candidate(app, state, menu_service, authorized_dirty_revision)
+        }
         None => {}
     }
 }
@@ -737,7 +880,20 @@ pub(super) fn cancel_pending_replacement(app: &SheetsApp, state: &GuiState) {
             app.set_xlsx_import_warning_message(SharedString::new());
         }
     }
-    state.pending_replacement.set(None);
+    if state.pending_replacement.take().is_some() {
+        state.advance_pending_replacement_token();
+    }
+}
+
+pub(super) fn cancel_save_changes_dialog(app: &SheetsApp, state: &GuiState) {
+    let save_in_progress = state.save_operations.borrow().is_active();
+    cancel_pending_replacement(app, state);
+    app.set_save_changes_open(false);
+    app.set_status_left(if save_in_progress {
+        "Replacement cancelled; the Save already in progress will continue".into()
+    } else {
+        "Replacement cancelled; your workbook is unchanged".into()
+    });
 }
 
 pub(super) fn continue_pending_replacement_after_dialog(
@@ -745,7 +901,7 @@ pub(super) fn continue_pending_replacement_after_dialog(
     state: &GuiState,
     menu_service: &Arc<loom_desktop::NativeMenuBar>,
 ) {
-    continue_pending_replacement(app, state, menu_service);
+    continue_pending_replacement(app, state, menu_service, None);
 }
 
 pub(super) fn request_replacement_after_dialog(

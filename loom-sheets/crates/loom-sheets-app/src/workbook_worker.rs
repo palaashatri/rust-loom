@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -9,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use loom_production::snapshot::SnapshotRecovery;
 use loom_sheets_core::workbook::evaluate_workbook;
-use loom_sheets_core::{CellRef, Sheet, Value};
+use loom_sheets_core::{workbook_to_json, CellRef, Sheet, Value};
 
 use crate::workbook_io::workbook_package_bytes;
 
@@ -29,6 +28,7 @@ pub(crate) struct WorkbookResult {
     pub(crate) values: HashMap<CellRef, Value>,
     pub(crate) recovery_error: Option<String>,
     pub(crate) input_error: Option<String>,
+    pub(crate) dirty: bool,
     #[cfg(test)]
     pub(crate) update_kind: WorkerUpdateKind,
     #[cfg(test)]
@@ -124,16 +124,23 @@ impl PendingBatch {
     }
 }
 
-struct CheckpointRequest {
-    payload: Vec<u8>,
-    reply: SyncSender<Result<(), String>>,
+pub(crate) struct CheckpointRequest {
+    pub(crate) operation_id: u64,
+    pub(crate) document_generation: u64,
+    pub(crate) revision: u64,
+    pub(crate) pending_replacement_token: Option<u64>,
+    pub(crate) path: PathBuf,
+}
+
+enum WorkerMessage {
+    Initialize(InitializationRequest),
+    Batch(PendingBatch),
+    Checkpoint(CheckpointRequest),
 }
 
 #[derive(Default)]
 struct Mailbox {
-    initialization: Option<InitializationRequest>,
-    pending: Option<PendingBatch>,
-    checkpoint: Option<CheckpointRequest>,
+    queue: std::collections::VecDeque<WorkerMessage>,
     stopping: bool,
 }
 
@@ -151,6 +158,8 @@ enum RecoveryLocation {
     Directory(PathBuf),
 }
 
+use crate::save_operations::SaveCompletion;
+
 pub(crate) struct WorkbookWorker {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
@@ -160,14 +169,20 @@ impl WorkbookWorker {
     pub(crate) fn start(
         application_id: impl Into<String>,
         schema: impl Into<String>,
+        save_completions: mpsc::Sender<SaveCompletion>,
     ) -> Result<(Self, WorkerStartup), String> {
         Self::spawn(
             RecoveryLocation::Application(application_id.into()),
             schema.into(),
+            save_completions,
         )
     }
 
-    fn spawn(location: RecoveryLocation, schema: String) -> Result<(Self, WorkerStartup), String> {
+    fn spawn(
+        location: RecoveryLocation,
+        schema: String,
+        save_completions: mpsc::Sender<SaveCompletion>,
+    ) -> Result<(Self, WorkerStartup), String> {
         let shared = Arc::new(Shared::default());
         let worker_shared = Arc::clone(&shared);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
@@ -185,7 +200,13 @@ impl WorkbookWorker {
                 };
                 let startup_error = startup.recovery_error.clone();
                 if startup_tx.send(startup).is_ok() {
-                    run_worker(worker_shared, &mut recovery, &schema, startup_error);
+                    run_worker(
+                        worker_shared,
+                        &mut recovery,
+                        &schema,
+                        startup_error,
+                        save_completions,
+                    );
                 }
             })
             .map_err(|error| format!("start workbook worker: {error}"))?;
@@ -243,16 +264,22 @@ impl WorkbookWorker {
         if mailbox.stopping {
             return Err("workbook worker is stopping".to_string());
         }
-        if mailbox.initialization.is_some() {
+        if mailbox
+            .queue
+            .iter()
+            .any(|m| matches!(m, WorkerMessage::Initialize(_)))
+        {
             return Err("workbook initialization is already pending".to_string());
         }
-        mailbox.initialization = Some(InitializationRequest {
-            revision,
-            active_sheet,
-            sheets,
-            record_recovery,
-            reply,
-        });
+        mailbox
+            .queue
+            .push_back(WorkerMessage::Initialize(InitializationRequest {
+                revision,
+                active_sheet,
+                sheets,
+                record_recovery,
+                reply,
+            }));
         drop(mailbox);
         self.shared.work_available.notify_one();
         response
@@ -289,10 +316,13 @@ impl WorkbookWorker {
         if mailbox.stopping {
             return Err("workbook worker is stopping".to_string());
         }
-        mailbox
-            .pending
-            .get_or_insert_with(PendingBatch::default)
-            .merge(update);
+        if let Some(WorkerMessage::Batch(batch)) = mailbox.queue.back_mut() {
+            batch.merge(update);
+        } else {
+            let mut batch = PendingBatch::default();
+            batch.merge(update);
+            mailbox.queue.push_back(WorkerMessage::Batch(batch));
+        }
         drop(mailbox);
         self.shared.work_available.notify_one();
         Ok(())
@@ -302,11 +332,15 @@ impl WorkbookWorker {
         self.shared.latest_result.lock().ok()?.take()
     }
 
-    /// Flush a saved package through the worker-owned recovery journal. The
-    /// desktop save operation is already synchronous, so waiting here also
-    /// preserves the checkpoint's order relative to any pending edit batch.
-    pub(crate) fn checkpoint(&self, payload: Vec<u8>) -> Result<(), String> {
-        let (reply, response) = mpsc::sync_channel(1);
+    /// Queue a Save barrier after all updates currently accepted by the worker.
+    pub(crate) fn queue_save(
+        &self,
+        operation_id: u64,
+        document_generation: u64,
+        revision: u64,
+        pending_replacement_token: Option<u64>,
+        path: PathBuf,
+    ) -> Result<(), String> {
         let mut mailbox = self
             .shared
             .mailbox
@@ -315,15 +349,25 @@ impl WorkbookWorker {
         if mailbox.stopping {
             return Err("workbook worker is stopping".to_string());
         }
-        if mailbox.checkpoint.is_some() {
-            return Err("a save checkpoint is already pending".to_string());
+        if mailbox
+            .queue
+            .iter()
+            .any(|m| matches!(m, WorkerMessage::Checkpoint(_)))
+        {
+            return Err("a save operation is already pending".to_string());
         }
-        mailbox.checkpoint = Some(CheckpointRequest { payload, reply });
+        mailbox
+            .queue
+            .push_back(WorkerMessage::Checkpoint(CheckpointRequest {
+                operation_id,
+                document_generation,
+                revision,
+                pending_replacement_token,
+                path,
+            }));
         drop(mailbox);
         self.shared.work_available.notify_one();
-        response
-            .recv()
-            .map_err(|error| format!("workbook recovery checkpoint failed: {error}"))?
+        Ok(())
     }
 
     #[cfg(test)]
@@ -364,7 +408,21 @@ impl WorkbookWorker {
         directory: PathBuf,
         schema: impl Into<String>,
     ) -> Result<(Self, WorkerStartup), String> {
-        Self::spawn(RecoveryLocation::Directory(directory), schema.into())
+        let (save_completions, _receiver) = mpsc::channel();
+        Self::start_at_with_completions(directory, schema, save_completions)
+    }
+
+    #[cfg(test)]
+    pub(super) fn start_at_with_completions(
+        directory: PathBuf,
+        schema: impl Into<String>,
+        save_completions: mpsc::Sender<SaveCompletion>,
+    ) -> Result<(Self, WorkerStartup), String> {
+        Self::spawn(
+            RecoveryLocation::Directory(directory),
+            schema.into(),
+            save_completions,
+        )
     }
 }
 
@@ -414,14 +472,12 @@ enum WorkerAction {
 fn next_action(shared: &Shared) -> WorkerAction {
     let mut mailbox = shared.mailbox.lock().expect("workbook worker mailbox");
     loop {
-        if let Some(initialization) = mailbox.initialization.take() {
-            return WorkerAction::Initialize(initialization);
-        }
-        if let Some(batch) = mailbox.pending.take() {
-            return WorkerAction::Batch(batch);
-        }
-        if let Some(checkpoint) = mailbox.checkpoint.take() {
-            return WorkerAction::Checkpoint(checkpoint);
+        if let Some(msg) = mailbox.queue.pop_front() {
+            return match msg {
+                WorkerMessage::Initialize(req) => WorkerAction::Initialize(req),
+                WorkerMessage::Batch(batch) => WorkerAction::Batch(batch),
+                WorkerMessage::Checkpoint(req) => WorkerAction::Checkpoint(req),
+            };
         }
         if mailbox.stopping {
             return WorkerAction::Stop;
@@ -438,9 +494,12 @@ fn run_worker(
     recovery: &mut Option<SnapshotRecovery>,
     schema: &str,
     startup_error: Option<String>,
+    save_completions: mpsc::Sender<crate::save_operations::SaveCompletion>,
 ) {
     let mut sheets = Vec::new();
+    let mut active_sheet = 0;
     let mut last_revision = 0;
+    let mut baseline: Option<(Vec<Sheet>, usize)> = None;
     loop {
         match next_action(&shared) {
             WorkerAction::Initialize(initialization) => {
@@ -453,9 +512,10 @@ fn run_worker(
                 if sheets.is_empty() {
                     sheets.push(Sheet::new("Untitled"));
                 }
-                let active_sheet = initialization
+                active_sheet = initialization
                     .active_sheet
                     .min(sheets.len().saturating_sub(1));
+                baseline = Some((sheets.clone(), active_sheet));
                 let model = WorkerModel {
                     sheets: sheets.clone(),
                     active_sheet,
@@ -500,6 +560,9 @@ fn run_worker(
                         }
                     }
                 }
+
+                let dirty = workbook_differs_from_baseline(&baseline, &sheets, active_sheet);
+
                 publish_result(
                     &shared,
                     WorkbookResult {
@@ -508,6 +571,7 @@ fn run_worker(
                         values,
                         recovery_error,
                         input_error: None,
+                        dirty,
                         #[cfg(test)]
                         update_kind: WorkerUpdateKind::InitialModel,
                         #[cfg(test)]
@@ -557,7 +621,7 @@ fn run_worker(
                         }
                     }
                 }
-                let active_sheet = batch.active_sheet.min(sheets.len().saturating_sub(1));
+                active_sheet = batch.active_sheet.min(sheets.len().saturating_sub(1));
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -594,6 +658,9 @@ fn run_worker(
                         recovery_journal_duration = journal_started.elapsed();
                     }
                 }
+
+                let dirty = workbook_differs_from_baseline(&baseline, &sheets, active_sheet);
+
                 publish_result(
                     &shared,
                     WorkbookResult {
@@ -602,6 +669,7 @@ fn run_worker(
                         values,
                         recovery_error,
                         input_error,
+                        dirty,
                         #[cfg(test)]
                         update_kind,
                         #[cfg(test)]
@@ -616,18 +684,76 @@ fn run_worker(
                 );
             }
             WorkerAction::Checkpoint(checkpoint) => {
-                let result = match recovery.as_mut() {
-                    Some(recovery) => recovery
-                        .checkpoint(schema, checkpoint.payload)
-                        .map_err(|error| error.to_string()),
-                    None => Err(startup_error
-                        .clone()
-                        .unwrap_or_else(|| "recovery writer is unavailable".to_string())),
+                if last_revision != checkpoint.revision {
+                    let _ = save_completions.send(crate::save_operations::SaveCompletion {
+                        operation: crate::save_operations::SaveOperation {
+                            operation_id: checkpoint.operation_id,
+                            document_generation: checkpoint.document_generation,
+                            target_revision: checkpoint.revision,
+                            pending_replacement_token: checkpoint.pending_replacement_token,
+                        },
+                        path: checkpoint.path,
+                        write_result: Err(format!(
+                            "Save revision {} is unavailable; worker is at revision {last_revision}",
+                            checkpoint.revision
+                        )),
+                        checkpoint_result: None,
+                        baseline: None,
+                    });
+                    continue;
+                }
+                let package_result = workbook_package_bytes(&sheets, active_sheet);
+                let (write_result, checkpoint_result, saved_baseline) = match package_result {
+                    Ok(payload) => {
+                        let write_result = loom_storage::atomic_write(&checkpoint.path, &payload)
+                            .map_err(|error| error.to_string());
+                        if write_result.is_ok() {
+                            let saved_baseline = (sheets.clone(), active_sheet);
+                            baseline = Some(saved_baseline.clone());
+                            let checkpoint_result = Some(match recovery.as_mut() {
+                                Some(recovery) => recovery
+                                    .checkpoint(schema, payload)
+                                    .map_err(|error| error.to_string()),
+                                None => Err(startup_error.clone().unwrap_or_else(|| {
+                                    "recovery writer is unavailable".to_string()
+                                })),
+                            });
+                            (write_result, checkpoint_result, Some(saved_baseline))
+                        } else {
+                            (write_result, None, None)
+                        }
+                    }
+                    Err(error) => (Err(error), None, None),
                 };
-                let _ = checkpoint.reply.send(result);
+
+                let _ = save_completions.send(crate::save_operations::SaveCompletion {
+                    operation: crate::save_operations::SaveOperation {
+                        operation_id: checkpoint.operation_id,
+                        document_generation: checkpoint.document_generation,
+                        target_revision: checkpoint.revision,
+                        pending_replacement_token: checkpoint.pending_replacement_token,
+                    },
+                    path: checkpoint.path,
+                    write_result,
+                    checkpoint_result,
+                    baseline: saved_baseline,
+                });
             }
             WorkerAction::Stop => return,
         }
+    }
+}
+
+fn workbook_differs_from_baseline(
+    baseline: &Option<(Vec<Sheet>, usize)>,
+    sheets: &[Sheet],
+    active_sheet: usize,
+) -> bool {
+    match baseline {
+        Some((saved_sheets, saved_active)) => {
+            workbook_to_json(saved_sheets, *saved_active) != workbook_to_json(sheets, active_sheet)
+        }
+        None => true,
     }
 }
 
@@ -644,359 +770,5 @@ fn publish_result(shared: &Shared, result: WorkbookResult) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
-
-    struct ScratchDirectory(PathBuf);
-
-    impl ScratchDirectory {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "loom-sheets-worker-{}-{}",
-                std::process::id(),
-                NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir_all(&path).expect("create test recovery directory");
-            Self(path)
-        }
-
-        fn path(&self) -> PathBuf {
-            self.0.clone()
-        }
-    }
-
-    impl Drop for ScratchDirectory {
-        fn drop(&mut self) {
-            if fs::remove_dir_all(&self.0).is_err() {
-                let _ = fs::remove_file(&self.0);
-            }
-        }
-    }
-
-    fn cell(revision: u64, cell: CellRef, raw: &str) -> PendingUpdate {
-        PendingUpdate::Cell(CellUpdate {
-            revision,
-            active_sheet: 0,
-            sheet: 0,
-            cell,
-            raw: Some(raw.to_string()),
-        })
-    }
-
-    fn value<'a>(result: &'a WorkbookResult, address: &str) -> &'a Value {
-        result
-            .values
-            .get(&CellRef::parse(address).unwrap())
-            .expect("calculated cell value")
-    }
-
-    #[test]
-    fn pending_updates_keep_latest_value_per_cell_and_keep_other_cells() {
-        let a1 = CellRef::parse("A1").unwrap();
-        let b1 = CellRef::parse("B1").unwrap();
-        let mut pending = PendingBatch::default();
-
-        pending.merge(cell(1, a1, "old"));
-        pending.merge(cell(2, a1, "new"));
-        pending.merge(cell(3, b1, "kept"));
-
-        assert_eq!(pending.revision, 3);
-        assert_eq!(
-            pending.cells.get(&(0, a1)).and_then(Option::as_deref),
-            Some("new")
-        );
-        assert_eq!(
-            pending.cells.get(&(0, b1)).and_then(Option::as_deref),
-            Some("kept")
-        );
-    }
-
-    #[test]
-    fn replacement_drops_older_deltas_and_keeps_later_deltas() {
-        let a1 = CellRef::parse("A1").unwrap();
-        let b1 = CellRef::parse("B1").unwrap();
-        let mut replacement = Sheet::new("replacement");
-        replacement.set_str("A1", "replacement value");
-        let mut pending = PendingBatch::default();
-
-        pending.merge(cell(1, a1, "old A1"));
-        pending.merge(cell(2, b1, "old B1"));
-        pending.merge(PendingUpdate::Replace {
-            revision: 3,
-            active_sheet: 0,
-            sheets: vec![replacement],
-        });
-        pending.merge(cell(4, b1, "new B1"));
-
-        assert_eq!(pending.revision, 4);
-        assert_eq!(
-            pending.replacement.as_ref().unwrap()[0].raw(a1),
-            Some("replacement value")
-        );
-        assert_eq!(pending.cells.len(), 1);
-        assert_eq!(
-            pending.cells.get(&(0, b1)).and_then(Option::as_deref),
-            Some("new B1")
-        );
-        assert!(!pending.cells.contains_key(&(0, a1)));
-    }
-
-    #[test]
-    fn latest_result_slot_never_replaces_a_newer_revision() {
-        let shared = Shared::default();
-        publish_result(
-            &shared,
-            WorkbookResult {
-                revision: 2,
-                active_sheet: 1,
-                values: HashMap::new(),
-                recovery_error: None,
-                input_error: None,
-                update_kind: WorkerUpdateKind::InitialModel,
-                cell_updates: 0,
-                evaluation_duration: Duration::ZERO,
-                recovery_package_duration: Duration::ZERO,
-                recovery_journal_duration: Duration::ZERO,
-            },
-        );
-        publish_result(
-            &shared,
-            WorkbookResult {
-                revision: 1,
-                active_sheet: 0,
-                values: HashMap::new(),
-                recovery_error: None,
-                input_error: None,
-                update_kind: WorkerUpdateKind::InitialModel,
-                cell_updates: 0,
-                evaluation_duration: Duration::ZERO,
-                recovery_package_duration: Duration::ZERO,
-                recovery_journal_duration: Duration::ZERO,
-            },
-        );
-
-        assert_eq!(
-            shared
-                .latest_result
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .revision,
-            2
-        );
-    }
-
-    #[test]
-    fn worker_evaluates_replacement_then_a_cell_delta() {
-        let temporary = ScratchDirectory::new();
-        let (worker, startup) =
-            WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("start worker");
-        assert!(startup.recovery_error.is_none());
-        let mut sheet = Sheet::new("worker");
-        sheet.set_str("A1", "2");
-        sheet.set_str("B1", "=A1+3");
-        worker
-            .submit_replacement(1, 0, vec![sheet])
-            .expect("send initial workbook");
-        let first = worker.wait_for_result(1).expect("first result");
-        assert_eq!(value(&first, "B1"), &Value::Number(5.0));
-
-        worker
-            .submit_cell(CellUpdate {
-                revision: 2,
-                active_sheet: 0,
-                sheet: 0,
-                cell: CellRef::parse("A1").unwrap(),
-                raw: Some("4".to_string()),
-            })
-            .expect("send cell edit");
-        let second = worker.wait_for_result(2).expect("second result");
-        assert_eq!(second.revision, 2);
-        assert_eq!(value(&second, "B1"), &Value::Number(7.0));
-        assert!(second.recovery_error.is_none());
-    }
-
-    #[test]
-    fn startup_restores_the_saved_active_tab_and_worker_values_match_evaluation() {
-        let temporary = ScratchDirectory::new();
-        let mut source = Sheet::new("Data");
-        source.set_str("B1", "4");
-        let mut report = Sheet::new("Report");
-        report.set_str("A1", "=Data!B1+3");
-        let sheets = vec![source, report];
-        let payload = workbook_package_bytes(&sheets, 1).expect("package workbook");
-        let mut recovery = SnapshotRecovery::open_at(temporary.path()).expect("open recovery");
-        recovery
-            .record("startup fixture", payload)
-            .expect("write recovered workbook");
-        drop(recovery);
-
-        let (worker, startup) =
-            WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("start worker");
-        let recovered = crate::restore_workbook_from_snapshot(
-            startup
-                .restored_payload
-                .as_deref()
-                .expect("startup recovery payload"),
-        )
-        .expect("restore startup workbook");
-        assert_eq!(recovered.active, 1);
-        let expected = evaluate_workbook(&recovered.sheets)[recovered.active].clone();
-        worker
-            .initialize_workbook(1, recovered.active, recovered.sheets)
-            .expect("initialize restored workbook on worker");
-        let result = worker.wait_for_result(1).expect("initial values");
-
-        assert_eq!(result.active_sheet, recovered.active);
-        assert_eq!(result.values, expected);
-        assert_eq!(
-            result.values.get(&CellRef::parse("A1").unwrap()),
-            Some(&Value::Number(7.0))
-        );
-    }
-
-    #[test]
-    fn initialize_workbook_returns_worker_owned_ui_copy_and_calculates_values() {
-        let temporary = ScratchDirectory::new();
-        let (worker, startup) =
-            WorkbookWorker::start_at(temporary.path(), "loom.sheets/1").expect("worker");
-        assert!(startup.recovery_error.is_none());
-
-        let mut sheet = Sheet::new("initialized");
-        sheet.set_str("A1", "6");
-        sheet.set_str("B1", "=A1+4");
-        let expected_values = evaluate_workbook(std::slice::from_ref(&sheet))[0].clone();
-        let model = worker
-            .initialize_workbook(1, 0, vec![sheet])
-            .expect("initialize workbook on worker");
-        let result = worker.wait_for_result(1).expect("initial calculation");
-
-        assert_eq!(model.active_sheet, 0);
-        assert_eq!(model.sheets.len(), 1);
-        assert_eq!(
-            model.sheets[0].raw(CellRef::parse("B1").unwrap()),
-            Some("=A1+4")
-        );
-        assert_eq!(result.values, expected_values);
-        assert_eq!(value(&result, "B1"), &Value::Number(10.0));
-    }
-
-    #[test]
-    fn initializing_a_cancelable_startup_import_does_not_replace_recovery() {
-        let temporary = ScratchDirectory::new();
-        let recovery_dir = temporary.path();
-        let mut previous = Sheet::new("Recovered");
-        previous.set_str("A1", "keep this recovery");
-        let previous_payload = workbook_package_bytes(std::slice::from_ref(&previous), 0)
-            .expect("package previous recovery");
-        let mut recovery = SnapshotRecovery::open_at(&recovery_dir).expect("open recovery");
-        recovery
-            .record("previous workbook", previous_payload.clone())
-            .expect("write previous recovery");
-        drop(recovery);
-
-        let (worker, startup) =
-            WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1").expect("start worker");
-        assert_eq!(startup.restored_payload, Some(previous_payload.clone()));
-        worker
-            .initialize_workbook_without_recovery(1, 0, vec![Sheet::new("Untitled")])
-            .expect("show blank workbook until import confirmation");
-        worker.wait_for_result(1).expect("blank initial values");
-        drop(worker);
-
-        let mut reopened = SnapshotRecovery::open_at(&recovery_dir).expect("reopen recovery");
-        assert_eq!(
-            reopened.take_restored_payload(),
-            Some(previous_payload),
-            "cancelling startup import must not replace recoverable work"
-        );
-    }
-
-    #[test]
-    fn save_checkpoint_flushes_pending_work_and_compacts_recovery() {
-        let temporary = ScratchDirectory::new();
-        let recovery_path = temporary.path();
-        let (worker, _) =
-            WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("worker");
-        let mut sheet = Sheet::new("checkpoint");
-        sheet.set_str("A1", "12");
-        let payload = workbook_package_bytes(std::slice::from_ref(&sheet), 0)
-            .expect("saved workbook package");
-
-        worker
-            .submit_replacement(1, 0, vec![sheet])
-            .expect("queue pending workbook");
-        worker
-            .checkpoint(payload.clone())
-            .expect("worker checkpoint");
-
-        let mut recovery = SnapshotRecovery::open_at(&recovery_path).expect("reopen recovery");
-        assert_eq!(recovery.take_restored_payload(), Some(payload));
-    }
-
-    #[test]
-    fn worker_reports_recovery_failure_and_keeps_evaluated_values() {
-        let temporary = ScratchDirectory::new();
-        let recovery_path = temporary.path();
-        let (worker, startup) =
-            WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("start worker");
-        assert!(startup.recovery_error.is_none());
-        fs::remove_dir_all(&recovery_path).expect("remove recovery directory");
-        fs::write(&recovery_path, "block recovery directory").expect("replace with a file");
-
-        let mut sheet = Sheet::new("in memory");
-        sheet.set_str("A1", "7");
-        sheet.set_str("B1", "=A1+1");
-        worker
-            .submit_replacement(1, 0, vec![sheet])
-            .expect("send workbook");
-        let result = worker.wait_for_result(1).expect("calculated result");
-
-        assert_eq!(value(&result, "B1"), &Value::Number(8.0));
-        assert!(result.recovery_error.is_some());
-    }
-
-    #[test]
-    fn shutdown_drains_the_last_pending_edit_to_recovery() {
-        let temporary = ScratchDirectory::new();
-        let recovery_path = temporary.path();
-        let (worker, _) =
-            WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("start worker");
-        let mut sheet = Sheet::new("shutdown");
-        sheet.set_str("A1", "2");
-        sheet.set_str("B1", "=A1+1");
-        worker
-            .submit_replacement(1, 0, vec![sheet])
-            .expect("send initial workbook");
-        worker
-            .submit_cell(CellUpdate {
-                revision: 2,
-                active_sheet: 0,
-                sheet: 0,
-                cell: CellRef::parse("A1").unwrap(),
-                raw: Some("9".to_string()),
-            })
-            .expect("send pending edit");
-        drop(worker);
-
-        let mut recovery = SnapshotRecovery::open_at(&recovery_path).expect("open recovery");
-        let payload = recovery
-            .take_restored_payload()
-            .expect("shutdown edit was journaled");
-        let workbook = crate::restore_workbook_from_snapshot(&payload).expect("recover workbook");
-        assert_eq!(
-            workbook.sheets[0].raw(CellRef::parse("A1").unwrap()),
-            Some("9")
-        );
-        let values = evaluate_workbook(&workbook.sheets);
-        assert_eq!(
-            values[0].get(&CellRef::parse("B1").unwrap()),
-            Some(&Value::Number(10.0))
-        );
-    }
-}
+#[path = "workbook_worker_tests.rs"]
+mod tests;

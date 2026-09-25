@@ -46,9 +46,11 @@ mod assets;
 mod workbook_io;
 #[cfg(test)]
 pub(crate) use workbook_io::load_workbook_with_report;
+#[cfg(test)]
+pub(crate) use workbook_io::workbook_package_bytes;
 pub(crate) use workbook_io::{
     blank_sheet, load_sheet, load_workbook, restore_workbook_from_snapshot, save_sheet,
-    save_workbook, starter_workbook, template_sheet, workbook_package_bytes, LoadedWorkbook,
+    save_workbook, starter_workbook, template_sheet, LoadedWorkbook,
 };
 
 mod xlsx_import;
@@ -72,11 +74,11 @@ use headless::render_headless;
 
 mod evaluation_cache;
 mod open_operations;
+mod save_operations;
 use open_operations::{
-    begin_new_workbook, cancel_pending_replacement, discard_changes_and_resume,
-    open_workbook_from_picker, request_replacement_after_dialog, save_changes_and_resume,
-    start_file_timer_after_show, start_startup_open, OpenOperations, PendingReplacement,
-    StartupOpenOptions,
+    begin_new_workbook, discard_changes_and_resume, open_workbook_from_picker,
+    request_replacement_after_dialog, save_changes_and_resume, start_file_timer_after_show,
+    start_startup_open, OpenOperations, PendingReplacement, StartupOpenOptions,
 };
 mod workbook_worker;
 
@@ -1722,6 +1724,8 @@ pub(crate) struct GuiState {
     evaluation_cache: RefCell<evaluation_cache::EvaluationCache>,
     pub(crate) workbook_worker: RefCell<Option<workbook_worker::WorkbookWorker>>,
     pub(crate) worker_revision: Cell<u64>,
+    pub(crate) worker_saved_baseline_generation: Cell<Option<u64>>,
+    pub(crate) worker_saved_baseline_revision: Cell<Option<u64>>,
     pub(crate) pending_cell_commit: Cell<Option<(u64, CellRef)>>,
     pub(crate) save_path: RefCell<Option<PathBuf>>,
     /// Workbook state from the last completed save/open/new operation.
@@ -1732,7 +1736,9 @@ pub(crate) struct GuiState {
     /// Undo and redo recompute exact equality against `last_saved`.
     dirty_content: Cell<bool>,
     pub(crate) pending_replacement: Cell<Option<PendingReplacement>>,
+    pub(crate) pending_replacement_token: Cell<u64>,
     pub(crate) open_operations: RefCell<OpenOperations>,
+    pub(crate) save_operations: RefCell<save_operations::SaveOperations>,
     pending_xlsx_import: RefCell<Option<PendingXlsxImport>>,
     pub(crate) undo_stack: RefCell<Vec<SheetTransaction>>,
     pub(crate) redo_stack: RefCell<Vec<SheetTransaction>>,
@@ -1763,12 +1769,16 @@ impl GuiState {
             evaluation_cache: RefCell::new(evaluation_cache::EvaluationCache::default()),
             workbook_worker: RefCell::new(None),
             worker_revision: Cell::new(0),
+            worker_saved_baseline_generation: Cell::new(None),
+            worker_saved_baseline_revision: Cell::new(None),
             pending_cell_commit: Cell::new(None),
             save_path: RefCell::new(path),
             last_saved: RefCell::new(None),
             dirty_content: Cell::new(false),
             pending_replacement: Cell::new(None),
+            pending_replacement_token: Cell::new(0),
             open_operations: RefCell::new(OpenOperations::default()),
+            save_operations: RefCell::new(save_operations::SaveOperations::default()),
             pending_xlsx_import: RefCell::new(None),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
@@ -1806,8 +1816,22 @@ impl GuiState {
         self.dirty_content.set(false);
     }
 
+    pub(crate) fn clear_dirty(&self) {
+        self.dirty_content.set(false);
+    }
+
     pub(crate) fn mark_content_dirty(&self) {
         self.dirty_content.set(true);
+    }
+
+    pub(crate) fn advance_pending_replacement_token(&self) -> u64 {
+        let token = self
+            .pending_replacement_token
+            .get()
+            .checked_add(1)
+            .expect("Sheets pending replacement token exhausted");
+        self.pending_replacement_token.set(token);
+        token
     }
 
     pub(crate) fn next_worker_revision(&self) -> u64 {
@@ -1818,14 +1842,6 @@ impl GuiState {
             .expect("Sheets workbook revision exhausted");
         self.worker_revision.set(revision);
         revision
-    }
-
-    pub(crate) fn checkpoint_recovery(&self, payload: Vec<u8>) -> Result<(), String> {
-        let worker = self.workbook_worker.borrow();
-        match worker.as_ref() {
-            Some(worker) => worker.checkpoint(payload),
-            None => Ok(()),
-        }
     }
 
     /// Recheck full content after undo/redo, where the edit marker alone would
@@ -1985,6 +2001,15 @@ pub(crate) fn apply_workbook_worker_result(
             "Workbook update failed: {error}"
         )));
     }
+    let generation = state.open_operations.borrow().document_generation();
+    if state.worker_saved_baseline_generation.get() == Some(generation)
+        && state
+            .worker_saved_baseline_revision
+            .get()
+            .is_some_and(|revision| result.revision > revision)
+    {
+        state.dirty_content.set(result.dirty);
+    }
     if let Some(feedback) = cell_feedback {
         app.set_formula_feedback(SharedString::from(feedback));
     } else if superseded_pending_cell && app.get_formula_feedback().as_str() == "Calculating…" {
@@ -1996,14 +2021,22 @@ pub(crate) fn apply_workbook_worker_result(
     true
 }
 
-fn start_workbook_worker_timer(app: &SheetsApp, state: &Rc<GuiState>) -> slint::Timer {
+fn start_workbook_worker_timer(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+) -> slint::Timer {
     let timer = slint::Timer::default();
     let app_ref = app.as_weak();
     let state = Rc::clone(state);
+    let menu_service = Arc::clone(menu_service);
     timer.start(
         slint::TimerMode::Repeated,
         Duration::from_millis(16),
         move || {
+            if let Some(app) = app_ref.upgrade() {
+                save_operations::process_completions(&app, &state, &menu_service);
+            }
             let result = state
                 .workbook_worker
                 .borrow()
@@ -2035,6 +2068,14 @@ fn save_current_sheet(
     state: &GuiState,
     force_picker: bool,
 ) -> Result<bool, String> {
+    if state.save_operations.borrow().is_active() {
+        return Err("a Save operation is already in progress".into());
+    }
+    let draft = app.get_formula_edit_buffer();
+    if draft != app.get_selection_formula() {
+        app.invoke_commit_selected_cell(draft);
+    }
+
     let current_path = (!force_picker)
         .then(|| state.save_path.borrow().clone())
         .flatten();
@@ -2049,20 +2090,31 @@ fn save_current_sheet(
         app.set_status_left("Save cancelled".into());
         return Ok(false);
     };
-    sync_current_to_tabs(state);
-    let active = *state.active_sheet_index.borrow();
-    save_workbook(&path, &state.sheets.borrow(), active)?;
-    *state.save_path.borrow_mut() = Some(path.clone());
-    state.mark_saved();
-    sync_window_title(app, state);
-    let checkpoint = workbook_package_bytes(&state.sheets.borrow(), active)?;
-    match state.checkpoint_recovery(checkpoint) {
-        Ok(()) => app.set_status_left(SharedString::from(format!("Saved {}", path.display()))),
-        Err(error) => app.set_status_left(SharedString::from(format!(
-            "Saved {}, but recovery checkpoint failed: {error}",
-            path.display()
-        ))),
+    let document_generation = state.open_operations.borrow().document_generation();
+    let target_revision = state.worker_revision.get();
+    let pending_replacement_token = (app.get_save_changes_open()
+        && state.pending_replacement.get().is_some())
+    .then(|| state.pending_replacement_token.get());
+    let operation = state.save_operations.borrow_mut().begin_operation(
+        document_generation,
+        target_revision,
+        pending_replacement_token,
+    )?;
+    let queue_result = match state.workbook_worker.borrow().as_ref() {
+        Some(worker) => worker.queue_save(
+            operation.operation_id,
+            operation.document_generation,
+            operation.target_revision,
+            operation.pending_replacement_token,
+            path,
+        ),
+        None => Err("workbook worker is unavailable".to_string()),
+    };
+    if let Err(error) = queue_result {
+        state.save_operations.borrow_mut().clear(operation);
+        return Err(error);
     }
+    app.set_status_left("Saving…".into());
     Ok(true)
 }
 
@@ -2152,8 +2204,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         .set_size(PhysicalSize::new(args.size.0, args.size.1));
     apply_layout_breakpoints(&app, args.size.0);
 
-    let (worker, startup) =
-        workbook_worker::WorkbookWorker::start("org.loom.sheets", "loom.sheets/1")?;
+    let save_operations = save_operations::SaveOperations::default();
+    let save_completion_sender = save_operations.sender();
+    let (worker, startup) = workbook_worker::WorkbookWorker::start(
+        "org.loom.sheets",
+        "loom.sheets/1",
+        save_completion_sender,
+    )?;
     let startup_recovery_error = startup.recovery_error.clone();
     let fallback = startup
         .restored_payload
@@ -2205,6 +2262,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         csv_filter,
         xlsx_filter,
     ));
+    *state.save_operations.borrow_mut() = save_operations;
     let initial_revision = state.next_worker_revision();
     let initial_model = if startup_open.is_some() {
         worker.initialize_workbook_without_recovery(
@@ -2311,7 +2369,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             if let Some(app) = app_ref.upgrade() {
                 if !request_replacement_after_dialog(&app, &state, PendingReplacement::OpenWorkbook)
                 {
-                    open_workbook_from_picker(&app, &state, &menu_service);
+                    open_workbook_from_picker(&app, &state, &menu_service, None);
                 }
             }
         });
@@ -2393,9 +2451,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_save_changes_cancel(move || {
             if let Some(app) = app_ref.upgrade() {
-                cancel_pending_replacement(&app, &state);
-                app.set_save_changes_open(false);
-                app.set_status_left("Replacement cancelled; your workbook is unchanged".into());
+                open_operations::cancel_save_changes_dialog(&app, &state);
             }
         });
     }
@@ -2679,7 +2735,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     state.recompute_dirty_from_saved();
     sync_window_title(&app, &state);
     app.show().map_err(|e| e.to_string())?;
-    let _worker_completion_timer = start_workbook_worker_timer(&app, &state);
+    let _worker_completion_timer = start_workbook_worker_timer(&app, &state, &menu_service);
     let _open_completion_timer = start_file_timer_after_show(&app, &state, &menu_service);
     if let Some(path) = startup_open {
         start_startup_open(

@@ -20,6 +20,8 @@ mod grid_interaction_tests;
 mod layout_tests;
 #[path = "main_tests/open_operation_journeys.rs"]
 mod open_operation_journeys;
+#[path = "main_tests/save_operations_journeys.rs"]
+mod save_operations_journeys;
 #[path = "main_tests/sheet_action_tests.rs"]
 mod sheet_action_tests;
 #[path = "main_tests/workbook_interop_tests.rs"]
@@ -60,9 +62,13 @@ fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> Path
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&recovery_dir);
-    let (worker, startup) =
-        workbook_worker::WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1")
-            .expect("start test worker");
+    let save_completions = state.save_operations.borrow().sender();
+    let (worker, startup) = workbook_worker::WorkbookWorker::start_at_with_completions(
+        recovery_dir.clone(),
+        "loom.sheets/1",
+        save_completions,
+    )
+    .expect("start test worker");
     assert!(startup.recovery_error.is_none());
     let revision = state.next_worker_revision();
     let (sheets, active) = workbook_sheets(state);
@@ -77,4 +83,21 @@ fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> Path
     assert!(apply_workbook_worker_result(app, state, result));
     *state.workbook_worker.borrow_mut() = Some(worker);
     recovery_dir
+}
+
+fn wait_for_save_test_completion(
+    app: &SheetsApp,
+    state: &GuiState,
+    menu_service: &std::sync::Arc<NativeMenuBar>,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while state.save_operations.borrow().is_active() {
+        crate::save_operations::process_completions(app, state, menu_service);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Save completion did not arrive"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    crate::save_operations::process_completions(app, state, menu_service);
 }

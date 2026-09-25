@@ -221,7 +221,7 @@ fn background_open_holds_candidate_until_dirty_document_choice() {
         Some(crate::open_operations::PendingReplacement::OpenCandidate)
     );
 
-    crate::open_operations::continue_pending_replacement_after_dialog(&app, &state, &menu_service);
+    crate::open_operations::discard_changes_and_resume(&app, &state, &menu_service);
 
     assert_eq!(state.current.borrow().name, "Candidate");
     assert_eq!(
@@ -269,6 +269,7 @@ fn formula_draft_is_gated_and_resolved_before_background_open_replaces_workbook(
     save_state.mark_saved();
     let saved_path = dir.join("saved-before-replacement.loomtable");
     *save_state.save_path.borrow_mut() = Some(saved_path.clone());
+    let recovery_path = attach_test_worker(&save_app, &save_state, "formula-draft-save");
     let save_menu = std::sync::Arc::new(NativeMenuBar::new());
     let save_operation =
         start_open_with_formula_draft(&save_app, &save_state, candidate_path.clone(), &save_menu);
@@ -277,16 +278,28 @@ fn formula_draft_is_gated_and_resolved_before_background_open_replaces_workbook(
         crate::open_operations::save_changes_and_resume(&save_app, &save_state, &save_menu)
             .expect("save current workbook before replacement")
     );
+    wait_for_save_test_completion(&save_app, &save_state, &save_menu);
     let saved = load_workbook(&saved_path).expect("reopen saved original workbook");
     assert_eq!(
         saved.sheets[0].raw(CellRef { row: 0, col: 0 }),
         Some("=1+2")
     );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while save_state.current.borrow().name != "Draft candidate" {
+        crate::open_operations::process_completions(&save_app, &save_state, &save_menu);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "candidate did not reload after the Save completed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     assert_eq!(save_state.current.borrow().name, "Draft candidate");
     assert!(!save_state
         .open_operations
         .borrow()
         .is_current(save_operation));
+    drop(save_state.workbook_worker.borrow_mut().take());
+    std::fs::remove_dir_all(&recovery_path).ok();
 
     let discard_app = SheetsApp::new().expect("create discard SheetsApp");
     let discard_state = cross_sheet_state();
@@ -313,6 +326,7 @@ fn continue_xlsx_warning_with_formula_draft(
     state: &GuiState,
     menu_service: &Arc<NativeMenuBar>,
     candidate_name: &str,
+    directory: &std::path::Path,
 ) -> crate::open_operations::OpenOperation {
     app.set_selected_cell("A1".into());
     project_current(app, state);
@@ -320,10 +334,12 @@ fn continue_xlsx_warning_with_formula_draft(
         .open_operations
         .borrow_mut()
         .begin_operation(state.worker_revision.get());
+    let candidate_path = directory.join(format!("{candidate_name}.xlsx"));
+    write_xlsx_with_defined_name(&candidate_path, candidate_name);
     crate::xlsx_import::stage_xlsx_import_candidate(
         app,
         state,
-        PathBuf::from(format!("{candidate_name}.xlsx")),
+        candidate_path,
         loom_sheets_core::persistence::WorkbookFile {
             sheets: vec![Sheet::new(candidate_name)],
             active: 0,
@@ -346,6 +362,31 @@ fn continue_xlsx_warning_with_formula_draft(
     operation
 }
 
+fn write_xlsx_with_defined_name(path: &std::path::Path, sheet_name: &str) {
+    let mut source = Sheet::new(sheet_name);
+    source.set_str("A1", "candidate value");
+    let exported = loom_sheets_core::export_xlsx_sheets(&[source]).expect("export base XLSX");
+    let original = loom_package::PackageArchive::from_bytes(&exported).expect("read base XLSX");
+    let mut rebuilt = loom_package::PackageArchive::new();
+    for part in original.paths() {
+        let bytes = original.get(part).expect("XLSX part");
+        let bytes = if part == "xl/workbook.xml" {
+            String::from_utf8(bytes.to_vec())
+                .expect("workbook XML")
+                .replace(
+                    "</workbook>",
+                    "<definedNames><definedName name=\"CandidateValue\">1</definedName></definedNames></workbook>",
+                )
+                .into_bytes()
+        } else {
+            bytes.to_vec()
+        };
+        rebuilt.add(part, bytes).expect("copy XLSX part");
+    }
+    std::fs::write(path, rebuilt.to_bytes().expect("build XLSX fixture"))
+        .expect("write XLSX fixture");
+}
+
 #[test]
 fn xlsx_warning_continue_with_formula_draft_waits_for_save_discard_or_cancel() {
     set_platform();
@@ -364,6 +405,7 @@ fn xlsx_warning_continue_with_formula_draft_waits_for_save_discard_or_cancel() {
         &cancel_state,
         &cancel_menu,
         "XLSX Cancel Candidate",
+        &dir,
     );
     crate::open_operations::cancel_pending_replacement(&cancel_app, &cancel_state);
     cancel_app.set_save_changes_open(false);
@@ -380,28 +422,46 @@ fn xlsx_warning_continue_with_formula_draft_waits_for_save_discard_or_cancel() {
     save_state.mark_saved();
     let saved_path = dir.join("saved-before-xlsx-import.loomtable");
     *save_state.save_path.borrow_mut() = Some(saved_path.clone());
+    let recovery_path = attach_test_worker(&save_app, &save_state, "xlsx-formula-draft-save");
     let save_menu = std::sync::Arc::new(NativeMenuBar::new());
     let save_operation = continue_xlsx_warning_with_formula_draft(
         &save_app,
         &save_state,
         &save_menu,
         "XLSX Save Candidate",
+        &dir,
     );
     register_cell_edit_action(&save_app, &save_state, &save_menu);
     assert!(
         crate::open_operations::save_changes_and_resume(&save_app, &save_state, &save_menu)
             .expect("save formula draft before accepting XLSX")
     );
+    wait_for_save_test_completion(&save_app, &save_state, &save_menu);
     let saved = load_workbook(&saved_path).expect("reopen saved workbook");
     assert_eq!(
         saved.sheets[0].raw(CellRef { row: 0, col: 0 }),
         Some("=1+2")
     );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !save_app.get_xlsx_import_warning_open() {
+        crate::open_operations::process_completions(&save_app, &save_state, &save_menu);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "reloaded XLSX candidate did not restore its loss warning"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(save_app
+        .get_xlsx_import_warning_message()
+        .contains("defined names"));
+    continue_pending_xlsx_import(&save_app, &save_state, &save_menu);
     assert_eq!(save_state.current.borrow().name, "XLSX Save Candidate");
     assert!(!save_state
         .open_operations
         .borrow()
         .is_current(save_operation));
+    drop(save_state.workbook_worker.borrow_mut().take());
+    std::fs::remove_dir_all(&recovery_path).ok();
 
     let discard_app = SheetsApp::new().expect("create discard SheetsApp");
     let discard_state = cross_sheet_state();
@@ -412,6 +472,7 @@ fn xlsx_warning_continue_with_formula_draft_waits_for_save_discard_or_cancel() {
         &discard_state,
         &discard_menu,
         "XLSX Discard Candidate",
+        &dir,
     );
     crate::open_operations::discard_changes_and_resume(&discard_app, &discard_state, &discard_menu);
     assert_eq!(
@@ -509,6 +570,7 @@ fn second_requests_and_cancel_preserve_held_xlsx_candidate_and_recovery() {
         &state,
         &menu_service,
         "Held XLSX Candidate",
+        &recovery_dir,
     );
 
     assert!(!app.get_xlsx_import_warning_open());
@@ -574,7 +636,7 @@ fn formula_draft_preflight_gates_open_and_new_before_their_replacement_actions()
         &open_state,
         crate::open_operations::PendingReplacement::OpenWorkbook,
     ) {
-        crate::open_operations::open_workbook_from_picker(&open_app, &open_state, &open_menu);
+        crate::open_operations::open_workbook_from_picker(&open_app, &open_state, &open_menu, None);
     }
 
     assert!(open_app.get_save_changes_open());

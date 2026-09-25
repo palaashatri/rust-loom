@@ -11,10 +11,10 @@ use crate::workbook_io::LoadedWorkbook;
 #[test]
 fn newer_open_and_document_replacement_make_older_operations_stale() {
     let mut coordinator = OpenOperationCoordinator::default();
-    let first = coordinator.begin(7);
+    let first = coordinator.begin(7, 0);
     assert!(coordinator.is_current(first));
 
-    let second = coordinator.begin(8);
+    let second = coordinator.begin(8, 0);
     assert!(!coordinator.is_current(first));
     assert!(coordinator.is_current(second));
 
@@ -25,7 +25,7 @@ fn newer_open_and_document_replacement_make_older_operations_stale() {
 #[test]
 fn delayed_open_returns_only_after_the_background_loader_finishes() {
     let mut coordinator = OpenOperationCoordinator::default();
-    let operation = coordinator.begin(11);
+    let operation = coordinator.begin(11, 0);
     let queue = OpenCompletionQueue::new();
     let (release, wait_for_release) = mpsc::channel();
     queue
@@ -50,8 +50,8 @@ fn delayed_open_returns_only_after_the_background_loader_finishes() {
 #[test]
 fn file_completions_keep_every_result_in_fifo_send_order() {
     let mut coordinator = OpenOperationCoordinator::default();
-    let older = coordinator.begin(20);
-    let newer = coordinator.begin(21);
+    let older = coordinator.begin(20, 0);
+    let newer = coordinator.begin(21, 0);
     let queue = OpenCompletionQueue::new();
     queue
         .sender
@@ -77,7 +77,7 @@ fn file_completions_keep_every_result_in_fifo_send_order() {
 #[test]
 fn loader_keeps_one_running_job_and_only_the_newest_waiting_job() {
     let mut coordinator = OpenOperationCoordinator::default();
-    let running = coordinator.begin(22);
+    let running = coordinator.begin(22, 0);
     let queue = OpenCompletionQueue::new();
     let (entered, wait_for_entered) = mpsc::channel();
     let (release, wait_for_release) = mpsc::channel();
@@ -94,7 +94,7 @@ fn loader_keeps_one_running_job_and_only_the_newest_waiting_job() {
         .recv_timeout(Duration::from_secs(2))
         .expect("loader started before queuing more work");
 
-    let superseded = coordinator.begin(23);
+    let superseded = coordinator.begin(23, 0);
     queue
         .start_load_with(
             superseded,
@@ -105,7 +105,7 @@ fn loader_keeps_one_running_job_and_only_the_newest_waiting_job() {
             },
         )
         .expect("queue an open behind the running load");
-    let newest = coordinator.begin(24);
+    let newest = coordinator.begin(24, 0);
     queue
         .start_load_with(newest, PathBuf::from("newest.loomtable"), |_| {
             Ok(loaded_workbook("Newest"))
@@ -137,9 +137,12 @@ fn candidate_stays_attached_until_replacement_is_resumed() {
     });
 
     let resumed = operations
-        .acknowledge_revision(operation, 31)
+        .acknowledge_revision(operation, 31, Some(31))
         .expect("current candidate can be resumed after Save or Discard");
     assert_eq!(resumed.target_revision, 31);
+    assert_eq!(resumed.authorized_dirty_revision, Some(31));
+    assert!(operations.allows_dirty_replacement(operation, 31));
+    assert!(!operations.allows_dirty_replacement(operation, 32));
     assert!(operations.pending_candidate.is_some());
 
     let candidate = operations
@@ -173,7 +176,9 @@ fn accepted_document_replacement_invalidates_and_discards_held_candidate() {
 
     assert!(!operations.is_current(operation));
     assert!(operations.pending_candidate.is_none());
-    assert!(operations.acknowledge_revision(operation, 41).is_none());
+    assert!(operations
+        .acknowledge_revision(operation, 41, None)
+        .is_none());
 }
 
 fn loaded_workbook(name: &str) -> LoadedWorkbook {
