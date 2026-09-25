@@ -11,6 +11,8 @@
 #[cfg(test)]
 mod checkpoint_generation_tests;
 mod checkpoint_generations;
+#[cfg(test)]
+mod recovery_journal_bounds_tests;
 /// Deduplicating full-state recovery coordination for Loom applications.
 pub mod snapshot;
 
@@ -39,6 +41,16 @@ const JOURNAL_FILE: &str = "operations.jsonl";
 const CHECKPOINT_LOCK_FILE: &str = ".checkpoint.lock";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";
 const CHECKPOINT_META_FILE: &str = "checkpoint.json";
+const MAX_JOURNAL_RECORD_LINE_BYTES: usize = 1024 * 1024;
+const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_JOURNAL_RECORDS: usize = 10_000;
+
+#[derive(Clone, Copy)]
+struct JournalAppendLimits {
+    max_record_line_bytes: usize,
+    max_journal_bytes: u64,
+    max_records: usize,
+}
 
 /// Exclusive lock shared by every reader and writer of one recovery directory.
 ///
@@ -238,10 +250,68 @@ impl RecoveryJournal {
         label: impl Into<String>,
         payload: Vec<u8>,
     ) -> Result<JournalRecord, ProductionError> {
+        self.append_record(operation_id, label, payload, None)
+    }
+
+    /// Append one operation within the approved recovery-journal bounds.
+    ///
+    /// The complete UTF-8 JSONL line, including its newline, is limited to
+    /// 1 MiB. The resulting journal is limited to 64 MiB and 10,000 records.
+    pub fn append_bounded(
+        &mut self,
+        operation_id: impl Into<String>,
+        label: impl Into<String>,
+        payload: Vec<u8>,
+    ) -> Result<JournalRecord, ProductionError> {
+        self.append_with_limits(
+            operation_id,
+            label,
+            payload,
+            JournalAppendLimits {
+                max_record_line_bytes: MAX_JOURNAL_RECORD_LINE_BYTES,
+                max_journal_bytes: MAX_JOURNAL_BYTES,
+                max_records: MAX_JOURNAL_RECORDS,
+            },
+        )
+    }
+
+    fn append_with_limits(
+        &mut self,
+        operation_id: impl Into<String>,
+        label: impl Into<String>,
+        payload: Vec<u8>,
+        limits: JournalAppendLimits,
+    ) -> Result<JournalRecord, ProductionError> {
+        self.append_record(operation_id, label, payload, Some(limits))
+    }
+
+    fn append_record(
+        &mut self,
+        operation_id: impl Into<String>,
+        label: impl Into<String>,
+        payload: Vec<u8>,
+        limits: Option<JournalAppendLimits>,
+    ) -> Result<JournalRecord, ProductionError> {
         let _recovery_lock = lock_recovery_writes(&self.directory)?;
         let path = self.directory.join(JOURNAL_FILE);
+        let current_bytes = if let Some(limits) = limits {
+            let current_bytes = match fs::metadata(&path) {
+                Ok(metadata) => metadata.len(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+                Err(error) => return Err(error.into()),
+            };
+            if current_bytes > limits.max_journal_bytes {
+                return Err(ProductionError::InvalidData(format!(
+                    "journal bytes already total {current_bytes}, exceeding the {} byte limit",
+                    limits.max_journal_bytes
+                )));
+            }
+            Some(current_bytes)
+        } else {
+            None
+        };
         let read = read_records_at(&path, true)?;
-        if read.skipped_tail {
+        if read.skipped_tail && limits.is_none() {
             repair_journal(&self.directory, &read.records)?;
         }
         let journal_sequence = read.records.last().map(|record| record.sequence);
@@ -267,6 +337,42 @@ impl RecoveryJournal {
         record.verify()?;
         let encoded = serde_json::to_vec(&record)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
+        if let Some(limits) = limits {
+            let line_bytes = encoded.len().checked_add(1).ok_or_else(|| {
+                ProductionError::InvalidData("journal record line length overflowed".into())
+            })?;
+            if line_bytes > limits.max_record_line_bytes {
+                return Err(ProductionError::InvalidData(format!(
+                    "journal record line is {line_bytes} bytes, exceeding the {} byte limit",
+                    limits.max_record_line_bytes
+                )));
+            }
+            let line_bytes = u64::try_from(line_bytes).map_err(|_| {
+                ProductionError::InvalidData("journal record line length exceeds u64".into())
+            })?;
+            let existing_bytes = current_bytes.unwrap_or(0);
+            let resulting_bytes = existing_bytes.checked_add(line_bytes).ok_or_else(|| {
+                ProductionError::InvalidData("journal byte length overflowed".into())
+            })?;
+            if resulting_bytes > limits.max_journal_bytes {
+                return Err(ProductionError::InvalidData(format!(
+                    "journal bytes would total {resulting_bytes}, exceeding the {} byte limit",
+                    limits.max_journal_bytes
+                )));
+            }
+            let resulting_records = read.records.len().checked_add(1).ok_or_else(|| {
+                ProductionError::InvalidData("journal record count overflowed".into())
+            })?;
+            if resulting_records > limits.max_records {
+                return Err(ProductionError::InvalidData(format!(
+                    "journal would contain {resulting_records} records, exceeding the {} record limit",
+                    limits.max_records
+                )));
+            }
+        }
+        if read.skipped_tail && limits.is_some() {
+            repair_journal(&self.directory, &read.records)?;
+        }
         let existed = path.exists();
         if existed {
             let mut file = OpenOptions::new().append(true).open(path)?;
