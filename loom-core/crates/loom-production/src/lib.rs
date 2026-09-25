@@ -11,8 +11,15 @@
 #[cfg(test)]
 mod checkpoint_generation_tests;
 mod checkpoint_generations;
+mod recovery_inspection;
+#[cfg(test)]
+mod recovery_inspection_tests;
 #[cfg(test)]
 mod recovery_journal_bounds_tests;
+pub use recovery_inspection::{
+    inspect_recovery, inspect_recovery_with_limits, RecoveryInspection, RecoveryInspectionCursor,
+    RecoveryInspectionLimits, RecoveryInspectionStats,
+};
 /// Deduplicating full-state recovery coordination for Loom applications.
 pub mod snapshot;
 
