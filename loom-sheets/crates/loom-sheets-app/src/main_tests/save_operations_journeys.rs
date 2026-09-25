@@ -10,7 +10,8 @@ fn attach_save_worker(app: &SheetsApp, state: &Rc<GuiState>) -> PathBuf {
         "loom-sheets-save-journey-{}-{id}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&recovery_path);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_path);
+    std::fs::create_dir_all(&recovery_path).expect("create Save journey recovery directory");
     let sender = state.save_operations.borrow().sender();
     let (worker, startup) = workbook_worker::WorkbookWorker::start_at_with_completions(
         recovery_path.clone(),

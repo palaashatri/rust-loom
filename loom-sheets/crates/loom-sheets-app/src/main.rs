@@ -71,6 +71,10 @@ use cli::{parse_args, Args};
 mod headless;
 use headless::render_headless;
 
+mod cell_edit_recovery;
+#[cfg(test)]
+#[path = "cell_edit_recovery_tests.rs"]
+mod cell_edit_recovery_tests;
 mod close_operations;
 mod evaluation_cache;
 mod export_operations;

@@ -610,14 +610,12 @@ fn second_requests_and_cancel_preserve_held_xlsx_candidate_and_recovery() {
     );
 
     drop(state.workbook_worker.borrow_mut().take());
-    let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
-        .expect("reopen unchanged recovery");
     assert_eq!(
-        recovery.take_restored_payload(),
+        recovered_worker_payload(&recovery_dir),
         Some(before_package),
         "cancelling the held XLSX candidate must preserve durable recovery"
     );
-    std::fs::remove_dir_all(recovery_dir).ok();
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -766,14 +764,12 @@ fn failed_background_open_preserves_workbook_path_and_recovery() {
     );
 
     drop(state.workbook_worker.borrow_mut().take());
-    let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
-        .expect("reopen preserved recovery");
     assert_eq!(
-        recovery.take_restored_payload(),
+        recovered_worker_payload(&recovery_dir),
         Some(previous_package),
         "parse failure must leave durable recovery untouched"
     );
-    std::fs::remove_dir_all(recovery_dir).ok();
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -823,12 +819,10 @@ fn failed_async_startup_open_preserves_fallback_path_and_recovery() {
     assert!(!state.open_operations.borrow().is_current(operation));
 
     drop(state.workbook_worker.borrow_mut().take());
-    let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
-        .expect("reopen preserved startup recovery");
     assert_eq!(
-        recovery.take_restored_payload(),
+        recovered_worker_payload(&recovery_dir),
         Some(fallback_package),
         "failed startup Open must leave durable fallback recovery unchanged"
     );
-    std::fs::remove_dir_all(recovery_dir).ok();
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }

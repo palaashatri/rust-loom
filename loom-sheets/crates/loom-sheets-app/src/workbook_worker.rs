@@ -8,10 +8,10 @@ use std::time::Duration;
 #[cfg(test)]
 use std::time::Instant;
 
-use loom_production::snapshot::SnapshotRecovery;
 use loom_sheets_core::workbook::evaluate_workbook;
 use loom_sheets_core::{workbook_to_json, CellRef, Sheet, Value};
 
+use crate::cell_edit_recovery::CellEditRecovery;
 use crate::export_operations::{
     ExportCompletion, ExportFormat, ExportOperation, ExportOutputSummary,
 };
@@ -204,11 +204,11 @@ impl WorkbookWorker {
             .spawn(move || {
                 let (mut recovery, startup) = match location {
                     RecoveryLocation::Application(application_id) => {
-                        open_recovery(SnapshotRecovery::open(&application_id))
+                        open_recovery(CellEditRecovery::open(&application_id))
                     }
                     #[cfg(test)]
                     RecoveryLocation::Directory(directory) => {
-                        open_recovery(SnapshotRecovery::open_at(directory))
+                        open_recovery(CellEditRecovery::open_at(directory))
                     }
                 };
                 let startup_error = startup.recovery_error.clone();
@@ -523,24 +523,21 @@ impl Drop for WorkbookWorker {
 }
 
 fn open_recovery(
-    result: Result<SnapshotRecovery, loom_production::ProductionError>,
-) -> (Option<SnapshotRecovery>, WorkerStartup) {
+    result: Result<(CellEditRecovery, Option<Vec<u8>>), String>,
+) -> (Option<CellEditRecovery>, WorkerStartup) {
     match result {
-        Ok(mut recovery) => {
-            let restored_payload = recovery.take_restored_payload();
-            (
-                Some(recovery),
-                WorkerStartup {
-                    restored_payload,
-                    recovery_error: None,
-                },
-            )
-        }
+        Ok((recovery, restored_payload)) => (
+            Some(recovery),
+            WorkerStartup {
+                restored_payload,
+                recovery_error: None,
+            },
+        ),
         Err(error) => (
             None,
             WorkerStartup {
                 restored_payload: None,
-                recovery_error: Some(error.to_string()),
+                recovery_error: Some(error),
             },
         ),
     }
@@ -593,8 +590,8 @@ fn next_completion_sequence(sequence: &mut u64) -> u64 {
 
 fn run_worker(
     shared: Arc<Shared>,
-    recovery: &mut Option<SnapshotRecovery>,
-    schema: &str,
+    recovery: &mut Option<CellEditRecovery>,
+    _schema: &str,
     startup_error: Option<String>,
     save_completions: mpsc::Sender<crate::save_operations::SaveCompletion>,
     export_completions: mpsc::Sender<crate::export_operations::ExportCompletion>,
@@ -626,6 +623,43 @@ fn run_worker(
                 };
                 let _ = initialization.reply.send(model);
 
+                let mut recovery_error = startup_error.clone();
+                #[cfg(test)]
+                let mut recovery_package_duration = Duration::ZERO;
+                #[cfg(test)]
+                let mut recovery_journal_duration = Duration::ZERO;
+                if record_recovery {
+                    if let Some(recovery) = recovery.as_mut() {
+                        if recovery.needs_initial_checkpoint() {
+                            #[cfg(test)]
+                            let package_started = Instant::now();
+                            let package = workbook_package_bytes(&sheets, active_sheet);
+                            #[cfg(test)]
+                            {
+                                recovery_package_duration = package_started.elapsed();
+                            }
+                            #[cfg(test)]
+                            let journal_started = Instant::now();
+                            match package {
+                                Ok(payload) => {
+                                    if let Err(error) = recovery.checkpoint_package(payload, false)
+                                    {
+                                        recovery_error = Some(error);
+                                    }
+                                }
+                                Err(error) => {
+                                    recovery.mark_failed(error.clone());
+                                    recovery_error = Some(error);
+                                }
+                            }
+                            #[cfg(test)]
+                            {
+                                recovery_journal_duration = journal_started.elapsed();
+                            }
+                        }
+                    }
+                }
+
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -634,36 +668,6 @@ fn run_worker(
                     .unwrap_or_default();
                 #[cfg(test)]
                 let evaluation_duration = evaluation_started.elapsed();
-                let mut recovery_error = startup_error.clone();
-                #[cfg(test)]
-                let mut recovery_package_duration = Duration::ZERO;
-                #[cfg(test)]
-                let mut recovery_journal_duration = Duration::ZERO;
-                if record_recovery {
-                    if let Some(recovery) = recovery.as_mut() {
-                        #[cfg(test)]
-                        let package_started = Instant::now();
-                        let package = workbook_package_bytes(&sheets, active_sheet);
-                        #[cfg(test)]
-                        {
-                            recovery_package_duration = package_started.elapsed();
-                        }
-                        #[cfg(test)]
-                        let journal_started = Instant::now();
-                        match package {
-                            Ok(payload) => {
-                                if let Err(error) = recovery.record("sheets state", payload) {
-                                    recovery_error = Some(error.to_string());
-                                }
-                            }
-                            Err(error) => recovery_error = Some(error),
-                        }
-                        #[cfg(test)]
-                        {
-                            recovery_journal_duration = journal_started.elapsed();
-                        }
-                    }
-                }
 
                 let dirty = workbook_differs_from_baseline(&baseline, &sheets, active_sheet);
 
@@ -703,6 +707,7 @@ fn run_worker(
                     (false, true) => WorkerUpdateKind::CellDelta,
                     (false, false) => WorkerUpdateKind::ActiveTab,
                 };
+                let is_replacement = batch.replacement.is_some();
                 if let Some(replacement) = batch.replacement {
                     sheets = replacement;
                     if sheets.is_empty() {
@@ -710,12 +715,17 @@ fn run_worker(
                     }
                 }
                 let mut input_error = None;
+                let mut accepted_cell_edits = Vec::new();
                 for ((sheet_index, cell), raw) in batch.cells {
                     match sheets.get_mut(sheet_index) {
                         Some(sheet) => match raw {
-                            Some(raw) => sheet.set_raw(cell, raw),
+                            Some(raw) => {
+                                sheet.set_raw(cell, raw.clone());
+                                accepted_cell_edits.push((sheet_index, cell, Some(raw)));
+                            }
                             None => {
                                 sheet.clear_cell(cell);
+                                accepted_cell_edits.push((sheet_index, cell, None));
                             }
                         },
                         None => {
@@ -726,6 +736,50 @@ fn run_worker(
                     }
                 }
                 active_sheet = batch.active_sheet.min(sheets.len().saturating_sub(1));
+                let mut recovery_error = startup_error.clone();
+                #[cfg(test)]
+                let mut recovery_package_duration = Duration::ZERO;
+                #[cfg(test)]
+                let mut recovery_journal_duration = Duration::ZERO;
+                if let Some(recovery) = recovery.as_mut() {
+                    if is_replacement {
+                        #[cfg(test)]
+                        let package_started = Instant::now();
+                        let package = workbook_package_bytes(&sheets, active_sheet);
+                        #[cfg(test)]
+                        {
+                            recovery_package_duration = package_started.elapsed();
+                        }
+                        #[cfg(test)]
+                        let journal_started = Instant::now();
+                        match package {
+                            Ok(payload) => {
+                                if let Err(error) = recovery.checkpoint_package(payload, true) {
+                                    recovery_error = Some(error);
+                                }
+                            }
+                            Err(error) => {
+                                recovery.mark_failed(error.clone());
+                                recovery_error = Some(error);
+                            }
+                        }
+                        #[cfg(test)]
+                        {
+                            recovery_journal_duration = journal_started.elapsed();
+                        }
+                    } else {
+                        #[cfg(test)]
+                        let journal_started = Instant::now();
+                        if let Err(error) = recovery.record_cells(active_sheet, accepted_cell_edits)
+                        {
+                            recovery_error = Some(error);
+                        }
+                        #[cfg(test)]
+                        {
+                            recovery_journal_duration = journal_started.elapsed();
+                        }
+                    }
+                }
                 #[cfg(test)]
                 let evaluation_started = Instant::now();
                 let values = evaluate_workbook(&sheets)
@@ -734,35 +788,6 @@ fn run_worker(
                     .unwrap_or_default();
                 #[cfg(test)]
                 let evaluation_duration = evaluation_started.elapsed();
-                let mut recovery_error = startup_error.clone();
-                #[cfg(test)]
-                let mut recovery_package_duration = Duration::ZERO;
-                #[cfg(test)]
-                let mut recovery_journal_duration = Duration::ZERO;
-                if let Some(recovery) = recovery.as_mut() {
-                    #[cfg(test)]
-                    let package_started = Instant::now();
-                    let package = workbook_package_bytes(&sheets, active_sheet);
-                    #[cfg(test)]
-                    {
-                        recovery_package_duration = package_started.elapsed();
-                    }
-                    #[cfg(test)]
-                    let journal_started = Instant::now();
-                    match package {
-                        Ok(payload) => {
-                            if let Err(error) = recovery.record("sheets state", payload) {
-                                recovery_error = Some(error.to_string());
-                            }
-                        }
-                        Err(error) => recovery_error = Some(error),
-                    }
-                    #[cfg(test)]
-                    {
-                        recovery_journal_duration = journal_started.elapsed();
-                    }
-                }
-
                 let dirty = workbook_differs_from_baseline(&baseline, &sheets, active_sheet);
 
                 publish_result(
@@ -816,9 +841,7 @@ fn run_worker(
                             let saved_baseline = (sheets.clone(), active_sheet);
                             baseline = Some(saved_baseline.clone());
                             let checkpoint_result = Some(match recovery.as_mut() {
-                                Some(recovery) => recovery
-                                    .checkpoint(schema, payload)
-                                    .map_err(|error| error.to_string()),
+                                Some(recovery) => recovery.checkpoint_package(payload, false),
                                 None => Err(startup_error.clone().unwrap_or_else(|| {
                                     "recovery writer is unavailable".to_string()
                                 })),

@@ -18,6 +18,9 @@ loom-package = { workspace = true }
 loom-storage = { path = "../../../loom-core/crates/loom-storage" }
 loom-ui = { path = "../../../loom-core/crates/loom-ui" }
 loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
+fs2 = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 slint = "1.17.1"
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 

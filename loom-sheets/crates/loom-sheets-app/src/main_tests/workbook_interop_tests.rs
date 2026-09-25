@@ -189,14 +189,12 @@ fn cancel_xlsx_import_warning_preserves_current_workbook_and_recovery_state() {
     assert_eq!(state.is_dirty(), original_dirty);
 
     drop(state.workbook_worker.borrow_mut().take());
-    let mut recovery = loom_production::snapshot::SnapshotRecovery::open_at(&recovery_dir)
-        .expect("open existing recovery after cancel");
     assert_eq!(
-        recovery.take_restored_payload(),
+        recovered_worker_payload(&recovery_dir),
         Some(original_recovery),
         "Cancel must leave the last durable workbook unchanged"
     );
-    std::fs::remove_dir_all(recovery_dir).ok();
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]

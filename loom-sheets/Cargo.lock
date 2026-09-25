@@ -3073,6 +3073,7 @@ dependencies = [
 name = "loom-sheets-app"
 version = "0.1.0"
 dependencies = [
+ "fs2",
  "i-slint-backend-testing",
  "i-slint-common",
  "image",
@@ -3083,6 +3084,8 @@ dependencies = [
  "loom-storage",
  "loom-test-support",
  "loom-ui",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
 ]

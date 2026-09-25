@@ -24,7 +24,7 @@ fn sheet_mutations_are_sent_to_the_background_workbook_worker() {
         "loom-sheets-main-worker-test-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
     let (worker, startup) =
         workbook_worker::WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1")
             .expect("start workbook worker");
@@ -54,7 +54,7 @@ fn sheet_mutations_are_sent_to_the_background_workbook_worker() {
     );
 
     drop(state);
-    let _ = std::fs::remove_dir_all(recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn active_tab_changes_are_revisioned_without_replacing_the_workbook() {
         "loom-sheets-main-active-worker-test-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
     let (worker, startup) =
         workbook_worker::WorkbookWorker::start_at(recovery_dir.clone(), "loom.sheets/1")
             .expect("start workbook worker");
@@ -102,7 +102,7 @@ fn active_tab_changes_are_revisioned_without_replacing_the_workbook() {
     );
 
     drop(state);
-    let _ = std::fs::remove_dir_all(recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn worker_result_rejects_old_revisions_and_other_tabs_without_changing_draft() {
 
     drop(app);
     drop(state);
-    let _ = std::fs::remove_dir_all(recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn worker_result_refresh_preserves_scrolled_viewport_and_formula_draft() {
 
     drop(app);
     drop(state);
-    let _ = std::fs::remove_dir_all(recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn newer_workbook_result_clears_superseded_cell_calculating_feedback() {
 
     drop(app);
     drop(state);
-    let _ = std::fs::remove_dir_all(recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 
 #[test]
@@ -293,5 +293,5 @@ fn formula_bar_commit_sends_a_cell_delta_and_keeps_old_values_until_result() {
 
     drop(app);
     drop(state);
-    let _ = std::fs::remove_dir_all(recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }

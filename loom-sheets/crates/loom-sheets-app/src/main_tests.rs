@@ -65,7 +65,8 @@ fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> Path
         "loom-sheets-cell-worker-{name}-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&recovery_dir);
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+    std::fs::create_dir_all(&recovery_dir).expect("create test recovery directory");
     let save_completions = state.save_operations.borrow().sender();
     let (worker, startup) = workbook_worker::WorkbookWorker::start_at_with_completions(
         recovery_dir.clone(),
@@ -88,6 +89,15 @@ fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> Path
     assert!(apply_workbook_worker_result(app, state, result));
     *state.workbook_worker.borrow_mut() = Some(worker);
     recovery_dir
+}
+
+fn recovered_worker_payload(directory: &std::path::Path) -> Option<Vec<u8>> {
+    let (worker, startup) =
+        workbook_worker::WorkbookWorker::start_at(directory.to_path_buf(), "loom.sheets/1")
+            .expect("restart workbook worker for recovery inspection");
+    assert!(startup.recovery_error.is_none());
+    drop(worker);
+    startup.restored_payload
 }
 
 fn wait_for_save_test_completion(

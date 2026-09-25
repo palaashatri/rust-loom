@@ -1,10 +1,22 @@
 use super::*;
+use loom_production::snapshot::SnapshotRecovery;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 struct ScratchDirectory(PathBuf);
+
+fn versioned_recovery_path(base: &Path) -> PathBuf {
+    let name = base
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("scratch directory name");
+    base.with_file_name(format!("{name}.sheets-recovery-v1"))
+}
 
 impl ScratchDirectory {
     fn new() -> Self {
@@ -26,6 +38,10 @@ impl Drop for ScratchDirectory {
     fn drop(&mut self) {
         if fs::remove_dir_all(&self.0).is_err() {
             let _ = fs::remove_file(&self.0);
+        }
+        let versioned = versioned_recovery_path(&self.0);
+        if fs::remove_dir_all(&versioned).is_err() {
+            let _ = fs::remove_file(versioned);
         }
     }
 }
@@ -493,6 +509,185 @@ fn startup_restores_the_saved_active_tab_and_worker_values_match_evaluation() {
 }
 
 #[test]
+fn startup_reads_legacy_recovery_without_repairing_it_and_publishes_v1_baseline() {
+    let temporary = ScratchDirectory::new();
+    let recovery_path = temporary.path();
+    let mut data = Sheet::new("Data");
+    data.set_str("A1", "6");
+    data.set_str("B1", "=A1*2");
+    let mut image =
+        loom_sheets_core::SheetObject::image(CellRef { row: 0, col: 3 }, "legacy-chart.png")
+            .expect("image object");
+    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10]);
+    data.objects.push(image);
+    let mut report = Sheet::new("Report");
+    report.set_str("A1", "=Data!B1+3");
+    let expected = workbook_package_bytes(&[data, report], 1).expect("legacy package");
+
+    let mut legacy = SnapshotRecovery::open_at(&recovery_path).expect("open legacy recovery");
+    legacy
+        .record("legacy workbook", expected.clone())
+        .expect("record legacy full package");
+    drop(legacy);
+
+    let operations_path = recovery_path.join("operations.jsonl");
+    let mut legacy_file = OpenOptions::new()
+        .append(true)
+        .open(&operations_path)
+        .expect("open legacy journal for torn-tail fixture");
+    legacy_file
+        .write_all(b"{\"sequence\": 2,")
+        .expect("append torn legacy tail");
+    legacy_file.sync_all().expect("sync torn legacy tail");
+    drop(legacy_file);
+    let original_legacy_records = fs::read(&operations_path).expect("read legacy records");
+
+    let (worker, startup) =
+        WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("start worker");
+    assert!(startup.recovery_error.is_none());
+    assert_eq!(startup.restored_payload, Some(expected));
+    let restored = crate::restore_workbook_from_snapshot(
+        startup
+            .restored_payload
+            .as_deref()
+            .expect("legacy recovery payload"),
+    )
+    .expect("restore legacy workbook");
+    assert_eq!(restored.active, 1);
+    assert_eq!(
+        restored.sheets[0].raw(CellRef::parse("B1").unwrap()),
+        Some("=A1*2")
+    );
+    assert_eq!(
+        restored.sheets[0].objects[0].embedded.as_deref(),
+        Some(&[137, 80, 78, 71, 13, 10, 26, 10][..])
+    );
+
+    worker
+        .initialize_workbook(1, restored.active, restored.sheets)
+        .expect("publish versioned baseline from restored workbook");
+    let result = worker.wait_for_result(1).expect("initial worker result");
+    assert!(result.recovery_error.is_none());
+    drop(worker);
+
+    assert!(
+        fs::read(&operations_path).expect("reread legacy records") == original_legacy_records,
+        "publishing the v1 baseline must preserve legacy records byte-for-byte"
+    );
+    let versioned = loom_production::RecoveryJournal::open(versioned_recovery_path(&recovery_path))
+        .expect("open versioned recovery journal");
+    let recovered = versioned.recover().expect("read versioned baseline");
+    assert!(recovered.checkpoint.is_some());
+    assert!(recovered.operations.is_empty());
+}
+
+#[test]
+fn versioned_cell_recovery_replays_exact_edits_after_a_complete_checkpoint() {
+    let temporary = ScratchDirectory::new();
+    let recovery_path = temporary.path();
+    let (worker, startup) =
+        WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("start worker");
+    assert!(startup.recovery_error.is_none());
+
+    let mut data = Sheet::new("Data");
+    data.set_str("A1", "8");
+    data.set_str("A2", "delete me");
+    data.set_str("B1", "=A1*2");
+    let mut image = loom_sheets_core::SheetObject::image(CellRef { row: 0, col: 3 }, "chart.png")
+        .expect("image object");
+    image.embedded = Some(vec![137, 80, 78, 71, 13, 10, 26, 10]);
+    data.objects.push(image);
+    let mut report = Sheet::new("Report");
+    report.set_str("A1", "=Data!B1+1");
+
+    worker
+        .initialize_workbook(1, 0, vec![data, report])
+        .expect("initialize complete workbook");
+    worker
+        .wait_for_result(1)
+        .expect("complete checkpoint result");
+
+    let (entered, release) = worker.enqueue_test_gate();
+    entered
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker gate");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 2,
+            active_sheet: 1,
+            sheet: 0,
+            cell: CellRef::parse("A1").expect("A1"),
+            raw: Some("11".to_string()),
+        })
+        .expect("overwrite cell");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 3,
+            active_sheet: 1,
+            sheet: 0,
+            cell: CellRef::parse("C1").expect("C1"),
+            raw: Some(String::new()),
+        })
+        .expect("set explicit empty cell");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 4,
+            active_sheet: 1,
+            sheet: 0,
+            cell: CellRef::parse("A2").expect("A2"),
+            raw: None,
+        })
+        .expect("delete cell");
+    worker.submit_active(5, 1).expect("change active sheet");
+    release.send(()).expect("release worker gate");
+    worker
+        .wait_for_result(5)
+        .expect("durable edit batch result");
+    drop(worker);
+
+    let versioned_directory = versioned_recovery_path(&recovery_path);
+    let journal = loom_production::RecoveryJournal::open(&versioned_directory)
+        .expect("open Sheets versioned recovery journal");
+    let recovered = journal.recover().expect("read versioned recovery");
+    assert!(
+        recovered.checkpoint.is_some(),
+        "the versioned journal must start from one complete package"
+    );
+    assert_eq!(recovered.operations.len(), 1);
+
+    let (_restarted_worker, restarted) =
+        WorkbookWorker::start_at(recovery_path, "loom.sheets/1").expect("restart worker");
+    let payload = restarted
+        .restored_payload
+        .as_deref()
+        .expect("replayed versioned workbook payload");
+    let restored =
+        crate::restore_workbook_from_snapshot(payload).expect("decode replayed workbook package");
+    assert_eq!(restored.active, 1);
+    assert_eq!(
+        restored.sheets[0].raw(CellRef::parse("A1").unwrap()),
+        Some("11")
+    );
+    assert_eq!(restored.sheets[0].raw(CellRef::parse("A2").unwrap()), None);
+    assert_eq!(
+        restored.sheets[0].raw(CellRef::parse("B1").unwrap()),
+        Some("=A1*2")
+    );
+    assert_eq!(
+        restored.sheets[0].raw(CellRef::parse("C1").unwrap()),
+        Some("")
+    );
+    assert_eq!(
+        restored.sheets[1].raw(CellRef::parse("A1").unwrap()),
+        Some("=Data!B1+1")
+    );
+    assert_eq!(
+        restored.sheets[0].objects[0].embedded.as_deref(),
+        Some(&[137, 80, 78, 71, 13, 10, 26, 10][..])
+    );
+}
+
+#[test]
 fn initialize_workbook_returns_worker_owned_ui_copy_and_calculates_values() {
     let temporary = ScratchDirectory::new();
     let (worker, startup) =
@@ -580,8 +775,10 @@ fn save_barrier_flushes_pending_work_and_compacts_recovery() {
     assert_eq!(active_sheet, 0);
     assert_eq!(baseline[0].raw(CellRef::parse("A1").unwrap()), Some("12"));
 
-    let mut recovery = SnapshotRecovery::open_at(&recovery_path).expect("reopen recovery");
-    assert_eq!(recovery.take_restored_payload(), Some(payload));
+    drop(worker);
+    let (_restarted_worker, startup) =
+        WorkbookWorker::start_at(recovery_path, "loom.sheets/1").expect("reopen recovery");
+    assert_eq!(startup.restored_payload, Some(payload));
 }
 
 #[test]
@@ -623,9 +820,10 @@ fn checkpoint_at_revision_n_preserves_later_n_plus_one_recovery() {
     worker.wait_for_result(2).expect("revision N+1 recovery");
     drop(worker);
 
-    let mut recovery = SnapshotRecovery::open_at(&recovery_path).expect("reopen recovery");
-    let payload = recovery
-        .take_restored_payload()
+    let (_restarted_worker, startup) =
+        WorkbookWorker::start_at(recovery_path, "loom.sheets/1").expect("reopen recovery");
+    let payload = startup
+        .restored_payload
         .expect("revision N+1 recovery payload");
     let workbook = crate::restore_workbook_from_snapshot(&payload).expect("restore workbook");
     assert_eq!(
@@ -682,8 +880,10 @@ fn save_reports_recovery_checkpoint_failure_after_native_write() {
         .expect("initialize workbook");
     worker.wait_for_result(1).expect("initial result");
 
-    fs::remove_dir_all(&recovery_path).expect("remove recovery directory");
-    fs::write(&recovery_path, "block recovery directory").expect("block recovery directory");
+    let versioned_path = versioned_recovery_path(&recovery_path);
+    fs::remove_dir_all(&versioned_path).expect("remove versioned recovery directory");
+    fs::write(&versioned_path, "block recovery directory")
+        .expect("block versioned recovery directory");
     let saved_path = recovery_path.with_extension("loomtable");
     worker
         .queue_save(1, 1, 1, None, saved_path.clone())
@@ -708,8 +908,9 @@ fn worker_reports_recovery_failure_and_keeps_evaluated_values() {
     let (worker, startup) =
         WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("start worker");
     assert!(startup.recovery_error.is_none());
-    fs::remove_dir_all(&recovery_path).expect("remove recovery directory");
-    fs::write(&recovery_path, "block recovery directory").expect("replace with a file");
+    let versioned_path = versioned_recovery_path(&recovery_path);
+    fs::remove_dir_all(&versioned_path).expect("remove versioned recovery directory");
+    fs::write(&versioned_path, "block recovery directory").expect("replace with a file");
 
     let mut sheet = Sheet::new("in memory");
     sheet.set_str("A1", "7");
@@ -746,9 +947,10 @@ fn shutdown_drains_the_last_pending_edit_to_recovery() {
         .expect("send pending edit");
     drop(worker);
 
-    let mut recovery = SnapshotRecovery::open_at(&recovery_path).expect("open recovery");
-    let payload = recovery
-        .take_restored_payload()
+    let (_restarted_worker, startup) =
+        WorkbookWorker::start_at(recovery_path, "loom.sheets/1").expect("reopen recovery");
+    let payload = startup
+        .restored_payload
         .expect("shutdown edit was journaled");
     let workbook = crate::restore_workbook_from_snapshot(&payload).expect("recover workbook");
     assert_eq!(
