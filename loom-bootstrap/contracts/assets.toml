@@ -50,6 +50,15 @@ commercial = true
 redistributable = true
 attribution_required = false
 
+# Sheets renderer captures are project-created QA evidence, not shipped artwork.
+[[allow]]
+glob = "loom-sheets/docs/qa-renderer/*.png"
+origin = "Loom Sheets project-generated renderer QA screenshot"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
 [[allow]]
 glob = "loom-vision/crates/loom-vision-cli/fixtures/hello.png"
 origin = "Loom-generated test fixture"

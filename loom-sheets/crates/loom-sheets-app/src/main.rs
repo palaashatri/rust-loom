@@ -93,6 +93,9 @@ mod template_navigation;
 mod actions;
 use actions::*;
 
+mod command_dispatch;
+use command_dispatch::*;
+
 mod cell_actions;
 pub(crate) use cell_actions::register_cell_edit_action;
 
