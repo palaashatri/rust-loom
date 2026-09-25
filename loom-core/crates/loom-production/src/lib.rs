@@ -40,6 +40,32 @@ const CHECKPOINT_LOCK_FILE: &str = ".checkpoint.lock";
 const CHECKPOINT_FILE: &str = "checkpoint.bin";
 const CHECKPOINT_META_FILE: &str = "checkpoint.json";
 
+/// Exclusive lock shared by every reader and writer of one recovery directory.
+///
+/// Hold this guard while inspecting or changing recovery files that must not be
+/// observed midway through an append or checkpoint publication.
+#[must_use = "dropping the guard releases the recovery-directory lock"]
+pub struct RecoveryDirectoryLock {
+    _file: File,
+}
+
+/// Lock a recovery directory using the same `.checkpoint.lock` as
+/// [`RecoveryJournal`] and [`snapshot::SnapshotRecovery`].
+pub fn lock_recovery_directory(
+    directory: impl AsRef<Path>,
+) -> Result<RecoveryDirectoryLock, ProductionError> {
+    let directory = directory.as_ref();
+    fs::create_dir_all(directory)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(directory.join(CHECKPOINT_LOCK_FILE))?;
+    lock.lock_exclusive()?;
+    Ok(RecoveryDirectoryLock { _file: lock })
+}
+
 /// Error returned by production-service operations.
 #[derive(Debug)]
 pub enum ProductionError {
@@ -489,16 +515,8 @@ fn repair_journal(directory: &Path, records: &[JournalRecord]) -> Result<(), Pro
     repair_journal_with(directory, records, atomic_write)
 }
 
-fn lock_recovery_writes(directory: &Path) -> Result<File, ProductionError> {
-    fs::create_dir_all(directory)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(directory.join(CHECKPOINT_LOCK_FILE))?;
-    lock.lock_exclusive()?;
-    Ok(lock)
+fn lock_recovery_writes(directory: &Path) -> Result<RecoveryDirectoryLock, ProductionError> {
+    lock_recovery_directory(directory)
 }
 
 fn compact_journal_with(
@@ -936,6 +954,43 @@ pub fn validate_release_matrix(targets: &[InstallerTarget]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_directory_lock_contention_and_release() {
+        use fs2::FileExt;
+        use std::sync::mpsc;
+        use std::thread;
+
+        let temporary = tempfile::tempdir().expect("temporary recovery directory");
+        let lock = lock_recovery_directory(temporary.path()).expect("acquire recovery lock");
+        let check_handle = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(temporary.path().join(CHECKPOINT_LOCK_FILE))
+            .expect("open shared lock file");
+        assert!(
+            check_handle.try_lock_exclusive().is_err(),
+            "the public lock must use the journal checkpoint lock"
+        );
+
+        let path = temporary.path().to_path_buf();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let waiter = thread::spawn(move || {
+            let _lock = lock_recovery_directory(path).expect("wait for recovery lock");
+            acquired_tx.send(()).expect("report lock acquisition");
+        });
+        assert!(
+            acquired_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "second handle must wait while the first lock is held"
+        );
+        drop(lock);
+        acquired_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("second handle acquires after release");
+        waiter.join().expect("lock waiter thread");
+    }
 
     #[test]
     fn atomic_write_replaces_existing_destination() {

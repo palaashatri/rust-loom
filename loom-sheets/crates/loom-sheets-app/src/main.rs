@@ -79,6 +79,7 @@ mod close_operations;
 mod evaluation_cache;
 mod export_operations;
 mod file_operation_completions;
+mod legacy_migration;
 mod open_operations;
 mod save_operations;
 mod worker_failure;

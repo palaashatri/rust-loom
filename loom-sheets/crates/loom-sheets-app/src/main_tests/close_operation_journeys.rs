@@ -495,11 +495,13 @@ fn dirty_close_save_waits_for_worker_checkpoint_before_hiding() {
 #[test]
 fn save_failure_during_close_keeps_dialog_open_with_full_error() {
     let recovery = ScratchDirectory::new();
+    let recovery_dir = recovery.0.join("recovery");
+    std::fs::create_dir_all(&recovery_dir).expect("create recovery directory");
     let blocking_parent = recovery.0.join("regular-file");
     std::fs::write(&blocking_parent, b"not a directory").expect("create blocking parent file");
     let destination = blocking_parent.join("failed.loomtable");
     let (app, state) = close_test_app([]);
-    attach_worker(&app, &state, &recovery.0, true);
+    attach_worker(&app, &state, &recovery_dir, true);
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
     register_cell_edit_action(&app, &state, &menu_service);
     close_operations::wire_save_changes_callbacks(&app, &state, &menu_service);

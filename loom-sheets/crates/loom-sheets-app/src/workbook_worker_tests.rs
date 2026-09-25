@@ -509,7 +509,7 @@ fn startup_restores_the_saved_active_tab_and_worker_values_match_evaluation() {
 }
 
 #[test]
-fn startup_reads_legacy_recovery_without_repairing_it_and_publishes_v1_baseline() {
+fn startup_migrates_legacy_recovery_after_v1_baseline_publication() {
     let temporary = ScratchDirectory::new();
     let recovery_path = temporary.path();
     let mut data = Sheet::new("Data");
@@ -540,7 +540,7 @@ fn startup_reads_legacy_recovery_without_repairing_it_and_publishes_v1_baseline(
         .expect("append torn legacy tail");
     legacy_file.sync_all().expect("sync torn legacy tail");
     drop(legacy_file);
-    let original_legacy_records = fs::read(&operations_path).expect("read legacy records");
+    assert!(operations_path.exists());
 
     let (worker, startup) =
         WorkbookWorker::start_at(recovery_path.clone(), "loom.sheets/1").expect("start worker");
@@ -571,9 +571,15 @@ fn startup_reads_legacy_recovery_without_repairing_it_and_publishes_v1_baseline(
     drop(worker);
 
     assert!(
-        fs::read(&operations_path).expect("reread legacy records") == original_legacy_records,
-        "publishing the v1 baseline must preserve legacy records byte-for-byte"
+        !operations_path.exists(),
+        "legacy operations are removed only after the verified v1 baseline is published"
     );
+    let legacy_marker: serde_json::Value = serde_json::from_slice(
+        &fs::read(versioned_recovery_path(&recovery_path).join("legacy-migration.json"))
+            .expect("read migration marker"),
+    )
+    .expect("decode migration marker");
+    assert_eq!(legacy_marker["phase"], "complete");
     let versioned = loom_production::RecoveryJournal::open(versioned_recovery_path(&recovery_path))
         .expect("open versioned recovery journal");
     let recovered = versioned.recover().expect("read versioned baseline");
@@ -747,7 +753,9 @@ fn initializing_a_cancelable_startup_import_does_not_replace_recovery() {
 #[test]
 fn save_barrier_flushes_pending_work_and_compacts_recovery() {
     let temporary = ScratchDirectory::new();
-    let recovery_path = temporary.path();
+    let recovery_path = temporary.path().join("recovery");
+    std::fs::create_dir_all(&recovery_path).expect("create recovery directory");
+    let save_path = temporary.path().join("saved.loomtable");
     let (save_sender, save_receiver) = std::sync::mpsc::channel();
     let (worker, _) = WorkbookWorker::start_at_with_completions(
         recovery_path.clone(),
@@ -764,7 +772,7 @@ fn save_barrier_flushes_pending_work_and_compacts_recovery() {
         .submit_replacement(1, 0, vec![sheet])
         .expect("queue pending workbook");
     worker
-        .queue_save(1, 1, 1, None, recovery_path.join("saved.loomtable"))
+        .queue_save(1, 1, 1, None, save_path)
         .expect("queue save barrier");
     let completion = save_receiver
         .recv_timeout(Duration::from_secs(5))
@@ -784,7 +792,8 @@ fn save_barrier_flushes_pending_work_and_compacts_recovery() {
 #[test]
 fn checkpoint_at_revision_n_preserves_later_n_plus_one_recovery() {
     let temporary = ScratchDirectory::new();
-    let recovery_path = temporary.path();
+    let recovery_path = temporary.path().join("recovery");
+    std::fs::create_dir_all(&recovery_path).expect("create recovery directory");
     let (save_sender, save_receiver) = std::sync::mpsc::channel();
     let (worker, _) = WorkbookWorker::start_at_with_completions(
         recovery_path.clone(),

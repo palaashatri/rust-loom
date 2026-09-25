@@ -74,7 +74,11 @@ fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> Path
         save_completions,
     )
     .expect("start test worker");
-    assert!(startup.recovery_error.is_none());
+    assert!(
+        startup.recovery_error.is_none(),
+        "recovery startup failed: {:?}",
+        startup.recovery_error
+    );
     let revision = state.next_worker_revision();
     let (sheets, active) = workbook_sheets(state);
     let model = worker
@@ -95,7 +99,11 @@ fn recovered_worker_payload(directory: &std::path::Path) -> Option<Vec<u8>> {
     let (worker, startup) =
         workbook_worker::WorkbookWorker::start_at(directory.to_path_buf(), "loom.sheets/1")
             .expect("restart workbook worker for recovery inspection");
-    assert!(startup.recovery_error.is_none());
+    assert!(
+        startup.recovery_error.is_none(),
+        "recovery restart failed: {:?}",
+        startup.recovery_error
+    );
     drop(worker);
     startup.restored_payload
 }

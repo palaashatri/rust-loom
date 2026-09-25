@@ -3086,6 +3086,7 @@ dependencies = [
  "loom-ui",
  "serde",
  "serde_json",
+ "sha2",
  "slint",
  "slint-build",
 ]

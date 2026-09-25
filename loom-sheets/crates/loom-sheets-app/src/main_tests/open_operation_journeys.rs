@@ -558,6 +558,14 @@ fn second_requests_and_cancel_preserve_held_xlsx_candidate_and_recovery() {
     let state = cross_sheet_state();
     state.mark_saved();
     let recovery_dir = attach_test_worker(&app, &state, "held-xlsx-candidate");
+    let candidate_dir = recovery_dir.with_file_name(format!(
+        "{}-candidates",
+        recovery_dir
+            .file_name()
+            .expect("test recovery directory name")
+            .to_string_lossy()
+    ));
+    std::fs::create_dir_all(&candidate_dir).expect("create XLSX candidate directory");
     let previous_path = std::env::temp_dir().join("before-xlsx-candidate.loomtable");
     *state.save_path.borrow_mut() = Some(previous_path.clone());
     let (before_sheets, before_active) = workbook_sheets(&state);
@@ -570,7 +578,7 @@ fn second_requests_and_cancel_preserve_held_xlsx_candidate_and_recovery() {
         &state,
         &menu_service,
         "Held XLSX Candidate",
-        &recovery_dir,
+        &candidate_dir,
     );
 
     assert!(!app.get_xlsx_import_warning_open());
@@ -615,6 +623,7 @@ fn second_requests_and_cancel_preserve_held_xlsx_candidate_and_recovery() {
         Some(before_package),
         "cancelling the held XLSX candidate must preserve durable recovery"
     );
+    std::fs::remove_dir_all(&candidate_dir).expect("remove XLSX candidate directory");
     crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
 

@@ -2,7 +2,9 @@
 
 use fs2::FileExt;
 use loom_production::snapshot::application_state_directory;
-use loom_production::{CheckpointMetadata, JournalRecord, RecoveryJournal};
+use loom_production::{
+    lock_recovery_directory, CheckpointMetadata, JournalRecord, RecoveryJournal,
+};
 use loom_sheets_core::{CellRef, Sheet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -78,9 +80,13 @@ impl CheckpointIdentity {
 /// The durable writer and the replayed startup payload for one Sheets session.
 pub(crate) struct CellEditRecovery {
     journal: RecoveryJournal,
+    legacy_directory: PathBuf,
+    pending_legacy_migration: Option<super::legacy_migration::LegacyManifest>,
     identity: Option<RecoveryIdentity>,
     last_sequence: u64,
     failed: Option<String>,
+    #[cfg(test)]
+    migration_limits_override: Option<(u64, u64, u64)>,
     _writer_lock: File,
 }
 
@@ -113,9 +119,80 @@ impl CellEditRecovery {
             }
         })?;
 
+        let _legacy_lock = lock_recovery_directory(legacy_directory)
+            .map_err(|error| format!("lock legacy Sheets recovery directory: {error}"))?;
+        let current_manifest = super::legacy_migration::scan_legacy(legacy_directory)?;
+        let receipt = super::legacy_migration::read_receipt(&versioned_directory)?;
+        if matches!(&receipt, super::legacy_migration::OpenReceipt::None)
+            && !current_manifest.is_empty()
+            && super::legacy_migration::has_versioned_recovery_entries(&versioned_directory)?
+        {
+            // A receipt replacement can be interrupted after Windows removes
+            // its old file. Without a receipt, never guess which store is newer.
+            return Err(
+                "versioned and legacy Sheets recovery both exist without a migration receipt; automatic recovery is paused because their ordering cannot be established".into(),
+            );
+        }
         let journal =
             RecoveryJournal::open(&versioned_directory).map_err(|error| error.to_string())?;
         let recovered = journal.recover().map_err(|error| error.to_string())?;
+        let pending_legacy_migration = match receipt {
+            super::legacy_migration::OpenReceipt::None => {
+                if !current_manifest.unsupported_entries().is_empty() {
+                    return Err(format!(
+                        "unsupported legacy Sheets recovery entries: {}",
+                        current_manifest.unsupported_entries().join(", ")
+                    ));
+                }
+                current_manifest
+                    .has_recovery_files()
+                    .then_some(current_manifest.clone())
+            }
+            super::legacy_migration::OpenReceipt::Complete(receipt) => {
+                super::legacy_migration::verify_complete_marker(&receipt, &current_manifest)?;
+                None
+            }
+            super::legacy_migration::OpenReceipt::Pending(mut receipt) => {
+                let selected_checkpoint_matches = super::legacy_migration::checkpoint_matches(
+                    &receipt,
+                    recovered.checkpoint.as_deref(),
+                    recovered.checkpoint_metadata.as_ref(),
+                );
+                if selected_checkpoint_matches {
+                    let allow_missing = super::legacy_migration::is_verified(&receipt);
+                    super::legacy_migration::verify_expected_manifest(
+                        super::legacy_migration::receipt_manifest(&receipt),
+                        &current_manifest,
+                        allow_missing,
+                    )?;
+                    if !allow_missing {
+                        super::legacy_migration::mark_verified(&mut receipt);
+                        super::legacy_migration::persist_receipt(&versioned_directory, &receipt)?;
+                    }
+                    super::legacy_migration::remove_unchanged(
+                        legacy_directory,
+                        super::legacy_migration::receipt_manifest(&receipt),
+                    )?;
+                    super::legacy_migration::mark_complete(&mut receipt);
+                    super::legacy_migration::persist_receipt(&versioned_directory, &receipt)?;
+                    None
+                } else if recovered.checkpoint.is_some()
+                    || recovered.checkpoint_metadata.is_some()
+                    || super::legacy_migration::is_verified(&receipt)
+                {
+                    return Err(
+                        "legacy migration receipt does not match the selected checkpoint".into(),
+                    );
+                } else {
+                    super::legacy_migration::verify_expected_manifest(
+                        super::legacy_migration::receipt_manifest(&receipt),
+                        &current_manifest,
+                        false,
+                    )?;
+                    Some(super::legacy_migration::receipt_manifest(&receipt).clone())
+                }
+            }
+        };
         let (identity, last_sequence, restored_payload) = match (
             recovered.checkpoint.as_deref(),
             recovered.checkpoint_metadata.as_ref(),
@@ -164,9 +241,13 @@ impl CellEditRecovery {
         Ok((
             Self {
                 journal,
+                legacy_directory: legacy_directory.to_path_buf(),
+                pending_legacy_migration,
                 identity,
                 last_sequence,
                 failed: None,
+                #[cfg(test)]
+                migration_limits_override: None,
                 _writer_lock: writer_lock,
             },
             restored_payload,
@@ -272,8 +353,25 @@ impl CellEditRecovery {
             },
         };
         let schema = encode_checkpoint_identity(&identity);
-        if let Err(error) = self.journal.checkpoint(durable_sequence, schema, &package) {
-            return self.fail(error.to_string());
+        let checkpoint = if let Some(manifest) = self.pending_legacy_migration.clone() {
+            match self.publish_legacy_baseline(
+                &package,
+                durable_sequence,
+                &schema,
+                manifest,
+                &identity,
+            ) {
+                Ok(metadata) => metadata,
+                Err(error) => return self.fail(error),
+            }
+        } else {
+            match self.journal.checkpoint(durable_sequence, schema, &package) {
+                Ok(metadata) => metadata,
+                Err(error) => return self.fail(error.to_string()),
+            }
+        };
+        if checkpoint.sha256.is_empty() {
+            return self.fail("Sheets recovery checkpoint readback has no digest".into());
         }
 
         // The checkpoint pointer is now durable, so its baseline identity is
@@ -287,8 +385,88 @@ impl CellEditRecovery {
         Ok(())
     }
 
+    fn publish_legacy_baseline(
+        &mut self,
+        package: &[u8],
+        durable_sequence: u64,
+        schema: &str,
+        manifest: super::legacy_migration::LegacyManifest,
+        identity: &RecoveryIdentity,
+    ) -> Result<CheckpointMetadata, String> {
+        let _legacy_lock = lock_recovery_directory(&self.legacy_directory)
+            .map_err(|error| format!("lock legacy Sheets recovery directory: {error}"))?;
+        let actual = super::legacy_migration::scan_legacy(&self.legacy_directory)?;
+        super::legacy_migration::verify_expected_manifest(&manifest, &actual, false)?;
+        let mut receipt =
+            super::legacy_migration::prepared(manifest.clone(), durable_sequence, package, schema);
+        let versioned_directory = self.journal.directory();
+        let receipt_bytes = super::legacy_migration::encode_receipt(&receipt)?;
+        super::legacy_migration::preflight(
+            package.len() as u64,
+            receipt_bytes.len() as u64,
+            &manifest,
+            versioned_directory,
+            self.migration_limits_override(),
+        )?;
+        super::legacy_migration::persist_receipt_bytes(versioned_directory, &receipt_bytes)?;
+
+        let metadata = self
+            .journal
+            .checkpoint(durable_sequence, schema, package)
+            .map_err(|error| format!("blocked legacy migration checkpoint publication: {error}"))?;
+        self.identity = Some(identity.clone());
+        self.last_sequence = durable_sequence;
+
+        let readback = self
+            .journal
+            .recover()
+            .map_err(|error| format!("read back migrated Sheets checkpoint: {error}"))?;
+        if !super::legacy_migration::checkpoint_matches(
+            &receipt,
+            readback.checkpoint.as_deref(),
+            readback.checkpoint_metadata.as_ref(),
+        ) {
+            return Err("migrated Sheets checkpoint did not match its prepared receipt".into());
+        }
+        super::legacy_migration::mark_verified(&mut receipt);
+        super::legacy_migration::persist_receipt(versioned_directory, &receipt)?;
+        super::legacy_migration::remove_unchanged(
+            &self.legacy_directory,
+            super::legacy_migration::receipt_manifest(&receipt),
+        )?;
+        super::legacy_migration::mark_complete(&mut receipt);
+        super::legacy_migration::persist_receipt(versioned_directory, &receipt)?;
+        self.pending_legacy_migration = None;
+        Ok(metadata)
+    }
+
+    #[cfg(test)]
+    fn migration_limits_override(&self) -> Option<(u64, u64, u64)> {
+        self.migration_limits_override
+    }
+
+    #[cfg(not(test))]
+    fn migration_limits_override(&self) -> Option<(u64, u64, u64)> {
+        None
+    }
+
     pub(crate) fn mark_failed(&mut self, error: String) {
         self.failed = Some(error);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_migration_limits_for_test(
+        &mut self,
+        package: u64,
+        retained: u64,
+        temporary: u64,
+    ) {
+        self.migration_limits_override = Some((package, retained, temporary));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn migration_limits_for_test(&self) -> Option<(u64, u64, u64)> {
+        self.migration_limits_override
     }
 
     fn fail<T>(&mut self, error: String) -> Result<T, String> {
