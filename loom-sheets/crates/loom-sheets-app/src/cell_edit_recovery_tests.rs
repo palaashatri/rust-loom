@@ -4,11 +4,12 @@ use crate::cell_edit_recovery::{
 };
 use crate::workbook_io::workbook_package_bytes;
 use crate::workbook_worker::WorkbookWorker;
+use fs2::FileExt;
 use loom_production::snapshot::SnapshotRecovery;
 use loom_production::{JournalRecord, RecoveryJournal};
 use loom_sheets_core::{CellRef, Sheet};
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -148,6 +149,30 @@ fn seed_legacy_checkpoint(directory: &Path, package: &[u8]) -> BTreeMap<String, 
         .expect("checkpoint legacy workbook");
     drop(legacy);
     legacy_entry_bytes(directory)
+}
+
+#[test]
+fn legacy_recovery_directory_lock_is_held_until_cell_recovery_drops() {
+    let fixture = RecoveryFixture::new();
+    let (recovery, _) =
+        CellEditRecovery::open_at(fixture.path()).expect("open empty versioned recovery");
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fixture.path().join(".checkpoint.lock"))
+        .expect("open legacy recovery lock file");
+
+    let while_open = FileExt::try_lock_exclusive(&lock_file)
+        .expect_err("cell recovery retains the legacy directory lock");
+    assert_eq!(
+        while_open.kind(),
+        std::io::ErrorKind::WouldBlock,
+        "the retained lock must block another exclusive acquisition"
+    );
+
+    drop(recovery);
+    FileExt::try_lock_exclusive(&lock_file)
+        .expect("dropping cell recovery releases the legacy directory lock");
 }
 
 #[test]

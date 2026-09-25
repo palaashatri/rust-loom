@@ -3,7 +3,8 @@
 use fs2::FileExt;
 use loom_production::snapshot::application_state_directory;
 use loom_production::{
-    lock_recovery_directory, CheckpointMetadata, JournalRecord, RecoveryJournal,
+    lock_recovery_directory, CheckpointMetadata, JournalRecord, RecoveryDirectoryLock,
+    RecoveryJournal,
 };
 use loom_sheets_core::{CellRef, Sheet};
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,7 @@ pub(crate) struct CellEditRecovery {
     #[cfg(test)]
     migration_limits_override: Option<(u64, u64, u64)>,
     _writer_lock: File,
+    _legacy_lock: RecoveryDirectoryLock,
 }
 
 impl CellEditRecovery {
@@ -119,7 +121,7 @@ impl CellEditRecovery {
             }
         })?;
 
-        let _legacy_lock = lock_recovery_directory(legacy_directory)
+        let legacy_lock = lock_recovery_directory(legacy_directory)
             .map_err(|error| format!("lock legacy Sheets recovery directory: {error}"))?;
         let current_manifest = super::legacy_migration::scan_legacy(legacy_directory)?;
         let receipt = super::legacy_migration::read_receipt(&versioned_directory)?;
@@ -249,6 +251,7 @@ impl CellEditRecovery {
                 #[cfg(test)]
                 migration_limits_override: None,
                 _writer_lock: writer_lock,
+                _legacy_lock: legacy_lock,
             },
             restored_payload,
         ))
@@ -393,8 +396,6 @@ impl CellEditRecovery {
         manifest: super::legacy_migration::LegacyManifest,
         identity: &RecoveryIdentity,
     ) -> Result<CheckpointMetadata, String> {
-        let _legacy_lock = lock_recovery_directory(&self.legacy_directory)
-            .map_err(|error| format!("lock legacy Sheets recovery directory: {error}"))?;
         let actual = super::legacy_migration::scan_legacy(&self.legacy_directory)?;
         super::legacy_migration::verify_expected_manifest(&manifest, &actual, false)?;
         let mut receipt =
