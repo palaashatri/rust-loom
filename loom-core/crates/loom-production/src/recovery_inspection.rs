@@ -1,14 +1,16 @@
+use super::checkpoint_generations::{read_checkpoint_state_with_limits, CheckpointState};
 use super::checkpoint_generations::{
     CHECKPOINT_COMMIT_PREFIX, CHECKPOINT_COMMIT_SUFFIX, CHECKPOINT_GENERATION_METADATA_SUFFIX,
     CHECKPOINT_GENERATION_PAYLOAD_SUFFIX, CHECKPOINT_GENERATION_PREFIX,
 };
 use super::{
-    read_checkpoint_state, CheckpointMetadata, JournalRecord, ProductionError, CHECKPOINT_FILE,
+    CheckpointMetadata, CheckpointPointer, JournalRecord, ProductionError, CHECKPOINT_FILE,
     CHECKPOINT_META_FILE, JOURNAL_FILE,
 };
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
-use std::path::Path;
+use std::io::{self, BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 
 const DEFAULT_MAX_CHECKPOINT_BYTES: u64 = 256 * 1024 * 1024;
 const DEFAULT_MAX_CHECKPOINT_METADATA_BYTES: u64 = 64 * 1024 * 1024;
@@ -16,6 +18,7 @@ const DEFAULT_MAX_DIRECTORY_ENTRIES: usize = 10_000;
 const DEFAULT_MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 const DEFAULT_MAX_RECORDS: usize = 10_000;
 const DEFAULT_MAX_RECORD_LINE_BYTES: usize = 1024 * 1024;
+const DEFAULT_MAX_DIRECTORY_DEPTH: usize = 32;
 
 /// Caller-controlled ceilings for a read-only recovery inspection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +91,10 @@ pub struct RecoveryInspectionStats {
 /// readers and writers must observe a stable recovery directory. This type
 /// does not create, repair, or prune recovery files.
 pub struct RecoveryInspectionCursor {
+    directory: PathBuf,
     checkpoint: Option<Vec<u8>>,
     checkpoint_metadata: Option<CheckpointMetadata>,
+    checkpoint_pointer: Option<CheckpointPointer>,
     journal: Option<BufReader<File>>,
     limits: RecoveryInspectionLimits,
     line_buffer: Vec<u8>,
@@ -100,6 +105,8 @@ pub struct RecoveryInspectionCursor {
     line_number: usize,
     incomplete_tail: bool,
     stats: Option<RecoveryInspectionStats>,
+    record_snapshot_hasher: Sha256,
+    record_snapshot_digest: Option<[u8; 32]>,
     failed: bool,
 }
 
@@ -127,19 +134,21 @@ impl RecoveryInspectionCursor {
                 ))
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(Self::empty(limits));
+                return Ok(Self::empty(directory.to_path_buf(), limits));
             }
             Err(error) => return Err(error.into()),
         }
 
         validate_existing_entries(directory, limits)?;
-        let checkpoint = read_checkpoint_state(directory)?;
+        let checkpoint = read_checkpoint_state_with_limits(directory, limits)?;
         let journal_path = directory.join(JOURNAL_FILE);
         let journal = open_optional_bounded_journal(&journal_path, limits.max_journal_bytes)?;
 
         Ok(Self {
+            directory: directory.to_path_buf(),
             checkpoint: checkpoint.bytes,
             checkpoint_metadata: checkpoint.metadata,
+            checkpoint_pointer: checkpoint.pointer,
             journal,
             limits,
             line_buffer: Vec::new(),
@@ -150,6 +159,8 @@ impl RecoveryInspectionCursor {
             line_number: 0,
             incomplete_tail: false,
             stats: None,
+            record_snapshot_hasher: Sha256::new(),
+            record_snapshot_digest: None,
             failed: false,
         })
     }
@@ -157,6 +168,11 @@ impl RecoveryInspectionCursor {
     /// Selected checkpoint package bytes, when one exists.
     pub fn checkpoint(&self) -> Option<&[u8]> {
         self.checkpoint.as_deref()
+    }
+
+    /// Take ownership of the selected checkpoint package, when one exists.
+    pub fn take_checkpoint(&mut self) -> Option<Vec<u8>> {
+        self.checkpoint.take()
     }
 
     /// Metadata for the selected checkpoint, when one exists.
@@ -167,6 +183,65 @@ impl RecoveryInspectionCursor {
     /// Exact journal statistics, available only after the cursor reaches EOF.
     pub fn stats(&self) -> Option<&RecoveryInspectionStats> {
         self.stats.as_ref()
+    }
+
+    pub(super) fn last_sequence(&self) -> Option<u64> {
+        (self.complete_record_count > 0).then_some(self.previous_sequence)
+    }
+
+    pub(super) fn limits(&self) -> RecoveryInspectionLimits {
+        self.limits
+    }
+
+    pub(super) fn validate_finalization_input(
+        &self,
+        directory: &Path,
+        records: &[JournalRecord],
+    ) -> Result<(), ProductionError> {
+        if self.directory != directory {
+            return Err(ProductionError::InvalidData(
+                "recovery inspection snapshot belongs to a different directory".into(),
+            ));
+        }
+        if self.failed || self.stats.is_none() {
+            return Err(ProductionError::InvalidData(
+                "recovery inspection must reach EOF before journal finalization".into(),
+            ));
+        }
+        if records.len() != self.complete_record_count {
+            return Err(ProductionError::InvalidData(
+                "recovery journal records do not match the inspected snapshot count".into(),
+            ));
+        }
+        let mut supplied_hasher = Sha256::new();
+        for record in records {
+            let encoded = serde_json::to_vec(record)
+                .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
+            supplied_hasher.update(encoded);
+            supplied_hasher.update(b"\n");
+        }
+        let supplied_digest: [u8; 32] = supplied_hasher.finalize().into();
+        if self.record_snapshot_digest != Some(supplied_digest) {
+            return Err(ProductionError::InvalidData(
+                "recovery journal records do not match the inspected snapshot".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn into_checkpoint_state_after_eof(
+        self,
+    ) -> Result<CheckpointState, ProductionError> {
+        if self.failed || self.stats.is_none() {
+            return Err(ProductionError::InvalidData(
+                "recovery inspection must reach EOF before journal finalization".into(),
+            ));
+        }
+        Ok(CheckpointState {
+            bytes: self.checkpoint,
+            metadata: self.checkpoint_metadata,
+            pointer: self.checkpoint_pointer,
+        })
     }
 
     /// Yield the next complete, integrity-checked journal record.
@@ -251,15 +326,21 @@ impl RecoveryInspectionCursor {
             self.previous_sequence = record.sequence;
             self.complete_record_count += 1;
             self.max_complete_line_bytes = self.max_complete_line_bytes.max(line_bytes);
+            let encoded = serde_json::to_vec(&record)
+                .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
+            self.record_snapshot_hasher.update(encoded);
+            self.record_snapshot_hasher.update(b"\n");
             self.line_buffer.clear();
             return Ok(Some(record));
         }
     }
 
-    fn empty(limits: RecoveryInspectionLimits) -> Self {
+    fn empty(directory: PathBuf, limits: RecoveryInspectionLimits) -> Self {
         Self {
+            directory,
             checkpoint: None,
             checkpoint_metadata: None,
+            checkpoint_pointer: None,
             journal: None,
             limits,
             line_buffer: Vec::new(),
@@ -270,6 +351,8 @@ impl RecoveryInspectionCursor {
             line_number: 0,
             incomplete_tail: false,
             stats: None,
+            record_snapshot_hasher: Sha256::new(),
+            record_snapshot_digest: None,
             failed: false,
         }
     }
@@ -324,6 +407,7 @@ impl RecoveryInspectionCursor {
             max_complete_line_bytes: self.max_complete_line_bytes,
             incomplete_tail: self.incomplete_tail,
         });
+        self.record_snapshot_digest = Some(self.record_snapshot_hasher.clone().finalize().into());
     }
 }
 
@@ -396,6 +480,50 @@ fn open_optional_bounded_journal(
     Ok(Some(BufReader::new(file)))
 }
 
+pub(super) fn read_bounded_file(
+    path: &Path,
+    maximum_bytes: u64,
+    description: &str,
+) -> Result<Vec<u8>, ProductionError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => return Err(obstructed_path(path, "read target is not a regular file")),
+        Err(error) => return Err(error.into()),
+    }
+
+    let file = File::open(path)?;
+    let opened_metadata = file.metadata()?;
+    if !opened_metadata.file_type().is_file() {
+        return Err(obstructed_path(
+            path,
+            "opened read target is not a regular file",
+        ));
+    }
+    if opened_metadata.len() > maximum_bytes {
+        return Err(ceiling_error(
+            description,
+            opened_metadata.len(),
+            maximum_bytes,
+        ));
+    }
+
+    let read_limit = maximum_bytes.checked_add(1).ok_or_else(|| {
+        ProductionError::InvalidData(format!(
+            "{description} byte limit cannot be represented as a read ceiling"
+        ))
+    })?;
+    let mut bytes = Vec::new();
+    file.take(read_limit).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > maximum_bytes {
+        return Err(ceiling_error(
+            description,
+            bytes.len() as u64,
+            maximum_bytes,
+        ));
+    }
+    Ok(bytes)
+}
+
 fn validate_existing_entries(
     directory: &Path,
     limits: RecoveryInspectionLimits,
@@ -414,6 +542,20 @@ fn validate_existing_entries(
         }
         let path = entry?.path();
         let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_dir() {
+            let is_atomicwrite_path = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".atomicwrite"));
+            if !is_atomicwrite_path {
+                return Err(obstructed_path(
+                    &path,
+                    "recovery entry is a symlink, directory, or special file",
+                ));
+            }
+            validate_atomicwrite_tree(&path, limits, &mut directory_entries, 1)?;
+            continue;
+        }
         if !metadata.file_type().is_file() {
             return Err(obstructed_path(
                 &path,
@@ -450,6 +592,44 @@ fn validate_existing_entries(
                 "checkpoint",
                 metadata.len(),
                 limits.max_checkpoint_bytes,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_atomicwrite_tree(
+    directory: &Path,
+    limits: RecoveryInspectionLimits,
+    entry_count: &mut usize,
+    depth: usize,
+) -> Result<(), ProductionError> {
+    if depth > DEFAULT_MAX_DIRECTORY_DEPTH {
+        return Err(limit_error(
+            "abandoned atomic-write directory depth",
+            u64::try_from(depth).unwrap_or(u64::MAX),
+            u64::try_from(DEFAULT_MAX_DIRECTORY_DEPTH).unwrap_or(u64::MAX),
+            "levels",
+        ));
+    }
+    for entry in fs::read_dir(directory)? {
+        *entry_count = (*entry_count).saturating_add(1);
+        if *entry_count > limits.max_directory_entries {
+            return Err(limit_error(
+                "recovery directory entry count",
+                u64::try_from(*entry_count).unwrap_or(u64::MAX),
+                u64::try_from(limits.max_directory_entries).unwrap_or(u64::MAX),
+                "entries",
+            ));
+        }
+        let path = entry?.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_dir() {
+            validate_atomicwrite_tree(&path, limits, entry_count, depth.saturating_add(1))?;
+        } else if !metadata.file_type().is_file() {
+            return Err(obstructed_path(
+                &path,
+                "abandoned atomic-write entry is a symlink or special file",
             ));
         }
     }

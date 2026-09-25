@@ -81,6 +81,7 @@ mod export_operations;
 mod file_operation_completions;
 mod legacy_migration;
 mod open_operations;
+mod recovery_policy;
 mod save_operations;
 mod worker_failure;
 use open_operations::{

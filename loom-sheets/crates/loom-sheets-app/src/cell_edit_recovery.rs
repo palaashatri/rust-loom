@@ -4,13 +4,14 @@ use fs2::FileExt;
 use loom_production::snapshot::application_state_directory;
 use loom_production::{
     lock_recovery_directory, CheckpointMetadata, JournalRecord, RecoveryDirectoryLock,
-    RecoveryJournal,
+    RecoveryInspectionCursor, RecoveryJournal,
 };
 use loom_sheets_core::{CellRef, Sheet};
-use serde::{Deserialize, Serialize};
+use serde::de::{Error as DeError, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,6 +30,9 @@ const COMMIT_PREFIX: &str = "checkpoint-commit-";
 #[cfg(windows)]
 const COMMIT_SUFFIX: &str = ".json";
 const WRITER_LOCK_FILE: &str = ".sheets-writer.lock";
+const LEGACY_PACKAGE_BYTE_LIMIT: usize =
+    super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES as usize;
+const LEGACY_PACKAGE_LIMIT_ERROR_MARKER: &str = "loom-legacy-package-limit";
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -56,6 +60,57 @@ pub(super) struct CellEditBatch {
     pub(super) predecessor_sequence: u64,
     pub(super) active_sheet: usize,
     pub(super) edits: Vec<CellAssignment>,
+}
+
+#[derive(Debug)]
+pub(super) struct BoundedLegacyPackage<const MAX_BYTES: usize>(Vec<u8>);
+
+impl<'de, const MAX_BYTES: usize> Deserialize<'de> for BoundedLegacyPackage<MAX_BYTES> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PackageVisitor<const MAX_BYTES: usize>;
+
+        impl<'de, const MAX_BYTES: usize> Visitor<'de> for PackageVisitor<MAX_BYTES> {
+            type Value = BoundedLegacyPackage<MAX_BYTES>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(formatter, "a byte array no longer than {MAX_BYTES} bytes")
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let initial_capacity = sequence.size_hint().unwrap_or(0).min(64 * 1024);
+                let mut bytes = Vec::with_capacity(initial_capacity.min(MAX_BYTES));
+                while let Some(byte) = sequence.next_element::<u8>()? {
+                    if bytes.len() >= MAX_BYTES {
+                        return Err(A::Error::custom(format!(
+                            "{LEGACY_PACKAGE_LIMIT_ERROR_MARKER}: legacy package exceeds its {MAX_BYTES} byte limit"
+                        )));
+                    }
+                    bytes.push(byte);
+                }
+                Ok(BoundedLegacyPackage(bytes))
+            }
+        }
+
+        deserializer.deserialize_seq(PackageVisitor::<MAX_BYTES>)
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyJournalRecord<const MAX_BYTES: usize> {
+    sequence: u64,
+    operation_id: String,
+    #[serde(rename = "label")]
+    _label: String,
+    payload: BoundedLegacyPackage<MAX_BYTES>,
+    #[serde(rename = "timestamp_ms")]
+    _timestamp_ms: u128,
+    payload_sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +159,7 @@ impl CellEditRecovery {
     ) -> Result<(Self, Option<Vec<u8>>), String> {
         let legacy_directory = legacy_directory.as_ref();
         let versioned_directory = versioned_directory_for(legacy_directory)?;
+        super::recovery_policy::validate_recovery_roots(legacy_directory, &versioned_directory)?;
         fs::create_dir_all(&versioned_directory)
             .map_err(|error| format!("create Sheets recovery directory: {error}"))?;
         let writer_lock = OpenOptions::new()
@@ -123,6 +179,13 @@ impl CellEditRecovery {
 
         let legacy_lock = lock_recovery_directory(legacy_directory)
             .map_err(|error| format!("lock legacy Sheets recovery directory: {error}"))?;
+        let versioned_lock = lock_recovery_directory(&versioned_directory)
+            .map_err(|error| format!("lock versioned Sheets recovery directory: {error}"))?;
+        super::recovery_policy::preflight_existing_storage(
+            &versioned_directory,
+            legacy_directory,
+            super::recovery_policy::APPROVED_RECOVERY_LIMITS,
+        )?;
         let current_manifest = super::legacy_migration::scan_legacy(legacy_directory)?;
         let receipt = super::legacy_migration::read_receipt(&versioned_directory)?;
         if matches!(&receipt, super::legacy_migration::OpenReceipt::None)
@@ -135,30 +198,46 @@ impl CellEditRecovery {
                 "versioned and legacy Sheets recovery both exist without a migration receipt; automatic recovery is paused because their ordering cannot be established".into(),
             );
         }
-        let journal =
-            RecoveryJournal::open(&versioned_directory).map_err(|error| error.to_string())?;
-        let recovered = journal.recover().map_err(|error| error.to_string())?;
+        if matches!(&receipt, super::legacy_migration::OpenReceipt::None)
+            && !current_manifest.unsupported_entries().is_empty()
+        {
+            return Err(format!(
+                "unsupported legacy Sheets recovery entries: {}",
+                current_manifest.unsupported_entries().join(", ")
+            ));
+        }
+
+        let inspection_limits = super::recovery_policy::inspection_limits();
+        let mut cursor =
+            RecoveryInspectionCursor::open_with_limits(&versioned_directory, inspection_limits)
+                .map_err(|error| format!("inspect bounded Sheets recovery data: {error}"))?;
+        let checkpoint_package = cursor.take_checkpoint();
+        let checkpoint_metadata = cursor.checkpoint_metadata().cloned();
+        let mut operations = Vec::new();
+        while let Some(record) = cursor
+            .next_record()
+            .map_err(|error| format!("inspect Sheets recovery journal: {error}"))?
+        {
+            operations.push(record);
+        }
+        cursor
+            .stats()
+            .expect("inspection cursor reaches EOF after the record loop");
+
+        let mut pending_receipt_cleanup = None;
         let pending_legacy_migration = match receipt {
-            super::legacy_migration::OpenReceipt::None => {
-                if !current_manifest.unsupported_entries().is_empty() {
-                    return Err(format!(
-                        "unsupported legacy Sheets recovery entries: {}",
-                        current_manifest.unsupported_entries().join(", ")
-                    ));
-                }
-                current_manifest
-                    .has_recovery_files()
-                    .then_some(current_manifest.clone())
-            }
+            super::legacy_migration::OpenReceipt::None => current_manifest
+                .has_recovery_files()
+                .then_some(current_manifest.clone()),
             super::legacy_migration::OpenReceipt::Complete(receipt) => {
                 super::legacy_migration::verify_complete_marker(&receipt, &current_manifest)?;
                 None
             }
-            super::legacy_migration::OpenReceipt::Pending(mut receipt) => {
+            super::legacy_migration::OpenReceipt::Pending(receipt) => {
                 let selected_checkpoint_matches = super::legacy_migration::checkpoint_matches(
                     &receipt,
-                    recovered.checkpoint.as_deref(),
-                    recovered.checkpoint_metadata.as_ref(),
+                    checkpoint_package.as_deref(),
+                    checkpoint_metadata.as_ref(),
                 );
                 if selected_checkpoint_matches {
                     let allow_missing = super::legacy_migration::is_verified(&receipt);
@@ -167,19 +246,10 @@ impl CellEditRecovery {
                         &current_manifest,
                         allow_missing,
                     )?;
-                    if !allow_missing {
-                        super::legacy_migration::mark_verified(&mut receipt);
-                        super::legacy_migration::persist_receipt(&versioned_directory, &receipt)?;
-                    }
-                    super::legacy_migration::remove_unchanged(
-                        legacy_directory,
-                        super::legacy_migration::receipt_manifest(&receipt),
-                    )?;
-                    super::legacy_migration::mark_complete(&mut receipt);
-                    super::legacy_migration::persist_receipt(&versioned_directory, &receipt)?;
+                    pending_receipt_cleanup = Some(receipt);
                     None
-                } else if recovered.checkpoint.is_some()
-                    || recovered.checkpoint_metadata.is_some()
+                } else if checkpoint_package.is_some()
+                    || checkpoint_metadata.is_some()
                     || super::legacy_migration::is_verified(&receipt)
                 {
                     return Err(
@@ -195,50 +265,88 @@ impl CellEditRecovery {
                 }
             }
         };
-        let (identity, last_sequence, restored_payload) = match (
-            recovered.checkpoint.as_deref(),
-            recovered.checkpoint_metadata.as_ref(),
-        ) {
-            (Some(package), Some(metadata)) => {
-                let identity = parse_checkpoint_identity(&metadata.schema)?;
-                let mut workbook = crate::workbook_io::restore_workbook_from_snapshot(package)
-                    .ok_or_else(|| "Sheets recovery checkpoint package is invalid".to_string())?;
-                if workbook.sheets.is_empty() {
-                    return Err("Sheets recovery checkpoint has no worksheets".to_string());
-                }
-                let mut last_sequence = metadata.last_sequence;
-                for record in &recovered.operations {
-                    let expected_sequence = last_sequence.checked_add(1).ok_or_else(|| {
-                        "Sheets recovery sequence is exhausted at u64::MAX".to_string()
-                    })?;
-                    if record.sequence != expected_sequence {
+        let (identity, last_sequence, restored_payload) =
+            match (checkpoint_package.as_deref(), checkpoint_metadata.as_ref()) {
+                (Some(package), Some(metadata)) => {
+                    let identity = parse_checkpoint_identity(&metadata.schema)?;
+                    let mut workbook = crate::workbook_io::restore_workbook_from_snapshot(package)
+                        .ok_or_else(|| {
+                            "Sheets recovery checkpoint package is invalid".to_string()
+                        })?;
+                    if workbook.sheets.is_empty() {
+                        return Err("Sheets recovery checkpoint has no worksheets".to_string());
+                    }
+                    let mut last_sequence = metadata.last_sequence;
+                    for record in operations
+                        .iter()
+                        .filter(|record| record.sequence > metadata.last_sequence)
+                    {
+                        let expected_sequence = last_sequence.checked_add(1).ok_or_else(|| {
+                            "Sheets recovery sequence is exhausted at u64::MAX".to_string()
+                        })?;
+                        if record.sequence != expected_sequence {
+                            return Err(format!(
+                                "Sheets recovery sequence {} does not follow {last_sequence}",
+                                record.sequence
+                            ));
+                        }
+                        let batch = decode_batch(record)?;
+                        validate_batch(&batch, &identity, last_sequence, &workbook.sheets)?;
+                        apply_batch(&mut workbook.sheets, &mut workbook.active, &batch);
+                        last_sequence = record.sequence;
+                    }
+                    let payload = crate::workbook_io::workbook_package_bytes(
+                        &workbook.sheets,
+                        workbook.active,
+                    )?;
+                    if payload.len() as u64 > super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES {
                         return Err(format!(
-                            "Sheets recovery sequence {} does not follow {last_sequence}",
-                            record.sequence
+                            "recovered Sheets package exceeds the {} byte package limit",
+                            super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES
                         ));
                     }
-                    let batch = decode_batch(record)?;
-                    validate_batch(&batch, &identity, last_sequence, &workbook.sheets)?;
-                    apply_batch(&mut workbook.sheets, &mut workbook.active, &batch);
-                    last_sequence = record.sequence;
+                    (Some(identity), last_sequence, Some(payload))
                 }
-                let payload =
-                    crate::workbook_io::workbook_package_bytes(&workbook.sheets, workbook.active)?;
-                (Some(identity), last_sequence, Some(payload))
-            }
-            (None, None) => {
-                if !recovered.operations.is_empty() {
+                (None, None) => {
+                    if !operations.is_empty() {
+                        return Err(
+                            "Sheets recovery edit journal has no complete baseline checkpoint"
+                                .into(),
+                        );
+                    }
+                    let legacy_payload = read_legacy_payload(legacy_directory)?;
+                    if legacy_payload.as_ref().is_some_and(|payload| {
+                        payload.len() as u64 > super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES
+                    }) {
+                        return Err(format!(
+                            "legacy Sheets package exceeds the {} byte package limit",
+                            super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES
+                        ));
+                    }
+                    (None, 0, legacy_payload)
+                }
+                _ => {
                     return Err(
-                        "Sheets recovery edit journal has no complete baseline checkpoint".into(),
-                    );
+                        "Sheets recovery checkpoint payload and metadata are incomplete".into(),
+                    )
                 }
-                let legacy_payload = read_legacy_payload(legacy_directory)?;
-                (None, 0, legacy_payload)
+            };
+
+        let journal =
+            RecoveryJournal::open_from_inspection(&versioned_lock, cursor, &operations)
+                .map_err(|error| format!("finalize validated Sheets recovery journal: {error}"))?;
+        if let Some(mut receipt) = pending_receipt_cleanup {
+            if !super::legacy_migration::is_verified(&receipt) {
+                super::legacy_migration::mark_verified(&mut receipt);
+                super::legacy_migration::persist_receipt(&versioned_directory, &receipt)?;
             }
-            _ => {
-                return Err("Sheets recovery checkpoint payload and metadata are incomplete".into())
-            }
-        };
+            super::legacy_migration::remove_unchanged(
+                legacy_directory,
+                super::legacy_migration::receipt_manifest(&receipt),
+            )?;
+            super::legacy_migration::mark_complete(&mut receipt);
+            super::legacy_migration::persist_receipt(&versioned_directory, &receipt)?;
+        }
 
         Ok((
             Self {
@@ -631,67 +739,84 @@ fn read_legacy_records_after(
     directory: &Path,
     checkpoint_sequence: u64,
 ) -> Result<Option<Vec<u8>>, String> {
+    read_legacy_records_after_with_package_limit::<LEGACY_PACKAGE_BYTE_LIMIT>(
+        directory,
+        checkpoint_sequence,
+    )
+}
+
+pub(super) fn read_legacy_records_after_with_package_limit<const MAX_BYTES: usize>(
+    directory: &Path,
+    checkpoint_sequence: u64,
+) -> Result<Option<Vec<u8>>, String> {
     let path = directory.join(JOURNAL_FILE);
-    if !path.exists() {
-        return Ok(None);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("inspect legacy Sheets journal: {error}")),
     }
-    let file = File::open(&path).map_err(|error| format!("read legacy Sheets journal: {error}"))?;
-    let mut reader = BufReader::new(file);
+    let file = super::recovery_policy::open_bounded_file(
+        &path,
+        super::recovery_policy::MAX_RETAINED_RECOVERY_BYTES,
+        "legacy Sheets journal",
+    )?;
+    let read_limit = super::recovery_policy::MAX_RETAINED_RECOVERY_BYTES
+        .checked_add(1)
+        .ok_or_else(|| "legacy Sheets journal limit cannot be incremented".to_string())?;
+    let mut reader = BufReader::new(file.take(read_limit));
     let mut line = Vec::new();
-    let mut pending_line: Option<Vec<u8>> = None;
+    let mut journal_bytes = 0_u64;
     let mut previous_sequence = 0;
     let mut newest_payload = None;
     let mut line_number = 0;
     loop {
         line.clear();
-        if reader
+        let bytes_read = reader
             .read_until(b'\n', &mut line)
-            .map_err(|error| format!("read legacy Sheets journal: {error}"))?
-            == 0
-        {
+            .map_err(|error| format!("read legacy Sheets journal: {error}"))?;
+        if bytes_read == 0 {
             break;
+        }
+        journal_bytes = journal_bytes
+            .checked_add(bytes_read as u64)
+            .ok_or_else(|| "legacy Sheets journal byte count overflow".to_string())?;
+        if journal_bytes > super::recovery_policy::MAX_RETAINED_RECOVERY_BYTES {
+            return Err(format!(
+                "legacy Sheets journal exceeds its {} byte retained limit",
+                super::recovery_policy::MAX_RETAINED_RECOVERY_BYTES
+            ));
         }
         let committed = line.last() == Some(&b'\n');
         if committed {
             line.pop();
         }
-        let current_line = std::mem::take(&mut line);
-        if let Some(previous_line) = pending_line.take() {
-            line_number += 1;
-            process_legacy_record_line(
-                &previous_line,
-                false,
-                line_number,
-                checkpoint_sequence,
-                &mut previous_sequence,
-                &mut newest_payload,
-            )?;
-        }
         if !committed {
             // Match RecoveryJournal's rule: a record needs its final newline
             // delimiter to be committed. Still reject invalid UTF-8 anywhere
             // in the legacy journal, as its shared reader does.
-            std::str::from_utf8(&current_line)
+            std::str::from_utf8(&line)
                 .map_err(|error| format!("legacy Sheets journal is not UTF-8: {error}"))?;
             break;
         }
-        pending_line = Some(current_line);
-    }
-    if let Some(final_line) = pending_line {
         line_number += 1;
-        process_legacy_record_line(
-            &final_line,
-            true,
+        let final_record = reader
+            .fill_buf()
+            .map_err(|error| format!("read legacy Sheets journal: {error}"))?
+            .is_empty();
+        process_legacy_record_line_with_limit::<MAX_BYTES>(
+            &line,
+            final_record,
             line_number,
             checkpoint_sequence,
             &mut previous_sequence,
             &mut newest_payload,
         )?;
+        line.clear();
     }
     Ok(newest_payload)
 }
 
-fn process_legacy_record_line(
+fn process_legacy_record_line_with_limit<const MAX_BYTES: usize>(
     line: &[u8],
     tolerate_invalid_final_record: bool,
     line_number: usize,
@@ -704,13 +829,20 @@ fn process_legacy_record_line(
     if line.trim().is_empty() {
         return Ok(());
     }
-    let record: JournalRecord = match serde_json::from_str(line) {
+    let record: LegacyJournalRecord<MAX_BYTES> = match serde_json::from_str(line) {
         Ok(record) => record,
+        Err(error)
+            if error
+                .to_string()
+                .contains(LEGACY_PACKAGE_LIMIT_ERROR_MARKER) =>
+        {
+            return Err(format!("legacy Sheets journal line {line_number}: {error}"));
+        }
         Err(_) if tolerate_invalid_final_record => return Ok(()),
         Err(error) => return Err(format!("legacy Sheets journal line {line_number}: {error}")),
     };
     let checksum =
-        loom_package::manifest::Checksum::from_bytes(loom_package::zip::sha256(&record.payload))
+        loom_package::manifest::Checksum::from_bytes(loom_package::zip::sha256(&record.payload.0))
             .to_hex();
     if checksum != record.payload_sha256 {
         return Err(format!(
@@ -726,7 +858,7 @@ fn process_legacy_record_line(
     }
     *previous_sequence = record.sequence;
     if record.sequence > checkpoint_sequence {
-        *newest_payload = Some(record.payload);
+        *newest_payload = Some(record.payload.0);
     }
     Ok(())
 }
@@ -754,11 +886,13 @@ fn read_legacy_checkpoint(
         }
         return Ok((None, None));
     }
-    let value: serde_json::Value = serde_json::from_slice(
-        &fs::read(&metadata_path)
-            .map_err(|error| format!("read legacy Sheets checkpoint metadata: {error}"))?,
-    )
-    .map_err(|error| format!("legacy Sheets checkpoint metadata is invalid: {error}"))?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&super::recovery_policy::read_bounded_file(
+            &metadata_path,
+            super::recovery_policy::MAX_RECOVERY_METADATA_BYTES,
+            "legacy Sheets checkpoint metadata",
+        )?)
+        .map_err(|error| format!("legacy Sheets checkpoint metadata is invalid: {error}"))?;
     if value.get("generation").is_some() {
         let pointer: CheckpointIdentity = serde_json::from_value(value)
             .map_err(|error| format!("legacy Sheets checkpoint pointer is invalid: {error}"))?;
@@ -776,8 +910,11 @@ fn read_legacy_checkpoint(
     }
     let metadata: CheckpointMetadata = serde_json::from_value(value)
         .map_err(|error| format!("legacy Sheets checkpoint metadata is invalid: {error}"))?;
-    let bytes = fs::read(payload_path)
-        .map_err(|error| format!("read legacy Sheets checkpoint payload: {error}"))?;
+    let bytes = super::recovery_policy::read_bounded_file(
+        &payload_path,
+        super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES,
+        "legacy Sheets checkpoint payload",
+    )?;
     verify_legacy_checkpoint_digest(&bytes, &metadata.sha256)?;
     Ok((Some(bytes), Some(metadata)))
 }
@@ -811,10 +948,13 @@ fn latest_commit_pointer(directory: &Path) -> Result<Option<CheckpointIdentity>,
     let Some((generation, path)) = latest else {
         return Ok(None);
     };
-    let pointer: CheckpointIdentity = serde_json::from_slice(
-        &fs::read(path).map_err(|error| format!("read legacy Sheets commit record: {error}"))?,
-    )
-    .map_err(|error| format!("legacy Sheets commit record is invalid: {error}"))?;
+    let pointer: CheckpointIdentity =
+        serde_json::from_slice(&super::recovery_policy::read_bounded_file(
+            &path,
+            super::recovery_policy::MAX_RECOVERY_METADATA_BYTES,
+            "legacy Sheets commit record",
+        )?)
+        .map_err(|error| format!("legacy Sheets commit record is invalid: {error}"))?;
     if pointer.generation != generation {
         return Err(format!(
             "legacy Sheets commit record {generation} names generation {}",
@@ -839,13 +979,18 @@ fn read_legacy_generation(
             "legacy Sheets checkpoint generation {generation} is incomplete"
         ));
     }
-    let metadata: CheckpointMetadata = serde_json::from_slice(
-        &fs::read(metadata_path)
-            .map_err(|error| format!("read legacy Sheets generation metadata: {error}"))?,
-    )
-    .map_err(|error| format!("legacy Sheets generation metadata is invalid: {error}"))?;
-    let bytes = fs::read(payload_path)
-        .map_err(|error| format!("read legacy Sheets generation payload: {error}"))?;
+    let metadata: CheckpointMetadata =
+        serde_json::from_slice(&super::recovery_policy::read_bounded_file(
+            &metadata_path,
+            super::recovery_policy::MAX_RECOVERY_METADATA_BYTES,
+            "legacy Sheets generation metadata",
+        )?)
+        .map_err(|error| format!("legacy Sheets generation metadata is invalid: {error}"))?;
+    let bytes = super::recovery_policy::read_bounded_file(
+        &payload_path,
+        super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES,
+        "legacy Sheets generation payload",
+    )?;
     verify_legacy_checkpoint_digest(&bytes, &metadata.sha256)?;
     Ok((bytes, metadata))
 }

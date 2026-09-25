@@ -4,7 +4,7 @@ use loom_production::CheckpointMetadata;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, Read};
 use std::path::Path;
 
@@ -84,11 +84,19 @@ pub(super) fn scan_legacy(directory: &Path) -> Result<LegacyManifest, String> {
             unknown_entries,
         });
     }
+    let mut entry_count = 0_usize;
     for entry in fs::read_dir(directory)
         .map_err(|error| format!("read legacy Sheets recovery directory: {error}"))?
     {
         let entry = entry.map_err(|error| format!("read legacy Sheets recovery entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        entry_count = entry_count.saturating_add(1);
+        if entry_count > super::recovery_policy::MAX_RECOVERY_DIRECTORY_ENTRIES {
+            return Err(format!(
+                "legacy Sheets recovery directory entry count exceeds {}",
+                super::recovery_policy::MAX_RECOVERY_DIRECTORY_ENTRIES
+            ));
+        }
         if LOCK_FILES.contains(&name.as_str()) {
             continue;
         }
@@ -98,7 +106,10 @@ pub(super) fn scan_legacy(directory: &Path) -> Result<LegacyManifest, String> {
             unknown_entries.push(name);
             continue;
         }
-        let (byte_length, sha256) = digest_file(&entry.path())?;
+        let remaining_bytes = super::recovery_policy::MAX_RETAINED_RECOVERY_BYTES
+            .checked_sub(total_bytes)
+            .ok_or_else(|| "legacy recovery byte count exceeds the retained limit".to_string())?;
+        let (byte_length, sha256) = digest_file(&entry.path(), remaining_bytes)?;
         total_bytes = total_bytes
             .checked_add(byte_length)
             .ok_or_else(|| "legacy recovery byte count overflow".to_string())?;
@@ -122,10 +133,13 @@ pub(super) fn read_receipt(versioned_directory: &Path) -> Result<OpenReceipt, St
     if !path.exists() {
         return Ok(OpenReceipt::None);
     }
-    let receipt: MigrationReceipt = serde_json::from_slice(
-        &fs::read(&path).map_err(|error| format!("read legacy migration receipt: {error}"))?,
-    )
-    .map_err(|error| format!("legacy migration receipt is invalid: {error}"))?;
+    let receipt: MigrationReceipt =
+        serde_json::from_slice(&super::recovery_policy::read_bounded_file(
+            &path,
+            super::recovery_policy::MAX_RECOVERY_METADATA_BYTES,
+            "legacy migration receipt",
+        )?)
+        .map_err(|error| format!("legacy migration receipt is invalid: {error}"))?;
     if receipt.version != RECEIPT_VERSION {
         return Err(format!(
             "unsupported legacy migration receipt version {}",
@@ -323,7 +337,7 @@ pub(super) fn remove_unchanged(directory: &Path, expected: &LegacyManifest) -> R
         if !metadata.file_type().is_file() {
             return Err(format!("legacy recovery source changed: {}", saved.path));
         }
-        let current = digest_file(&path)?;
+        let current = digest_file(&path, saved.byte_length)?;
         if current != (saved.byte_length, saved.sha256.clone()) {
             return Err(format!("legacy recovery source changed: {}", saved.path));
         }
@@ -353,16 +367,36 @@ pub(super) fn verify_complete_marker(
 
 fn versioned_file_bytes(directory: &Path) -> Result<u64, String> {
     let mut total = 0u64;
-    sum_versioned_directory(directory, true, &mut total)?;
+    let mut entry_count = 0;
+    sum_versioned_directory(directory, true, &mut total, &mut entry_count, 0)?;
     Ok(total)
 }
 
-fn sum_versioned_directory(directory: &Path, root: bool, total: &mut u64) -> Result<(), String> {
+fn sum_versioned_directory(
+    directory: &Path,
+    root: bool,
+    total: &mut u64,
+    entry_count: &mut usize,
+    depth: usize,
+) -> Result<(), String> {
+    if depth > super::recovery_policy::MAX_RECOVERY_DIRECTORY_DEPTH {
+        return Err(format!(
+            "versioned recovery directory depth exceeds {} levels",
+            super::recovery_policy::MAX_RECOVERY_DIRECTORY_DEPTH
+        ));
+    }
     for entry in fs::read_dir(directory)
         .map_err(|error| format!("read versioned recovery directory: {error}"))?
     {
         let entry = entry.map_err(|error| format!("read versioned recovery entry: {error}"))?;
         let name = entry.file_name();
+        *entry_count = (*entry_count).saturating_add(1);
+        if *entry_count > super::recovery_policy::MAX_RECOVERY_DIRECTORY_ENTRIES {
+            return Err(format!(
+                "versioned recovery directory entry count exceeds {}",
+                super::recovery_policy::MAX_RECOVERY_DIRECTORY_ENTRIES
+            ));
+        }
         if root && (name == ".checkpoint.lock" || name == ".sheets-writer.lock") {
             continue;
         }
@@ -380,7 +414,13 @@ fn sum_versioned_directory(directory: &Path, root: bool, total: &mut u64) -> Res
             // Include filesystem directory metadata in addition to every
             // descendant file so an obstruction cannot be silently omitted.
             *total = total.saturating_add(metadata.len().max(4096));
-            sum_versioned_directory(&entry.path(), false, total)?;
+            sum_versioned_directory(
+                &entry.path(),
+                false,
+                total,
+                entry_count,
+                depth.saturating_add(1),
+            )?;
         } else {
             return Err(format!(
                 "versioned recovery contains unsupported entry {}",
@@ -451,9 +491,9 @@ fn numbered_file(name: &str, prefix: &str, suffixes: &[&str]) -> bool {
     })
 }
 
-fn digest_file(path: &Path) -> Result<(u64, String), String> {
+fn digest_file(path: &Path, maximum_bytes: u64) -> Result<(u64, String), String> {
     let mut file =
-        File::open(path).map_err(|error| format!("read legacy recovery file: {error}"))?;
+        super::recovery_policy::open_bounded_file(path, maximum_bytes, "legacy recovery file")?;
     let mut digest = Sha256::new();
     let mut total = 0u64;
     let mut buffer = [0u8; 64 * 1024];
@@ -465,7 +505,14 @@ fn digest_file(path: &Path) -> Result<(u64, String), String> {
             break;
         }
         digest.update(&buffer[..read]);
-        total = total.saturating_add(read as u64);
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "legacy recovery byte count overflow".to_string())?;
+        if total > maximum_bytes {
+            return Err(format!(
+                "legacy recovery file grew beyond its {maximum_bytes} byte limit while hashing"
+            ));
+        }
     }
     Ok((total, hex_digest(digest.finalize().as_slice())))
 }

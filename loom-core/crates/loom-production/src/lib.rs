@@ -16,6 +16,7 @@ mod recovery_inspection;
 mod recovery_inspection_tests;
 #[cfg(test)]
 mod recovery_journal_bounds_tests;
+mod recovery_journal_inspection;
 pub use recovery_inspection::{
     inspect_recovery, inspect_recovery_with_limits, RecoveryInspection, RecoveryInspectionCursor,
     RecoveryInspectionLimits, RecoveryInspectionStats,
@@ -27,7 +28,8 @@ use checkpoint_generations::{
     checkpoint_generation_metadata_path, checkpoint_generation_payload_path,
     next_checkpoint_generation, publish_checkpoint_pointer, read_checkpoint,
     read_checkpoint_generations, read_checkpoint_sequence, read_checkpoint_state,
-    reconcile_checkpoint_generations, CheckpointPointer,
+    reconcile_checkpoint_generations, reconcile_checkpoint_generations_with_limits,
+    CheckpointPointer,
 };
 #[cfg(windows)]
 use checkpoint_generations::{
@@ -65,6 +67,7 @@ struct JournalAppendLimits {
 /// observed midway through an append or checkpoint publication.
 #[must_use = "dropping the guard releases the recovery-directory lock"]
 pub struct RecoveryDirectoryLock {
+    directory: PathBuf,
     _file: File,
 }
 
@@ -82,7 +85,10 @@ pub fn lock_recovery_directory(
         .truncate(false)
         .open(directory.join(CHECKPOINT_LOCK_FILE))?;
     lock.lock_exclusive()?;
-    Ok(RecoveryDirectoryLock { _file: lock })
+    Ok(RecoveryDirectoryLock {
+        directory: directory.to_path_buf(),
+        _file: lock,
+    })
 }
 
 /// Error returned by production-service operations.
@@ -202,7 +208,21 @@ impl RecoveryJournal {
     pub fn open(directory: impl AsRef<Path>) -> Result<Self, ProductionError> {
         let directory = directory.as_ref().to_path_buf();
         fs::create_dir_all(&directory)?;
-        let _recovery_lock = lock_recovery_writes(&directory)?;
+        let recovery_lock = lock_recovery_writes(&directory)?;
+        Self::open_with_recovery_lock(&recovery_lock)
+    }
+
+    /// Open or repair a journal while the caller holds its exclusive
+    /// recovery-directory lock. This is useful when startup must validate and
+    /// replay a bounded snapshot before allowing this method to repair a torn
+    /// tail or reconcile checkpoint generations.
+    ///
+    /// The supplied guard remains responsible for synchronization and must be
+    /// kept alive for the full validation and repair sequence.
+    pub fn open_with_recovery_lock(
+        recovery_lock: &RecoveryDirectoryLock,
+    ) -> Result<Self, ProductionError> {
+        let directory = recovery_lock.directory.clone();
         let checkpoint_state = read_checkpoint_state(&directory)?;
         let read = read_records_at(&directory.join(JOURNAL_FILE), true)?;
         if read.skipped_tail {
@@ -1103,6 +1123,21 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("second handle acquires after release");
         waiter.join().expect("lock waiter thread");
+    }
+
+    #[test]
+    fn recovery_journal_opens_under_an_existing_directory_lock() {
+        let temporary = tempfile::tempdir().expect("temporary recovery directory");
+        let lock = lock_recovery_directory(temporary.path()).expect("acquire recovery lock");
+
+        let mut journal = RecoveryJournal::open_with_recovery_lock(&lock)
+            .expect("open journal without reacquiring the held lock");
+        assert_eq!(journal.directory(), temporary.path());
+
+        drop(lock);
+        journal
+            .append("after-open", "after lock release", vec![1])
+            .expect("normal journal operations acquire their own lock");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use super::recovery_inspection::{read_bounded_file, RecoveryInspectionLimits};
 use super::{
     atomic_write, sha256_hex, CheckpointMetadata, ProductionError, CHECKPOINT_FILE,
     CHECKPOINT_META_FILE,
@@ -116,6 +117,55 @@ pub(super) fn read_checkpoint_state(directory: &Path) -> Result<CheckpointState,
     })
 }
 
+pub(super) fn read_checkpoint_state_with_limits(
+    directory: &Path,
+    limits: RecoveryInspectionLimits,
+) -> Result<CheckpointState, ProductionError> {
+    let mut metadata_bytes = 0_u64;
+    let (candidates, legacy_metadata) =
+        read_pointer_candidates_with_limits(directory, limits, &mut metadata_bytes)?;
+    let by_generation = unique_pointers(candidates)?;
+    if let Some((_, pointer)) = by_generation.into_iter().next_back() {
+        let (bytes, metadata) =
+            validate_pointer_with_limits(directory, &pointer, limits, &mut metadata_bytes)?;
+        return Ok(CheckpointState {
+            bytes: Some(bytes),
+            metadata: Some(metadata),
+            pointer: Some(pointer),
+        });
+    }
+    let Some(metadata) = legacy_metadata else {
+        let checkpoint_path = directory.join(CHECKPOINT_FILE);
+        if checkpoint_path.exists() {
+            return Err(ProductionError::Integrity(
+                "checkpoint metadata and payload must both exist".into(),
+            ));
+        }
+        return Ok(CheckpointState::empty());
+    };
+    let checkpoint_path = directory.join(CHECKPOINT_FILE);
+    if !checkpoint_path.exists() {
+        return Err(ProductionError::Integrity(
+            "checkpoint metadata and payload must both exist".into(),
+        ));
+    }
+    let bytes = read_bounded_file(
+        &checkpoint_path,
+        limits.max_checkpoint_bytes,
+        "checkpoint package",
+    )?;
+    if sha256_hex(&bytes) != metadata.sha256 {
+        return Err(ProductionError::Integrity(
+            "checkpoint digest mismatch".into(),
+        ));
+    }
+    Ok(CheckpointState {
+        bytes: Some(bytes),
+        metadata: Some(metadata),
+        pointer: None,
+    })
+}
+
 fn unique_pointers(
     candidates: Vec<CheckpointPointer>,
 ) -> Result<BTreeMap<u64, CheckpointPointer>, ProductionError> {
@@ -187,6 +237,95 @@ fn read_pointer_candidates(
     Ok((candidates, legacy_metadata))
 }
 
+fn read_pointer_candidates_with_limits(
+    directory: &Path,
+    limits: RecoveryInspectionLimits,
+    metadata_bytes: &mut u64,
+) -> Result<(Vec<CheckpointPointer>, Option<CheckpointMetadata>), ProductionError> {
+    let mut candidates = Vec::new();
+    let mut legacy_metadata = None;
+    let metadata_path = directory.join(CHECKPOINT_META_FILE);
+    if path_exists(&metadata_path)? {
+        let bytes = read_checkpoint_metadata_with_limit(&metadata_path, limits, metadata_bytes)?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
+            ProductionError::InvalidData(format!("checkpoint metadata is not valid JSON: {error}"))
+        })?;
+        if value.get("generation").is_some() {
+            let pointer = serde_json::from_value(value).map_err(|error| {
+                ProductionError::InvalidData(format!("checkpoint pointer is invalid: {error}"))
+            })?;
+            candidates.push(pointer);
+        } else {
+            legacy_metadata = Some(serde_json::from_value(value).map_err(|error| {
+                ProductionError::InvalidData(format!("checkpoint metadata is invalid: {error}"))
+            })?);
+        }
+    }
+
+    let mut entry_count = 0_usize;
+    for entry in fs::read_dir(directory)? {
+        entry_count = entry_count.saturating_add(1);
+        if entry_count > limits.max_directory_entries {
+            return Err(ProductionError::InvalidData(
+                "recovery directory entry count exceeds the inspection ceiling".into(),
+            ));
+        }
+        let path = entry?.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(filename_generation) =
+            parse_checkpoint_generation(name, CHECKPOINT_COMMIT_PREFIX, CHECKPOINT_COMMIT_SUFFIX)
+        else {
+            continue;
+        };
+        let raw = read_checkpoint_metadata_with_limit(&path, limits, metadata_bytes)?;
+        let pointer: CheckpointPointer = serde_json::from_slice(&raw).map_err(|error| {
+            ProductionError::InvalidData(format!(
+                "checkpoint commit record {filename_generation} is invalid: {error}"
+            ))
+        })?;
+        if pointer.generation != filename_generation {
+            return Err(ProductionError::Integrity(format!(
+                "checkpoint commit record {filename_generation} names generation {}",
+                pointer.generation
+            )));
+        }
+        candidates.push(pointer);
+    }
+    Ok((candidates, legacy_metadata))
+}
+
+fn read_checkpoint_metadata_with_limit(
+    path: &Path,
+    limits: RecoveryInspectionLimits,
+    metadata_bytes: &mut u64,
+) -> Result<Vec<u8>, ProductionError> {
+    let remaining = limits
+        .max_checkpoint_metadata_bytes
+        .checked_sub(*metadata_bytes)
+        .ok_or_else(|| {
+            ProductionError::InvalidData(
+                "checkpoint metadata total exceeds the inspection ceiling".into(),
+            )
+        })?;
+    let bytes = read_bounded_file(path, remaining, "checkpoint metadata")?;
+    *metadata_bytes = metadata_bytes
+        .checked_add(bytes.len() as u64)
+        .ok_or_else(|| {
+            ProductionError::InvalidData("checkpoint metadata byte count overflow".into())
+        })?;
+    Ok(bytes)
+}
+
+fn path_exists(path: &Path) -> Result<bool, ProductionError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn read_json_value(path: &Path, description: &str) -> Result<serde_json::Value, ProductionError> {
     serde_json::from_slice(&fs::read(path)?).map_err(|error| {
         ProductionError::InvalidData(format!("{description} is not valid JSON: {error}"))
@@ -199,6 +338,28 @@ fn validate_pointer(
 ) -> Result<(Vec<u8>, CheckpointMetadata), ProductionError> {
     validate_pointer_lineage(pointer)?;
     let (bytes, metadata) = read_checkpoint_generations(directory, pointer.generation)?;
+    if metadata != pointer.metadata() {
+        return Err(ProductionError::Integrity(format!(
+            "checkpoint generation {} does not match its commit record",
+            pointer.generation
+        )));
+    }
+    Ok((bytes, metadata))
+}
+
+fn validate_pointer_with_limits(
+    directory: &Path,
+    pointer: &CheckpointPointer,
+    limits: RecoveryInspectionLimits,
+    metadata_bytes: &mut u64,
+) -> Result<(Vec<u8>, CheckpointMetadata), ProductionError> {
+    validate_pointer_lineage(pointer)?;
+    let (bytes, metadata) = read_checkpoint_generations_with_limits(
+        directory,
+        pointer.generation,
+        limits,
+        metadata_bytes,
+    )?;
     if metadata != pointer.metadata() {
         return Err(ProductionError::Integrity(format!(
             "checkpoint generation {} does not match its commit record",
@@ -307,12 +468,52 @@ pub(super) fn read_checkpoint_generations(
     Ok((bytes, metadata))
 }
 
+fn read_checkpoint_generations_with_limits(
+    directory: &Path,
+    generation: u64,
+    limits: RecoveryInspectionLimits,
+    metadata_bytes: &mut u64,
+) -> Result<(Vec<u8>, CheckpointMetadata), ProductionError> {
+    let payload_path = checkpoint_generation_payload_path(directory, generation);
+    let metadata_path = checkpoint_generation_metadata_path(directory, generation);
+    if !path_exists(&payload_path)? || !path_exists(&metadata_path)? {
+        return Err(ProductionError::Integrity(format!(
+            "checkpoint generation {generation} is incomplete"
+        )));
+    }
+    let raw = read_checkpoint_metadata_with_limit(&metadata_path, limits, metadata_bytes)?;
+    let metadata: CheckpointMetadata = serde_json::from_slice(&raw).map_err(|error| {
+        ProductionError::InvalidData(format!(
+            "checkpoint generation {generation} metadata is invalid: {error}"
+        ))
+    })?;
+    let bytes = read_bounded_file(
+        &payload_path,
+        limits.max_checkpoint_bytes,
+        "checkpoint package",
+    )?;
+    if sha256_hex(&bytes) != metadata.sha256 {
+        return Err(ProductionError::Integrity(format!(
+            "checkpoint generation {generation} digest mismatch"
+        )));
+    }
+    Ok((bytes, metadata))
+}
+
 fn legacy_previous_generation(
     directory: &Path,
     current_generation: u64,
+    limits: Option<RecoveryInspectionLimits>,
 ) -> Result<Option<u64>, ProductionError> {
     let mut generations = BTreeSet::new();
+    let mut entry_count = 0_usize;
     for entry in fs::read_dir(directory)? {
+        entry_count = entry_count.saturating_add(1);
+        if limits.is_some_and(|limits| entry_count > limits.max_directory_entries) {
+            return Err(ProductionError::InvalidData(
+                "recovery directory entry count exceeds the inspection ceiling".into(),
+            ));
+        }
         let name = entry?.file_name();
         let Some(name) = name.to_str() else {
             continue;
@@ -328,7 +529,19 @@ fn legacy_previous_generation(
         }
     }
     for generation in generations.into_iter().rev() {
-        if read_checkpoint_generations(directory, generation).is_ok() {
+        let checkpoint = match limits {
+            Some(limits) => {
+                let mut metadata_bytes = 0;
+                read_checkpoint_generations_with_limits(
+                    directory,
+                    generation,
+                    limits,
+                    &mut metadata_bytes,
+                )
+            }
+            None => read_checkpoint_generations(directory, generation),
+        };
+        if checkpoint.is_ok() {
             return Ok(Some(generation));
         }
     }
@@ -339,12 +552,30 @@ pub(super) fn reconcile_checkpoint_generations(
     directory: &Path,
     state: &CheckpointState,
 ) -> Result<(), ProductionError> {
+    reconcile_checkpoint_generations_inner(directory, state, None)
+}
+
+pub(super) fn reconcile_checkpoint_generations_with_limits(
+    directory: &Path,
+    state: &CheckpointState,
+    limits: RecoveryInspectionLimits,
+) -> Result<(), ProductionError> {
+    reconcile_checkpoint_generations_inner(directory, state, Some(limits))
+}
+
+fn reconcile_checkpoint_generations_inner(
+    directory: &Path,
+    state: &CheckpointState,
+    limits: Option<RecoveryInspectionLimits>,
+) -> Result<(), ProductionError> {
     let mut retained = BTreeSet::new();
     if let Some(pointer) = &state.pointer {
         retained.insert(pointer.generation);
         if let Some(previous) = pointer.previous_generation {
             retained.insert(previous);
-        } else if let Some(previous) = legacy_previous_generation(directory, pointer.generation)? {
+        } else if let Some(previous) =
+            legacy_previous_generation(directory, pointer.generation, limits)?
+        {
             retained.insert(previous);
         }
     }
@@ -352,7 +583,14 @@ pub(super) fn reconcile_checkpoint_generations(
     let mut obsolete_pointers = Vec::new();
     let mut obsolete_generations = Vec::new();
     let mut abandoned_atomic_writes = Vec::new();
+    let mut entry_count = 0_usize;
     for entry in fs::read_dir(directory)? {
+        entry_count = entry_count.saturating_add(1);
+        if limits.is_some_and(|limits| entry_count > limits.max_directory_entries) {
+            return Err(ProductionError::InvalidData(
+                "recovery directory entry count exceeds the inspection ceiling".into(),
+            ));
+        }
         let path = entry?.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -362,7 +600,22 @@ pub(super) fn reconcile_checkpoint_generations(
             continue;
         }
         if name == CHECKPOINT_META_FILE {
-            if let Ok(value) = read_json_value(&path, "checkpoint metadata") {
+            let value = match limits {
+                Some(limits) => read_bounded_file(
+                    &path,
+                    limits.max_checkpoint_metadata_bytes,
+                    "checkpoint metadata",
+                )
+                .and_then(|bytes| {
+                    serde_json::from_slice(&bytes).map_err(|error| {
+                        ProductionError::InvalidData(format!(
+                            "checkpoint metadata is not valid JSON: {error}"
+                        ))
+                    })
+                }),
+                None => read_json_value(&path, "checkpoint metadata"),
+            };
+            if let Ok(value) = value {
                 if value
                     .get("generation")
                     .and_then(serde_json::Value::as_u64)

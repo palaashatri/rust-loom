@@ -1,6 +1,6 @@
 use super::{
-    inspect_recovery, inspect_recovery_with_limits, RecoveryInspectionCursor,
-    RecoveryInspectionLimits, RecoveryJournal,
+    inspect_recovery, inspect_recovery_with_limits, lock_recovery_directory,
+    RecoveryInspectionCursor, RecoveryInspectionLimits, RecoveryJournal,
 };
 use std::fs;
 use std::io::Write;
@@ -187,6 +187,140 @@ fn inspection_refuses_oversized_checkpoint_without_changing_files() {
 
     assert!(result.is_err(), "oversized checkpoint must be refused");
     assert_eq!(snapshot_files(temporary.path()), before);
+}
+
+#[test]
+fn limited_journal_open_refuses_oversized_checkpoint_before_repairing_torn_tail() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let journal = RecoveryJournal::open(temporary.path()).expect("open journal");
+    let package = b"oversized checkpoint";
+    journal
+        .checkpoint(0, "loom.test/1", package)
+        .expect("publish checkpoint");
+    drop(journal);
+
+    let journal_path = temporary.path().join("operations.jsonl");
+    let mut journal_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&journal_path)
+        .expect("open journal for torn-tail fixture");
+    journal_file.write_all(b"{torn").expect("append torn tail");
+    drop(journal_file);
+    let before = fs::read(&journal_path).expect("read journal before limited open");
+    let limits = RecoveryInspectionLimits {
+        max_checkpoint_bytes: package.len() as u64 - 1,
+        ..RecoveryInspectionLimits::default()
+    };
+    let recovery_lock = lock_recovery_directory(temporary.path()).expect("lock recovery directory");
+
+    let error = RecoveryJournal::open_with_recovery_lock_limited(&recovery_lock, limits)
+        .expect_err("limited open must refuse the oversized checkpoint");
+
+    assert!(
+        error.to_string().contains("checkpoint"),
+        "unexpected limited-open error: {error}"
+    );
+    assert_eq!(
+        fs::read(journal_path).expect("read journal after limited refusal"),
+        before,
+        "a checkpoint refusal must happen before torn-tail repair"
+    );
+}
+
+#[test]
+fn limited_journal_open_validates_before_removing_abandoned_atomicwrite_directory() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let journal = RecoveryJournal::open(temporary.path()).expect("open journal");
+    journal
+        .checkpoint(0, "loom.test/1", b"valid checkpoint")
+        .expect("publish checkpoint");
+    drop(journal);
+    let abandoned = temporary.path().join(".atomicwrite-abandoned-test");
+    fs::create_dir(&abandoned).expect("create abandoned atomic-write directory");
+    fs::write(abandoned.join("temporary-file"), b"partial checkpoint")
+        .expect("create abandoned atomic-write payload");
+    let recovery_lock = lock_recovery_directory(temporary.path()).expect("lock recovery directory");
+
+    let reopened = RecoveryJournal::open_with_recovery_lock_limited(
+        &recovery_lock,
+        RecoveryInspectionLimits::default(),
+    )
+    .expect("validate checkpoint then remove abandoned atomic-write directory");
+    drop(recovery_lock);
+    let recovered = reopened.recover().expect("recover valid checkpoint");
+
+    assert_eq!(
+        recovered.checkpoint.as_deref(),
+        Some(b"valid checkpoint".as_slice())
+    );
+    assert!(!abandoned.exists());
+}
+
+#[test]
+fn inspection_refuses_an_overdeep_abandoned_atomicwrite_tree() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let abandoned = temporary.path().join(".atomicwrite-depth");
+    fs::create_dir(&abandoned).expect("create abandoned atomic-write directory");
+    let mut nested = abandoned;
+    for _ in 0..33 {
+        nested = nested.join("d");
+        fs::create_dir(&nested).expect("create nested atomic-write directory");
+    }
+    fs::write(nested.join("temporary-file"), b"partial").expect("write temporary payload");
+
+    let error = inspect_recovery(temporary.path())
+        .expect_err("inspection must stop when abandoned directory depth is exceeded");
+
+    assert!(
+        error.to_string().contains("depth"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn journal_finalization_rejects_changed_records_before_repairing_the_inspected_tail() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut journal = RecoveryJournal::open(temporary.path()).expect("open journal");
+    append(&mut journal, "first", b"original payload");
+    drop(journal);
+
+    let journal_path = temporary.path().join("operations.jsonl");
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&journal_path)
+        .expect("open journal for torn tail");
+    file.write_all(b"{torn").expect("append torn tail");
+    drop(file);
+    let before = fs::read(&journal_path).expect("read journal before finalization");
+    let recovery_lock = lock_recovery_directory(temporary.path()).expect("lock recovery directory");
+    let mut cursor = RecoveryInspectionCursor::open_with_limits(
+        temporary.path(),
+        RecoveryInspectionLimits::default(),
+    )
+    .expect("open bounded inspection cursor");
+    let mut records = Vec::new();
+    while let Some(record) = cursor.next_record().expect("read inspected record") {
+        records.push(record);
+    }
+    assert!(
+        cursor.stats().expect("EOF statistics").incomplete_tail,
+        "fixture must contain a torn tail"
+    );
+    records[0].label.push_str(" changed after inspection");
+
+    let error = RecoveryJournal::open_from_inspection(&recovery_lock, cursor, &records)
+        .expect_err("finalization must reject records that differ from the inspected snapshot");
+
+    assert!(
+        error.to_string().contains("snapshot"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        fs::read(journal_path).expect("read journal after rejected finalization"),
+        before,
+        "changed caller records must not trigger torn-tail repair"
+    );
 }
 
 #[test]

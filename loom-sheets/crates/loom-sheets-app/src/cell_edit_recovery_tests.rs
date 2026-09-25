@@ -1,6 +1,7 @@
 use crate::cell_edit_recovery::{
-    parse_checkpoint_identity, versioned_directory_for, CellAssignment, CellEditBatch,
-    CellEditRecovery, RECORD_VERSION,
+    parse_checkpoint_identity, read_legacy_records_after_with_package_limit,
+    versioned_directory_for, BoundedLegacyPackage, CellAssignment, CellEditBatch, CellEditRecovery,
+    RECORD_VERSION,
 };
 use crate::workbook_io::workbook_package_bytes;
 use crate::workbook_worker::WorkbookWorker;
@@ -173,6 +174,167 @@ fn legacy_recovery_directory_lock_is_held_until_cell_recovery_drops() {
     drop(recovery);
     FileExt::try_lock_exclusive(&lock_file)
         .expect("dropping cell recovery releases the legacy directory lock");
+}
+
+#[test]
+fn over_limit_torn_journal_is_preserved_before_recovery_journal_open() {
+    let fixture = RecoveryFixture::new();
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned directory path");
+    fs::create_dir_all(&versioned).expect("create versioned recovery directory");
+    let journal_path = versioned.join("operations.jsonl");
+    let journal_bytes = vec![b'x'; 1024 * 1024 + 1];
+    fs::write(&journal_path, &journal_bytes).expect("write over-limit torn journal tail");
+
+    let result = CellEditRecovery::open_at(fixture.path());
+
+    assert!(
+        result.is_err(),
+        "startup must refuse an over-limit journal before recovery can repair it"
+    );
+    assert_eq!(
+        fs::read(&journal_path).expect("read preserved journal"),
+        journal_bytes,
+        "preflight refusal must preserve the over-limit journal bytes"
+    );
+}
+
+#[test]
+fn legacy_package_decoder_stops_before_collecting_bytes_over_its_limit() {
+    let accepted = serde_json::from_str::<BoundedLegacyPackage<4>>("[0,1,2,3]");
+    assert!(accepted.is_ok(), "the exact package limit must be accepted");
+
+    let error = serde_json::from_str::<BoundedLegacyPackage<4>>("[0,1,2,3,4]")
+        .expect_err("decoder must reject the first byte over the package limit");
+
+    assert!(error.to_string().contains("4 byte limit"));
+}
+
+#[test]
+fn oversized_final_legacy_record_is_not_tolerated_as_a_torn_tail() {
+    let line = serde_json::to_vec(&serde_json::json!({
+        "sequence": 1,
+        "operation_id": "oversized-final-record",
+        "label": "edit",
+        "payload": [0, 1, 2, 3, 4],
+        "timestamp_ms": 1,
+        "payload_sha256": "unused-because-decoding-must-fail"
+    }))
+    .expect("encode oversized committed record");
+    let mut committed_bytes = line;
+    committed_bytes.push(b'\n');
+    let fixture = RecoveryFixture::new();
+    let journal_path = fixture.path().join("operations.jsonl");
+    fs::write(&journal_path, &committed_bytes).expect("write oversized legacy journal record");
+
+    let error = read_legacy_records_after_with_package_limit::<4>(fixture.path(), 0)
+        .expect_err("an oversized final committed record must fail closed");
+
+    assert!(error.contains("4 byte limit"), "unexpected error: {error}");
+    assert_eq!(
+        fs::read(&journal_path).expect("read preserved legacy journal"),
+        committed_bytes,
+        "refusing an oversized record must not alter legacy recovery data"
+    );
+}
+
+#[test]
+fn malformed_final_legacy_record_remains_tolerated_as_a_torn_tail() {
+    let fixture = RecoveryFixture::new();
+    let journal_path = fixture.path().join("operations.jsonl");
+    let committed_bytes = b"{malformed final record}\n";
+    fs::write(&journal_path, committed_bytes).expect("write malformed final journal record");
+
+    let result = read_legacy_records_after_with_package_limit::<4>(fixture.path(), 0)
+        .expect("malformed final JSON retains existing torn-tail behavior");
+
+    assert!(result.is_none());
+    assert_eq!(
+        fs::read(&journal_path).expect("read unchanged legacy journal"),
+        committed_bytes,
+        "torn-tail tolerance is read-only until an explicit migration succeeds"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_legacy_recovery_root_is_rejected_before_creating_locks() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = RecoveryFixture::new();
+    let target = fixture.path().join("target");
+    fs::create_dir(&target).expect("create symlink target");
+    let legacy_link = fixture.path().join("legacy-link");
+    symlink(&target, &legacy_link).expect("create legacy recovery symlink");
+    let versioned = versioned_directory_for(&legacy_link).expect("versioned directory path");
+
+    let result = CellEditRecovery::open_at(&legacy_link);
+
+    assert!(result.is_err(), "symlinked recovery roots must fail closed");
+    assert!(
+        !target.join(".checkpoint.lock").exists(),
+        "path validation must run before a lock is created through the symlink"
+    );
+    assert!(
+        !versioned.exists(),
+        "path validation must run before creating a sibling recovery directory"
+    );
+}
+
+#[test]
+fn pending_migration_receipt_keeps_legacy_files_when_replay_fails() {
+    let fixture = RecoveryFixture::new();
+    let package = package_with_recovery_content();
+    let legacy_before = seed_legacy_checkpoint(fixture.path(), &package);
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned directory path");
+    fs::create_dir_all(&versioned).expect("create versioned recovery directory");
+    let schema =
+        "loom.sheets.recovery/1;session=test-session;workbook=test-workbook;baseline=test-baseline";
+    let manifest = crate::legacy_migration::scan_legacy(fixture.path())
+        .expect("scan legacy files for migration receipt");
+    let prepared = crate::legacy_migration::prepared(manifest, 0, &package, schema);
+    crate::legacy_migration::persist_receipt(&versioned, &prepared)
+        .expect("write prepared migration receipt");
+    let mut journal = RecoveryJournal::open(&versioned).expect("open versioned recovery journal");
+    journal
+        .checkpoint(0, schema, &package)
+        .expect("publish the receipt's matching complete checkpoint");
+    let invalid_batch = CellEditBatch {
+        format_version: RECORD_VERSION,
+        session_id: "wrong-session".into(),
+        workbook_id: "test-workbook".into(),
+        baseline_id: "test-baseline".into(),
+        predecessor_sequence: 0,
+        active_sheet: 0,
+        edits: vec![CellAssignment {
+            sheet: 0,
+            row: 0,
+            col: 0,
+            raw: Some("must not replay".into()),
+        }],
+    };
+    journal
+        .append(
+            "invalid-after-migration-checkpoint",
+            "invalid recovery batch",
+            serde_json::to_vec(&invalid_batch).expect("encode semantically invalid batch"),
+        )
+        .expect("append checksum-valid batch with wrong lineage");
+    drop(journal);
+    let receipt_path = versioned.join("legacy-migration.json");
+    let receipt_before = fs::read(&receipt_path).expect("read prepared receipt before startup");
+
+    let result = CellEditRecovery::open_at(fixture.path());
+
+    assert!(
+        result.is_err(),
+        "startup must reject invalid recovery lineage"
+    );
+    assert_eq!(legacy_entry_bytes(fixture.path()), legacy_before);
+    assert_eq!(
+        fs::read(&receipt_path).expect("read receipt after failed startup"),
+        receipt_before,
+        "failed replay must leave the pending receipt unchanged"
+    );
 }
 
 #[test]
