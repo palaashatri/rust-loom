@@ -3,8 +3,8 @@
 use fs2::FileExt;
 use loom_production::snapshot::application_state_directory;
 use loom_production::{
-    lock_recovery_directory, CheckpointMetadata, JournalRecord, RecoveryDirectoryLock,
-    RecoveryInspectionCursor, RecoveryJournal,
+    lock_recovery_directory, CheckpointMetadata, JournalRecord, ProductionError,
+    RecoveryDirectoryLock, RecoveryInspectionCursor, RecoveryJournal,
 };
 use loom_sheets_core::{CellRef, Sheet};
 use serde::de::{Error as DeError, SeqAccess, Visitor};
@@ -33,6 +33,7 @@ const WRITER_LOCK_FILE: &str = ".sheets-writer.lock";
 const LEGACY_PACKAGE_BYTE_LIMIT: usize =
     super::recovery_policy::MAX_RECOVERY_PACKAGE_BYTES as usize;
 const LEGACY_PACKAGE_LIMIT_ERROR_MARKER: &str = "loom-legacy-package-limit";
+const MAX_BATCH_PAYLOAD_BYTES: usize = super::recovery_policy::MAX_JOURNAL_RECORD_BYTES as usize;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -373,6 +374,7 @@ impl CellEditRecovery {
         &mut self,
         active_sheet: usize,
         edits: impl IntoIterator<Item = (usize, CellRef, Option<String>)>,
+        checkpoint_package: impl FnOnce() -> Result<Vec<u8>, String>,
     ) -> Result<(), String> {
         if let Some(error) = &self.failed {
             return Err(error.clone());
@@ -413,7 +415,10 @@ impl CellEditRecovery {
             .last_sequence
             .checked_add(1)
             .ok_or_else(|| "Sheets recovery sequence is exhausted at u64::MAX".to_string())?;
-        match self.journal.append(
+        if payload.len() > MAX_BATCH_PAYLOAD_BYTES {
+            return self.checkpoint_current_model(checkpoint_package);
+        }
+        match self.journal.append_bounded(
             format!("sheets-cell-batch-{expected_sequence}"),
             "Sheets cell edits",
             payload,
@@ -426,8 +431,26 @@ impl CellEditRecovery {
                 "Sheets recovery wrote unexpected sequence {}; expected {expected_sequence}",
                 record.sequence
             )),
+            Err(error) if is_journal_limit_refusal(&error) => {
+                self.checkpoint_current_model(checkpoint_package)
+            }
             Err(error) => self.fail(error.to_string()),
         }
+    }
+
+    fn checkpoint_current_model(
+        &mut self,
+        build_package: impl FnOnce() -> Result<Vec<u8>, String>,
+    ) -> Result<(), String> {
+        let package = match build_package() {
+            Ok(package) => package,
+            Err(error) => {
+                return self.fail(format!(
+                    "build complete Sheets recovery checkpoint after journal limit: {error}"
+                ));
+            }
+        };
+        self.checkpoint_package(package, false)
     }
 
     pub(crate) fn checkpoint_package(
@@ -582,6 +605,20 @@ impl CellEditRecovery {
         self.failed = Some(error.clone());
         Err(error)
     }
+}
+
+fn is_journal_limit_refusal(error: &ProductionError) -> bool {
+    let ProductionError::InvalidData(message) = error else {
+        return false;
+    };
+    [
+        "journal record line is ",
+        "journal bytes would total ",
+        "journal bytes already total ",
+        "journal would contain ",
+    ]
+    .iter()
+    .any(|prefix| message.starts_with(prefix) && message.contains("exceeding the "))
 }
 
 pub(crate) fn versioned_directory_for(legacy_directory: &Path) -> Result<PathBuf, String> {

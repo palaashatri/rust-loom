@@ -983,6 +983,86 @@ fn replay_rejects_a_gap_in_durable_sequences() {
     );
 }
 
+#[test]
+fn oversized_cell_batch_uses_checkpoint_without_advancing_durable_sequence() {
+    let fixture = RecoveryFixture::new();
+    let baseline_package = checkpoint_fixture(fixture.path());
+    let (mut recovery, restored) =
+        CellEditRecovery::open_at(fixture.path()).expect("reopen baseline recovery");
+    assert_eq!(restored, Some(baseline_package));
+
+    let a1 = CellRef::parse("A1").expect("A1 cell");
+    recovery
+        .record_cells(0, [(0, a1, Some("small edit".into()))], || {
+            Err("unexpected checkpoint fallback for small cell batch".into())
+        })
+        .expect("append first small edit");
+
+    let large_value = "x".repeat(300_000);
+    let a2 = CellRef::parse("A2").expect("A2 cell");
+    let mut current_sheet = Sheet::new("Data");
+    current_sheet.set_str("A1", "small edit");
+    current_sheet.set_str("B1", "=A1+1");
+    current_sheet.set_str("A2", &large_value);
+    let current_package = workbook_package_bytes(&[current_sheet], 0)
+        .expect("package accepted workbook state for checkpoint fallback");
+    recovery
+        .record_cells(0, [(0, a2, Some(large_value.clone()))], || {
+            Ok(current_package.clone())
+        })
+        .expect("use a complete checkpoint for the oversized cell batch");
+
+    drop(recovery);
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned recovery path");
+    let journal = RecoveryJournal::open(&versioned).expect("reopen recovery journal");
+    let recovered = journal
+        .recover()
+        .expect("read recovery state after oversized batch");
+    assert!(
+        recovered.checkpoint.as_deref() == Some(current_package.as_slice()),
+        "complete checkpoint must contain the accepted oversized cell edit"
+    );
+    assert_eq!(
+        recovered
+            .checkpoint_metadata
+            .as_ref()
+            .expect("checkpoint metadata")
+            .last_sequence,
+        1,
+        "checkpoint must retain the prior durable sequence"
+    );
+    assert!(
+        recovered.operations.is_empty(),
+        "oversized transaction must not be split into journal records"
+    );
+    let workbook = crate::restore_workbook_from_snapshot(
+        recovered.checkpoint.as_deref().expect("checkpoint package"),
+    )
+    .expect("restore complete checkpoint");
+    assert_eq!(workbook.sheets[0].raw(a2), Some(large_value.as_str()));
+
+    drop(journal);
+    let (mut recovery, restored) =
+        CellEditRecovery::open_at(fixture.path()).expect("reopen checkpointed recovery");
+    assert_eq!(restored, Some(current_package));
+    let a3 = CellRef::parse("A3").expect("A3 cell");
+    recovery
+        .record_cells(0, [(0, a3, Some("after checkpoint".into()))], || {
+            Err("unexpected checkpoint fallback for small cell batch".into())
+        })
+        .expect("append small edit after checkpoint fallback");
+    drop(recovery);
+    let journal = RecoveryJournal::open(&versioned).expect("reopen journal after next edit");
+    let recovered = journal
+        .recover()
+        .expect("read recovery state after next small edit");
+    assert_eq!(recovered.operations.len(), 1);
+    assert_eq!(recovered.operations[0].sequence, 2);
+    let next_batch: CellEditBatch = serde_json::from_slice(&recovered.operations[0].payload)
+        .expect("decode next small edit batch");
+    assert_eq!(next_batch.predecessor_sequence, 1);
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_legacy_checkpoint_pointer_wins_over_a_stale_windows_commit_pointer() {

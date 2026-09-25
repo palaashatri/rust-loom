@@ -770,7 +770,10 @@ fn run_worker(
                     } else {
                         #[cfg(test)]
                         let journal_started = Instant::now();
-                        if let Err(error) = recovery.record_cells(active_sheet, accepted_cell_edits)
+                        if let Err(error) =
+                            recovery.record_cells(active_sheet, accepted_cell_edits, || {
+                                workbook_package_bytes(&sheets, active_sheet)
+                            })
                         {
                             recovery_error = Some(error);
                         }
