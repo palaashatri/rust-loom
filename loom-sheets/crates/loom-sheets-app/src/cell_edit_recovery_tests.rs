@@ -727,6 +727,126 @@ fn legacy_migration_refuses_each_capacity_limit_before_writing_a_receipt() {
     }
 }
 
+#[test]
+fn ordinary_checkpoint_capacity_refusal_preserves_checkpoint_journal_and_sequence() {
+    for (limits, expected_error) in [
+        (
+            crate::recovery_policy::RecoveryLimits {
+                package_bytes: 1,
+                retained_bytes: u64::MAX,
+                temporary_peak_bytes: u64::MAX,
+            },
+            "package limit",
+        ),
+        (
+            crate::recovery_policy::RecoveryLimits {
+                package_bytes: u64::MAX,
+                retained_bytes: 1,
+                temporary_peak_bytes: u64::MAX,
+            },
+            "retained-storage limit",
+        ),
+        (
+            crate::recovery_policy::RecoveryLimits {
+                package_bytes: u64::MAX,
+                retained_bytes: u64::MAX,
+                temporary_peak_bytes: 1,
+            },
+            "temporary-peak limit",
+        ),
+    ] {
+        let fixture = RecoveryFixture::new();
+        let original_package = checkpoint_fixture(fixture.path());
+        let (mut recovery, _) =
+            CellEditRecovery::open_at(fixture.path()).expect("open checkpoint recovery");
+        recovery
+            .record_cells(
+                0,
+                [(
+                    0,
+                    CellRef::parse("A1").expect("cell"),
+                    Some("edited".into()),
+                )],
+                || Ok(original_package.clone()),
+            )
+            .expect("write a durable edit before checkpoint refusal");
+
+        let versioned = versioned_directory_for(fixture.path()).expect("versioned path");
+        let journal_path = versioned.join("operations.jsonl");
+        let mut torn = OpenOptions::new()
+            .append(true)
+            .open(&journal_path)
+            .expect("open journal for interrupted tail");
+        torn.write_all(b"{interrupted")
+            .expect("append torn journal tail");
+        drop(torn);
+        let before = versioned_entry_bytes(&versioned);
+        let sequence_before = recovery.last_sequence_for_test();
+        recovery.set_recovery_limits_for_test(limits);
+
+        let error = recovery
+            .checkpoint_package(original_package, false)
+            .expect_err("ordinary checkpoint must refuse injected capacity limit");
+
+        assert!(
+            error.contains(expected_error),
+            "expected {expected_error:?}, got {error:?}"
+        );
+        assert_eq!(versioned_entry_bytes(&versioned), before);
+        assert_eq!(recovery.last_sequence_for_test(), sequence_before);
+    }
+}
+
+#[test]
+fn ordinary_append_capacity_refusal_preserves_torn_journal_and_sequence() {
+    let fixture = RecoveryFixture::new();
+    let package = checkpoint_fixture(fixture.path());
+    let (mut recovery, _) =
+        CellEditRecovery::open_at(fixture.path()).expect("open checkpoint recovery");
+    recovery
+        .record_cells(
+            0,
+            [(0, CellRef::parse("A1").expect("cell"), Some("first".into()))],
+            || Ok(package.clone()),
+        )
+        .expect("write first durable edit");
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned path");
+    let journal_path = versioned.join("operations.jsonl");
+    let mut torn = OpenOptions::new()
+        .append(true)
+        .open(&journal_path)
+        .expect("open journal for interrupted tail");
+    torn.write_all(b"{interrupted")
+        .expect("append torn journal tail");
+    drop(torn);
+    let before = versioned_entry_bytes(&versioned);
+    let sequence_before = recovery.last_sequence_for_test();
+    recovery.set_recovery_limits_for_test(crate::recovery_policy::RecoveryLimits {
+        package_bytes: u64::MAX,
+        retained_bytes: 1,
+        temporary_peak_bytes: u64::MAX,
+    });
+
+    let error = recovery
+        .record_cells(
+            0,
+            [(
+                0,
+                CellRef::parse("A2").expect("cell"),
+                Some("second".into()),
+            )],
+            || Ok(package),
+        )
+        .expect_err("aggregate recovery limit must refuse before journal repair");
+
+    assert!(
+        error.contains("retained-storage limit"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(versioned_entry_bytes(&versioned), before);
+    assert_eq!(recovery.last_sequence_for_test(), sequence_before);
+}
+
 fn assert_capacity_refusal(limits: (u64, u64, u64), expected_error: &str) {
     let fixture = RecoveryFixture::new();
     let package = package_with_recovery_content();

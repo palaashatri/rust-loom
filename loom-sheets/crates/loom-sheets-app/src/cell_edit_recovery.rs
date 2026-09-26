@@ -144,6 +144,8 @@ pub(crate) struct CellEditRecovery {
     failed: Option<String>,
     #[cfg(test)]
     migration_limits_override: Option<(u64, u64, u64)>,
+    #[cfg(test)]
+    recovery_limits_override: Option<super::recovery_policy::RecoveryLimits>,
     _writer_lock: File,
     _legacy_lock: RecoveryDirectoryLock,
 }
@@ -359,6 +361,8 @@ impl CellEditRecovery {
                 failed: None,
                 #[cfg(test)]
                 migration_limits_override: None,
+                #[cfg(test)]
+                recovery_limits_override: None,
                 _writer_lock: writer_lock,
                 _legacy_lock: legacy_lock,
             },
@@ -418,10 +422,43 @@ impl CellEditRecovery {
         if payload.len() > MAX_BATCH_PAYLOAD_BYTES {
             return self.checkpoint_current_model(checkpoint_package);
         }
-        match self.journal.append_bounded(
+        let versioned_directory = self.journal.directory().to_path_buf();
+        let legacy_directory = self.legacy_directory.clone();
+        let limits = self.recovery_limits();
+        match self.journal.append_bounded_with_preflight(
             format!("sheets-cell-batch-{expected_sequence}"),
             "Sheets cell edits",
             payload,
+            |projection| {
+                let storage = super::recovery_policy::scan_recovery_storage(
+                    &versioned_directory,
+                    &legacy_directory,
+                )
+                .map_err(ProductionError::InvalidData)?;
+                let current_total = storage
+                    .total_bytes()
+                    .map_err(ProductionError::InvalidData)?;
+                let retained_after = current_total
+                    .checked_sub(projection.current_journal_bytes)
+                    .and_then(|bytes| bytes.checked_add(projection.resulting_journal_bytes))
+                    .and_then(|bytes| {
+                        bytes.checked_add(projection.retained_directory_growth_reserve_bytes)
+                    })
+                    .ok_or_else(|| {
+                        ProductionError::InvalidData("recovery byte count overflow".into())
+                    })?;
+                super::recovery_policy::preflight_checkpoint(
+                    storage,
+                    0,
+                    retained_after,
+                    projection.temporary_peak_additional_bytes,
+                    limits,
+                )
+                .map(|_| ())
+                .map_err(|error| {
+                    ProductionError::InvalidData(format!("recovery capacity refusal: {error}"))
+                })
+            },
         ) {
             Ok(record) if record.sequence == expected_sequence => {
                 self.last_sequence = record.sequence;
@@ -458,18 +495,14 @@ impl CellEditRecovery {
         package: Vec<u8>,
         new_workbook: bool,
     ) -> Result<(), String> {
-        let durable_sequence = match self.journal.recover() {
-            Ok(recovered) => recovered.operations.last().map_or_else(
-                || {
-                    recovered
-                        .checkpoint_metadata
-                        .as_ref()
-                        .map_or(0, |metadata| metadata.last_sequence)
-                },
-                |record| record.sequence,
-            ),
-            Err(error) => return self.fail(error.to_string()),
-        };
+        let limits = self.recovery_limits();
+        if package.len() as u64 > limits.package_bytes {
+            return self.fail(format!(
+                "recovery package limit exceeded ({} > {} bytes)",
+                package.len(),
+                limits.package_bytes
+            ));
+        }
         let identity = match &self.identity {
             Some(current) => RecoveryIdentity {
                 session_id: current.session_id.clone(),
@@ -487,8 +520,22 @@ impl CellEditRecovery {
             },
         };
         let schema = encode_checkpoint_identity(&identity);
-        let checkpoint = if let Some(manifest) = self.pending_legacy_migration.clone() {
-            match self.publish_legacy_baseline(
+        let (checkpoint, durable_sequence) = if let Some(manifest) =
+            self.pending_legacy_migration.clone()
+        {
+            let durable_sequence = match self.journal.recover() {
+                Ok(recovered) => recovered.operations.last().map_or_else(
+                    || {
+                        recovered
+                            .checkpoint_metadata
+                            .as_ref()
+                            .map_or(0, |metadata| metadata.last_sequence)
+                    },
+                    |record| record.sequence,
+                ),
+                Err(error) => return self.fail(error.to_string()),
+            };
+            let checkpoint = match self.publish_legacy_baseline(
                 &package,
                 durable_sequence,
                 &schema,
@@ -497,19 +544,61 @@ impl CellEditRecovery {
             ) {
                 Ok(metadata) => metadata,
                 Err(error) => return self.fail(error),
-            }
+            };
+            (checkpoint, durable_sequence)
         } else {
-            match self.journal.checkpoint(durable_sequence, schema, &package) {
-                Ok(metadata) => metadata,
+            let versioned_directory = self.journal.directory().to_path_buf();
+            let legacy_directory = self.legacy_directory.clone();
+            let outcome = match self.journal.checkpoint_and_compact_with_preflight(
+                schema,
+                &package,
+                |projection| {
+                    let storage = super::recovery_policy::scan_recovery_storage(
+                        &versioned_directory,
+                        &legacy_directory,
+                    )
+                    .map_err(ProductionError::InvalidData)?;
+                    let current_total = storage
+                        .total_bytes()
+                        .map_err(ProductionError::InvalidData)?;
+                    let retained_after = current_total
+                        .checked_sub(projection.retained_removed_bytes)
+                        .and_then(|bytes| bytes.checked_add(projection.retained_added_bytes))
+                        .ok_or_else(|| {
+                            ProductionError::InvalidData("recovery byte count overflow".into())
+                        })?;
+                    super::recovery_policy::preflight_checkpoint(
+                        storage,
+                        projection.package_bytes,
+                        retained_after,
+                        projection
+                            .temporary_peak_additional_bytes
+                            .saturating_sub(projection.package_bytes),
+                        limits,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| {
+                        ProductionError::InvalidData(format!("recovery capacity refusal: {error}"))
+                    })
+                },
+            ) {
+                Ok(outcome) => outcome,
                 Err(error) => return self.fail(error.to_string()),
+            };
+            self.identity = Some(identity);
+            self.last_sequence = outcome.last_sequence;
+            if let Some(error) = outcome.compaction_error {
+                return self.fail(error);
             }
+            self.failed = None;
+            return Ok(());
         };
         if checkpoint.sha256.is_empty() {
             return self.fail("Sheets recovery checkpoint readback has no digest".into());
         }
 
-        // The checkpoint pointer is now durable, so its baseline identity is
-        // authoritative even if subsequent journal compaction reports an error.
+        // The migration pointer is durable, so its identity is authoritative
+        // even if its separately ordered compaction reports an error.
         self.identity = Some(identity);
         self.last_sequence = durable_sequence;
         if let Err(error) = self.journal.compact(durable_sequence) {
@@ -599,6 +688,27 @@ impl CellEditRecovery {
     #[cfg(test)]
     pub(crate) fn migration_limits_for_test(&self) -> Option<(u64, u64, u64)> {
         self.migration_limits_override
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_recovery_limits_for_test(
+        &mut self,
+        limits: super::recovery_policy::RecoveryLimits,
+    ) {
+        self.recovery_limits_override = Some(limits);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_sequence_for_test(&self) -> u64 {
+        self.last_sequence
+    }
+
+    fn recovery_limits(&self) -> super::recovery_policy::RecoveryLimits {
+        #[cfg(test)]
+        if let Some(limits) = self.recovery_limits_override {
+            return limits;
+        }
+        super::recovery_policy::APPROVED_RECOVERY_LIMITS
     }
 
     fn fail<T>(&mut self, error: String) -> Result<T, String> {

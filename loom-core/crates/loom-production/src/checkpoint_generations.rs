@@ -568,6 +568,32 @@ fn reconcile_checkpoint_generations_inner(
     state: &CheckpointState,
     limits: Option<RecoveryInspectionLimits>,
 ) -> Result<(), ProductionError> {
+    let plan = checkpoint_reconciliation_plan(directory, state, limits, None, 4096)?;
+    for path in plan.obsolete_files {
+        remove_generated_file(&path)?;
+    }
+    for path in plan.abandoned_atomic_writes {
+        remove_abandoned_atomic_write(&path)?;
+    }
+    Ok(())
+}
+
+pub(super) struct CheckpointReconciliationPlan {
+    obsolete_files: Vec<PathBuf>,
+    abandoned_atomic_writes: Vec<PathBuf>,
+    pub(super) removed_logical_bytes: u64,
+}
+
+/// Plan the exact generated artifacts that reconciliation would remove. The
+/// optional replacement path is excluded because publication replaces it
+/// before reconciliation runs.
+pub(super) fn checkpoint_reconciliation_plan(
+    directory: &Path,
+    state: &CheckpointState,
+    limits: Option<RecoveryInspectionLimits>,
+    replacement_path: Option<&Path>,
+    minimum_directory_charge: u64,
+) -> Result<CheckpointReconciliationPlan, ProductionError> {
     let mut retained = BTreeSet::new();
     if let Some(pointer) = &state.pointer {
         retained.insert(pointer.generation);
@@ -620,6 +646,7 @@ fn reconcile_checkpoint_generations_inner(
                     .get("generation")
                     .and_then(serde_json::Value::as_u64)
                     .is_some_and(|generation| !retained.contains(&generation))
+                    && replacement_path != Some(path.as_path())
                 {
                     obsolete_pointers.push(path);
                 }
@@ -628,7 +655,9 @@ fn reconcile_checkpoint_generations_inner(
         }
         let commit_generation =
             parse_checkpoint_generation(name, CHECKPOINT_COMMIT_PREFIX, CHECKPOINT_COMMIT_SUFFIX);
-        if commit_generation.is_some_and(|generation| !retained.contains(&generation)) {
+        if commit_generation.is_some_and(|generation| !retained.contains(&generation))
+            && replacement_path != Some(path.as_path())
+        {
             obsolete_pointers.push(path);
             continue;
         }
@@ -649,16 +678,53 @@ fn reconcile_checkpoint_generations_inner(
         }
     }
 
-    for path in obsolete_pointers {
-        remove_generated_file(&path)?;
+    let mut obsolete_files = obsolete_pointers;
+    obsolete_files.extend(obsolete_generations);
+    let mut removed_logical_bytes = 0_u64;
+    for path in obsolete_files.iter().chain(abandoned_atomic_writes.iter()) {
+        let bytes = logical_entry_bytes(path, minimum_directory_charge)?;
+        removed_logical_bytes = removed_logical_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| ProductionError::InvalidData("recovery byte count overflow".into()))?;
     }
-    for path in obsolete_generations {
-        remove_generated_file(&path)?;
+    Ok(CheckpointReconciliationPlan {
+        obsolete_files,
+        abandoned_atomic_writes,
+        removed_logical_bytes,
+    })
+}
+
+fn logical_entry_bytes(path: &Path, minimum_directory_charge: u64) -> Result<u64, ProductionError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(ProductionError::InvalidData(format!(
+            "recovery entry is a symlink: {}",
+            path.display()
+        )));
     }
-    for path in abandoned_atomic_writes {
-        remove_abandoned_atomic_write(&path)?;
+    if metadata.file_type().is_file() {
+        return Ok(metadata.len());
     }
-    Ok(())
+    if !metadata.file_type().is_dir() {
+        return Err(ProductionError::InvalidData(format!(
+            "recovery entry has unsupported type: {}",
+            path.display()
+        )));
+    }
+    let mut total = metadata.len().max(minimum_directory_charge);
+    for entry in fs::read_dir(path)? {
+        total = total
+            .checked_add(logical_entry_bytes(
+                &entry?.path(),
+                minimum_directory_charge,
+            )?)
+            .ok_or_else(|| ProductionError::InvalidData("recovery byte count overflow".into()))?;
+    }
+    Ok(total)
 }
 
 fn remove_generated_file(path: &Path) -> Result<(), ProductionError> {
@@ -716,12 +782,17 @@ pub(super) fn publish_checkpoint_pointer(
         fs::remove_file(&legacy_temporary)?;
     }
 
+    let path = checkpoint_pointer_target_path(directory, generation)?;
+    atomic_write(&path, pointer_bytes)
+}
+
+pub(super) fn checkpoint_pointer_target_path(
+    directory: &Path,
+    generation: u64,
+) -> Result<PathBuf, ProductionError> {
     #[cfg(windows)]
     {
-        atomic_write(
-            &checkpoint_commit_path(directory, generation),
-            pointer_bytes,
-        )
+        Ok(checkpoint_commit_path(directory, generation))
     }
 
     #[cfg(not(windows))]
@@ -732,12 +803,9 @@ pub(super) fn publish_checkpoint_pointer(
                 .get("generation")
                 .is_none();
         if preserves_legacy_metadata {
-            atomic_write(
-                &checkpoint_commit_path(directory, generation),
-                pointer_bytes,
-            )
+            Ok(checkpoint_commit_path(directory, generation))
         } else {
-            atomic_write(&metadata_path, pointer_bytes)
+            Ok(metadata_path)
         }
     }
 }

@@ -11,12 +11,19 @@
 #[cfg(test)]
 mod checkpoint_generation_tests;
 mod checkpoint_generations;
+mod recovery_checkpoint;
+#[cfg(test)]
+mod recovery_checkpoint_tests;
 mod recovery_inspection;
 #[cfg(test)]
 mod recovery_inspection_tests;
 #[cfg(test)]
 mod recovery_journal_bounds_tests;
 mod recovery_journal_inspection;
+pub use recovery_checkpoint::{
+    CheckpointAndCompactOutcome, CheckpointWriteProjection, JournalAppendProjection,
+    RECOVERY_DIRECTORY_ENTRY_GROWTH_RESERVE_BYTES,
+};
 pub use recovery_inspection::{
     inspect_recovery, inspect_recovery_with_limits, RecoveryInspection, RecoveryInspectionCursor,
     RecoveryInspectionLimits, RecoveryInspectionStats,
@@ -24,10 +31,12 @@ pub use recovery_inspection::{
 /// Deduplicating full-state recovery coordination for Loom applications.
 pub mod snapshot;
 
+#[cfg(test)]
 use checkpoint_generations::{
     checkpoint_generation_metadata_path, checkpoint_generation_payload_path,
-    next_checkpoint_generation, publish_checkpoint_pointer, read_checkpoint,
-    read_checkpoint_generations, read_checkpoint_sequence, read_checkpoint_state,
+};
+use checkpoint_generations::{
+    read_checkpoint, read_checkpoint_sequence, read_checkpoint_state,
     reconcile_checkpoint_generations, reconcile_checkpoint_generations_with_limits,
     CheckpointPointer,
 };
@@ -319,6 +328,19 @@ impl RecoveryJournal {
         payload: Vec<u8>,
         limits: Option<JournalAppendLimits>,
     ) -> Result<JournalRecord, ProductionError> {
+        self.append_record_with_preflight(operation_id, label, payload, limits, None)
+    }
+
+    fn append_record_with_preflight(
+        &mut self,
+        operation_id: impl Into<String>,
+        label: impl Into<String>,
+        payload: Vec<u8>,
+        limits: Option<JournalAppendLimits>,
+        mut preflight: Option<
+            &mut dyn FnMut(&JournalAppendProjection) -> Result<(), ProductionError>,
+        >,
+    ) -> Result<JournalRecord, ProductionError> {
         let _recovery_lock = lock_recovery_writes(&self.directory)?;
         let path = self.directory.join(JOURNAL_FILE);
         let current_bytes = if let Some(limits) = limits {
@@ -364,10 +386,10 @@ impl RecoveryJournal {
         record.verify()?;
         let encoded = serde_json::to_vec(&record)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
+        let line_bytes = encoded.len().checked_add(1).ok_or_else(|| {
+            ProductionError::InvalidData("journal record line length overflowed".into())
+        })?;
         if let Some(limits) = limits {
-            let line_bytes = encoded.len().checked_add(1).ok_or_else(|| {
-                ProductionError::InvalidData("journal record line length overflowed".into())
-            })?;
             if line_bytes > limits.max_record_line_bytes {
                 return Err(ProductionError::InvalidData(format!(
                     "journal record line is {line_bytes} bytes, exceeding the {} byte limit",
@@ -396,6 +418,23 @@ impl RecoveryJournal {
                     limits.max_records
                 )));
             }
+        }
+        if let Some(preflight) = preflight.as_mut() {
+            let current_journal_bytes = current_bytes
+                .unwrap_or_else(|| fs::metadata(&path).map_or(0, |metadata| metadata.len()));
+            let repaired_prefix_bytes = read
+                .skipped_tail
+                .then(|| recovery_checkpoint::encoded_records_bytes(&read.records))
+                .transpose()?;
+            let projection = JournalAppendProjection::new(
+                current_journal_bytes,
+                repaired_prefix_bytes,
+                u64::try_from(line_bytes).map_err(|_| {
+                    ProductionError::InvalidData("journal record line length exceeds u64".into())
+                })?,
+                path.exists(),
+            )?;
+            preflight(&projection)?;
         }
         if read.skipped_tail && limits.is_some() {
             repair_journal(&self.directory, &read.records)?;
@@ -429,88 +468,6 @@ impl RecoveryJournal {
         Ok(read.records)
     }
 
-    /// Atomically write an application checkpoint.
-    pub fn checkpoint(
-        &self,
-        last_sequence: u64,
-        schema: impl Into<String>,
-        bytes: &[u8],
-    ) -> Result<CheckpointMetadata, ProductionError> {
-        // All processes writing recovery data use one lock, so generation
-        // selection and pointer publication happen in one order.
-        let _recovery_lock = lock_recovery_writes(&self.directory)?;
-        let journal_read = read_records_at(&self.directory.join(JOURNAL_FILE), true)?;
-        if journal_read.skipped_tail {
-            repair_journal(&self.directory, &journal_read.records)?;
-        }
-        let current_checkpoint = read_checkpoint_state(&self.directory)?;
-        let current_checkpoint_sequence = current_checkpoint
-            .metadata
-            .as_ref()
-            .map(|metadata| metadata.last_sequence);
-        if let Some(current_sequence) = current_checkpoint_sequence {
-            if last_sequence < current_sequence {
-                return Err(ProductionError::Integrity(format!(
-                    "checkpoint sequence {last_sequence} cannot replace newer sequence {current_sequence}"
-                )));
-            }
-        }
-        let highest_saved_sequence = journal_read
-            .records
-            .last()
-            .map(|record| record.sequence)
-            .into_iter()
-            .chain(current_checkpoint_sequence)
-            .max()
-            .unwrap_or(0);
-        if last_sequence > highest_saved_sequence {
-            return Err(ProductionError::Integrity(format!(
-                "checkpoint sequence {last_sequence} is newer than saved recovery data {highest_saved_sequence}"
-            )));
-        }
-        reconcile_checkpoint_generations(&self.directory, &current_checkpoint)?;
-
-        let metadata = CheckpointMetadata {
-            last_sequence,
-            sha256: sha256_hex(bytes),
-            timestamp_ms: unix_time_ms(),
-            schema: schema.into(),
-        };
-        let metadata_bytes = serde_json::to_vec_pretty(&metadata)
-            .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-        let generation = next_checkpoint_generation(&self.directory)?;
-        let payload_path = checkpoint_generation_payload_path(&self.directory, generation);
-        let metadata_path = checkpoint_generation_metadata_path(&self.directory, generation);
-
-        // A generation is complete before its pointer is published. A failure
-        // in either write leaves the previous pointer and journal untouched.
-        atomic_write(&payload_path, bytes)?;
-        atomic_write(&metadata_path, &metadata_bytes)?;
-        let (verified_bytes, verified_metadata) =
-            read_checkpoint_generations(&self.directory, generation)?;
-        if verified_bytes != bytes || verified_metadata != metadata {
-            return Err(ProductionError::Integrity(
-                "checkpoint generation changed before publication".into(),
-            ));
-        }
-
-        let pointer = CheckpointPointer {
-            generation,
-            last_sequence,
-            sha256: metadata.sha256.clone(),
-            timestamp_ms: metadata.timestamp_ms,
-            schema: metadata.schema.clone(),
-            previous_generation: current_checkpoint
-                .pointer
-                .as_ref()
-                .map(|pointer| pointer.generation),
-        };
-        let pointer_bytes = serde_json::to_vec_pretty(&pointer)
-            .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-        publish_checkpoint_pointer(&self.directory, generation, &pointer_bytes)?;
-        Ok(metadata)
-    }
-
     /// Load the last valid checkpoint and all operations after it.
     pub fn recover(&self) -> Result<RecoveryState, ProductionError> {
         self.recover_with_checkpoint_hook(|| {})
@@ -540,27 +497,6 @@ impl RecoveryJournal {
             checkpoint_metadata,
             operations,
         })
-    }
-
-    /// Compact the journal by retaining only records newer than `sequence`.
-    pub fn compact(&self, sequence: u64) -> Result<(), ProductionError> {
-        let _recovery_lock = lock_recovery_writes(&self.directory)?;
-        let checkpoint_state = read_checkpoint_state(&self.directory)?;
-        let checkpoint_sequence = checkpoint_state
-            .metadata
-            .as_ref()
-            .map_or(0, |metadata| metadata.last_sequence);
-        if sequence > checkpoint_sequence {
-            return Err(ProductionError::Integrity(format!(
-                "cannot compact through sequence {sequence}; durable checkpoint is {checkpoint_sequence}"
-            )));
-        }
-        let journal_read = read_records_at(&self.directory.join(JOURNAL_FILE), true)?;
-        if journal_read.skipped_tail {
-            repair_journal(&self.directory, &journal_read.records)?;
-        }
-        compact_journal_with(&self.directory, sequence, atomic_write)?;
-        reconcile_checkpoint_generations(&self.directory, &checkpoint_state)
     }
 }
 
