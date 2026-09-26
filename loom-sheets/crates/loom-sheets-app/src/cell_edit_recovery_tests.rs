@@ -827,6 +827,7 @@ fn ordinary_append_capacity_refusal_preserves_torn_journal_and_sequence() {
         temporary_peak_bytes: u64::MAX,
     });
 
+    let mut fallback_attempted = false;
     let error = recovery
         .record_cells(
             0,
@@ -835,16 +836,130 @@ fn ordinary_append_capacity_refusal_preserves_torn_journal_and_sequence() {
                 CellRef::parse("A2").expect("cell"),
                 Some("second".into()),
             )],
-            || Ok(package),
+            || {
+                fallback_attempted = true;
+                Ok(package)
+            },
         )
         .expect_err("aggregate recovery limit must refuse before journal repair");
 
+    assert!(
+        fallback_attempted,
+        "aggregate capacity refusal must attempt complete-checkpoint fallback"
+    );
     assert!(
         error.contains("retained-storage limit"),
         "unexpected error: {error}"
     );
     assert_eq!(versioned_entry_bytes(&versioned), before);
     assert_eq!(recovery.last_sequence_for_test(), sequence_before);
+}
+
+#[test]
+fn ordinary_append_aggregate_capacity_refusal_uses_fitting_checkpoint() {
+    let fixture = RecoveryFixture::new();
+    let baseline_package = checkpoint_fixture(fixture.path());
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned directory");
+    let large_value = "x".repeat(100_000);
+    let mut journal = RecoveryJournal::open(&versioned).expect("open baseline journal");
+    let recovered = journal.recover().expect("read baseline checkpoint");
+    assert_eq!(recovered.checkpoint, Some(baseline_package.clone()));
+    let identity = parse_checkpoint_identity(
+        &recovered
+            .checkpoint_metadata
+            .expect("baseline checkpoint metadata")
+            .schema,
+    )
+    .expect("baseline checkpoint identity");
+    append_batch(&mut journal, &identity, 0, &large_value);
+    append_batch(&mut journal, &identity, 1, "compact replacement");
+    drop(journal);
+
+    let mut replayed_sheet = Sheet::new("Data");
+    replayed_sheet.set_str("A1", "compact replacement");
+    replayed_sheet.set_str("B1", "=A1+1");
+    let replayed_package = workbook_package_bytes(&[replayed_sheet], 0)
+        .expect("package accepted replayed historical workbook state");
+    let (mut recovery, restored) =
+        CellEditRecovery::open_at(fixture.path()).expect("open checkpoint recovery");
+    assert_eq!(restored, Some(replayed_package));
+    assert_eq!(recovery.last_sequence_for_test(), 2);
+
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned directory");
+    let retained_before = crate::recovery_policy::scan_recovery_storage(&versioned, fixture.path())
+        .expect("scan current recovery storage")
+        .total_bytes()
+        .expect("sum current recovery storage");
+    recovery.set_recovery_limits_for_test(crate::recovery_policy::RecoveryLimits {
+        package_bytes: u64::MAX,
+        retained_bytes: retained_before,
+        temporary_peak_bytes: u64::MAX,
+    });
+
+    let a1 = CellRef::parse("A1").expect("A1 cell");
+    let a3 = CellRef::parse("A3").expect("A3 cell");
+    let mut current_sheet = Sheet::new("Data");
+    current_sheet.set_str("A1", "compact replacement");
+    current_sheet.set_str("B1", "=A1+1");
+    current_sheet.set_str("A3", "checkpoint after aggregate refusal");
+    let current_package =
+        workbook_package_bytes(&[current_sheet], 0).expect("package accepted final workbook state");
+    let journal_bytes = fs::metadata(versioned.join("operations.jsonl"))
+        .expect("inspect historical edit journal")
+        .len();
+    println!(
+        "fallback fixture: journal={journal_bytes} bytes, package={} bytes, retained cap={retained_before} bytes",
+        current_package.len()
+    );
+    assert!(
+        journal_bytes > 250_000,
+        "fixture must contain historical bytes"
+    );
+    assert!(
+        current_package.len() < 16_384,
+        "complete package must remain small"
+    );
+    let mut fallback_attempted = false;
+    recovery
+        .record_cells(
+            0,
+            [(0, a3, Some("checkpoint after aggregate refusal".into()))],
+            || {
+                fallback_attempted = true;
+                Ok(current_package.clone())
+            },
+        )
+        .expect("fit a complete checkpoint after aggregate append refusal");
+    assert!(fallback_attempted, "complete-checkpoint fallback must run");
+
+    assert_eq!(
+        recovery.last_sequence_for_test(),
+        2,
+        "the refused append must not advance the durable sequence"
+    );
+    drop(recovery);
+
+    let journal = RecoveryJournal::open(&versioned).expect("reopen recovery journal");
+    let recovered = journal.recover().expect("read checkpointed recovery state");
+    assert_eq!(recovered.checkpoint, Some(current_package.clone()));
+    assert_eq!(
+        recovered
+            .checkpoint_metadata
+            .as_ref()
+            .expect("checkpoint metadata")
+            .last_sequence,
+        2
+    );
+    assert!(recovered.operations.is_empty());
+    let workbook = crate::restore_workbook_from_snapshot(
+        recovered.checkpoint.as_deref().expect("checkpoint package"),
+    )
+    .expect("restore checkpointed workbook");
+    assert_eq!(workbook.sheets[0].raw(a1), Some("compact replacement"));
+    assert_eq!(
+        workbook.sheets[0].raw(a3),
+        Some("checkpoint after aggregate refusal")
+    );
 }
 
 fn assert_capacity_refusal(limits: (u64, u64, u64), expected_error: &str) {
@@ -1221,5 +1336,95 @@ fn unix_legacy_checkpoint_pointer_wins_over_a_stale_windows_commit_pointer() {
         restored,
         Some(current_package),
         "Unix checkpoint.json is authoritative over a stale Windows commit pointer"
+    );
+}
+
+#[test]
+fn ordinary_capacity_fallback_build_error_is_cause_neutral() {
+    let fixture = RecoveryFixture::new();
+    checkpoint_fixture(fixture.path());
+    let (mut recovery, _) = CellEditRecovery::open_at(fixture.path()).expect("open recovery");
+    recovery.set_recovery_limits_for_test(crate::recovery_policy::RecoveryLimits {
+        package_bytes: u64::MAX,
+        retained_bytes: 1,
+        temporary_peak_bytes: u64::MAX,
+    });
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned directory");
+    let before = versioned_entry_bytes(&versioned);
+    let sequence_before = recovery.last_sequence_for_test();
+    let mut fallback_attempted = false;
+
+    let error = recovery
+        .record_cells(
+            0,
+            [(
+                0,
+                CellRef::parse("A2").expect("cell"),
+                Some("edit that triggers capacity refusal".into()),
+            )],
+            || {
+                fallback_attempted = true;
+                Err("fixture package builder failure".into())
+            },
+        )
+        .expect_err("failed complete-package construction remains a hard error");
+
+    assert!(
+        fallback_attempted,
+        "capacity refusal must attempt checkpoint fallback"
+    );
+    assert!(
+        error.contains("while preparing a complete Sheets recovery checkpoint"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        !error.contains("journal limit") && !error.contains("capacity refusal"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(versioned_entry_bytes(&versioned), before);
+    assert_eq!(recovery.last_sequence_for_test(), sequence_before);
+}
+
+#[test]
+fn ordinary_append_unsupported_legacy_entry_does_not_attempt_fallback() {
+    let fixture = RecoveryFixture::new();
+    let package = checkpoint_fixture(fixture.path());
+    let (mut recovery, _) = CellEditRecovery::open_at(fixture.path()).expect("open recovery");
+    let versioned = versioned_directory_for(fixture.path()).expect("versioned directory");
+    let versioned_before = versioned_entry_bytes(&versioned);
+    let sequence_before = recovery.last_sequence_for_test();
+    let unknown_path = fixture.path().join("future-recovery-format.bin");
+    let unknown_bytes = b"unsupported legacy entry added after open";
+    fs::write(&unknown_path, unknown_bytes).expect("add unsupported legacy entry");
+    let mut fallback_attempted = false;
+
+    let error = recovery
+        .record_cells(
+            0,
+            [(
+                0,
+                CellRef::parse("A2").expect("cell"),
+                Some("edit blocked by unsupported legacy state".into()),
+            )],
+            || {
+                fallback_attempted = true;
+                Ok(package.clone())
+            },
+        )
+        .expect_err("unsupported legacy state must block the append");
+
+    assert!(
+        error.contains("unsupported entries"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        !fallback_attempted,
+        "unsupported-store failures must not invoke fallback"
+    );
+    assert_eq!(versioned_entry_bytes(&versioned), versioned_before);
+    assert_eq!(recovery.last_sequence_for_test(), sequence_before);
+    assert_eq!(
+        fs::read(&unknown_path).expect("unsupported entry survives"),
+        unknown_bytes
     );
 }

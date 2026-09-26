@@ -456,7 +456,8 @@ fn dirty_close_cancel_keeps_the_workbook_open_and_dirty() {
 #[test]
 fn dirty_close_save_waits_for_worker_checkpoint_before_hiding() {
     let recovery = ScratchDirectory::new();
-    let output = recovery.0.join("saved.loomtable");
+    let output_directory = ScratchDirectory::new();
+    let output = output_directory.0.join("saved.loomtable");
     let (app, state) = close_test_app([]);
     attach_worker(&app, &state, &recovery.0, true);
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());

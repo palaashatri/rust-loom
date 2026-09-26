@@ -468,7 +468,9 @@ impl CellEditRecovery {
                 "Sheets recovery wrote unexpected sequence {}; expected {expected_sequence}",
                 record.sequence
             )),
-            Err(error) if is_journal_limit_refusal(&error) => {
+            Err(error)
+                if is_journal_limit_refusal(&error) || is_recovery_capacity_refusal(&error) =>
+            {
                 self.checkpoint_current_model(checkpoint_package)
             }
             Err(error) => self.fail(error.to_string()),
@@ -483,7 +485,7 @@ impl CellEditRecovery {
             Ok(package) => package,
             Err(error) => {
                 return self.fail(format!(
-                    "build complete Sheets recovery checkpoint after journal limit: {error}"
+                    "while preparing a complete Sheets recovery checkpoint: {error}"
                 ));
             }
         };
@@ -551,6 +553,7 @@ impl CellEditRecovery {
             let legacy_directory = self.legacy_directory.clone();
             let outcome = match self.journal.checkpoint_and_compact_with_preflight(
                 schema,
+                self.last_sequence,
                 &package,
                 |projection| {
                     let storage = super::recovery_policy::scan_recovery_storage(
@@ -729,6 +732,22 @@ fn is_journal_limit_refusal(error: &ProductionError) -> bool {
     ]
     .iter()
     .any(|prefix| message.starts_with(prefix) && message.contains("exceeding the "))
+}
+
+fn is_recovery_capacity_refusal(error: &ProductionError) -> bool {
+    let ProductionError::InvalidData(message) = error else {
+        return false;
+    };
+    let Some(reason) = message.strip_prefix("recovery capacity refusal: ") else {
+        return false;
+    };
+    [
+        "recovery package limit exceeded (",
+        "recovery retained-storage limit exceeded (",
+        "recovery temporary-peak limit exceeded (",
+    ]
+    .iter()
+    .any(|prefix| reason.starts_with(prefix))
 }
 
 pub(crate) fn versioned_directory_for(legacy_directory: &Path) -> Result<PathBuf, String> {

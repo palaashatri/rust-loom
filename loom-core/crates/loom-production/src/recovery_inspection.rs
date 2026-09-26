@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_MAX_CHECKPOINT_BYTES: u64 = 256 * 1024 * 1024;
 const DEFAULT_MAX_CHECKPOINT_METADATA_BYTES: u64 = 64 * 1024 * 1024;
-const DEFAULT_MAX_DIRECTORY_ENTRIES: usize = 10_000;
+pub(super) const DEFAULT_MAX_DIRECTORY_ENTRIES: usize = 10_000;
 const DEFAULT_MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 const DEFAULT_MAX_RECORDS: usize = 10_000;
 const DEFAULT_MAX_RECORD_LINE_BYTES: usize = 1024 * 1024;
-const DEFAULT_MAX_DIRECTORY_DEPTH: usize = 32;
+pub(super) const DEFAULT_MAX_DIRECTORY_DEPTH: usize = 32;
 
 /// Caller-controlled ceilings for a read-only recovery inspection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

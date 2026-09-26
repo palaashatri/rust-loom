@@ -70,6 +70,9 @@ struct JournalAppendLimits {
     max_records: usize,
 }
 
+type JournalAppendPreflight<'a> =
+    dyn FnMut(&JournalAppendProjection) -> Result<(), ProductionError> + 'a;
+
 /// Exclusive lock shared by every reader and writer of one recovery directory.
 ///
 /// Hold this guard while inspecting or changing recovery files that must not be
@@ -337,9 +340,7 @@ impl RecoveryJournal {
         label: impl Into<String>,
         payload: Vec<u8>,
         limits: Option<JournalAppendLimits>,
-        mut preflight: Option<
-            &mut dyn FnMut(&JournalAppendProjection) -> Result<(), ProductionError>,
-        >,
+        mut preflight: Option<&mut JournalAppendPreflight<'_>>,
     ) -> Result<JournalRecord, ProductionError> {
         let _recovery_lock = lock_recovery_writes(&self.directory)?;
         let path = self.directory.join(JOURNAL_FILE);

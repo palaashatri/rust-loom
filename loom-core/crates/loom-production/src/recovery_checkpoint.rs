@@ -3,9 +3,10 @@
 use super::checkpoint_generations::{
     checkpoint_generation_metadata_path, checkpoint_generation_payload_path,
     checkpoint_pointer_target_path, checkpoint_reconciliation_plan, next_checkpoint_generation,
-    publish_checkpoint_pointer, read_checkpoint_generations, read_checkpoint_state,
-    reconcile_checkpoint_generations, CheckpointPointer, CheckpointState,
+    next_checkpoint_generation_with_limit, publish_checkpoint_pointer, read_checkpoint_generations,
+    read_checkpoint_state, reconcile_checkpoint_generations, CheckpointPointer, CheckpointState,
 };
+use super::recovery_inspection::{RecoveryInspectionLimits, DEFAULT_MAX_DIRECTORY_ENTRIES};
 use super::{
     atomic_write, checked_next_sequence, compact_journal_with, lock_recovery_writes,
     read_records_at, repair_journal, sha256_hex, unix_time_ms, CheckpointMetadata, JournalRecord,
@@ -148,17 +149,62 @@ impl RecoveryJournal {
         )
     }
 
-    /// Atomically checkpoint the latest verified journal sequence, compact the
-    /// covered journal, and enforce application-provided bounds in one lock
-    /// scope. The callback runs before journal repair, generation cleanup,
-    /// receipt mutation, or publication.
+    /// Atomically checkpoint through a verified journal sequence, compact the
+    /// covered records, and enforce application-provided bounds in one lock
+    /// scope. Records newer than `covered_sequence` remain in the journal. The
+    /// callback runs before journal repair, generation cleanup, receipt
+    /// mutation, or publication.
     pub fn checkpoint_and_compact_with_preflight(
         &mut self,
         schema: impl Into<String>,
+        covered_sequence: u64,
         bytes: &[u8],
         preflight: impl FnOnce(&CheckpointWriteProjection) -> Result<(), ProductionError>,
     ) -> Result<CheckpointAndCompactOutcome, ProductionError> {
+        self.checkpoint_and_compact_with_entry_limit(
+            schema,
+            covered_sequence,
+            bytes,
+            None,
+            preflight,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn checkpoint_and_compact_with_entry_limit_for_test(
+        &mut self,
+        schema: impl Into<String>,
+        covered_sequence: u64,
+        bytes: &[u8],
+        max_directory_entries: usize,
+        preflight: impl FnOnce(&CheckpointWriteProjection) -> Result<(), ProductionError>,
+    ) -> Result<CheckpointAndCompactOutcome, ProductionError> {
+        self.checkpoint_and_compact_with_entry_limit(
+            schema,
+            covered_sequence,
+            bytes,
+            Some(max_directory_entries),
+            preflight,
+        )
+    }
+
+    fn checkpoint_and_compact_with_entry_limit(
+        &mut self,
+        schema: impl Into<String>,
+        covered_sequence: u64,
+        bytes: &[u8],
+        max_directory_entries: Option<usize>,
+        preflight: impl FnOnce(&CheckpointWriteProjection) -> Result<(), ProductionError>,
+    ) -> Result<CheckpointAndCompactOutcome, ProductionError> {
         let _recovery_lock = lock_recovery_writes(&self.directory)?;
+        let max_directory_entries = max_directory_entries
+            .unwrap_or(DEFAULT_MAX_DIRECTORY_ENTRIES)
+            .min(DEFAULT_MAX_DIRECTORY_ENTRIES);
+        let inspection_limits = RecoveryInspectionLimits {
+            max_directory_entries,
+            ..RecoveryInspectionLimits::default()
+        };
+        let inspection_limits = Some(inspection_limits);
         let journal_path = self.directory.join(JOURNAL_FILE);
         let journal_read = read_records_at(&journal_path, true)?;
         let current_checkpoint = read_checkpoint_state(&self.directory)?;
@@ -166,13 +212,24 @@ impl RecoveryJournal {
             .metadata
             .as_ref()
             .map_or(0, |metadata| metadata.last_sequence);
-        let last_sequence = journal_read
+        let frontier_sequence = journal_read
             .records
             .last()
             .map_or(checkpoint_sequence, |record| {
                 record.sequence.max(checkpoint_sequence)
             });
-        let next_sequence = checked_next_sequence(last_sequence)?;
+        if covered_sequence > frontier_sequence {
+            return Err(ProductionError::Integrity(format!(
+                "checkpoint covered sequence {covered_sequence} exceeds recovery frontier {frontier_sequence}"
+            )));
+        }
+        if covered_sequence < checkpoint_sequence {
+            return Err(ProductionError::Integrity(format!(
+                "checkpoint covered sequence {covered_sequence} precedes current checkpoint sequence {checkpoint_sequence}"
+            )));
+        }
+        let next_sequence = checked_next_sequence(frontier_sequence)?;
+        let last_sequence = covered_sequence;
         let schema = schema.into();
         let metadata = CheckpointMetadata {
             last_sequence,
@@ -182,7 +239,8 @@ impl RecoveryJournal {
         };
         let metadata_bytes = to_vec_pretty(&metadata)
             .map_err(|error| ProductionError::InvalidData(error.to_string()))?;
-        let generation = next_checkpoint_generation(&self.directory)?;
+        let generation =
+            next_checkpoint_generation_with_limit(&self.directory, max_directory_entries)?;
         let pointer = CheckpointPointer {
             generation,
             last_sequence,
@@ -202,10 +260,17 @@ impl RecoveryJournal {
             metadata: Some(metadata.clone()),
             pointer: Some(pointer),
         };
+        let current_prune_plan = checkpoint_reconciliation_plan(
+            &self.directory,
+            &current_checkpoint,
+            inspection_limits,
+            None,
+            MIN_TEMPORARY_DIRECTORY_CHARGE_BYTES,
+        )?;
         let prune_plan = checkpoint_reconciliation_plan(
             &self.directory,
             &new_state,
-            None,
+            inspection_limits,
             Some(&pointer_path),
             MIN_TEMPORARY_DIRECTORY_CHARGE_BYTES,
         )?;
@@ -221,6 +286,46 @@ impl RecoveryJournal {
         let replaced_pointer_bytes = file_length(&pointer_path)?;
         let new_pointer_entry = u64::from(!pointer_path.exists());
         let new_journal_entry = u64::from(!journal_path.exists());
+        let added_entry_count = 2_usize
+            .checked_add(new_pointer_entry as usize)
+            .and_then(|entries| entries.checked_add(new_journal_entry as usize))
+            .ok_or_else(|| {
+                ProductionError::InvalidData("recovery directory entry count overflowed".into())
+            })?;
+        let entries_after_safe_cleanup = current_prune_plan
+            .entry_count
+            .checked_sub(current_prune_plan.removable_entry_count)
+            .ok_or_else(|| {
+                ProductionError::InvalidData(
+                    "recovery directory cleanup projection underflowed".into(),
+                )
+            })?;
+        let entries_before_post_publication_pruning = entries_after_safe_cleanup
+            .checked_add(added_entry_count)
+            .ok_or_else(|| {
+                ProductionError::InvalidData("recovery directory entry count overflowed".into())
+            })?;
+        let entries_removed_after_publication =
+            prune_plan.additional_removable_entry_count(&current_prune_plan);
+        let final_retained_entry_count = entries_before_post_publication_pruning
+            .checked_sub(entries_removed_after_publication)
+            .ok_or_else(|| {
+                ProductionError::InvalidData(
+                    "recovery directory prune projection underflowed".into(),
+                )
+            })?;
+        let temporary_peak_entry_count = entries_before_post_publication_pruning
+            .checked_add(2)
+            .ok_or_else(|| {
+                ProductionError::InvalidData("recovery directory entry count overflowed".into())
+            })?;
+        if final_retained_entry_count > max_directory_entries
+            || temporary_peak_entry_count > max_directory_entries
+        {
+            return Err(ProductionError::InvalidData(format!(
+                "recovery directory entry count exceeds the write ceiling (final {final_retained_entry_count}, peak {temporary_peak_entry_count}, limit {max_directory_entries})"
+            )));
+        }
         let new_retained_file_entries = 2_u64
             .checked_add(new_pointer_entry)
             .and_then(|entries| entries.checked_add(new_journal_entry))

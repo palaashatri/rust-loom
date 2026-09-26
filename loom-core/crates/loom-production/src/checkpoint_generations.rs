@@ -1,4 +1,7 @@
-use super::recovery_inspection::{read_bounded_file, RecoveryInspectionLimits};
+use super::recovery_inspection::{
+    read_bounded_file, RecoveryInspectionLimits, DEFAULT_MAX_DIRECTORY_DEPTH,
+    DEFAULT_MAX_DIRECTORY_ENTRIES,
+};
 use super::{
     atomic_write, sha256_hex, CheckpointMetadata, ProductionError, CHECKPOINT_FILE,
     CHECKPOINT_META_FILE,
@@ -406,10 +409,21 @@ fn parse_checkpoint_generation(name: &str, prefix: &str, suffix: &str) -> Option
 }
 
 pub(super) fn next_checkpoint_generation(directory: &Path) -> Result<u64, ProductionError> {
+    next_checkpoint_generation_with_limit(directory, DEFAULT_MAX_DIRECTORY_ENTRIES)
+}
+
+pub(super) fn next_checkpoint_generation_with_limit(
+    directory: &Path,
+    max_directory_entries: usize,
+) -> Result<u64, ProductionError> {
     let mut highest = 0;
+    let max_directory_entries = max_directory_entries.min(DEFAULT_MAX_DIRECTORY_ENTRIES);
+    let mut entry_count = 0;
     if directory.exists() {
         for entry in fs::read_dir(directory)? {
-            let name = entry?.file_name();
+            let entry = entry?;
+            count_reconciliation_entry(&mut entry_count, max_directory_entries)?;
+            let name = entry.file_name();
             let Some(name) = name.to_str() else {
                 continue;
             };
@@ -440,6 +454,14 @@ pub(super) fn next_checkpoint_generation(directory: &Path) -> Result<u64, Produc
     highest.checked_add(1).ok_or_else(|| {
         ProductionError::Integrity("checkpoint generation is exhausted at u64::MAX".into())
     })
+}
+
+#[cfg(test)]
+pub(super) fn next_checkpoint_generation_with_limit_for_test(
+    directory: &Path,
+    max_directory_entries: usize,
+) -> Result<u64, ProductionError> {
+    next_checkpoint_generation_with_limit(directory, max_directory_entries)
 }
 
 pub(super) fn read_checkpoint_generations(
@@ -505,16 +527,34 @@ fn legacy_previous_generation(
     current_generation: u64,
     limits: Option<RecoveryInspectionLimits>,
 ) -> Result<Option<u64>, ProductionError> {
+    let max_directory_entries = limits
+        .map(|limits| {
+            limits
+                .max_directory_entries
+                .min(DEFAULT_MAX_DIRECTORY_ENTRIES)
+        })
+        .unwrap_or(DEFAULT_MAX_DIRECTORY_ENTRIES);
+    legacy_previous_generation_with_entry_limit(
+        directory,
+        current_generation,
+        limits,
+        max_directory_entries,
+    )
+}
+
+fn legacy_previous_generation_with_entry_limit(
+    directory: &Path,
+    current_generation: u64,
+    limits: Option<RecoveryInspectionLimits>,
+    max_directory_entries: usize,
+) -> Result<Option<u64>, ProductionError> {
     let mut generations = BTreeSet::new();
     let mut entry_count = 0_usize;
+    let max_directory_entries = max_directory_entries.min(DEFAULT_MAX_DIRECTORY_ENTRIES);
     for entry in fs::read_dir(directory)? {
-        entry_count = entry_count.saturating_add(1);
-        if limits.is_some_and(|limits| entry_count > limits.max_directory_entries) {
-            return Err(ProductionError::InvalidData(
-                "recovery directory entry count exceeds the inspection ceiling".into(),
-            ));
-        }
-        let name = entry?.file_name();
+        let entry = entry?;
+        count_reconciliation_entry(&mut entry_count, max_directory_entries)?;
+        let name = entry.file_name();
         let Some(name) = name.to_str() else {
             continue;
         };
@@ -546,6 +586,20 @@ fn legacy_previous_generation(
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+pub(super) fn legacy_previous_generation_with_limit_for_test(
+    directory: &Path,
+    current_generation: u64,
+    max_directory_entries: usize,
+) -> Result<Option<u64>, ProductionError> {
+    legacy_previous_generation_with_entry_limit(
+        directory,
+        current_generation,
+        None,
+        max_directory_entries,
+    )
 }
 
 pub(super) fn reconcile_checkpoint_generations(
@@ -582,6 +636,18 @@ pub(super) struct CheckpointReconciliationPlan {
     obsolete_files: Vec<PathBuf>,
     abandoned_atomic_writes: Vec<PathBuf>,
     pub(super) removed_logical_bytes: u64,
+    pub(super) entry_count: usize,
+    pub(super) removable_entry_count: usize,
+    removable_entry_counts: BTreeMap<PathBuf, usize>,
+}
+
+impl CheckpointReconciliationPlan {
+    pub(super) fn additional_removable_entry_count(&self, already_removed: &Self) -> usize {
+        self.removable_entry_counts
+            .iter()
+            .filter(|(path, _)| !already_removed.removable_entry_counts.contains_key(*path))
+            .fold(0_usize, |total, (_, count)| total.saturating_add(*count))
+    }
 }
 
 /// Plan the exact generated artifacts that reconciliation would remove. The
@@ -609,15 +675,18 @@ pub(super) fn checkpoint_reconciliation_plan(
     let mut obsolete_pointers = Vec::new();
     let mut obsolete_generations = Vec::new();
     let mut abandoned_atomic_writes = Vec::new();
+    let max_directory_entries = limits
+        .map(|limits| {
+            limits
+                .max_directory_entries
+                .min(DEFAULT_MAX_DIRECTORY_ENTRIES)
+        })
+        .unwrap_or(DEFAULT_MAX_DIRECTORY_ENTRIES);
     let mut entry_count = 0_usize;
     for entry in fs::read_dir(directory)? {
-        entry_count = entry_count.saturating_add(1);
-        if limits.is_some_and(|limits| entry_count > limits.max_directory_entries) {
-            return Err(ProductionError::InvalidData(
-                "recovery directory entry count exceeds the inspection ceiling".into(),
-            ));
-        }
-        let path = entry?.path();
+        let entry = entry?;
+        count_reconciliation_entry(&mut entry_count, max_directory_entries)?;
+        let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
@@ -681,20 +750,86 @@ pub(super) fn checkpoint_reconciliation_plan(
     let mut obsolete_files = obsolete_pointers;
     obsolete_files.extend(obsolete_generations);
     let mut removed_logical_bytes = 0_u64;
-    for path in obsolete_files.iter().chain(abandoned_atomic_writes.iter()) {
-        let bytes = logical_entry_bytes(path, minimum_directory_charge)?;
+    let mut removable_entry_count = 0_usize;
+    let mut removable_entry_counts = BTreeMap::new();
+    for path in &obsolete_files {
+        let bytes = logical_entry_bytes(
+            path,
+            minimum_directory_charge,
+            &mut entry_count,
+            max_directory_entries,
+            1,
+        )?;
         removed_logical_bytes = removed_logical_bytes
             .checked_add(bytes)
             .ok_or_else(|| ProductionError::InvalidData("recovery byte count overflow".into()))?;
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                removable_entry_count = removable_entry_count.checked_add(1).ok_or_else(|| {
+                    ProductionError::InvalidData("recovery directory entry count overflow".into())
+                })?;
+                removable_entry_counts.insert(path.clone(), 1);
+            }
+            Ok(_) => {
+                return Err(ProductionError::InvalidData(format!(
+                    "generated checkpoint artifact is not a regular file: {}",
+                    path.display()
+                )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    for path in &abandoned_atomic_writes {
+        let entries_before = entry_count;
+        let bytes = logical_entry_bytes(
+            path,
+            minimum_directory_charge,
+            &mut entry_count,
+            max_directory_entries,
+            1,
+        )?;
+        removed_logical_bytes = removed_logical_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| ProductionError::InvalidData("recovery byte count overflow".into()))?;
+        let descendants = entry_count.saturating_sub(entries_before);
+        let entries = descendants.saturating_add(1);
+        removable_entry_count = removable_entry_count.checked_add(entries).ok_or_else(|| {
+            ProductionError::InvalidData("recovery directory entry count overflow".into())
+        })?;
+        removable_entry_counts.insert(path.clone(), entries);
     }
     Ok(CheckpointReconciliationPlan {
         obsolete_files,
         abandoned_atomic_writes,
         removed_logical_bytes,
+        entry_count,
+        removable_entry_count,
+        removable_entry_counts,
     })
 }
 
-fn logical_entry_bytes(path: &Path, minimum_directory_charge: u64) -> Result<u64, ProductionError> {
+fn count_reconciliation_entry(
+    entry_count: &mut usize,
+    max_directory_entries: usize,
+) -> Result<(), ProductionError> {
+    *entry_count = entry_count.saturating_add(1);
+    if *entry_count > max_directory_entries {
+        return Err(ProductionError::InvalidData(format!(
+            "recovery directory entry count exceeds the reconciliation ceiling ({} > {})",
+            *entry_count, max_directory_entries
+        )));
+    }
+    Ok(())
+}
+
+fn logical_entry_bytes(
+    path: &Path,
+    minimum_directory_charge: u64,
+    entry_count: &mut usize,
+    max_directory_entries: usize,
+    directory_depth: usize,
+) -> Result<u64, ProductionError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
@@ -715,13 +850,45 @@ fn logical_entry_bytes(path: &Path, minimum_directory_charge: u64) -> Result<u64
             path.display()
         )));
     }
+    if directory_depth > DEFAULT_MAX_DIRECTORY_DEPTH {
+        return Err(ProductionError::InvalidData(format!(
+            "abandoned atomic-write directory depth exceeds the reconciliation ceiling ({directory_depth} > {DEFAULT_MAX_DIRECTORY_DEPTH})"
+        )));
+    }
     let mut total = metadata.len().max(minimum_directory_charge);
     for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        count_reconciliation_entry(entry_count, max_directory_entries)?;
+        let child_path = entry.path();
+        let child_metadata = fs::symlink_metadata(&child_path)?;
+        if child_metadata.file_type().is_dir() && directory_depth >= DEFAULT_MAX_DIRECTORY_DEPTH {
+            return Err(ProductionError::InvalidData(format!(
+                "abandoned atomic-write directory depth exceeds the reconciliation ceiling ({} > {DEFAULT_MAX_DIRECTORY_DEPTH})",
+                directory_depth.saturating_add(1)
+            )));
+        }
         total = total
-            .checked_add(logical_entry_bytes(
-                &entry?.path(),
-                minimum_directory_charge,
-            )?)
+            .checked_add(if child_metadata.file_type().is_dir() {
+                logical_entry_bytes(
+                    &child_path,
+                    minimum_directory_charge,
+                    entry_count,
+                    max_directory_entries,
+                    directory_depth.saturating_add(1),
+                )?
+            } else if child_metadata.file_type().is_file() {
+                child_metadata.len()
+            } else if child_metadata.file_type().is_symlink() {
+                return Err(ProductionError::InvalidData(format!(
+                    "recovery entry is a symlink: {}",
+                    child_path.display()
+                )));
+            } else {
+                return Err(ProductionError::InvalidData(format!(
+                    "recovery entry has unsupported type: {}",
+                    child_path.display()
+                )));
+            })
             .ok_or_else(|| ProductionError::InvalidData("recovery byte count overflow".into()))?;
     }
     Ok(total)
