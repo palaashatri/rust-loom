@@ -36,7 +36,10 @@ mod workbook_state_tests;
 mod worker_tests;
 
 fn cross_sheet_state() -> Rc<GuiState> {
-    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    cross_sheet_state_with_dialogs(Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])))
+}
+
+fn cross_sheet_state_with_dialogs(dialogs: Rc<dyn FileDialogService>) -> Rc<GuiState> {
     let mut data = Sheet::new("Data");
     data.set_str("A1", "10");
     data.set_str("B1", "=A1*2");

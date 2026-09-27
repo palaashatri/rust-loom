@@ -603,6 +603,127 @@ fn multi_series_xlsx_warning_cancels_safely_and_continue_reports_dropped_data() 
 }
 
 #[test]
+fn multi_series_picker_and_startup_open_warn_before_replacement() {
+    set_platform();
+    let incoming_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-multi-series-open-warning-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
+    let incoming_path = incoming_dir.join("incoming.xlsx");
+    write_xlsx_with_multiple_series_line_chart(&incoming_path);
+
+    let picker_app = SheetsApp::new().expect("create picker SheetsApp");
+    let picker_state = cross_sheet_state_with_dialogs(Rc::new(
+        loom_desktop::ScriptedFileDialogs::new([Some(incoming_path.clone())], []),
+    ));
+    picker_state.mark_saved();
+    let picker_menu = std::sync::Arc::new(NativeMenuBar::new());
+    crate::open_operations::open_workbook_from_picker(
+        &picker_app,
+        &picker_state,
+        &picker_menu,
+        None,
+    );
+    assert!(picker_app.get_status_left().starts_with("Opening "));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !picker_app.get_xlsx_import_warning_open() {
+        crate::open_operations::process_completions(&picker_app, &picker_state, &picker_menu);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "picker-selected candidate should stage the multi-series warning"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(picker_state.current.borrow().name, "Data");
+    assert!(picker_app
+        .get_xlsx_import_warning_message()
+        .contains("additional line chart series"));
+    continue_pending_xlsx_import(&picker_app, &picker_state, &picker_menu);
+    assert_eq!(picker_state.current.borrow().name, "Imported");
+    assert_eq!(
+        picker_state
+            .current
+            .borrow()
+            .chart
+            .as_ref()
+            .unwrap()
+            .cat_col,
+        0,
+        "picker import must retain the first series category column"
+    );
+    assert_eq!(
+        picker_state
+            .current
+            .borrow()
+            .chart
+            .as_ref()
+            .unwrap()
+            .val_col,
+        1,
+        "picker import must retain the first series value column"
+    );
+    assert!(picker_app
+        .get_status_left()
+        .contains("dropped: additional line chart series"));
+
+    set_platform();
+    let startup_app = SheetsApp::new().expect("create startup SheetsApp");
+    let startup_state = cross_sheet_state();
+    startup_state.mark_saved();
+    crate::open_operations::start_startup_open(
+        &startup_app,
+        &startup_state,
+        incoming_path.clone(),
+        crate::open_operations::StartupOpenOptions::new(false, false, false),
+    );
+    let startup_menu = std::sync::Arc::new(NativeMenuBar::new());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !startup_app.get_xlsx_import_warning_open() {
+        crate::open_operations::process_completions(&startup_app, &startup_state, &startup_menu);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "startup candidate should stage the multi-series warning"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(startup_state.current.borrow().name, "Data");
+    assert!(startup_app
+        .get_xlsx_import_warning_message()
+        .contains("additional line chart series"));
+    continue_pending_xlsx_import(&startup_app, &startup_state, &startup_menu);
+    assert_eq!(startup_state.current.borrow().name, "Imported");
+    assert_eq!(
+        startup_state
+            .current
+            .borrow()
+            .chart
+            .as_ref()
+            .unwrap()
+            .cat_col,
+        0,
+        "startup import must retain the first series category column"
+    );
+    assert_eq!(
+        startup_state
+            .current
+            .borrow()
+            .chart
+            .as_ref()
+            .unwrap()
+            .val_col,
+        1,
+        "startup import must retain the first series value column"
+    );
+    assert!(startup_app
+        .get_status_left()
+        .contains("dropped: additional line chart series"));
+    assert!(!startup_app.get_xlsx_import_warning_open());
+
+    std::fs::remove_dir_all(&incoming_dir).ok();
+}
+
+#[test]
 fn startup_xlsx_warning_keeps_recovered_workbook_visible_until_confirmation() {
     let mut recovered = Sheet::new("Recovered");
     recovered.set_str("A1", "keep this workbook");

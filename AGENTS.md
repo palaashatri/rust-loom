@@ -433,6 +433,8 @@ Loom is a local-first Rust + Slint functional alpha. It has useful domain engine
 
 **Owner-requested independent audit (2026-09-27):** Astra reviewed the design-bible contracts first, then the supplied current-source native Sheets captures; Sol reviewed Rust failure paths and those same captures. The reviewers were read-only. The design-bible findings and native UX findings are OPEN below; no acceptance status is promoted by these reviews. The exact measurements, screenshots, and source locations are preserved in `.work/owner-audits-20260927.txt` and the linked native captures.
 
+**Astra source-only follow-up (2026-09-27):** A separate read-only pass mapped design-bible findings to the active UI ledger. It identified five uncovered Sheets issues (UI-34–UI-38), plus three design-bible governance repairs (GOV-02–GOV-04). It also confirmed UI-10 already covers toolbar action-caption truncation and existing CODE/UI cards already own native focus and recovery truthfulness checks. This follow-up produced no screenshot or native interaction evidence. The source findings are recorded below without changing the acceptance gate.
+
 Quality and permission to work are different. The owner override permits the active Sheets completion work while the remaining applications stay locked until their turn. This is the single live application status table:
 
 | Order | Application | Product status | Work status | Current blocking evidence |
@@ -450,7 +452,7 @@ The previous ledger listed Present/Photo both LOCKED and ACCEPTED and said Sheet
 
 ## Recorded audit and evidence
 
-The first audit was a code/reliability audit; it explicitly did **not** certify UI/UX. The follow-up adds fresh rendered screenshots from all eight apps and isolated native Linux interactions in Sheets and Writer. The observations are durable in CODE-01 through CODE-19 and UI-01 through UI-29 below, including reproduction instructions so they remain usable if `.work/` is removed. UI cards distinguish reproduced failures from source-confirmed limitations and visual design recommendations.
+The first audit was a code/reliability audit; it explicitly did **not** certify UI/UX. The follow-up adds fresh rendered screenshots from all eight apps and isolated native Linux interactions in Sheets and Writer. The observations are durable in CODE-01 through CODE-29, UI-01 through UI-38, and GOV-01 through GOV-04 below, including reproduction instructions so they remain usable if `.work/` is removed. UI cards distinguish reproduced failures from source-confirmed limitations and visual design recommendations; UI-34 through UI-38 are explicitly source-only findings without new native evidence.
 
 - Original detailed code report: [.work/audit-2026-09-14/AUDIT.md](AGENTS.md#source-work-audit-2026-09-14-audit-md).
 - Fresh visual report and screenshots: [.work/uiux-audit-2026-09-14/AUDIT.md](AGENTS.md#source-work-uiux-audit-2026-09-14-audit-md). Build/capture commands and limitations are recorded with that report.
@@ -507,6 +509,43 @@ FFmpeg queue/preset planning, execution/progress/cancellation, persistence/recov
 Oversized `main.rs`/`lib.rs` files and duplicated generic UI remain maintenance debt. Follow the byte ratchet; extract coherent responsibilities when a touched legacy file cannot grow. Do not create a parallel framework or rewrite the suite as part of one repair.
 
 A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formatting, Clippy, and workspace tests, with the native UI build dependencies installed. **GOV-01 · FIXED:** on pushed commit `ce2374c75fad4ec3e112b0c3a852840c39c1f928`, the job passed formatting, Clippy, and `cargo test --workspace --locked`. The separate repo-wide governance job is still red at the code-structure ratchet for four untouched files: `loom-encode/crates/loom-encode-app/src/main.rs`, `loom-video/crates/loom-video-app/src/main.rs`, `loom-video/crates/loom-video-core/src/lib.rs`, and `loom-photo/crates/loom-photo-app/src/main.rs`. That unrelated debt is not a Sheets test failure. A focused chart-range regression was also run once with the intentional range bug restored and failed on the expected XLSX range assertion; the fixed-source focused and full cached test harnesses pass. Keep unrelated release/package builds manual. Do not replace behavior checks with callback-count or screenshot-exists checks.
+
+### GOV-02 — Reconcile design-bible prose with canonical contracts
+
+**GOV · OPEN.** The consolidated design-bible prose repeats palette and motion values that no longer match the canonical token/desktop contracts, describes sheet tabs as 28 px while both current contracts define 30 px, and contains inconsistent reduced-motion guidance. It also gives conflicting ownership and evidence directions: `foundation.slint` owns current generic components while retained toolkit aliases still have compatibility roles, and the visual QA text conflicts with current baseline storage and threshold units.
+
+**Scope:** Current normative design-bible prose in the `loom-design-bible/*` source sections of `AGENTS.md`, `loom-design-bible/README.md`, `loom-design-bible/contracts/desktop-ui.toml`, `loom-design-bible/tokens/loom.toml`, and the `foundation.slint`/`toolkit.slint` exports. Historical audit reports remain historical and must not be rewritten as current findings.
+
+1. Compare each live prose claim to the canonical machine-readable contract and runtime source; replace duplicated constants with links or named token roles.
+2. Resolve the sheet-tab, reduced-motion, control-ownership, baseline location, and visual-diff threshold/unit conflicts in the normative source only.
+3. Add or extend governance checks for the reconciled ownership and values where mechanically testable.
+
+**Done when:** each current design-bible rule has one unambiguous owner and source of truth, prose and machine contracts agree, and the focused audits pass without rewriting historical evidence or weakening an accessibility/layout requirement.
+
+### GOV-03 — Restore trustworthy geometry-manifest generation
+
+**GOV · OPEN.** `loom-design-bible/contracts/geometry-manifest.toml` names `loom-bootstrap/scripts/audit-product-ui.py` as its generator, but that script is absent. The current manifest's Sheets source closure omits the maintenance-split modules, and five of six recorded Sheets source hashes are stale. Replacing those hashes by hand would create the appearance of current geometry evidence without measuring or verifying it.
+
+**Scope:** `loom-design-bible/contracts/geometry-manifest.toml`, its README reference, and the geometry audit/generator in `loom-bootstrap/scripts/`.
+
+1. Either restore a deterministic generator/checker that discovers the full recursive Slint import closure, records actual measured geometry and provenance, and rejects missing/stale source or contract hashes; or explicitly retire the manifest and its README/normative references, replacing its required evidence with a maintained alternative.
+2. Cover every application and shared import, including split modules, in source closure and freshness checks. Keep raw geometry observations traceable to current source and measured values.
+3. Add tests for changed/missing/imported source, deterministic output, stale evidence rejection, and the selected retirement path if the manifest is removed.
+
+**Done when:** one documented executable path can reproduce and validate current geometry evidence, or every reference to the retired manifest is removed and a validated replacement is in use. Do not hand-edit hashes or invent geometry values.
+
+### GOV-04 — Bind visual acceptance to reviewable evidence
+
+**GOV · OPEN.** `loom-bootstrap/scripts/audit-ui-foundation.py` accepts boolean status fields and the presence of any PNG; it does not bind approval to the reviewed source revision, contract revision, complete viewport/theme/text-scale/direction matrix, image hashes, reviewer, date, or scope. The contract's `ACCEPTED` state therefore does not by itself establish that current sources still match the human-approved visual evidence.
+
+**Scope:** `loom-design-bible/contracts/ui-foundation.toml`, `loom-bootstrap/scripts/audit-ui-foundation.py`, its tests, and native/renderer evidence manifests.
+
+1. Add a structured approval/evidence record with approved source and contract revision/hashes, capture manifest and image hashes, required matrix coordinates, reviewer, approval date, and reviewed scope.
+2. Validate completeness and source freshness against that record; make missing or stale approval visible as unverified current coverage rather than treating arbitrary PNG presence as approval.
+3. Preserve historical approval truth. Do not fabricate missing reviewer/date/source metadata, auto-refresh screenshots, or make regenerated captures count as approval.
+4. Add tests for missing coordinates, wrong image hash, changed source/contract, incomplete reviewer/scope data, and a valid current record.
+
+**Done when:** acceptance evidence is tied to the exact sources and matrix that were reviewed, the audit rejects incomplete or stale records, and the historical `ACCEPTED` fact remains clearly distinguished from current verified coverage.
 
 Asset provenance and commercial redistribution rules remain in `AGENTS.md` and `loom-bootstrap/contracts/assets.toml`. Fresh screenshots are evidence generated by this project, not imported product artwork. No third-party assets were added for this audit.
 
@@ -772,9 +811,9 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 
 **Prove it:** Set Dissolve, undo to the original transition, redo to Dissolve. Mix this with slide deletion/duplication, then save/reopen. Current isolated transition change leaves `undo()` false. Evidence: `documents-repro.log`.
 
-## UI/UX repair cards — fresh 2026-09-14/15 evidence
+## UI/UX repair cards — findings through 2026-09-27
 
-Each card shows its current state. A screenshot proves only the visible state; native observations are marked separately. Original audit evidence lives in `.work/uiux-audit-2026-09-14/`. A cut-off control inside an otherwise complete app capture is a product finding, not an accidentally cropped evidence image.
+Each card shows its current state. A screenshot proves only the visible state; native observations are marked separately. Original audit evidence lives in `.work/uiux-audit-2026-09-14/`. UI-34 through UI-38 are source-only findings from Astra's 2026-09-27 pass and have no fresh native capture or interaction evidence. A cut-off control inside an otherwise complete app capture is a product finding, not an accidentally cropped evidence image.
 
 ### UI-01 — Give every desktop a visible application menu
 
@@ -870,6 +909,67 @@ Each card shows its current state. A screenshot proves only the visible state; n
 **Contrast evidence:** accent-label ratios are light 5.013:1 / 4.658:1 / 5.551:1, dark 6.011:1 / 7.244:1 / 4.781:1, and high contrast 15.182:1 / 16.888:1 / 11.704:1 for normal/hover/pressed. Disabled text's lowest contrast across the seven audited surfaces is light 5.270:1 on `canvas-alt`, dark 4.625:1 on `surface-raised`, and high contrast 10.816:1 on `surface-raised`. Filled disabled buttons use `surface-sunken`; disabled ghost buttons are transparent and are covered against the listed opaque parent surfaces. Translucent overlays and arbitrary content are outside this scoped palette check.
 
 **Focused verification:** `PYTHONDONTWRITEBYTECODE=1 python3 loom-bootstrap/scripts/test_audit_ui_foundation.py` passed 6 tests, including regressions for lowered/non-finite contrast thresholds, theme decoys, comments and strings, duplicate malformed roles, disabled foreground/background drift, and malformed braces. `python3 loom-bootstrap/scripts/audit-ui-foundation.py`, `python3 loom-bootstrap/scripts/audit-governance.py`, `python3 loom-bootstrap/scripts/audit-assets.py`, and `git diff --check` passed. `cargo test --manifest-path loom-core/Cargo.toml -p loom-ui --locked --offline` passed 13 tests; the rebuilt Sheets app passed `cargo build --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --locked --offline` in 3m04s at 3,091,488 KiB peak RSS with no swap. Refreshed native `/usr/bin/gnome-screenshot -w` captures show the normal Create action in [light](loom-sheets/docs/qa-native/owner-20260927-13-contrast-light-live-linux.png), [dark](loom-sheets/docs/qa-native/owner-20260927-14-contrast-dark-live-linux.png), and [high contrast at 1.5×](loom-sheets/docs/qa-native/owner-20260927-15-contrast-high-contrast-1.5-live-linux.png); those images are linked in the Sheets README. Astra's design-bible review and Sol's hostile code review found no remaining material issue in this scoped repair. This does not close general application accessibility acceptance.
+
+### UI-34 — Keep anchored shape labels readable on every fill
+
+**P1 · Sheets accessibility and anchored objects · OPEN.** Shape labels use the theme's general ink color over hard-coded pastel fills. Astra measured only 1.06–1.32:1 in dark mode and 1.16–1.45:1 in high-contrast mode for the reviewed fill/text pairs, making the labels difficult to read. This is a source-only finding; no fresh native capture was made for it.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/objects.slint` shape background and label color; canonical contrast requirements in `loom-design-bible/tokens/loom.toml` and `loom-design-bible/contracts/desktop-ui.toml`.
+
+1. Keep the existing shape fills or replace them with semantic theme roles, but choose a readable foreground for every fill in light, dark, and high-contrast themes.
+2. Add a focused contrast regression over every supported shape fill and theme, enforcing at least 4.5:1 for the body-sized label. Preserve focus/selection visibility and do not meet contrast by removing useful fill choices.
+3. Rebuild and inspect all fill/theme pairs in the native window at normal and supported text scales.
+
+**Done when:** every supported fill/foreground pair meets the 4.5:1 label contrast floor, automated checks bind runtime colors to the chosen theme roles, and live captures confirm the labels and selection affordance remain legible. Existing UI-33 covers shared button labels only and does not close this finding.
+
+### UI-35 — Give every Sheets icon action a meaningful accessible name
+
+**P1 · Sheets accessibility · OPEN.** `LoomIconButton` defaults its accessible label to `Action`; setting only its tooltip changes the accessible description, not its name. Astra found this on the chart's Close action and inspector row/column/font/decimal steppers. Other Sheets icon-only actions need the same audit. This is a source-only finding.
+
+**Source:** `loom-core/crates/loom-ui/ui/foundation/controls.slint` (`LoomIconButton`); `loom-sheets/crates/loom-sheets-app/ui/chart.slint`; `loom-sheets/crates/loom-sheets-app/ui/inspector.slint`. UI-26 fixes Export CSV only.
+
+1. Audit every Sheets `LoomIconButton` instance and provide a specific accessible label and action description; do not derive a name from the icon glyph or leave the generic default.
+2. Add an automated accessibility-tree regression covering chart Close and each inspector stepper, plus a guard that rejects generic names for app actions.
+3. Inspect the rebuilt native AT-SPI tree and verify Orca announces the action and purpose when focused and activated.
+
+**Done when:** each icon-only action has an accurate unique name and useful description in the live accessibility tree, and the existing action remains keyboard reachable. UI-26's Export CSV result remains intact.
+
+### UI-36 — Expose chart data to keyboard and screen-reader users
+
+**P1 · Sheets chart accessibility · OPEN.** Charts render plotted shapes and a visual legend, but expose no chart summary or keyboard navigation among data points. A screen-reader user cannot inspect the plotted categories and values, and a keyboard user cannot move through the data. This is a source-only finding; UI-08's source-range, unit, and comparison semantics remain fixed and should not be reopened.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/chart.slint`; chart model and accessible source-range semantics are covered by UI-08.
+
+1. Expose a named chart summary with chart type, source range, series, unit, and plotted categories/values through the accessibility tree.
+2. Add a predictable keyboard path to enter the chart and move through data points; announce category, series, value, and unit, and preserve a clear path to leave the chart.
+3. Add regressions for bar, line, and pie data; empty, long, and changing series; then inspect the native AT-SPI tree and keyboard/Orca interaction.
+
+**Done when:** a keyboard-only and screen-reader user can enter a chart, inspect each plotted value with its category and unit, and leave without losing worksheet context. Do not treat a rendered screenshot or chart-range label as data accessibility.
+
+### UI-37 — Make anchored objects operable without a pointer
+
+**P1 · Sheets accessibility and anchored objects · OPEN.** Anchored images and shapes are selected, moved, and resized through pointer-only `TouchArea`s. The selected shape's visible resize handle and hit area are 12×12 px, below the design contract's 20 px object-handle target. There is no keyboard object-action path or useful image/shape action model for assistive technology. This is a source-only finding.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/objects.slint`; `loom-design-bible/contracts/desktop-ui.toml` `[canvas].object-handle-hit-target`.
+
+1. Give anchored images and shapes distinct accessible names and expose selection, position/size, and available actions.
+2. Implement keyboard selection, movement, and resize actions with visible focus and announced outcomes; retain pointer manipulation.
+3. Increase the resize target to at least the contract's 20 px hit area without obscuring useful object content.
+4. Test keyboard and screen-reader workflows, target geometry, image/shape selection, cancel, and save/reopen in the native app.
+
+**Done when:** objects can be selected, moved, resized, and described without a pointer, the resize hit target meets the contract, and saved/reopened geometry matches the announced result. Native interaction evidence is required.
+
+### UI-38 — Apply text scaling throughout Sheets
+
+**P1 · Sheets accessibility · OPEN.** The `--text-scale` setting is passed to the template chooser and XLSX warning dialog, while much of the workbook chrome remains at token size. In particular, the Save Changes dialog's fixed 208 px layout and chart labels do not scale with the rest of the application. This is a source-only finding.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/app.slint`, `ui/template_chooser.slint`, `ui/xlsx_import_warning.slint`, `ui/save_changes_dialog.slint`, `ui/chart.slint`, `ui/inspector.slint`, and shared controls in `loom-core/crates/loom-ui/ui/foundation/controls.slint`.
+
+1. Thread the selected text scale through all app chrome and controls, including grid headers, formula bar, menu and popup rows, inspector, chart controls, and Save Changes. Keep user-authored cell/document content under its own formatting control.
+2. Make dialogs and popups reflow or scroll at large scales while retaining visible actions and focus; do not clip labels or shrink them back to fit.
+3. Add layout/interaction checks at 1.0, 1.25, 1.5, and 2.0 scales across the required viewports and themes, then inspect native output.
+
+**Done when:** app labels and controls visibly honor every supported scale without clipping or hidden actions, and the full dialog/menu/inspector workflow remains keyboard accessible. The chooser-specific UI-03/UI-27 fixes and warning layout UI-28 do not establish whole-app scaling.
 
 ### UI-02 — Stop opening a mostly empty Sheets inspector by default
 
@@ -1399,9 +1499,9 @@ The live Linux warning capture at `loom-sheets/docs/qa-native/code28-absolute-an
 
 **Repair result (2026-09-27) — NEEDS_REVIEW.** Added a typed warning for additional series in the selected supported plot group, scoped the count to direct `<ser>` children in the chart namespace, and corrected chart-reference parsing so a series-title formula cannot shift the first series' category/value columns. Scatter charts keep their X/Y references. The UI reports the dropped data before replacement; Cancel preserves the active workbook and recovery bytes, and Continue imports the retained first series and reports the loss. The single-series model remains unchanged.
 
-**Verification:** `cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-core --locked --offline` passed 130 tests; `cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --locked --offline -- --test-threads=1` passed 255 unit tests and 2 integration tests. Focused core regressions for title-formula ordering, scatter references, multi-series warnings, and namespace decoys passed; the focused app journey `multi_series_xlsx_warning_cancels_safely_and_continue_reports_dropped_data` passed. Production app build, strict workspace all-target Clippy, formatting, governance audit, asset audit, and `git diff --check` passed. Logs: `.work/code29-core-suite-final.log`, `.work/code29-app-multiseries-final.log`, `.work/code29-app-package-tests.log`, `.work/code29-app-build-final.log`, `.work/code29-clippy-final.log`, `.work/code29-governance.log`, `.work/code29-assets.log`, and `.work/code29-structure.log`. Structure audit still reports six pre-existing findings in locked/out-of-scope applications; no changed Sheets source is implicated.
+**Verification:** `cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-core --locked --offline` passed 130 tests; the current full app package run passed 257 unit tests and 2 integration tests (`.work/audit-20260927/code29-app-package-ledger-final.log`). The picker/startup journey `multi_series_picker_and_startup_open_warn_before_replacement` passed within that suite. Earlier focused core regressions for title-formula ordering, scatter references, multi-series warnings, and namespace decoys passed; the direct-stage app journey `multi_series_xlsx_warning_cancels_safely_and_continue_reports_dropped_data` passed. Fresh app all-target Clippy, workspace formatting, governance audit, asset audit, UI Foundation audit, and `git diff --check` passed (`.work/audit-20260927/code29-app-clippy-ledger-final.log`, `code29-governance-ledger-final.log`, `code29-assets-ledger-final.log`, `code29-ui-foundation-ledger-final.log`, `code29-format-ledger-final.log`, and `code29-diff-ledger-final.log`). The production app build and strict workspace all-target Clippy passed during the implementation milestone (`.work/code29-app-build-final.log`, `.work/code29-clippy-final.log`). The current structure audit still reports six legacy source-size findings in locked/out-of-scope applications; no active Sheets source is implicated (`.work/audit-20260927/code29-structure-ledger-final.log`).
 
-**Visual and review evidence:** The actual Linux window was captured with `/usr/bin/gnome-screenshot -w -f` at `loom-sheets/docs/qa-native/code29-multiseries-warning-live-linux.png`; the image shows the startup `--open` warning over the visible recovery workbook with the loss explanation and both actions readable. The capture is linked from `loom-sheets/README.md`. Astra design-bible/UI audit and hostile Sol code, functionality, and visual reviews found no current blocker in this repair. Native button/focus actions and picker-driven multi-series import remain unverified, so this milestone is NEEDS_REVIEW rather than FIXED; broader XLSX interoperability remains an acceptance gap.
+**Visual and review evidence:** The existing native Linux capture `loom-sheets/docs/qa-native/code29-multiseries-warning-live-linux.png` shows the startup `--open` warning over the visible recovery workbook with the loss explanation and both actions readable; it is linked from `loom-sheets/README.md`. That capture predates this follow-up; Sol's prior visual review found the displayed warning readable. Sol code and functionality reviewers found no product defect in the test update and confirmed both the actual picker callback and startup `--open` path now reach the warning before replacement and Continue assertions. Astra found no CODE-29-specific blocker; the additional source-only findings are tracked in UI-34–UI-38 and GOV-02–GOV-04. Native OS picker behavior, button/focus actions, keyboard navigation, and a real CLI launch with recovered startup state remain unverified. CUA exposed no native app/window this turn; `/usr/bin/gnome-screenshot -w` captured the Codex window and was rejected as invalid product evidence. No new screenshot was captured. This milestone remains NEEDS_REVIEW; broader XLSX interoperability remains an acceptance gap.
 
 ### PERF-01 — Keep large workbook work from freezing the window
 
