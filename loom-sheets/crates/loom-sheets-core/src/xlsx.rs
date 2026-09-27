@@ -627,6 +627,331 @@ mod tests {
     }
 
     #[test]
+    fn xlsx_import_warns_when_absolute_anchor_object_is_dropped() {
+        let mut sheet = Sheet::new("Budget");
+        sheet.objects.push(SheetObject::shape(
+            CellRef { row: 0, col: 0 },
+            "absolute object",
+        ));
+        let base = export_xlsx_sheets(&[sheet]).expect("export base workbook");
+        let archive = PackageArchive::from_bytes(&base).expect("read base workbook");
+        let base_drawing = String::from_utf8(
+            archive
+                .get("xl/drawings/drawing1.xml")
+                .expect("exported drawing")
+                .to_vec(),
+        )
+        .expect("drawing XML is UTF-8");
+
+        let one_cell = import_xlsx_sheets(&base).expect("import one-cell-anchor workbook");
+        assert_eq!(one_cell.sheets[0].objects.len(), 1);
+        assert!(
+            one_cell.warnings.is_empty(),
+            "one-cell anchors are supported"
+        );
+
+        let from = "<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>";
+        let two_cell_drawing = base_drawing
+            .replace(
+                from,
+                "<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>",
+            );
+        let extent_start = two_cell_drawing
+            .find("<xdr:ext ")
+            .expect("one-cell extent starts");
+        let extent_end = two_cell_drawing[extent_start..]
+            .find("/>")
+            .map(|offset| extent_start + offset + 2)
+            .expect("one-cell extent ends");
+        let two_cell_drawing = format!(
+            "{}{}",
+            &two_cell_drawing[..extent_start],
+            &two_cell_drawing[extent_end..]
+        )
+        .replace("oneCellAnchor", "twoCellAnchor");
+        let two_cell_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", two_cell_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let two_cell =
+            import_xlsx_sheets(&two_cell_bytes).expect("import two-cell-anchor workbook");
+        assert_eq!(two_cell.sheets[0].objects.len(), 1);
+        assert!(
+            two_cell.warnings.is_empty(),
+            "two-cell anchors are supported"
+        );
+
+        let drawing = base_drawing
+            .replace(from, "<xdr:pos x=\"9525\" y=\"19050\"/>")
+            .replace("<xdr:oneCellAnchor>", "<xdr:absoluteAnchor>")
+            .replace("</xdr:oneCellAnchor>", "</xdr:absoluteAnchor>");
+        assert!(drawing.contains("<xdr:absoluteAnchor>"));
+        assert!(!drawing.contains("<xdr:from>"));
+        let bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", drawing.clone())],
+            &[],
+            &[],
+            Some(&base),
+        );
+
+        let imported = import_xlsx_sheets(&bytes).expect("import absolute-anchor workbook");
+        assert!(
+            imported.sheets[0].objects.is_empty(),
+            "the object is currently dropped"
+        );
+        assert_eq!(
+            imported
+                .warnings
+                .iter()
+                .map(|warning| warning.label())
+                .collect::<Vec<_>>(),
+            vec!["objects positioned with absolute anchors"],
+            "the import report must name the absolute-anchor loss"
+        );
+
+        let extension_drawing = drawing
+            .replace(
+                "<xdr:absoluteAnchor>",
+                "<x:absoluteAnchor xmlns:x=\"urn:loom:test\">",
+            )
+            .replace("</xdr:absoluteAnchor>", "</x:absoluteAnchor>");
+        let extension_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", extension_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let extension_import =
+            import_xlsx_sheets(&extension_bytes).expect("import extension-decoy workbook");
+        assert!(
+            extension_import.warnings.is_empty(),
+            "an extension-namespace lookalike is not a spreadsheet drawing anchor"
+        );
+
+        let strict_drawing = drawing.replace(
+            "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+            "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing",
+        );
+        let strict_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", strict_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let strict_import =
+            import_xlsx_sheets(&strict_bytes).expect("import strict absolute-anchor workbook");
+        assert!(strict_import
+            .warnings
+            .contains(&XlsxImportWarning::AbsoluteDrawingAnchors));
+
+        let anchor_close = drawing
+            .rfind("</xdr:absoluteAnchor>")
+            .expect("absolute anchor closing tag");
+        let truncated_drawing = drawing[..anchor_close].to_string();
+        let truncated_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", truncated_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let error = import_xlsx_sheets(&truncated_bytes)
+            .expect_err("truncated absolute-anchor XML must fail closed");
+        assert!(error.contains("unclosed drawing XML element"), "{error}");
+    }
+
+    #[test]
+    fn xlsx_import_uses_supported_alternate_content_fallback_without_loss_warning() {
+        let mut sheet = Sheet::new("Budget");
+        sheet.objects.push(SheetObject::shape(
+            CellRef { row: 0, col: 0 },
+            "Fallback shape",
+        ));
+        let base = export_xlsx_sheets(&[sheet]).expect("export base workbook");
+        let archive = PackageArchive::from_bytes(&base).expect("read base workbook");
+        let drawing = String::from_utf8(
+            archive
+                .get("xl/drawings/drawing1.xml")
+                .expect("exported drawing")
+                .to_vec(),
+        )
+        .expect("drawing XML is UTF-8");
+        let from = "<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>";
+        let absolute_drawing = drawing
+            .replace(from, "<xdr:pos x=\"9525\" y=\"19050\"/>")
+            .replace("<xdr:oneCellAnchor>", "<xdr:absoluteAnchor>")
+            .replace("</xdr:oneCellAnchor>", "</xdr:absoluteAnchor>");
+        let absolute_start = absolute_drawing
+            .find("<xdr:absoluteAnchor>")
+            .expect("absolute choice anchor starts");
+        let absolute_end = absolute_drawing[absolute_start..]
+            .find("</xdr:absoluteAnchor>")
+            .map(|offset| absolute_start + offset + "</xdr:absoluteAnchor>".len())
+            .expect("absolute choice anchor ends");
+        let absolute_anchor = &absolute_drawing[absolute_start..absolute_end];
+        let fallback_start = drawing
+            .find("<xdr:oneCellAnchor>")
+            .expect("fallback anchor starts");
+        let fallback_end = drawing[fallback_start..]
+            .find("</xdr:oneCellAnchor>")
+            .map(|offset| fallback_start + offset + "</xdr:oneCellAnchor>".len())
+            .expect("fallback anchor ends");
+        let fallback_anchor = &drawing[fallback_start..fallback_end];
+        let root_end = drawing
+            .find("<xdr:oneCellAnchor>")
+            .expect("drawing root ends before the anchor");
+        let root = drawing[..root_end].replace(
+            "xmlns:xdr=",
+            "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" xmlns:ext=\"urn:loom:test-extension\" xmlns:xdr=",
+        );
+        let alternate_drawing = format!(
+            "{root}<mc:AlternateContent><mc:Choice Requires=\"ext\">{absolute_anchor}</mc:Choice><mc:Fallback>{fallback_anchor}</mc:Fallback></mc:AlternateContent></xdr:wsDr>"
+        );
+        let bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", alternate_drawing.clone())],
+            &[],
+            &[],
+            Some(&base),
+        );
+
+        let imported = import_xlsx_sheets(&bytes).expect("import alternate drawing workbook");
+        assert_eq!(imported.sheets[0].objects.len(), 1);
+        assert_eq!(imported.sheets[0].objects[0].label, "Fallback shape");
+        assert!(
+            imported.warnings.is_empty(),
+            "an absolute anchor in an unsupported Choice is not lost when a supported Fallback is imported"
+        );
+
+        let mismatched_choice_anchor =
+            absolute_anchor.replace("<a:t>Fallback shape</a:t>", "<a:t>Choice shape</a:t>");
+        let mismatched_choice_drawing =
+            alternate_drawing.replace(absolute_anchor, &mismatched_choice_anchor);
+        let mismatched_choice_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", mismatched_choice_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let mismatched_choice = import_xlsx_sheets(&mismatched_choice_bytes)
+            .expect("import mismatched-choice workbook");
+        assert_eq!(
+            mismatched_choice.sheets[0].objects[0].label,
+            "Fallback shape"
+        );
+        assert!(mismatched_choice
+            .warnings
+            .contains(&XlsxImportWarning::AbsoluteDrawingAnchors));
+
+        let selected_choice_drawing =
+            alternate_drawing.replace("Requires=\"ext\"", "Requires=\"xdr\"");
+        let selected_choice_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", selected_choice_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let selected_choice =
+            import_xlsx_sheets(&selected_choice_bytes).expect("import supported-choice workbook");
+        assert!(selected_choice
+            .warnings
+            .contains(&XlsxImportWarning::AbsoluteDrawingAnchors));
+
+        let unselected_choice_drawing = format!(
+            "{root}<mc:AlternateContent><mc:Choice Requires=\"xdr\">{fallback_anchor}</mc:Choice><mc:Choice Requires=\"xdr\">{absolute_anchor}</mc:Choice><mc:Fallback/></mc:AlternateContent></xdr:wsDr>"
+        );
+        let unselected_choice_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", unselected_choice_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let unselected_choice = import_xlsx_sheets(&unselected_choice_bytes)
+            .expect("import later supported-choice workbook");
+        assert_eq!(unselected_choice.sheets[0].objects.len(), 1);
+        assert!(
+            unselected_choice.warnings.is_empty(),
+            "an absolute anchor in a later supported Choice is not selected by Markup Compatibility"
+        );
+
+        let nested_unsupported_choice_drawing = format!(
+            "{root}<mc:AlternateContent><mc:Choice Requires=\"xdr\"><mc:AlternateContent><mc:Choice Requires=\"ext\">{absolute_anchor}</mc:Choice><mc:Fallback>{fallback_anchor}</mc:Fallback></mc:AlternateContent></mc:Choice><mc:Fallback/></mc:AlternateContent></xdr:wsDr>"
+        );
+        let nested_unsupported_choice_bytes = test_xlsx_with_parts(
+            &[(
+                "xl/drawings/drawing1.xml",
+                nested_unsupported_choice_drawing,
+            )],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let nested_unsupported_choice = import_xlsx_sheets(&nested_unsupported_choice_bytes)
+            .expect("import nested fallback workbook");
+        assert_eq!(nested_unsupported_choice.sheets[0].objects.len(), 1);
+        assert!(
+            nested_unsupported_choice.warnings.is_empty(),
+            "a matching inner Fallback preserves an absolute object inside a selected outer Choice"
+        );
+
+        let nested_unselected_outer_drawing = format!(
+            "{root}<mc:AlternateContent><mc:Choice Requires=\"ext\"><mc:AlternateContent><mc:Choice Requires=\"xdr\">{absolute_anchor}</mc:Choice></mc:AlternateContent></mc:Choice><mc:Fallback>{fallback_anchor}</mc:Fallback></mc:AlternateContent></xdr:wsDr>"
+        );
+        let nested_unselected_outer_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", nested_unselected_outer_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let nested_unselected_outer = import_xlsx_sheets(&nested_unselected_outer_bytes)
+            .expect("import unsupported outer-choice workbook");
+        assert_eq!(nested_unselected_outer.sheets[0].objects.len(), 1);
+        assert!(
+            nested_unselected_outer.warnings.is_empty(),
+            "an unsupported outer Choice uses its matching Fallback even if it contains an inner supported Choice"
+        );
+
+        let empty_fallback_drawing = alternate_drawing.replace(
+            &format!("<mc:Fallback>{fallback_anchor}</mc:Fallback>"),
+            "<mc:Fallback/>",
+        );
+        let empty_fallback_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", empty_fallback_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let empty_fallback =
+            import_xlsx_sheets(&empty_fallback_bytes).expect("import empty-fallback workbook");
+        assert!(empty_fallback.sheets[0].objects.is_empty());
+        assert!(
+            empty_fallback
+                .warnings
+                .contains(&XlsxImportWarning::AbsoluteDrawingAnchors),
+            "an empty fallback does not preserve the absolute-anchor object"
+        );
+
+        let unrelated_anchor = fallback_anchor.replace("id=\"1\"", "id=\"99\"");
+        assert_ne!(unrelated_anchor, fallback_anchor);
+        let unrelated_fallback_drawing = alternate_drawing.replace(
+            &format!("<mc:Fallback>{fallback_anchor}</mc:Fallback>"),
+            &format!("<mc:Fallback>{unrelated_anchor}</mc:Fallback>"),
+        );
+        let unrelated_fallback_bytes = test_xlsx_with_parts(
+            &[("xl/drawings/drawing1.xml", unrelated_fallback_drawing)],
+            &[],
+            &[],
+            Some(&base),
+        );
+        let unrelated_fallback = import_xlsx_sheets(&unrelated_fallback_bytes)
+            .expect("import unrelated-fallback workbook");
+        assert_eq!(unrelated_fallback.sheets[0].objects.len(), 1);
+        assert!(unrelated_fallback
+            .warnings
+            .contains(&XlsxImportWarning::AbsoluteDrawingAnchors));
+    }
+
+    #[test]
     fn xlsx_import_ignores_feature_words_in_cell_text_and_plain_workbooks() {
         let mut sheet = Sheet::new("Budget");
         sheet.set_str(

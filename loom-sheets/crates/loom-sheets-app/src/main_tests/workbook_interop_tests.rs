@@ -54,6 +54,36 @@ fn write_xlsx_with_unsupported_area_chart(path: &std::path::Path) {
         .expect("write XLSX fixture");
 }
 
+fn write_xlsx_with_absolute_anchor_shape(path: &std::path::Path) {
+    let mut source = Sheet::new("Imported");
+    source.objects.push(loom_sheets_core::SheetObject::shape(
+        CellRef { row: 0, col: 0 },
+        "Absolute shape",
+    ));
+    let exported = loom_sheets_core::export_xlsx_sheets(&[source]).expect("export base XLSX");
+    let original = PackageArchive::from_bytes(&exported).expect("read base XLSX");
+    let mut rebuilt = PackageArchive::new();
+    for part in original.paths() {
+        let bytes = original.get(part).expect("XLSX part");
+        let bytes = if part == "xl/drawings/drawing1.xml" {
+            String::from_utf8(bytes.to_vec())
+                .expect("drawing XML")
+                .replace(
+                    "<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>",
+                    "<xdr:pos x=\"9525\" y=\"19050\"/>",
+                )
+                .replace("<xdr:oneCellAnchor>", "<xdr:absoluteAnchor>")
+                .replace("</xdr:oneCellAnchor>", "</xdr:absoluteAnchor>")
+                .into_bytes()
+        } else {
+            bytes.to_vec()
+        };
+        rebuilt.add(part, bytes).expect("copy XLSX part");
+    }
+    std::fs::write(path, rebuilt.to_bytes().expect("build XLSX fixture"))
+        .expect("write XLSX fixture");
+}
+
 fn write_xlsx_with_multiple_series_line_chart(path: &std::path::Path) {
     let mut source = Sheet::new("Imported");
     source.set_str("A1", "Quarter");
@@ -281,6 +311,82 @@ fn cancel_xlsx_import_warning_preserves_current_workbook_and_recovery_state() {
     assert_eq!(state.worker_revision.get(), original_revision);
     assert_eq!(state.is_dirty(), original_dirty);
 
+    drop(state.workbook_worker.borrow_mut().take());
+    assert_eq!(
+        recovered_worker_payload(&recovery_dir),
+        Some(original_recovery),
+        "Cancel must leave the last durable workbook unchanged"
+    );
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+    std::fs::remove_dir_all(&incoming_dir).ok();
+}
+
+#[test]
+fn absolute_anchor_warning_cancel_preserves_workbook_and_recovery() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let state = cross_sheet_state();
+    let recovery_dir = attach_test_worker(&app, &state, "cancel-absolute-anchor-import-warning");
+    state
+        .current
+        .borrow_mut()
+        .set_str("C1", "unsaved current value");
+    state.mark_content_dirty();
+    apply_sheet(&app, &state);
+    let revision = state.worker_revision.get();
+    let result = state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .expect("recovery worker")
+        .wait_for_result(revision)
+        .expect("persist current workbook before warning");
+    assert!(apply_workbook_worker_result(&app, &state, result));
+    let original_sheets = workbook_sheets(&state).0;
+    let original_workbook = workbook_to_json(&original_sheets, *state.active_sheet_index.borrow());
+    let original_recovery =
+        workbook_package_bytes(&original_sheets, *state.active_sheet_index.borrow())
+            .expect("package current recovery");
+
+    let incoming_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-absolute-anchor-import-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
+    let incoming_path = incoming_dir.join("incoming.xlsx");
+    write_xlsx_with_absolute_anchor_shape(&incoming_path);
+    let loaded = load_workbook_with_report(&incoming_path).expect("load absolute-anchor workbook");
+    assert!(loaded.workbook.sheets[0].objects.is_empty());
+    assert_eq!(
+        loaded
+            .warnings
+            .iter()
+            .map(|warning| warning.label())
+            .collect::<Vec<_>>(),
+        vec!["objects positioned with absolute anchors"]
+    );
+    stage_xlsx_import(
+        &app,
+        &state,
+        incoming_path,
+        loaded.workbook,
+        loaded.warnings,
+    );
+    assert!(app.get_xlsx_import_warning_open());
+    assert!(app
+        .get_xlsx_import_warning_message()
+        .contains("objects positioned with absolute anchors"));
+
+    cancel_pending_xlsx_import(&app, &state);
+
+    assert!(!app.get_xlsx_import_warning_open());
+    assert_eq!(
+        workbook_to_json(
+            &workbook_sheets(&state).0,
+            *state.active_sheet_index.borrow()
+        ),
+        original_workbook
+    );
     drop(state.workbook_worker.borrow_mut().take());
     assert_eq!(
         recovered_worker_payload(&recovery_dir),

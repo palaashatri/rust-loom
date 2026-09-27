@@ -56,6 +56,10 @@ The 2026-09-27 live capture shows “unsupported area charts” before workbook 
 
 The 2026-09-27 live capture shows the “additional line chart series” warning before workbook replacement, with the current workbook visible and both actions in view. The native 1018×728 capture came from `/usr/bin/gnome-screenshot -w`. App tests verify Cancel preserves the workbook and recovery payload, and Continue imports the first series and names the dropped series in status. Native button/focus actions and multi-series picker/startup dispatch remain unverified under the Sheets acceptance gate.
 
+![Native Linux warning before dropping an absolute-anchor drawing object](docs/qa-native/code28-absolute-anchor-warning-live-linux.png)
+
+The 2026-09-27 live capture shows the “objects positioned with absolute anchors” warning before workbook replacement, with the recovered Checklist workbook visible and both actions in view. The 1018×728 focused-window PNG came from `/usr/bin/gnome-screenshot -w`. Core and app journeys verify supported anchor imports, warning behavior, and Cancel preserving the current workbook and recovery. Native button/focus interactions remain unverified under the Sheets acceptance gate.
+
 ![Renderer capture of the aligned File menu popup](docs/qa-renderer/ui29-menu-popup-aligned-1024x720-linux.png)
 
 Menu rows use the shared exported `LoomMenuItem` from `loom-core/crates/loom-ui/ui/foundation.slint`. Other Loom applications should reuse it for consistent label, shortcut, check-mark, disabled, and selected layout. The popup now fits its visible rows. This menu popup image is renderer evidence; native popup interaction is still unverified under UI-01.

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loom_package::zip::PackageArchive;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 use quick_xml::NsReader;
 
@@ -11,10 +11,14 @@ use super::import::workbook_sheet_parts;
 use super::package_parts::{
     parent_path, parse_relationships, relationship_part_path, resolve_target, OoxmlRelationship,
 };
-use super::xml::parse_xml_nodes;
-use super::{CHART_NS, DRAWINGML_NS};
+use super::xml::{attr, elements, parse_xml_nodes, xml_unescape};
+use super::{CHART_NS, DRAWINGML_NS, DRAWING_NS, REL_NS};
 
 const STRICT_CHART_NS: &str = "http://purl.oclc.org/ooxml/drawingml/chart";
+const STRICT_DRAWING_NS: &str = "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing";
+const STRICT_DRAWINGML_NS: &str = "http://purl.oclc.org/ooxml/drawingml/main";
+const STRICT_REL_NS: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+const MARKUP_COMPATIBILITY_NS: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
 /// A chart group kind recognized in SpreadsheetML chart parts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -143,6 +147,7 @@ pub enum XlsxImportWarning {
     CustomRowColumnSizes,
     MultipleChartsOnSheet,
     MissingDrawingParts,
+    AbsoluteDrawingAnchors,
     PivotTables,
     UnsupportedChart(XlsxChartType),
     DroppedChartPlot(XlsxChartType),
@@ -161,6 +166,7 @@ impl XlsxImportWarning {
             Self::CustomRowColumnSizes => "custom row heights or column widths",
             Self::MultipleChartsOnSheet => "additional charts on the same sheet",
             Self::MissingDrawingParts => "drawing objects with missing linked parts",
+            Self::AbsoluteDrawingAnchors => "objects positioned with absolute anchors",
             Self::PivotTables => "Excel PivotTables (only their cached cell values are imported)",
             Self::UnsupportedChart(chart_type) => chart_type.unsupported_label(),
             Self::DroppedChartPlot(chart_type) => chart_type.dropped_plot_label(),
@@ -287,6 +293,9 @@ pub(super) fn detect_import_warnings(
         let drawing_xml = std::str::from_utf8(drawing_bytes)
             .map_err(|_| format!("{drawing_path} is not valid UTF-8"))?;
         let drawing_nodes = parse_xml_nodes(&drawing_path, drawing_xml)?;
+        if drawing_has_unpreserved_absolute_anchor(&drawing_path, drawing_xml)? {
+            warnings.insert(XlsxImportWarning::AbsoluteDrawingAnchors);
+        }
         let drawing_rels_path = relationship_part_path(&drawing_path);
         let drawing_relationships = archive
             .get(&drawing_rels_path)
@@ -365,6 +374,322 @@ pub(super) fn detect_import_warnings(
 
 fn is_chart_namespace(namespace: &str) -> bool {
     namespace == CHART_NS || namespace == STRICT_CHART_NS
+}
+
+fn is_spreadsheet_drawing_namespace(namespace: &str) -> bool {
+    namespace == DRAWING_NS || namespace == STRICT_DRAWING_NS
+}
+
+fn drawing_has_unpreserved_absolute_anchor(path: &str, xml: &str) -> Result<bool, String> {
+    #[derive(Clone, PartialEq, Eq)]
+    struct DrawingObjectIdentity {
+        kind: String,
+        id: String,
+        name: String,
+        description: Option<String>,
+        width: Option<String>,
+        height: Option<String>,
+        imported_payload: Vec<String>,
+    }
+
+    #[derive(Default)]
+    struct AlternateContent {
+        choices_supported: Vec<bool>,
+        fallback_objects: Vec<DrawingObjectIdentity>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum AnchorKind {
+        Absolute,
+        Supported,
+    }
+
+    struct AnchorCapture {
+        kind: AnchorKind,
+        choices: Vec<(usize, usize)>,
+        fallbacks: Vec<usize>,
+        start_byte: usize,
+    }
+
+    struct AbsoluteCandidate {
+        choices: Vec<(usize, usize)>,
+        identity: Option<DrawingObjectIdentity>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ElementFrame {
+        AlternateContent(usize),
+        Choice { index: usize, choice_index: usize },
+        Fallback(usize),
+        Anchor(usize),
+        Other,
+    }
+
+    fn attribute_value(
+        path: &str,
+        element: &BytesStart<'_>,
+        wanted: &[u8],
+    ) -> Result<Option<String>, String> {
+        for attribute in element.attributes().with_checks(false) {
+            let attribute = attribute.map_err(|error| format!("parse {path}: {error}"))?;
+            if attribute.key.as_ref() == wanted {
+                return attribute
+                    .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                    .map(|value| Some(value.into_owned()))
+                    .map_err(|error| format!("parse {path}: {error}"));
+            }
+        }
+        Ok(None)
+    }
+
+    fn choice_is_supported(
+        path: &str,
+        reader: &NsReader<&[u8]>,
+        requires: Option<&str>,
+    ) -> Result<bool, String> {
+        let Some(requires) = requires else {
+            return Ok(false);
+        };
+        let prefixes = requires.split_whitespace().collect::<Vec<_>>();
+        if prefixes.is_empty() {
+            return Ok(false);
+        }
+        for prefix in prefixes {
+            let qualified_name = format!("{prefix}:required");
+            let (namespace, _) = reader
+                .resolver()
+                .resolve_element(quick_xml::name::QName(qualified_name.as_bytes()));
+            let namespace = resolved_chart_namespace(path, namespace)?;
+            if !matches!(
+                namespace.as_str(),
+                DRAWING_NS
+                    | STRICT_DRAWING_NS
+                    | DRAWINGML_NS
+                    | STRICT_DRAWINGML_NS
+                    | CHART_NS
+                    | STRICT_CHART_NS
+                    | SPREADSHEET_NS
+                    | STRICT_SPREADSHEET_NS
+                    | REL_NS
+                    | STRICT_REL_NS
+            ) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn object_identity(anchor_xml: &str) -> Option<DrawingObjectIdentity> {
+        let (kind, object_body) = ["graphicFrame", "pic", "sp"].into_iter().find_map(|kind| {
+            elements(anchor_xml, kind)
+                .next()
+                .map(|object| (kind, object.body))
+        })?;
+        let properties = elements(object_body, "cNvPr").next()?;
+        let id = attr(properties.attrs, "id")?;
+        let name = attr(properties.attrs, "name")?;
+        let description = attr(properties.attrs, "descr");
+        let extent = elements(anchor_xml, "ext").next();
+        let width = extent.and_then(|item| attr(item.attrs, "cx"));
+        let height = extent.and_then(|item| attr(item.attrs, "cy"));
+        let imported_payload = match kind {
+            "graphicFrame" => vec![elements(object_body, "chart")
+                .next()
+                .and_then(|chart| attr(chart.attrs, "r:id").or_else(|| attr(chart.attrs, "id")))?],
+            "pic" => vec![
+                description.clone().unwrap_or_else(|| name.clone()),
+                elements(object_body, "blip").next().and_then(|blip| {
+                    attr(blip.attrs, "r:embed").or_else(|| attr(blip.attrs, "embed"))
+                })?,
+            ],
+            "sp" => vec![
+                elements(object_body, "t")
+                    .next()
+                    .map(|text| xml_unescape(text.body.trim()))
+                    .unwrap_or_default(),
+                elements(object_body, "srgbClr")
+                    .next()
+                    .and_then(|color| attr(color.attrs, "val"))
+                    .unwrap_or_else(|| "default-blue".to_string()),
+            ],
+            _ => return None,
+        };
+        Some(DrawingObjectIdentity {
+            kind: kind.to_string(),
+            id,
+            name,
+            description,
+            width,
+            height,
+            imported_payload,
+        })
+    }
+
+    let mut reader = NsReader::from_str(xml);
+    let mut elements = Vec::<ElementFrame>::new();
+    let mut alternate_contents = Vec::<AlternateContent>::new();
+    let mut anchors = Vec::<AnchorCapture>::new();
+    let mut absolute_anchors = Vec::<AbsoluteCandidate>::new();
+
+    loop {
+        let event_start = reader.buffer_position() as usize;
+        let (resolved_namespace, event) = reader
+            .read_resolved_event()
+            .map_err(|error| format!("parse {path}: {error}"))?;
+        match event {
+            Event::Start(element) => {
+                let namespace = resolved_chart_namespace(path, resolved_namespace)?;
+                let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                let parent = elements.last().copied();
+                if namespace == MARKUP_COMPATIBILITY_NS && name == "AlternateContent" {
+                    let index = alternate_contents.len();
+                    alternate_contents.push(AlternateContent::default());
+                    elements.push(ElementFrame::AlternateContent(index));
+                } else if namespace == MARKUP_COMPATIBILITY_NS && name == "Choice" {
+                    if let Some(ElementFrame::AlternateContent(index)) = parent {
+                        let requires = attribute_value(path, &element, b"Requires")?;
+                        let supported = choice_is_supported(path, &reader, requires.as_deref())?;
+                        let choice_index = alternate_contents[index].choices_supported.len();
+                        alternate_contents[index].choices_supported.push(supported);
+                        elements.push(ElementFrame::Choice {
+                            index,
+                            choice_index,
+                        });
+                    } else {
+                        elements.push(ElementFrame::Other);
+                    }
+                } else if namespace == MARKUP_COMPATIBILITY_NS && name == "Fallback" {
+                    if let Some(ElementFrame::AlternateContent(index)) = parent {
+                        elements.push(ElementFrame::Fallback(index));
+                    } else {
+                        elements.push(ElementFrame::Other);
+                    }
+                } else if is_spreadsheet_drawing_namespace(&namespace)
+                    && matches!(
+                        name.as_str(),
+                        "absoluteAnchor" | "oneCellAnchor" | "twoCellAnchor"
+                    )
+                {
+                    let kind = if name == "absoluteAnchor" {
+                        AnchorKind::Absolute
+                    } else {
+                        AnchorKind::Supported
+                    };
+                    let choices = elements
+                        .iter()
+                        .filter_map(|frame| match frame {
+                            ElementFrame::Choice {
+                                index,
+                                choice_index,
+                            } => Some((*index, *choice_index)),
+                            _ => None,
+                        })
+                        .collect();
+                    let fallbacks = elements
+                        .iter()
+                        .filter_map(|frame| match frame {
+                            ElementFrame::Fallback(index) => Some(*index),
+                            _ => None,
+                        })
+                        .collect();
+                    let index = anchors.len();
+                    anchors.push(AnchorCapture {
+                        kind,
+                        choices,
+                        fallbacks,
+                        start_byte: event_start,
+                    });
+                    elements.push(ElementFrame::Anchor(index));
+                } else {
+                    elements.push(ElementFrame::Other);
+                }
+            }
+            Event::Empty(element) => {
+                let namespace = resolved_chart_namespace(path, resolved_namespace)?;
+                let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                if is_spreadsheet_drawing_namespace(&namespace) && name == "absoluteAnchor" {
+                    let choices = elements
+                        .iter()
+                        .filter_map(|frame| match frame {
+                            ElementFrame::Choice {
+                                index,
+                                choice_index,
+                            } => Some((*index, *choice_index)),
+                            _ => None,
+                        })
+                        .collect();
+                    absolute_anchors.push(AbsoluteCandidate {
+                        choices,
+                        identity: None,
+                    });
+                }
+            }
+            Event::End(_) => match elements.pop() {
+                Some(ElementFrame::Anchor(index)) => {
+                    let anchor = &anchors[index];
+                    let anchor_xml = xml
+                        .get(anchor.start_byte..reader.buffer_position() as usize)
+                        .ok_or_else(|| {
+                            format!("parse {path}: invalid drawing anchor byte range")
+                        })?;
+                    let identity = object_identity(anchor_xml);
+                    match anchor.kind {
+                        AnchorKind::Absolute => absolute_anchors.push(AbsoluteCandidate {
+                            choices: anchor.choices.clone(),
+                            identity,
+                        }),
+                        AnchorKind::Supported => {
+                            if let Some(identity) = identity {
+                                for alternate_index in &anchor.fallbacks {
+                                    alternate_contents[*alternate_index]
+                                        .fallback_objects
+                                        .push(identity.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                Some(
+                    ElementFrame::AlternateContent(_)
+                    | ElementFrame::Choice { .. }
+                    | ElementFrame::Fallback(_)
+                    | ElementFrame::Other,
+                )
+                | None => {}
+            },
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    if !elements.is_empty() {
+        return Err(format!("parse {path}: unclosed drawing XML element"));
+    }
+
+    Ok(absolute_anchors.iter().any(|anchor| {
+        if anchor.choices.is_empty() {
+            return true;
+        }
+
+        for (index, choice_index) in &anchor.choices {
+            let alternate_content = &alternate_contents[*index];
+            match alternate_content
+                .choices_supported
+                .iter()
+                .position(|supported| *supported)
+            {
+                Some(selected_index) if selected_index == *choice_index => {}
+                Some(_) => return false,
+                None => {
+                    return anchor.identity.as_ref().map_or(true, |identity| {
+                        !alternate_content.fallback_objects.contains(identity)
+                    });
+                }
+            }
+        }
+
+        true
+    }))
 }
 
 pub(super) struct ChartPlotGroup<'a> {
