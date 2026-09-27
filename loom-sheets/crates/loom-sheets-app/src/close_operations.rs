@@ -111,6 +111,14 @@ pub(crate) fn process_worker_tick(
     if let Some(result) = result {
         crate::apply_workbook_worker_result(app, state, result);
     }
+    if worker_failures.is_none()
+        && matches!(
+            state.close_state.get(),
+            CloseState::SavingForClose | CloseState::Draining { .. }
+        )
+    {
+        worker_failures = state.unaccepted_worker_revision_message();
+    }
     process_tick(app, state, &completions, worker_failures.as_deref());
     preserve_worker_input_failure_status(app, state, &completions);
 }

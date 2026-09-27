@@ -218,7 +218,7 @@ fn close_waits_for_the_real_initial_worker_result() {
 }
 
 #[test]
-fn stale_worker_failure_does_not_abort_close_before_newer_accepted_result() {
+fn stale_worker_input_failure_blocks_close_until_full_resync() {
     let recovery = ScratchDirectory::new();
     let (app, state) = close_test_app([]);
     attach_worker(&app, &state, &recovery.0, true);
@@ -244,11 +244,6 @@ fn stale_worker_failure_does_not_abort_close_before_newer_accepted_result() {
         })
         .expect("submit newer accepted update");
     state.last_queued_worker_revision.set(current_revision);
-    release_first.send(()).expect("release first worker gate");
-    second_entered
-        .recv_timeout(Duration::from_secs(5))
-        .expect("worker reached gate after stale failure");
-
     wire_close_actions(&app, &state);
     app.window().show().expect("show root window");
     app.window()
@@ -257,29 +252,58 @@ fn stale_worker_failure_does_not_abort_close_before_newer_accepted_result() {
         state.close_state.get(),
         close_operations::CloseState::Draining {
             target_revision: current_revision
-        }
+        },
+        "Close should wait for the accepted later revision while the worker is still gated"
     );
+    assert!(app.window().is_visible());
+    release_first.send(()).expect("release first worker gate");
+    second_entered
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker reached gate after stale failure");
 
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
     close_operations::process_worker_tick(&app, &state, &menu_service);
-    let waited_for_current_revision = state.close_state.get()
-        == close_operations::CloseState::Draining {
-            target_revision: current_revision,
-        };
+    assert_eq!(
+        state.close_state.get(),
+        close_operations::CloseState::Idle,
+        "a failure at N must abort close even while waiting for accepted revision N+1"
+    );
     let visible_after_stale_error = app.window().is_visible();
     let applied_stale_revision = state.applied_worker_result_revision.get();
     release_second
         .send(())
         .expect("release current worker gate");
 
-    assert!(
-        waited_for_current_revision,
-        "stale worker failure at revision {stale_revision} aborted close before accepted revision {current_revision}"
-    );
     assert!(visible_after_stale_error);
     assert_eq!(applied_stale_revision, stale_revision);
-    pump_worker_until(&app, &state, || !app.window().is_visible());
+    pump_worker_until(&app, &state, || {
+        state.applied_worker_result_revision.get() >= current_revision
+    });
     assert_eq!(state.applied_worker_result_revision.get(), current_revision);
+    let failure = state
+        .unaccepted_worker_revision_message()
+        .expect("a later accepted cell result cannot clear the earlier failure");
+    assert!(failure.contains(&stale_revision.to_string()), "{failure}");
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    assert!(app.window().is_visible());
+
+    crate::record_workbook_snapshot(&state).expect("queue a full workbook resynchronization");
+    let resync_revision = state.last_queued_worker_revision.get();
+    pump_worker_until(&app, &state, || {
+        state.applied_worker_result_revision.get() >= resync_revision
+    });
+    assert_eq!(state.unaccepted_worker_revision_message(), None);
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    assert!(app.window().is_visible());
+    assert_eq!(
+        state.close_state.get(),
+        close_operations::CloseState::DirtyDecision,
+        "after resync, Close should return to the normal dirty-workbook decision"
+    );
+    assert!(app.get_save_changes_open());
+    close_operations::cancel_close(&app, &state);
 }
 
 #[test]
@@ -328,7 +352,7 @@ fn same_tick_worker_failure_preserves_file_outcome_accessibly() {
     first_entered
         .recv_timeout(Duration::from_secs(5))
         .expect("worker entered first deterministic gate");
-    let target_revision = submit_missing_sheet_update(&state);
+    submit_missing_sheet_update(&state);
     let (second_entered, release_second) = start_test_worker_gate(&state);
     release_first.send(()).expect("release first worker gate");
     second_entered
@@ -343,7 +367,8 @@ fn same_tick_worker_failure_preserves_file_outcome_accessibly() {
         .dispatch_event(slint::platform::WindowEvent::CloseRequested);
     assert_eq!(
         state.close_state.get(),
-        close_operations::CloseState::Draining { target_revision }
+        close_operations::CloseState::Idle,
+        "a latched worker input failure should refuse Close immediately"
     );
 
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
@@ -367,9 +392,8 @@ fn same_tick_worker_failure_preserves_file_outcome_accessibly() {
         "worker close failure replaced the same-tick file outcome: {status}"
     );
     assert!(
-        status.contains("Workbook work failed before closing")
-            && status.contains("cell edit targets missing sheet 99"),
-        "status omitted the complete target worker failure: {status}"
+        status.contains("cell edit targets missing sheet 99"),
+        "status omitted the complete worker input failure: {status}"
     );
     let status_accessibility: Vec<_> =
         i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, &status).collect();
@@ -663,16 +687,50 @@ fn idle_worker_input_failure_blocks_save_and_close_until_full_resync() {
     attach_worker(&app, &state, &recovery.0, true);
 
     let failed_revision = submit_missing_sheet_update(&state);
+    let later_revision = state.next_worker_revision();
+    {
+        let worker = state.workbook_worker.borrow();
+        let worker = worker.as_ref().expect("worker");
+        let failed = worker
+            .wait_for_result(failed_revision)
+            .expect("failed input result before later update");
+        assert_eq!(
+            failed.input_error.as_deref(),
+            Some("cell edit targets missing sheet 99")
+        );
+        worker
+            .submit_cell(workbook_worker::CellUpdate {
+                revision: later_revision,
+                active_sheet: 0,
+                sheet: 0,
+                cell: CellRef::parse("A1").expect("cell reference"),
+                raw: Some("2".into()),
+            })
+            .expect("submit later valid worker update");
+        state.last_queued_worker_revision.set(later_revision);
+        assert_eq!(
+            worker
+                .wait_for_result(later_revision)
+                .expect("later worker result before UI poll")
+                .revision,
+            later_revision,
+            "the result slot must contain the later revision before polling"
+        );
+    }
     pump_worker_until(&app, &state, || {
-        state.applied_worker_result_revision.get() >= failed_revision
+        state.applied_worker_result_revision.get() >= later_revision
     });
 
     let failure = state
         .unaccepted_worker_revision_message()
-        .expect("consumed worker input failure must remain an admission barrier");
+        .expect("a coalesced later result must not erase the earlier input failure");
     assert!(
         failure.contains("cell edit targets missing sheet 99"),
         "{failure}"
+    );
+    assert!(
+        failure.contains(&format!("workbook revision {failed_revision}")),
+        "the retained barrier must identify the revision that failed: {failure}"
     );
     assert!(
         state.is_dirty(),
@@ -921,4 +979,8 @@ fn idle_worker_input_failure_requires_confirmation_before_new_or_open() {
         state.applied_worker_result_revision.get() >= replacement_revision
     });
     assert_eq!(state.unaccepted_worker_revision_message(), None);
+    assert!(
+        state.worker_input_failure.borrow().is_none(),
+        "a successful replacement must discard the prior generation's worker input failure"
+    );
 }

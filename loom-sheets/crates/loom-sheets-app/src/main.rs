@@ -1918,26 +1918,6 @@ impl GuiState {
         self.worker_submission_failure.borrow_mut().take();
     }
 
-    pub(crate) fn unaccepted_worker_revision_message(&self) -> Option<String> {
-        let mut messages = Vec::new();
-        if let Some((revision, error)) = self.worker_submission_failure.borrow().clone() {
-            messages.push(format!(
-                "workbook revision {revision} was not accepted by the calculation worker: {error}"
-            ));
-        }
-        if let Some(message) = worker_failure::admission_message(self) {
-            messages.push(message);
-        }
-        let allocated = self.worker_revision.get();
-        let accepted = self.last_queued_worker_revision.get();
-        if allocated > accepted {
-            messages.push(format!(
-                "workbook revision {allocated} was not accepted by the calculation worker"
-            ));
-        }
-        (!messages.is_empty()).then(|| messages.join("; "))
-    }
-
     /// Recheck full content after undo/redo, where the edit marker alone would
     /// stay set even after returning exactly to the last saved workbook.
     pub(crate) fn recompute_dirty_from_saved(&self) {

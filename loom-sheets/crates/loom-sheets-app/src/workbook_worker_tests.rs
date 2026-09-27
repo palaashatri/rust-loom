@@ -402,6 +402,118 @@ fn worker_completion_sequence_tracks_export_before_save() {
 }
 
 #[test]
+fn queued_file_operations_fail_until_worker_input_is_resynchronized() {
+    let temporary = ScratchDirectory::new();
+    let (save_tx, save_rx) = std::sync::mpsc::channel();
+    let (export_tx, export_rx) = std::sync::mpsc::channel();
+    let (worker, startup) = WorkbookWorker::start_at_with_file_completions(
+        temporary.path(),
+        "loom.sheets/1",
+        save_tx,
+        export_tx,
+    )
+    .expect("start worker with file completions");
+    assert!(startup.recovery_error.is_none());
+    let mut initial = Sheet::new("Data");
+    initial.set_str("A1", "1");
+    worker
+        .initialize_workbook(1, 0, vec![initial])
+        .expect("initialize workbook");
+    worker.wait_for_result(1).expect("initial worker result");
+
+    let (entered, release) = worker.enqueue_test_gate();
+    entered
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker gate");
+    worker
+        .submit_cell(CellUpdate {
+            revision: 2,
+            active_sheet: 0,
+            sheet: 99,
+            cell: CellRef::parse("A1").expect("cell reference"),
+            raw: Some("unapplied edit".into()),
+        })
+        .expect("queue invalid input revision");
+    let failed_save_path = temporary.path().join("must-not-save.loomtable");
+    let failed_export_path = temporary.path().join("must-not-export.csv");
+    worker
+        .queue_save(1, 1, 2, None, failed_save_path.clone())
+        .expect("queue Save behind invalid input");
+    worker
+        .queue_export(export_operation(
+            1,
+            1,
+            2,
+            crate::export_operations::ExportFormat::Csv,
+            failed_export_path.clone(),
+        ))
+        .expect("queue Export behind invalid input");
+    release.send(()).expect("release worker gate");
+
+    let failed_save = save_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("failed Save completion");
+    let failed_export = export_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("failed Export completion");
+    assert!(failed_save
+        .write_result
+        .as_ref()
+        .expect_err("Save must reject the incomplete worker mirror")
+        .contains("cell edit targets missing sheet 99"));
+    assert!(failed_export
+        .result
+        .as_ref()
+        .expect_err("Export must reject the incomplete worker mirror")
+        .contains("cell edit targets missing sheet 99"));
+    assert!(!failed_save_path.exists());
+    assert!(!failed_export_path.exists());
+    assert_eq!(
+        worker
+            .pending_input_failure()
+            .expect("read worker input-failure latch")
+            .map(|failure| failure.revision),
+        Some(2)
+    );
+
+    let mut resynchronized = Sheet::new("Data");
+    resynchronized.set_str("A1", "2");
+    worker
+        .submit_replacement(3, 0, vec![resynchronized])
+        .expect("queue full workbook resynchronization");
+    worker
+        .wait_for_result(3)
+        .expect("successful resynchronization result");
+    assert!(worker.pending_input_failure().unwrap().is_none());
+    let saved_path = temporary.path().join("resynchronized.loomtable");
+    let exported_path = temporary.path().join("resynchronized.csv");
+    worker
+        .queue_save(2, 1, 3, None, saved_path.clone())
+        .expect("queue Save after resynchronization");
+    worker
+        .queue_export(export_operation(
+            2,
+            1,
+            3,
+            crate::export_operations::ExportFormat::Csv,
+            exported_path.clone(),
+        ))
+        .expect("queue Export after resynchronization");
+    assert!(save_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("resynchronized Save completion")
+        .write_result
+        .is_ok());
+    assert!(export_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("resynchronized Export completion")
+        .result
+        .is_ok());
+    assert!(saved_path.exists());
+    assert!(exported_path.exists());
+}
+
+#[test]
 fn xlsx_export_uses_every_worker_owned_sheet() {
     let temporary = ScratchDirectory::new();
     let (worker, exports) = start_worker_with_exports(&temporary);

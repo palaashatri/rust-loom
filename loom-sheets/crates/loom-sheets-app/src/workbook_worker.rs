@@ -47,6 +47,12 @@ pub(crate) struct WorkbookResult {
     pub(crate) recovery_journal_duration: Duration,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct WorkerInputError {
+    pub(crate) revision: u64,
+    pub(crate) error: String,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkerUpdateKind {
@@ -161,6 +167,7 @@ struct Shared {
     mailbox: Mutex<Mailbox>,
     work_available: Condvar,
     latest_result: Mutex<Option<WorkbookResult>>,
+    pending_input_failure: Mutex<Option<WorkerInputError>>,
     result_available: Condvar,
 }
 
@@ -344,6 +351,10 @@ impl WorkbookWorker {
 
     pub(crate) fn take_latest_result(&self) -> Option<WorkbookResult> {
         self.shared.latest_result.lock().ok()?.take()
+    }
+
+    pub(crate) fn pending_input_failure(&self) -> Result<Option<WorkerInputError>, String> {
+        read_pending_input_failure(&self.shared)
     }
 
     /// Queue a Save barrier after all updates currently accepted by the worker.
@@ -617,6 +628,7 @@ fn run_worker(
                     .active_sheet
                     .min(sheets.len().saturating_sub(1));
                 baseline = Some((sheets.clone(), active_sheet));
+                clear_pending_input_failure(&shared);
                 let model = WorkerModel {
                     sheets: sheets.clone(),
                     active_sheet,
@@ -735,6 +747,12 @@ fn run_worker(
                         }
                     }
                 }
+                update_pending_input_failure(
+                    &shared,
+                    batch.revision,
+                    input_error.as_deref(),
+                    is_replacement && input_error.is_none(),
+                );
                 active_sheet = batch.active_sheet.min(sheets.len().saturating_sub(1));
                 let mut recovery_error = startup_error.clone();
                 #[cfg(test)]
@@ -816,6 +834,30 @@ fn run_worker(
                 );
             }
             WorkerAction::Checkpoint(checkpoint) => {
+                let input_failure = match read_pending_input_failure(&shared) {
+                    Ok(Some(failure)) => Some(format!(
+                        "Save blocked until the workbook is fully resynchronized after revision {} failed: {}",
+                        failure.revision, failure.error
+                    )),
+                    Ok(None) => None,
+                    Err(error) => Some(format!("Save blocked: {error}")),
+                };
+                if let Some(error) = input_failure {
+                    let _ = save_completions.send(crate::save_operations::SaveCompletion {
+                        completion_sequence: next_completion_sequence(&mut completion_sequence),
+                        operation: crate::save_operations::SaveOperation {
+                            operation_id: checkpoint.operation_id,
+                            document_generation: checkpoint.document_generation,
+                            target_revision: checkpoint.revision,
+                            pending_replacement_token: checkpoint.pending_replacement_token,
+                        },
+                        path: checkpoint.path,
+                        write_result: Err(error),
+                        checkpoint_result: None,
+                        baseline: None,
+                    });
+                    continue;
+                }
                 if last_revision != checkpoint.revision {
                     let _ = save_completions.send(crate::save_operations::SaveCompletion {
                         completion_sequence: next_completion_sequence(&mut completion_sequence),
@@ -874,7 +916,14 @@ fn run_worker(
             WorkerAction::Export(operation) => {
                 #[cfg(test)]
                 let started = Instant::now();
-                let result = export_at_revision(&sheets, active_sheet, last_revision, &operation);
+                let result = match read_pending_input_failure(&shared) {
+                    Ok(Some(failure)) => Err(format!(
+                        "Export blocked until the workbook is fully resynchronized after revision {} failed: {}",
+                        failure.revision, failure.error
+                    )),
+                    Ok(None) => export_at_revision(&sheets, active_sheet, last_revision, &operation),
+                    Err(error) => Err(format!("Export blocked: {error}")),
+                };
                 #[cfg(test)]
                 let worker_duration = started.elapsed();
                 let _ = export_completions.send(ExportCompletion {
@@ -941,6 +990,41 @@ fn workbook_differs_from_baseline(
             workbook_to_json(saved_sheets, *saved_active) != workbook_to_json(sheets, active_sheet)
         }
         None => true,
+    }
+}
+
+fn update_pending_input_failure(
+    shared: &Shared,
+    revision: u64,
+    input_error: Option<&str>,
+    successful_full_resync: bool,
+) {
+    let Ok(mut pending) = shared.pending_input_failure.lock() else {
+        return;
+    };
+    if let Some(error) = input_error {
+        if pending.is_none() {
+            *pending = Some(WorkerInputError {
+                revision,
+                error: error.to_string(),
+            });
+        }
+    } else if successful_full_resync {
+        pending.take();
+    }
+}
+
+fn read_pending_input_failure(shared: &Shared) -> Result<Option<WorkerInputError>, String> {
+    shared
+        .pending_input_failure
+        .lock()
+        .map(|failure| failure.clone())
+        .map_err(|_| "workbook worker input-failure mailbox is unavailable".to_string())
+}
+
+fn clear_pending_input_failure(shared: &Shared) {
+    if let Ok(mut pending) = shared.pending_input_failure.lock() {
+        pending.take();
     }
 }
 
