@@ -912,7 +912,7 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 ### UI-34 — Keep anchored shape labels readable on every fill
 
-**P1 · Sheets accessibility and anchored objects · OPEN.** Shape labels use the theme's general ink color over hard-coded pastel fills. Astra measured only 1.06–1.32:1 in dark mode and 1.16–1.45:1 in high-contrast mode for the reviewed fill/text pairs, making the labels difficult to read. This is a source-only finding; no fresh native capture was made for it.
+**P1 · Sheets accessibility and anchored objects · FIXED (2026-09-28).** Shape labels originally used the theme's general ink color over hard-coded pastel fills. Astra measured only 1.06–1.32:1 in dark mode and 1.16–1.45:1 in high-contrast mode for the reviewed fill/text pairs, making the labels difficult to read. Astra's original finding was source-only; fresh native evidence is linked below.
 
 **Source:** `loom-sheets/crates/loom-sheets-app/ui/objects.slint` shape background and label color; canonical contrast requirements in `loom-design-bible/tokens/loom.toml` and `loom-design-bible/contracts/desktop-ui.toml`.
 
@@ -921,6 +921,14 @@ Each card shows its current state. A screenshot proves only the visible state; n
 3. Rebuild and inspect all fill/theme pairs in the native window at normal and supported text scales.
 
 **Done when:** every supported fill/foreground pair meets the 4.5:1 label contrast floor, automated checks bind runtime colors to the chosen theme roles, and live captures confirm the labels and selection affordance remain legible. Existing UI-33 covers shared button labels only and does not close this finding.
+
+**Repair result (2026-09-28):** `objects.slint` now uses the theme's `paper-ink` foreground for supported colored shape fills and `ink` for the unfilled fallback. The approved seven pastel fills and background fallbacks are unchanged. The UI foundation audit now includes Sheets shape labels, checks the exact kind guard and unique object/label structure, verifies the foreground and background expressions, binds runtime `paper-ink` and `ink` to the design tokens, and checks all seven fills plus the unfilled surface in light, dark, and high-contrast themes.
+
+**Contrast evidence:** the lowest colored-fill label contrast is light 12.25:1, dark 11.99:1, and high contrast 14.52:1 (all above the 4.5:1 floor). Unfilled label contrast is light 17.72:1, dark 14.05:1, and high contrast 18.10:1. The regression suite includes the reported comment-marker-in-string condition; the exact `"shape/*hidden*/"` guard is rejected because the comment masker preserves its span as whitespace. Sol retracted its final hostile-review allegation after checking the reproduced fixture.
+
+**Focused verification:** `PYTHONDONTWRITEBYTECODE=1 python3 loom-bootstrap/scripts/test_audit_ui_foundation.py` passed 16 tests; `python3 loom-bootstrap/scripts/audit-ui-foundation.py`, `python3 loom-bootstrap/scripts/audit-governance.py`, `python3 loom-bootstrap/scripts/audit-assets.py`, and `git diff --check` passed. The production build passed with `PKG_CONFIG_PATH=/tmp/loom-fontconfig LIBRARY_PATH=/tmp/loom-fontconfig SLINT_EMIT_DEBUG_INFO=1 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 nice -n 19 ionice -c3 cargo build --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --locked --offline` in 8m35s. The image has the Fontconfig runtime but no development `.pc` file or linker symlink; the build used a temporary metadata/linker shim in `/tmp`, without installing packages or changing repository dependencies. Logs are under `.work/audit-20260928/`.
+
+**Native visual evidence:** `/usr/bin/gnome-screenshot -w` captured the live 1018×728 Linux window with all seven fills in [light](loom-sheets/docs/qa-native/ui34-shape-label-light-live-linux.png), [dark](loom-sheets/docs/qa-native/ui34-shape-label-dark-live-linux.png), and [high contrast](loom-sheets/docs/qa-native/ui34-shape-label-high-contrast-live-linux.png), plus a [selected high-contrast shape](loom-sheets/docs/qa-native/ui34-shape-label-selection-high-contrast-live-linux.png). A `--text-scale 2.0` launch produced a byte-identical light-theme capture; these anchored object labels retain document formatting under UI-38. Sol's visual review found all labels readable and unclipped and the selected outline/handle visible. The checked-in screenshots show visual state only; UI-37 keyboard/assistive-technology object actions and Windows/macOS behavior remain unverified. UI-34 is fixed; the broader Sheets acceptance gate remains open.
 
 ### UI-35 — Give every Sheets icon action a meaningful accessible name
 

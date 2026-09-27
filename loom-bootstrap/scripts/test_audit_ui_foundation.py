@@ -22,6 +22,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
             "loom-design-bible/tokens/loom.toml",
             "loom-core/crates/loom-ui/ui/foundation.slint",
             "loom-core/crates/loom-ui/ui/theme.slint",
+            "loom-sheets/crates/loom-sheets-app/ui/objects.slint",
         )
         for name in files:
             target = self.root / name
@@ -255,6 +256,301 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         self.assertNotEqual(raised.returncode, 0)
         self.assertIn("light accent/accent-ink contrast", raised.stderr)
         self.assertIn("requires 7.0:1", raised.stderr)
+
+    def test_shape_label_audit_rejects_theme_ink_for_pastel_fills(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        corrupted, count = re.subn(
+            r"(?<![\w-])color:\s*[^;]+;",
+            "color: Theme.palette().ink;",
+            source,
+            count=1,
+        )
+        self.assertEqual(count, 1, "fixture changes the shape label foreground only")
+        objects_path.write_text(corrupted, encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "dark theme ink must not be used on every pastel fill")
+        self.assertIn("shape label foreground", result.stderr.lower())
+
+    def test_shape_label_contrast_is_checked_for_each_theme(self):
+        token_path = self.root / "loom-design-bible/tokens/loom.toml"
+        theme_path = self.root / "loom-core/crates/loom-ui/ui/theme.slint"
+        original_tokens = token_path.read_text(encoding="utf-8")
+        original_theme = theme_path.read_text(encoding="utf-8")
+        theme_ranges = {
+            "light": ("export global Theme {", "export global ThemeDark {"),
+            "dark": ("export global ThemeDark {", "export global ThemeHighContrast {"),
+            "high-contrast": ("export global ThemeHighContrast {", None),
+        }
+
+        for theme, (opening, next_opening) in theme_ranges.items():
+            with self.subTest(theme=theme):
+                token_path.write_text(original_tokens, encoding="utf-8")
+                theme_path.write_text(original_theme, encoding="utf-8")
+                token_start = original_tokens.index(f"[palette.{theme}]")
+                token_end = original_tokens.find("\n[", token_start + 1)
+                if token_end < 0:
+                    token_end = len(original_tokens)
+                token_block = original_tokens[token_start:token_end]
+                changed_tokens, token_count = re.subn(
+                    r'(\bpaper-ink\s*=\s*)"#[0-9a-fA-F]{6}"',
+                    r'\1"#888888"',
+                    token_block,
+                    count=1,
+                )
+                self.assertEqual(token_count, 1, f"fixture changes {theme} paper ink token")
+                token_path.write_text(
+                    original_tokens[:token_start] + changed_tokens + original_tokens[token_end:],
+                    encoding="utf-8",
+                )
+
+                theme_source = theme_path.read_text(encoding="utf-8")
+                theme_start = theme_source.index(opening)
+                theme_end = (
+                    theme_source.index(next_opening, theme_start + len(opening))
+                    if next_opening
+                    else len(theme_source)
+                )
+                theme_block = theme_source[theme_start:theme_end]
+                changed_theme, theme_count = re.subn(
+                    r"(\bpaper-ink:\s*)#[0-9a-fA-F]{6}(?=\s*,)",
+                    r"\1#888888",
+                    theme_block,
+                    count=1,
+                )
+                self.assertEqual(theme_count, 1, f"fixture changes {theme} runtime paper ink")
+                theme_path.write_text(
+                    theme_source[:theme_start] + changed_theme + theme_source[theme_end:],
+                    encoding="utf-8",
+                )
+
+                result = self.run_audit()
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"low-contrast shape label ink must fail in the {theme} theme",
+                )
+                self.assertIn("shape fill", result.stderr.lower())
+                self.assertIn(theme, result.stderr.lower())
+
+    def test_runtime_ink_must_match_the_dark_token(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        theme_path = self.root / "loom-core/crates/loom-ui/ui/theme.slint"
+        source = theme_path.read_text(encoding="utf-8")
+        dark_start = source.index("export global ThemeDark {")
+        dark_end = source.index("export global ThemeHighContrast {", dark_start)
+        dark_source = source[dark_start:dark_end]
+        corrupted_dark, count = re.subn(
+            r"(?<![\w-])(ink\s*:\s*)#[0-9a-fA-F]{6}(?=\s*,)",
+            r"\1#24242a",
+            dark_source,
+            count=1,
+        )
+        self.assertEqual(count, 1, "fixture changes the runtime ink role only")
+        theme_path.write_text(
+            source[:dark_start] + corrupted_dark + source[dark_end:], encoding="utf-8"
+        )
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "runtime ink must be tied to the approved token")
+        self.assertIn(
+            "runtime theme.slint dark ink value #24242a does not match token #f4f4f6",
+            result.stderr,
+        )
+
+    def test_unfilled_shape_contrast_uses_runtime_ink(self):
+        token_path = self.root / "loom-design-bible/tokens/loom.toml"
+        theme_path = self.root / "loom-core/crates/loom-ui/ui/theme.slint"
+        token_source = token_path.read_text(encoding="utf-8")
+        token_block_start = token_source.index("[palette.dark]")
+        token_block_end = token_source.find("\n[", token_block_start + 1)
+        token_block = token_source[token_block_start:token_block_end]
+        changed_token_block, token_count = re.subn(
+            r'(\bink\s*=\s*)"#[0-9a-fA-F]{6}"',
+            r'\1"#24242a"',
+            token_block,
+            count=1,
+        )
+        self.assertEqual(token_count, 1, "fixture changes dark ink token only")
+        token_path.write_text(
+            token_source[:token_block_start]
+            + changed_token_block
+            + token_source[token_block_end:],
+            encoding="utf-8",
+        )
+
+        theme_source = theme_path.read_text(encoding="utf-8")
+        dark_start = theme_source.index("export global ThemeDark {")
+        dark_end = theme_source.index("export global ThemeHighContrast {", dark_start)
+        dark_block = theme_source[dark_start:dark_end]
+        changed_theme, theme_count = re.subn(
+            r"(?<![\w-])(ink\s*:\s*)#[0-9a-fA-F]{6}(?=\s*,)",
+            r"\1#24242a",
+            dark_block,
+            count=1,
+        )
+        self.assertEqual(theme_count, 1, "fixture aligns runtime ink with low-contrast token")
+        theme_path.write_text(
+            theme_source[:dark_start] + changed_theme + theme_source[dark_end:],
+            encoding="utf-8",
+        )
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "unfilled labels need readable dark ink")
+        self.assertIn("Sheets unfilled shape in dark ink contrast", result.stderr)
+
+    def test_shape_background_audit_rejects_duplicate_unsafe_fill_branch(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        original = "idx < root.fills.length && root.fills[idx] == 0 ? #FECACA"
+        unsafe_duplicate = (
+            "idx < root.fills.length && root.fills[idx] == 0 ? #18181B\n"
+            "                : idx < root.fills.length && root.fills[idx] == 0 ? #FECACA"
+        )
+        self.assertIn(original, source)
+        objects_path.write_text(source.replace(original, unsafe_duplicate, 1), encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "duplicate fill branches must not mask the rendered color")
+        self.assertIn("fill index 0 occurs 2 times", result.stderr)
+
+    def test_shape_background_audit_rejects_unsafe_fallback(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        self.assertIn(": Theme.palette().surface-raised)", source)
+        objects_path.write_text(
+            source.replace(
+                ": Theme.palette().surface-raised)",
+                ": Theme.palette().ink)",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "shape fallback must use the audited surface")
+        self.assertIn("shape background must preserve its approved fill mapping and fallbacks", result.stderr)
+
+    def test_shape_label_audit_rejects_a_safe_decoy_before_the_real_label(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        label_foreground = (
+            "idx < root.fills.length && root.fills[idx] >= 0 && root.fills[idx] <= 6 "
+            "? Theme.palette().paper-ink : Theme.palette().ink"
+        )
+        decoy = (
+            '        if root.kinds[idx] == "shape" && false : Text {\n'
+            f"            color: {label_foreground};\n"
+            "        }\n\n"
+        )
+        actual_label = '        if root.kinds[idx] == "shape" : Text {\n'
+        self.assertIn(actual_label, source)
+        source = source.replace(actual_label, decoy + actual_label, 1)
+        actual_label_start = source.rfind(actual_label)
+        actual_foreground_start = source.index("color:", actual_label_start)
+        actual_foreground_end = source.index(";", actual_foreground_start)
+        source = (
+            source[:actual_foreground_start]
+            + "color: Theme.palette().ink"
+            + source[actual_foreground_end:]
+        )
+        objects_path.write_text(source, encoding="utf-8")
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "an inert safe Text node must not hide the real label")
+        self.assertIn("must define exactly one Text child", result.stderr)
+
+    def test_shape_label_audit_requires_the_shape_kind_condition(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        original = 'if root.kinds[idx] == "shape" : Text {'
+        self.assertIn(original, source)
+        objects_path.write_text(
+            source.replace(original, 'if root.kinds[idx] != "shape" : Text {', 1),
+            encoding="utf-8",
+        )
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "shape labels must not be hidden behind a non-shape condition")
+        self.assertIn("must be conditioned on kind == shape", result.stderr)
+
+        commented = source.replace(
+            original,
+            'if root.kinds[idx] /* valid shape guard */ == "shape" : Text {',
+            1,
+        )
+        objects_path.write_text(commented, encoding="utf-8")
+        comment_result = self.run_audit()
+        self.assertEqual(comment_result.returncode, 0, "valid comments in the shape guard must remain accepted")
+
+    def test_shape_label_audit_rejects_comment_tokens_inside_kind_string(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        original = 'if root.kinds[idx] == "shape" : Text {'
+        self.assertIn(original, source)
+        objects_path.write_text(
+            source.replace(original, 'if root.kinds[idx] == "shape/*hidden*/" : Text {', 1),
+            encoding="utf-8",
+        )
+
+        result = self.run_audit()
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "comment markers inside a kind string must not make a different kind pass",
+        )
+        self.assertIn("must be conditioned on kind == shape", result.stderr)
+
+    def test_shape_audit_rejects_a_second_unsafe_object_repeater(self):
+        baseline = self.run_audit()
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+        objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
+        source = objects_path.read_text(encoding="utf-8")
+        component_end = source.rfind("\n}")
+        self.assertGreater(component_end, 0, "fixture locates the component's closing brace")
+        unsafe_repeater = '''
+
+    for idx in root.kinds.length : Rectangle {
+        x: idx < root.positions-x.length ? root.positions-x[idx] : 0px;
+        y: idx < root.positions-y.length ? root.positions-y[idx] : 0px;
+        width: idx < root.widths.length ? max(80px, root.widths[idx] * 1px) : 80px;
+        height: idx < root.heights.length ? max(48px, root.heights[idx] * 1px) : 48px;
+        if root.kinds[idx] == "shape" : Text {
+            text: idx < root.labels.length ? root.labels[idx] : "Shape";
+            color: Theme.palette().ink;
+        }
+    }
+'''
+        objects_path.write_text(
+            source[:component_end] + unsafe_repeater + source[component_end:],
+            encoding="utf-8",
+        )
+
+        result = self.run_audit()
+        self.assertNotEqual(result.returncode, 0, "the real unsafe second repeater must not evade the audit")
+        self.assertIn("must define exactly one object Rectangle repeater", result.stderr)
 
 
 if __name__ == "__main__":

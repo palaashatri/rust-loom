@@ -13,6 +13,7 @@ CONTRACT = ROOT / "loom-design-bible/contracts/ui-foundation.toml"
 TOKEN_FILE = ROOT / "loom-design-bible/tokens/loom.toml"
 DESKTOP_UI = ROOT / "loom-design-bible/contracts/desktop-ui.toml"
 THEME_SOURCE = ROOT / "loom-core/crates/loom-ui/ui/theme.slint"
+SHEETS_OBJECTS_SOURCE = ROOT / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
 FACADE = ROOT / "loom-core/crates/loom-ui/ui/foundation.slint"
 FOUNDATION = ROOT / "loom-core/crates/loom-ui/ui/foundation"
 GALLERY = FOUNDATION / "gallery.slint"
@@ -97,6 +98,48 @@ def braced_block(source: str, declaration: str, label: str) -> str:
     raise ValueError(f"unclosed Slint scope: {label}")
 
 
+def braced_block_bounds(source: str, declaration: str, label: str) -> tuple[int, int]:
+    """Return a braced scope's body offsets using the comment/string-masked source."""
+    match = re.search(declaration, source)
+    if not match:
+        raise ValueError(f"missing Slint palette scope: {label}")
+    opening = source.rfind("{", match.start(), match.end())
+    if opening < 0:
+        raise ValueError(f"missing opening brace in Slint scope: {label}")
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return opening + 1, index
+    raise ValueError(f"unclosed Slint scope: {label}")
+
+
+def direct_property_assignments(source: str, property_name: str) -> list[re.Match]:
+    """Find property assignments at the current component scope, excluding children."""
+    assignment = re.compile(
+        rf"(?<![\w-]){re.escape(property_name)}\s*:\s*([^;]+);"
+    )
+    matches: list[re.Match] = []
+    depth = 0
+    index = 0
+    while index < len(source):
+        if depth == 0:
+            match = assignment.match(source, index)
+            if match:
+                matches.append(match)
+                index = match.end()
+                continue
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+        index += 1
+    return matches
+
+
 def runtime_palette_values(source: str, theme: str) -> dict[str, str]:
     theme_scopes = {
         "light": r"(?<![\w-])export\s+global\s+Theme\b\s*\{",
@@ -130,6 +173,7 @@ def runtime_palette_values(source: str, theme: str) -> dict[str, str]:
         "accent-hover",
         "accent-pressed",
         "accent-ink",
+        "ink",
         "ink-disabled",
         "canvas",
         "canvas-alt",
@@ -138,6 +182,7 @@ def runtime_palette_values(source: str, theme: str) -> dict[str, str]:
         "surface-sunken",
         "chrome",
         "panel",
+        "paper-ink",
     )
     role_pattern = "|".join(sorted(roles, key=len, reverse=True))
     assignments = list(
@@ -166,6 +211,145 @@ def runtime_palette_values(source: str, theme: str) -> dict[str, str]:
             )
         values[role] = value_match.group(1).lower()
     return values
+
+
+def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> list[str]:
+    """Check shape text roles against every fixed pastel fill and theme."""
+    code = slint_code_without_comments_or_strings(source)
+    result: list[str] = []
+    component_declaration = (
+        r"export\s+component\s+SheetObjectLayer\s+inherits\s+Rectangle\s*\{"
+    )
+    component_matches = list(re.finditer(component_declaration, code))
+    if len(component_matches) != 1:
+        return ["Sheets object source must define exactly one SheetObjectLayer component"]
+    try:
+        component_start, component_end = braced_block_bounds(
+            code,
+            component_declaration,
+            "Sheets SheetObjectLayer",
+        )
+        component = code[component_start:component_end]
+        repeater_declaration = (
+            r"for\s+idx\s+in\s+root\.kinds\.length\s*:\s*Rectangle\s*\{"
+        )
+        repeater_matches = list(re.finditer(repeater_declaration, component))
+        if len(repeater_matches) != 1:
+            return ["Sheets object layer must define exactly one object Rectangle repeater"]
+        shape_rectangle_start, shape_rectangle_end = braced_block_bounds(
+            component,
+            repeater_declaration,
+            "Sheets shape object Rectangle",
+        )
+    except ValueError as error:
+        return [str(error)]
+
+    shape_rectangle_code = component[shape_rectangle_start:shape_rectangle_end]
+    shape_rectangle_source = source[
+        component_start + shape_rectangle_start : component_start + shape_rectangle_end
+    ]
+    text_nodes = list(re.finditer(r"\bText\s*\{", shape_rectangle_code))
+    if len(text_nodes) != 1:
+        result.append("Sheets shape object must define exactly one Text child")
+        return result
+    shape_text_declaration = r"if\s+root\.kinds\[idx\].{0,40}:\s*Text\s*\{"
+    shape_text_matches = list(re.finditer(shape_text_declaration, shape_rectangle_code))
+    if len(shape_text_matches) != 1 or shape_text_matches[0].end() != text_nodes[0].end():
+        result.append("Sheets shape object must define exactly one shape label Text")
+        return result
+    raw_text_declaration = shape_rectangle_source[
+        shape_text_matches[0].start() : shape_text_matches[0].end()
+    ]
+    declaration_without_comments = re.sub(
+        r"/\*.*?\*/|//[^\n]*",
+        lambda match: "".join("\n" if character == "\n" else " " for character in match.group()),
+        raw_text_declaration,
+        flags=re.DOTALL,
+    )
+    if not re.fullmatch(
+        r'\s*if\s+root\.kinds\[idx\]\s*==\s*"shape"\s*:\s*Text\s*\{\s*',
+        declaration_without_comments,
+    ):
+        result.append("Sheets shape label Text must be conditioned on kind == shape")
+    shape_text = braced_block(
+        shape_rectangle_code,
+        shape_text_declaration,
+        "Sheets shape label Text",
+    )
+    color_assignments = list(re.finditer(r"\bcolor\s*:\s*([^;]+);", shape_text))
+    if len(color_assignments) != 1:
+        result.append("Sheets shape label must define exactly one foreground color")
+    else:
+        expression = re.sub(r"\s+", " ", color_assignments[0].group(1)).strip()
+        expected = re.compile(
+            r"idx < root\.fills\.length && root\.fills\[idx\] >= 0 && root\.fills\[idx\] <= 6 "
+            r"\? Theme\.palette\(\)\.paper-ink : Theme\.palette\(\)\.ink"
+        )
+        if not expected.fullmatch(expression):
+            result.append(
+                "Sheets shape label foreground must use paper-ink for colored fills and ink for unfilled shapes"
+            )
+
+    backgrounds = direct_property_assignments(shape_rectangle_code, "background")
+    if len(backgrounds) != 1:
+        result.append("Sheets shape object must define exactly one background expression")
+        return result
+
+    background = backgrounds[0]
+    background_expression = shape_rectangle_source[background.start(1) : background.end(1)]
+    fill_branches = re.findall(
+        r"root\.fills\[idx\]\s*==\s*(\d+)\s*\?\s*(#[0-9a-fA-F]{6})",
+        background.group(1),
+    )
+    fill_indices = [int(index) for index, _ in fill_branches]
+    valid_fill_counts = True
+    for index in range(7):
+        count = fill_indices.count(index)
+        if count != 1:
+            valid_fill_counts = False
+            result.append(f"Sheets shape background fill index {index} occurs {count} times; requires exactly once")
+
+    expected_fills = (
+        "#FECACA",
+        "#FED7AA",
+        "#FEF08A",
+        "#BBF7D0",
+        "#BFDBFE",
+        "#DDD6FE",
+        "#E5E7EB",
+    )
+    expected_mapping = "root.kinds[idx]==\"shape\"?("
+    expected_mapping += ":".join(
+        f"idx<root.fills.length&&root.fills[idx]=={index}?{color}"
+        for index, color in enumerate(expected_fills)
+    )
+    expected_mapping += ":Theme.palette().surface-raised):Theme.palette().surface"
+    if "".join(background_expression.split()) != expected_mapping:
+        result.append("Sheets shape background must preserve its approved fill mapping and fallbacks")
+    if not valid_fill_counts or fill_indices != list(range(7)):
+        return result
+
+    fills = {int(index): color.lower() for index, color in fill_branches}
+
+    for theme in ("light", "dark", "high-contrast"):
+        palette = palettes[theme]
+        foreground = palette["paper-ink"].lower()
+        for index, background in sorted(fills.items()):
+            ratio = contrast_ratio(foreground, background)
+            if ratio < minimum:
+                result.append(
+                    f"Sheets shape fill {index} in {theme} paper-ink contrast is {ratio:.3f}:1; "
+                    f"requires {minimum:.1f}:1"
+                )
+        fallback_ratio = contrast_ratio(
+            palette["ink"].lower(), palette["surface-raised"].lower()
+        )
+        if fallback_ratio < minimum:
+            result.append(
+                f"Sheets unfilled shape in {theme} ink contrast is {fallback_ratio:.3f}:1; "
+                f"requires {minimum:.1f}:1"
+            )
+    return result
 
 
 tokens = tomllib.loads(TOKEN_FILE.read_text(encoding="utf-8"))
@@ -220,7 +404,7 @@ for theme in ("light", "dark", "high-contrast"):
             errors.append(
                 f"runtime theme.slint {theme} {background_key} value {actual} does not match token {background}"
             )
-    for foreground_key in ("accent-ink", "ink-disabled"):
+    for foreground_key in ("accent-ink", "ink", "ink-disabled", "paper-ink"):
         foreground = palette[foreground_key].lower()
         if contract_palette[foreground_key].lower() != foreground:
             errors.append(f"{theme} {foreground_key} differs between loom.toml and desktop-ui.toml")
@@ -229,6 +413,15 @@ for theme in ("light", "dark", "high-contrast"):
             errors.append(
                 f"runtime theme.slint {theme} {foreground_key} value {actual} does not match token {foreground}"
             )
+
+try:
+    sheets_objects_source = SHEETS_OBJECTS_SOURCE.read_text(encoding="utf-8")
+except OSError as error:
+    errors.append(f"Sheets object source is missing or unreadable: {error}")
+else:
+    errors.extend(
+        sheets_shape_label_errors(sheets_objects_source, tokens["palette"], contrast_floor)
+    )
 
 config = tomllib.loads(CONTRACT.read_text(encoding="utf-8"))
 status = config.get("status")

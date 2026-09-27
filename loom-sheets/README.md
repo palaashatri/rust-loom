@@ -100,6 +100,20 @@ Captured the running Sheets window with `/usr/bin/gnome-screenshot -w` while the
 
 The three theme captures show the normal Create action; hover, pressed, and disabled states have not been captured live. Other captures show the [blank workbook](docs/qa-native/owner-20260927-01-empty-workbook-live-linux.png), [Open picker](docs/qa-native/owner-20260927-02-open-file-picker-live-linux.png), [File menu](docs/qa-native/owner-20260927-03-file-menu-open-live-linux.png), [menu keyboard focus](docs/qa-native/owner-20260927-04-file-menu-keyboard-live-linux.png), [picker keyboard focus](docs/qa-native/owner-20260927-05-open-picker-keyboard-live-linux.png), [Open cancelled](docs/qa-native/owner-20260927-06-open-cancelled-live-linux.png), [template chooser](docs/qa-native/owner-20260927-07-template-chooser-live-linux.png), [close cancelled](docs/qa-native/owner-20260927-11-close-cancelled-live-linux.png), and the [created Checklist window](docs/qa-native/owner-20260927-12-checklist-window-live-linux.png). These images document the inspected states and open UI findings; they do not establish full Sheets acceptance or accessibility conformance.
 
+## Anchored shape label contrast — UI-34
+
+These live-window captures show all seven supported shape fills in each theme, plus the selected-object outline and resize handle in high contrast. The window was requested at 1024×720 and captured at 1018×728, including the Linux title bar, with `/usr/bin/gnome-screenshot -w`.
+
+![All seven shape fills with readable labels in the light theme](docs/qa-native/ui34-shape-label-light-live-linux.png)
+
+![All seven shape fills with readable labels in the dark theme](docs/qa-native/ui34-shape-label-dark-live-linux.png)
+
+![All seven shape fills with readable labels in the high-contrast theme](docs/qa-native/ui34-shape-label-high-contrast-live-linux.png)
+
+![Selected shape with a visible outline and resize handle in high contrast](docs/qa-native/ui34-shape-label-selection-high-contrast-live-linux.png)
+
+The shape foreground uses the theme's `paper-ink` role on colored fills and `ink` on the unfilled surface. The workbook was also launched with `--text-scale 2.0`; anchored object text keeps its document formatting, as specified by UI-38, so that capture was pixel-identical to the light-theme image and is not duplicated here. These images verify visual contrast and selection affordance only; keyboard object actions, assistive-technology behavior, and cross-platform rendering remain open under UI-37 and the Sheets acceptance gate.
+
 ## Visual QA Evidence
 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.

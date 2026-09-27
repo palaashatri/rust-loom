@@ -57,7 +57,9 @@ export component SheetObjectLayer inherits Rectangle {
             width: parent.width - 2 * Theme.tokens.space.sm;
             height: parent.height - 2 * Theme.tokens.space.sm;
             text: idx < root.labels.length ? root.labels[idx] : "Shape";
-            color: Theme.palette().ink;
+            color: idx < root.fills.length && root.fills[idx] >= 0 && root.fills[idx] <= 6
+                ? Theme.palette().paper-ink
+                : Theme.palette().ink;
             font-size: Theme.tokens.typography.body;
             font-weight: 600;
             horizontal-alignment: center;
