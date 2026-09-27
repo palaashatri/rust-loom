@@ -70,6 +70,24 @@ This 1024×720 image is a software-renderer capture. The native live window was 
 - **Command Palette & Menus**: Ctrl+K palette covering every primary command; native macOS NSMenu plus an in-window File/Edit/View/Table/Help menu on non-macOS desktops. The local menu uses the same command IDs and live enablement as the native menu. Linux DBusMenu layout data is not connected to a desktop global-menu host, so Linux keeps the in-window menu visible.
 - **Storage & Interoperability**: Versioned `.loomtable` packages (all tabs, styles, alignments, freeze panes, charts, anchored shapes/images, and package-owned embedded image assets; legacy single-sheet files still open), formula-preserving CSV import/export with dialect sniffing, and multi-sheet XLSX import/export preserving worksheet names, formulas, cached values, cell styles/alignments, one chart per sheet, shapes, and embedded images. Before replacing the current workbook, XLSX import warns about known losses in both the file picker and startup `--open` flow. The warning covers defined names, external workbook links, conditional formatting, data validation, PivotTables (cached cells only), frozen panes, custom row/column sizes, extra charts on one sheet, and missing drawing/media parts. An empty `<definedNames/>` container does not trigger a false warning. Cancel leaves the current workbook and recovery data in place; Continue imports the supported content and reports the dropped features. Native-menu and palette commands are ignored while the user decides. The warning covers known cases and does not guarantee complete Excel round-trip support. Normal Save does not overwrite the original `.xlsx`.
 
+## Native Linux owner audit — 2026-09-27
+
+Captured the running Sheets window with `/usr/bin/gnome-screenshot -w` while the desktop was unlocked. Main-window images are 1018×728 for a requested 1024×720 app window; native file-picker images are 689×407. The captures cover the blank workbook, File menu and keyboard focus, open/cancel flow, template chooser and Checklist selection/creation, dirty-close prompt/cancel, and primary-action labels after the theme-token repair.
+
+![Checklist selected in the native template chooser](docs/qa-native/owner-20260927-08-template-checklist-selected-live-linux.png)
+
+![Checklist workbook created from the native chooser](docs/qa-native/owner-20260927-09-template-created-live-linux.png)
+
+![Dirty-close prompt in the running Linux window](docs/qa-native/owner-20260927-10-close-save-changes-live-linux.png)
+
+![Light theme primary action after the contrast repair](docs/qa-native/owner-20260927-13-contrast-light-live-linux.png)
+
+![Dark theme primary action after the contrast repair](docs/qa-native/owner-20260927-14-contrast-dark-live-linux.png)
+
+![High-contrast theme at 1.5× text scale](docs/qa-native/owner-20260927-15-contrast-high-contrast-1.5-live-linux.png)
+
+The three theme captures show the normal Create action; hover, pressed, and disabled states have not been captured live. Other captures show the [blank workbook](docs/qa-native/owner-20260927-01-empty-workbook-live-linux.png), [Open picker](docs/qa-native/owner-20260927-02-open-file-picker-live-linux.png), [File menu](docs/qa-native/owner-20260927-03-file-menu-open-live-linux.png), [menu keyboard focus](docs/qa-native/owner-20260927-04-file-menu-keyboard-live-linux.png), [picker keyboard focus](docs/qa-native/owner-20260927-05-open-picker-keyboard-live-linux.png), [Open cancelled](docs/qa-native/owner-20260927-06-open-cancelled-live-linux.png), [template chooser](docs/qa-native/owner-20260927-07-template-chooser-live-linux.png), [close cancelled](docs/qa-native/owner-20260927-11-close-cancelled-live-linux.png), and the [created Checklist window](docs/qa-native/owner-20260927-12-checklist-window-live-linux.png). These images document the inspected states and open UI findings; they do not establish full Sheets acceptance or accessibility conformance.
+
 ## Visual QA Evidence
 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.

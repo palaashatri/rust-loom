@@ -10,14 +10,14 @@ testable, and consistent across eight applications.
 
 ## Repository role
 
-This repository is **specification only**. It contains no application code and no
-Slint components. The component gallery, Slint example components, and screenshot
-baselines arrive in a later milestone. What it must contain, from day one:
+This repository contains the normative design specification and machine-readable
+contracts. Runtime Slint components, the component gallery, and screenshot
+baselines live in `loom-core/crates/loom-ui`; they are not stored here. What this
+repository provides:
 
 * The complete design contract applications are built against.
 * Machine-readable design tokens in `tokens/loom.toml` (the canonical source).
-* The visual QA process and baseline storage contract (`baselines/`, added with
-  the gallery milestone).
+* The visual QA process and baseline storage contract.
 * Design review and acceptance procedures.
 
 Applications never invent their own tokens, spacing, colors, or motion values.
@@ -61,10 +61,13 @@ They consume this contract.
 | [DESIGN_REVIEW.md](../AGENTS.md#source-loom-design-bible-design-review-md) | Review checklist and process. |
 | [UX_ACCEPTANCE_CHECKLIST.md](../AGENTS.md#source-loom-design-bible-ux-acceptance-checklist-md) | Per-app acceptance checklist. |
 | `tokens/loom.toml` | Canonical machine-readable tokens. |
+| `contracts/desktop-ui.toml` | Normative desktop geometry, palette, and interaction contract. |
+| `contracts/ui-foundation.toml` | Shared UI foundation status and mechanical acceptance requirements. |
+| `contracts/geometry-manifest.toml` | Generated per-app geometry and source evidence; verify its generator and hashes before relying on it. |
 | [ADR-0001-design-tokens.md](../AGENTS.md#source-loom-design-bible-docs-adrs-adr-0001-design-tokens-md) | Decision record for the token architecture. |
 | `docs/adrs/` | Further decision records (added over time). |
-| `baselines/` | Visual regression baselines, `<app>/<name>.png` (added with gallery milestone). |
-| `test/` | Reserved for the gallery milestone's visual test harness fixtures. |
+| `loom-core/crates/loom-ui/ui/foundation/` | Shared Slint foundation and interactive gallery. |
+| `loom-core/crates/loom-ui/baselines/foundation/` | Current deterministic foundation captures. |
 
 ## Reading order for new agents
 
@@ -76,7 +79,7 @@ They consume this contract.
 
 ## Contract integrity rules
 
-* `tokens/loom.toml` is the canonical token source. [DESIGN_TOKENS.md](../AGENTS.md#source-loom-design-bible-design-tokens-md),
+* `tokens/loom.toml` is the normative token source. [DESIGN_TOKENS.md](../AGENTS.md#source-loom-design-bible-design-tokens-md),
   [THEMING.md](../AGENTS.md#source-loom-design-bible-theming-md), and any generated Slint constants derive from it.
 * If a value appears in two documents and they disagree, the documents have a
   defect. Fix the defect; do not accept it.
