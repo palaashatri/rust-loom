@@ -27,6 +27,33 @@ fn has_button_border_near_bottom(image: &image::RgbaImage, surface_height: u32) 
     })
 }
 
+fn write_xlsx_with_unsupported_area_chart(path: &std::path::Path) {
+    let mut source = Sheet::new("Imported");
+    source.set_str("A1", "Quarter");
+    source.set_str("B1", "Revenue");
+    source.chart = Some(loom_sheets_core::SheetChart {
+        kind: loom_sheets_core::ChartKind::Line,
+        ..Default::default()
+    });
+    let exported = loom_sheets_core::export_xlsx_sheets(&[source]).expect("export base XLSX");
+    let original = PackageArchive::from_bytes(&exported).expect("read base XLSX");
+    let mut rebuilt = PackageArchive::new();
+    for part in original.paths() {
+        let bytes = original.get(part).expect("XLSX part");
+        let bytes = match part {
+            "xl/charts/chart1.xml" => String::from_utf8(bytes.to_vec())
+                .expect("chart XML")
+                .replace("<c:lineChart>", "<c:areaChart>")
+                .replace("</c:lineChart>", "</c:areaChart>")
+                .into_bytes(),
+            _ => bytes.to_vec(),
+        };
+        rebuilt.add(part, bytes).expect("copy XLSX part");
+    }
+    std::fs::write(path, rebuilt.to_bytes().expect("build XLSX fixture"))
+        .expect("write XLSX fixture");
+}
+
 #[test]
 fn workbook_file_roundtrip_preserves_tabs_styles_and_freeze() {
     let dir =
@@ -151,22 +178,35 @@ fn cancel_xlsx_import_warning_preserves_current_workbook_and_recovery_state() {
     let original_revision = state.worker_revision.get();
     let original_dirty = state.is_dirty();
 
-    let mut candidate = Sheet::new("Imported");
-    candidate.set_str("A1", "replacement value");
+    let incoming_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-unsupported-chart-import-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
+    let incoming_path = incoming_dir.join("incoming.xlsx");
+    write_xlsx_with_unsupported_area_chart(&incoming_path);
+    let loaded = load_workbook_with_report(&incoming_path).expect("load area chart workbook");
+    assert!(loaded.workbook.sheets[0].chart.is_none());
+    assert_eq!(
+        loaded
+            .warnings
+            .iter()
+            .map(|warning| warning.label())
+            .collect::<Vec<_>>(),
+        vec!["unsupported area charts"],
+        "the single unsupported chart must be the only reason for the warning"
+    );
     stage_xlsx_import(
         &app,
         &state,
-        PathBuf::from("incoming.xlsx"),
-        loom_sheets_core::persistence::WorkbookFile {
-            sheets: vec![candidate],
-            active: 0,
-        },
-        vec![loom_sheets_core::XlsxImportWarning::DefinedNames],
+        incoming_path,
+        loaded.workbook,
+        loaded.warnings,
     );
     assert!(app.get_xlsx_import_warning_open());
     assert!(app
         .get_xlsx_import_warning_message()
-        .contains("defined names and named ranges"));
+        .contains("unsupported area charts"));
     assert!(app
         .get_xlsx_import_warning_message()
         .contains("Continue replaces the workbook that is open now"));
@@ -195,6 +235,7 @@ fn cancel_xlsx_import_warning_preserves_current_workbook_and_recovery_state() {
         "Cancel must leave the last durable workbook unchanged"
     );
     crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+    std::fs::remove_dir_all(&incoming_dir).ok();
 }
 
 #[test]
@@ -208,21 +249,38 @@ fn continue_xlsx_import_replaces_the_workbook_only_after_confirmation() {
         .set_str("C1", "unsaved current value");
     state.mark_content_dirty();
 
-    let mut candidate = Sheet::new("Imported");
-    candidate.set_str("A1", "replacement value");
+    let incoming_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-unsupported-chart-continue-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
+    let incoming_path = incoming_dir.join("incoming.xlsx");
+    write_xlsx_with_unsupported_area_chart(&incoming_path);
+    let loaded = load_workbook_with_report(&incoming_path).expect("load area chart workbook");
+    assert!(loaded.workbook.sheets[0].chart.is_none());
+    assert_eq!(
+        loaded
+            .warnings
+            .iter()
+            .map(|warning| warning.label())
+            .collect::<Vec<_>>(),
+        vec!["unsupported area charts"],
+        "the single unsupported chart must be the only reason for the warning"
+    );
     stage_xlsx_import(
         &app,
         &state,
-        PathBuf::from("incoming.xlsx"),
-        loom_sheets_core::persistence::WorkbookFile {
-            sheets: vec![candidate],
-            active: 0,
-        },
-        vec![loom_sheets_core::XlsxImportWarning::DefinedNames],
+        incoming_path,
+        loaded.workbook,
+        loaded.warnings,
     );
 
     assert_eq!(state.current.borrow().name, "Data");
     assert!(state.is_dirty());
+    assert!(app.get_xlsx_import_warning_open());
+    assert!(app
+        .get_xlsx_import_warning_message()
+        .contains("unsupported area charts"));
     let menu_service = std::sync::Arc::new(NativeMenuBar::new());
     continue_pending_xlsx_import(&app, &state, &menu_service);
 
@@ -231,8 +289,13 @@ fn continue_xlsx_import_replaces_the_workbook_only_after_confirmation() {
     assert_eq!(state.current.borrow().name, "Imported");
     assert_eq!(
         state.current.borrow().raw(CellRef { row: 0, col: 0 }),
-        Some("replacement value")
+        Some("Quarter")
     );
+    assert_eq!(
+        state.current.borrow().raw(CellRef { row: 0, col: 1 }),
+        Some("Revenue")
+    );
+    assert!(state.current.borrow().chart.is_none());
     assert_eq!(state.sheets.borrow().len(), 1);
     assert_eq!(*state.active_sheet_index.borrow(), 0);
     assert!(state.undo_stack.borrow().is_empty());
@@ -241,7 +304,8 @@ fn continue_xlsx_import_replaces_the_workbook_only_after_confirmation() {
     assert!(!state.is_dirty());
     assert!(app
         .get_status_left()
-        .contains("dropped: defined names and named ranges"));
+        .contains("dropped: unsupported area charts"));
+    std::fs::remove_dir_all(&incoming_dir).ok();
 }
 
 #[test]
@@ -251,20 +315,27 @@ fn startup_xlsx_warning_keeps_recovered_workbook_visible_until_confirmation() {
     let recovered_payload =
         workbook_package_bytes(&[recovered], 0).expect("build recovery package");
 
-    let mut candidate = Sheet::new("Imported");
-    candidate.set_str("A1", "incoming value");
-    let loaded = LoadedWorkbook {
-        workbook: loom_sheets_core::persistence::WorkbookFile {
-            sheets: vec![candidate],
-            active: 0,
-        },
-        warnings: vec![loom_sheets_core::XlsxImportWarning::DefinedNames],
-    };
+    let incoming_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-unsupported-chart-startup-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
+    let incoming_path = incoming_dir.join("incoming.xlsx");
+    write_xlsx_with_unsupported_area_chart(&incoming_path);
+    let loaded = load_workbook_with_report(&incoming_path).expect("load area chart workbook");
+    assert_eq!(
+        loaded
+            .warnings
+            .iter()
+            .map(|warning| warning.label())
+            .collect::<Vec<_>>(),
+        vec!["unsupported area charts"],
+        "the single unsupported chart must be the only reason for the warning"
+    );
 
     let fallback = restore_workbook_from_snapshot(&recovered_payload)
         .expect("restore previous workbook for startup fallback");
-    let (current, pending) =
-        prepare_startup_import(PathBuf::from("incoming.xlsx"), loaded, fallback);
+    let (current, pending) = prepare_startup_import(incoming_path.clone(), loaded, fallback);
 
     assert_eq!(current.sheets[0].name, "Recovered");
     assert_eq!(
@@ -272,16 +343,19 @@ fn startup_xlsx_warning_keeps_recovered_workbook_visible_until_confirmation() {
         Some("keep this workbook")
     );
     let pending = pending.expect("candidate should wait for confirmation");
-    assert_eq!(pending.path, PathBuf::from("incoming.xlsx"));
+    assert_eq!(pending.path, incoming_path);
     assert_eq!(pending.workbook.sheets[0].name, "Imported");
     assert_eq!(
         pending.workbook.sheets[0].raw(CellRef { row: 0, col: 0 }),
-        Some("incoming value")
+        Some("Quarter")
     );
     assert_eq!(
         pending.warnings,
-        vec![loom_sheets_core::XlsxImportWarning::DefinedNames]
+        vec![loom_sheets_core::XlsxImportWarning::UnsupportedChart(
+            loom_sheets_core::XlsxChartType::Area
+        )]
     );
+    std::fs::remove_dir_all(&incoming_dir).ok();
 }
 
 #[test]

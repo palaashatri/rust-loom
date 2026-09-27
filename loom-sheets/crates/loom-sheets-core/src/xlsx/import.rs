@@ -8,8 +8,8 @@ use crate::{CellRef, ChartKind, Sheet, SheetChart, SheetObject};
 use super::cell_refs::column_index;
 use super::package_parts::{parent_path, relationship_map, relationship_part_path, resolve_target};
 use super::styles::{apply_imported_styles, fill_from_rgb, parse_styles};
-use super::warnings::XlsxImportWarning;
-use super::xml::{attr, contains_element, elements, xml_unescape};
+use super::warnings::{chart_plot_groups, imported_chart_group_index, XlsxImportWarning};
+use super::xml::{attr, elements, xml_unescape};
 use super::EMU_PER_PIXEL;
 
 /// Parsed worksheet model plus known features that will be omitted by import.
@@ -202,7 +202,7 @@ fn import_drawings(
                     let chart_path = resolve_target(parent_path(&drawing_path), target);
                     if let Some(chart_bytes) = archive.get(&chart_path) {
                         if let Ok(chart_xml) = std::str::from_utf8(chart_bytes) {
-                            if let Some(chart) = parse_chart(chart_xml) {
+                            if let Some(chart) = parse_chart(&chart_path, chart_xml)? {
                                 sheet.chart = Some(chart);
                             }
                         }
@@ -306,23 +306,24 @@ fn parse_marker(body: &str) -> CellRef {
     CellRef { row, col }
 }
 
-fn parse_chart(xml: &str) -> Option<SheetChart> {
-    let kind = if contains_element(xml, "pieChart") {
-        ChartKind::Pie
-    } else if contains_element(xml, "scatterChart") {
-        ChartKind::Scatter
-    } else if contains_element(xml, "lineChart") {
-        ChartKind::Line
-    } else if contains_element(xml, "barChart") {
-        ChartKind::Bar
-    } else {
-        return None;
+fn parse_chart(path: &str, xml: &str) -> Result<Option<SheetChart>, String> {
+    let chart_groups = chart_plot_groups(path, xml)?;
+    let Some(imported_group_index) = imported_chart_group_index(&chart_groups) else {
+        return Ok(None);
+    };
+    let imported_group = &chart_groups[imported_group_index];
+    let kind = match imported_group.name.as_str() {
+        "pieChart" => ChartKind::Pie,
+        "scatterChart" => ChartKind::Scatter,
+        "lineChart" => ChartKind::Line,
+        "barChart" => ChartKind::Bar,
+        _ => unreachable!("the import priority only selects supported chart groups"),
     };
     let title = elements(xml, "t")
         .next()
         .map(|tag| xml_unescape(tag.body.trim()))
         .unwrap_or_else(|| "Chart".to_string());
-    let formulas = elements(xml, "f")
+    let formulas = elements(imported_group.body, "f")
         .map(|tag| xml_unescape(tag.body.trim()))
         .collect::<Vec<_>>();
     let cat_col = formulas
@@ -338,14 +339,14 @@ fn parse_chart(xml: &str) -> Option<SheetChart> {
         let (first, last) = range.split_once(':')?;
         Some((CellRef::parse(first)?.row, CellRef::parse(last)?.row))
     });
-    Some(SheetChart {
+    Ok(Some(SheetChart {
         start_row: rows.map_or(1, |rows| rows.0),
         end_row: rows.map(|rows| rows.1),
         kind,
         title,
         cat_col,
         val_col,
-    })
+    }))
 }
 
 fn formula_column(formula: &str) -> Option<u32> {

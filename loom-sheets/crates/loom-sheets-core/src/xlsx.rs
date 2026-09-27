@@ -10,7 +10,7 @@ mod xml;
 
 pub use export::export_xlsx_sheets;
 pub use import::{extract_xlsx_sheets, import_xlsx_sheets, XlsxImport};
-pub use warnings::XlsxImportWarning;
+pub use warnings::{XlsxChartType, XlsxImportWarning};
 
 const MAIN_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -360,6 +360,148 @@ mod tests {
     }
 
     #[test]
+    fn xlsx_import_reports_single_unsupported_chart_types_before_dropping_them() {
+        for (expected_label, chart_tag) in [
+            ("unsupported area charts", "areaChart"),
+            ("unsupported doughnut charts", "doughnutChart"),
+        ] {
+            let bytes = xlsx_with_single_chart_type(chart_tag);
+            let imported = import_xlsx_sheets(&bytes).expect("import workbook");
+
+            assert!(imported.sheets[0].chart.is_none());
+            assert!(
+                imported
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.label() == expected_label),
+                "the warning must name the dropped chart as {expected_label}: {:?}",
+                imported.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn xlsx_import_reports_plot_groups_dropped_from_a_combined_chart() {
+        let bytes = xlsx_with_combined_chart_groups(ChartKind::Bar, ChartKind::Line);
+        let imported = import_xlsx_sheets(&bytes).expect("import combined chart workbook");
+
+        let chart = imported.sheets[0]
+            .chart
+            .as_ref()
+            .expect("imported line chart");
+        assert_eq!(
+            chart.kind,
+            ChartKind::Line,
+            "the importer selects the line plot from the combination"
+        );
+        assert_eq!(
+            chart.val_col, 2,
+            "the imported line plot must keep its C-column values"
+        );
+        assert!(
+            imported
+                .warnings
+                .iter()
+                .any(|warning| { warning.label() == "additional bar chart plots" }),
+            "the warning must name the dropped bar plot: {:?}",
+            imported.warnings
+        );
+    }
+
+    #[test]
+    fn xlsx_import_reports_repeated_plot_groups_dropped_from_a_chart() {
+        let bytes = xlsx_with_combined_chart_groups(ChartKind::Bar, ChartKind::Bar);
+        let imported = import_xlsx_sheets(&bytes).expect("import repeated chart groups");
+
+        assert_eq!(
+            imported.sheets[0].chart.as_ref().map(|chart| chart.kind),
+            Some(ChartKind::Bar)
+        );
+        assert!(
+            imported
+                .warnings
+                .iter()
+                .any(|warning| { warning.label() == "additional bar chart plots" }),
+            "the warning must report the repeated, dropped bar plot: {:?}",
+            imported.warnings
+        );
+    }
+
+    #[test]
+    fn xlsx_import_reports_single_unsupported_chart_in_strict_chart_namespace() {
+        let bytes = xlsx_with_single_chart_type_in_namespace(
+            "areaChart",
+            "http://purl.oclc.org/ooxml/drawingml/chart",
+        );
+        let imported = import_xlsx_sheets(&bytes).expect("import strict-chart workbook");
+
+        assert!(imported.sheets[0].chart.is_none());
+        assert!(imported
+            .warnings
+            .iter()
+            .any(|warning| warning.label() == "unsupported area charts"));
+    }
+
+    #[test]
+    fn xlsx_import_keeps_supported_chart_types_out_of_loss_warnings() {
+        for kind in [
+            ChartKind::Bar,
+            ChartKind::Line,
+            ChartKind::Pie,
+            ChartKind::Scatter,
+        ] {
+            let mut sheet = Sheet::new("Budget");
+            sheet.chart = Some(SheetChart {
+                kind,
+                ..Default::default()
+            });
+            let bytes = export_xlsx_sheets(&[sheet]).expect("export supported chart");
+            let imported = import_xlsx_sheets(&bytes).expect("import supported chart");
+            assert!(imported.warnings.is_empty(), "{kind:?} chart warning");
+            assert_eq!(
+                imported.sheets[0].chart.as_ref().map(|chart| chart.kind),
+                Some(kind)
+            );
+        }
+    }
+
+    #[test]
+    fn xlsx_import_ignores_chart_like_extension_elements_when_selecting_plot_type() {
+        let mut sheet = Sheet::new("Budget");
+        sheet.chart = Some(SheetChart {
+            kind: ChartKind::Bar,
+            ..Default::default()
+        });
+        let base = export_xlsx_sheets(&[sheet]).expect("export base workbook");
+        let archive = PackageArchive::from_bytes(&base).expect("read base workbook");
+        let chart_xml = String::from_utf8(
+            archive
+                .get("xl/charts/chart1.xml")
+                .expect("chart part")
+                .to_vec(),
+        )
+        .expect("chart XML is UTF-8")
+        .replace(
+            "</c:chartSpace>",
+            "<c:extLst><c:ext uri=\"urn:loom:test\"><x:pieChart xmlns:x=\"urn:loom:test\"/></c:ext></c:extLst></c:chartSpace>",
+        );
+        let bytes = test_xlsx_with_parts(
+            &[("xl/charts/chart1.xml", chart_xml)],
+            &[],
+            &[],
+            Some(&base),
+        );
+
+        let imported = import_xlsx_sheets(&bytes).expect("import extension chart workbook");
+        assert_eq!(
+            imported.sheets[0].chart.as_ref().map(|chart| chart.kind),
+            Some(ChartKind::Bar),
+            "only actual chart-namespace plot groups determine the imported chart"
+        );
+        assert!(imported.warnings.is_empty());
+    }
+
+    #[test]
     fn xlsx_import_reports_drawing_relationships_that_point_to_missing_parts() {
         let mut sheet = Sheet::new("Budget");
         sheet.chart = Some(SheetChart::default());
@@ -415,6 +557,126 @@ mod tests {
     fn test_xlsx_with_xml(path: &str, close_tag: &str, snippet: &str) -> Vec<u8> {
         let snippet = test_xml_with_snippet(path, close_tag, snippet);
         test_xlsx_with_parts(&[(path, snippet)], &[], &[], None)
+    }
+
+    fn xlsx_with_single_chart_type(chart_tag: &str) -> Vec<u8> {
+        xlsx_with_single_chart_type_in_namespace(chart_tag, CHART_NS)
+    }
+
+    fn xlsx_with_single_chart_type_in_namespace(chart_tag: &str, namespace: &str) -> Vec<u8> {
+        let (kind, source_tag) = match chart_tag {
+            "areaChart" => (ChartKind::Line, "lineChart"),
+            "doughnutChart" => (ChartKind::Pie, "pieChart"),
+            _ => panic!("add a schema-appropriate source fixture for {chart_tag}"),
+        };
+        let mut sheet = Sheet::new("Budget");
+        sheet.chart = Some(SheetChart {
+            kind,
+            ..Default::default()
+        });
+        let base = export_xlsx_sheets(&[sheet]).expect("export base workbook");
+        let archive = PackageArchive::from_bytes(&base).expect("read base workbook");
+        let chart_xml = String::from_utf8(
+            archive
+                .get("xl/charts/chart1.xml")
+                .expect("chart part")
+                .to_vec(),
+        )
+        .expect("chart XML is UTF-8");
+        assert!(chart_xml.contains(&format!("<c:{source_tag}>")));
+        assert!(chart_xml.contains(&format!("</c:{source_tag}>")));
+        let mut chart_xml = chart_xml
+            .replace(&format!("<c:{source_tag}>"), &format!("<c:{chart_tag}>"))
+            .replace(&format!("</c:{source_tag}>"), &format!("</c:{chart_tag}>"));
+        if chart_tag == "doughnutChart" {
+            chart_xml = chart_xml.replace(
+                "</c:doughnutChart>",
+                "<c:holeSize val=\"50\"/></c:doughnutChart>",
+            );
+        }
+        let chart_xml = chart_xml.replace(CHART_NS, namespace);
+        let drawing_xml = String::from_utf8(
+            archive
+                .get("xl/drawings/drawing1.xml")
+                .expect("drawing part")
+                .to_vec(),
+        )
+        .expect("drawing XML is UTF-8")
+        .replace(CHART_NS, namespace);
+        test_xlsx_with_parts(
+            &[
+                ("xl/charts/chart1.xml", chart_xml),
+                ("xl/drawings/drawing1.xml", drawing_xml),
+            ],
+            &[],
+            &[],
+            Some(&base),
+        )
+    }
+
+    fn xlsx_with_combined_chart_groups(first: ChartKind, second: ChartKind) -> Vec<u8> {
+        let chart_group = |kind, value_col| {
+            let mut sheet = Sheet::new("Budget");
+            sheet.set_str("A1", "Q1");
+            sheet.set_str("A2", "Q2");
+            sheet.set_str("B1", "10");
+            sheet.set_str("B2", "20");
+            sheet.set_str("C1", "15");
+            sheet.set_str("C2", "30");
+            sheet.chart = Some(SheetChart {
+                kind,
+                val_col: value_col,
+                ..Default::default()
+            });
+            let bytes = export_xlsx_sheets(&[sheet]).expect("export chart group");
+            let archive = PackageArchive::from_bytes(&bytes).expect("read chart package");
+            String::from_utf8(
+                archive
+                    .get("xl/charts/chart1.xml")
+                    .expect("chart part")
+                    .to_vec(),
+            )
+            .expect("chart XML is UTF-8")
+        };
+        let first_xml = chart_group(first, 1);
+        let second_xml = chart_group(second, 2);
+        let chart_tag = |kind| match kind {
+            ChartKind::Bar => "barChart",
+            ChartKind::Line => "lineChart",
+            ChartKind::Pie => "pieChart",
+            ChartKind::Scatter => "scatterChart",
+        };
+        let extract_group = |xml: &str, tag: &str| {
+            let open = format!("<c:{tag}>");
+            let close = format!("</c:{tag}>");
+            let start = xml.find(&open).expect("chart group starts");
+            let end = xml[start..]
+                .find(&close)
+                .map(|offset| start + offset + close.len())
+                .expect("chart group ends");
+            xml[start..end].to_string()
+        };
+        let first_tag = chart_tag(first);
+        let second_group = extract_group(&second_xml, chart_tag(second))
+            .replace("<c:idx val=\"0\"/>", "<c:idx val=\"1\"/>")
+            .replace("<c:order val=\"0\"/>", "<c:order val=\"1\"/>");
+        let combined_xml = first_xml.replacen(
+            &format!("</c:{first_tag}>"),
+            &format!("</c:{first_tag}>{second_group}"),
+            1,
+        );
+        let mut sheet = Sheet::new("Budget");
+        sheet.chart = Some(SheetChart {
+            kind: first,
+            ..Default::default()
+        });
+        let base = export_xlsx_sheets(&[sheet]).expect("export base workbook");
+        test_xlsx_with_parts(
+            &[("xl/charts/chart1.xml", combined_xml)],
+            &[],
+            &[],
+            Some(&base),
+        )
     }
 
     fn test_xml_with_snippet(path: &str, close_tag: &str, snippet: &str) -> String {

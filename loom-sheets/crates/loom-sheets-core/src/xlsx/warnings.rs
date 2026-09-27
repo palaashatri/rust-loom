@@ -3,6 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loom_package::zip::PackageArchive;
+use quick_xml::events::Event;
+use quick_xml::name::ResolveResult;
+use quick_xml::NsReader;
 
 use super::import::workbook_sheet_parts;
 use super::package_parts::{
@@ -10,6 +13,102 @@ use super::package_parts::{
 };
 use super::xml::parse_xml_nodes;
 use super::{CHART_NS, DRAWINGML_NS};
+
+const STRICT_CHART_NS: &str = "http://purl.oclc.org/ooxml/drawingml/chart";
+
+/// A chart group kind recognized in SpreadsheetML chart parts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum XlsxChartType {
+    Area,
+    Area3D,
+    Bar,
+    Bar3D,
+    Bubble,
+    Doughnut,
+    Line,
+    Line3D,
+    OfPie,
+    Pie,
+    Pie3D,
+    Radar,
+    Scatter,
+    Stock,
+    Surface,
+    Surface3D,
+    Other,
+}
+
+impl XlsxChartType {
+    fn from_tag(tag: &str) -> Self {
+        match tag.strip_suffix("Chart") {
+            Some("area") => Self::Area,
+            Some("area3D") => Self::Area3D,
+            Some("bar") => Self::Bar,
+            Some("bar3D") => Self::Bar3D,
+            Some("bubble") => Self::Bubble,
+            Some("doughnut") => Self::Doughnut,
+            Some("line") => Self::Line,
+            Some("line3D") => Self::Line3D,
+            Some("ofPie") => Self::OfPie,
+            Some("pie") => Self::Pie,
+            Some("pie3D") => Self::Pie3D,
+            Some("radar") => Self::Radar,
+            Some("scatter") => Self::Scatter,
+            Some("stock") => Self::Stock,
+            Some("surface") => Self::Surface,
+            Some("surface3D") => Self::Surface3D,
+            _ => Self::Other,
+        }
+    }
+
+    fn is_supported(self) -> bool {
+        matches!(self, Self::Bar | Self::Line | Self::Pie | Self::Scatter)
+    }
+
+    fn unsupported_label(self) -> &'static str {
+        match self {
+            Self::Area => "unsupported area charts",
+            Self::Area3D => "unsupported 3-D area charts",
+            Self::Bar => "unsupported bar charts",
+            Self::Bar3D => "unsupported 3-D bar charts",
+            Self::Bubble => "unsupported bubble charts",
+            Self::Doughnut => "unsupported doughnut charts",
+            Self::Line => "unsupported line charts",
+            Self::Line3D => "unsupported 3-D line charts",
+            Self::OfPie => "unsupported of-pie charts",
+            Self::Pie => "unsupported pie charts",
+            Self::Pie3D => "unsupported 3-D pie charts",
+            Self::Radar => "unsupported radar charts",
+            Self::Scatter => "unsupported scatter charts",
+            Self::Stock => "unsupported stock charts",
+            Self::Surface => "unsupported surface charts",
+            Self::Surface3D => "unsupported 3-D surface charts",
+            Self::Other => "unsupported unrecognized chart types",
+        }
+    }
+
+    fn dropped_plot_label(self) -> &'static str {
+        match self {
+            Self::Area => "additional area chart plots",
+            Self::Area3D => "additional 3-D area chart plots",
+            Self::Bar => "additional bar chart plots",
+            Self::Bar3D => "additional 3-D bar chart plots",
+            Self::Bubble => "additional bubble chart plots",
+            Self::Doughnut => "additional doughnut chart plots",
+            Self::Line => "additional line chart plots",
+            Self::Line3D => "additional 3-D line chart plots",
+            Self::OfPie => "additional of-pie chart plots",
+            Self::Pie => "additional pie chart plots",
+            Self::Pie3D => "additional 3-D pie chart plots",
+            Self::Radar => "additional radar chart plots",
+            Self::Scatter => "additional scatter chart plots",
+            Self::Stock => "additional stock chart plots",
+            Self::Surface => "additional surface chart plots",
+            Self::Surface3D => "additional 3-D surface chart plots",
+            Self::Other => "additional unrecognized chart plots",
+        }
+    }
+}
 
 /// A known XLSX feature that the Loom workbook model cannot preserve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,6 +122,8 @@ pub enum XlsxImportWarning {
     MultipleChartsOnSheet,
     MissingDrawingParts,
     PivotTables,
+    UnsupportedChart(XlsxChartType),
+    DroppedChartPlot(XlsxChartType),
 }
 
 impl XlsxImportWarning {
@@ -38,6 +139,8 @@ impl XlsxImportWarning {
             Self::MultipleChartsOnSheet => "additional charts on the same sheet",
             Self::MissingDrawingParts => "drawing objects with missing linked parts",
             Self::PivotTables => "Excel PivotTables (only their cached cell values are imported)",
+            Self::UnsupportedChart(chart_type) => chart_type.unsupported_label(),
+            Self::DroppedChartPlot(chart_type) => chart_type.dropped_plot_label(),
         }
     }
 }
@@ -168,16 +271,45 @@ pub(super) fn detect_import_warnings(
             .unwrap_or_default();
         let mut charts = 0usize;
         for node in &drawing_nodes {
-            if node.namespace == CHART_NS && node.name == "chart" {
+            if is_chart_namespace(&node.namespace) && node.name == "chart" {
                 charts += 1;
-                if !drawing_target_exists(
+                let chart_path = drawing_target_path(
                     &drawing_relationships,
                     &node.attributes,
                     "chart",
                     &drawing_path,
-                    archive,
-                ) {
+                );
+                let Some(chart_path) = chart_path.filter(|path| archive.get(path).is_some()) else {
                     warnings.insert(XlsxImportWarning::MissingDrawingParts);
+                    continue;
+                };
+                let Some(chart_bytes) = archive.get(&chart_path) else {
+                    warnings.insert(XlsxImportWarning::MissingDrawingParts);
+                    continue;
+                };
+                let chart_xml = std::str::from_utf8(chart_bytes)
+                    .map_err(|_| format!("{chart_path} is not valid UTF-8"))?;
+                let chart_groups = chart_plot_groups(&chart_path, chart_xml)?;
+                if chart_groups.is_empty() {
+                    warnings.insert(XlsxImportWarning::UnsupportedChart(XlsxChartType::Other));
+                }
+                if chart_groups.len() == 1 {
+                    if let Some(chart_type) = unsupported_chart_type(&chart_groups[0].name) {
+                        warnings.insert(XlsxImportWarning::UnsupportedChart(chart_type));
+                    }
+                } else if chart_groups.len() > 1 {
+                    let imported_index = imported_chart_group_index(&chart_groups);
+                    for (index, group) in chart_groups.iter().enumerate() {
+                        if Some(index) == imported_index {
+                            continue;
+                        }
+                        let chart_type = XlsxChartType::from_tag(&group.name);
+                        warnings.insert(if chart_type.is_supported() {
+                            XlsxImportWarning::DroppedChartPlot(chart_type)
+                        } else {
+                            XlsxImportWarning::UnsupportedChart(chart_type)
+                        });
+                    }
                 }
             } else if node.namespace == DRAWINGML_NS
                 && node.name == "blip"
@@ -200,6 +332,112 @@ pub(super) fn detect_import_warnings(
     Ok(warnings.into_iter().collect())
 }
 
+fn is_chart_namespace(namespace: &str) -> bool {
+    namespace == CHART_NS || namespace == STRICT_CHART_NS
+}
+
+pub(super) struct ChartPlotGroup<'a> {
+    pub(super) name: String,
+    pub(super) body: &'a str,
+}
+
+struct ChartXmlFrame {
+    namespace: String,
+    name: String,
+    is_plot_area: bool,
+    plot_group_body_start: Option<usize>,
+}
+
+pub(super) fn chart_plot_groups<'a>(
+    path: &str,
+    chart_xml: &'a str,
+) -> Result<Vec<ChartPlotGroup<'a>>, String> {
+    let mut reader = NsReader::from_str(chart_xml);
+    reader.config_mut().trim_text(false);
+    let mut stack = Vec::<ChartXmlFrame>::new();
+    let mut groups = Vec::new();
+
+    loop {
+        let event_start = reader.buffer_position() as usize;
+        let (resolved_namespace, event) = reader
+            .read_resolved_event()
+            .map_err(|error| format!("parse {path}: {error}"))?;
+        match event {
+            Event::Start(element) => {
+                let namespace = resolved_chart_namespace(path, resolved_namespace)?;
+                let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                let is_plot_area = name == "plotArea"
+                    && is_chart_namespace(&namespace)
+                    && stack.len() >= 2
+                    && stack[stack.len() - 1].name == "chart"
+                    && is_chart_namespace(&stack[stack.len() - 1].namespace)
+                    && stack[stack.len() - 2].name == "chartSpace"
+                    && is_chart_namespace(&stack[stack.len() - 2].namespace);
+                let is_plot_group = stack.last().is_some_and(|parent| parent.is_plot_area)
+                    && is_chart_namespace(&namespace)
+                    && name.ends_with("Chart");
+                let plot_group_body_start =
+                    is_plot_group.then(|| reader.buffer_position() as usize);
+                stack.push(ChartXmlFrame {
+                    namespace,
+                    name,
+                    is_plot_area,
+                    plot_group_body_start,
+                });
+            }
+            Event::Empty(element) => {
+                let namespace = resolved_chart_namespace(path, resolved_namespace)?;
+                let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                if stack.last().is_some_and(|parent| parent.is_plot_area)
+                    && is_chart_namespace(&namespace)
+                    && name.ends_with("Chart")
+                {
+                    groups.push(ChartPlotGroup { name, body: "" });
+                }
+            }
+            Event::End(_) => {
+                if let Some(frame) = stack.pop() {
+                    if let Some(body_start) = frame.plot_group_body_start {
+                        let body = chart_xml.get(body_start..event_start).ok_or_else(|| {
+                            format!("parse {path}: invalid chart plot group byte range")
+                        })?;
+                        groups.push(ChartPlotGroup {
+                            name: frame.name,
+                            body,
+                        });
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    if !stack.is_empty() {
+        return Err(format!("parse {path}: unclosed chart XML element"));
+    }
+    Ok(groups)
+}
+
+fn resolved_chart_namespace(path: &str, namespace: ResolveResult<'_>) -> Result<String, String> {
+    match namespace {
+        ResolveResult::Bound(namespace) => {
+            Ok(String::from_utf8_lossy(namespace.as_ref()).into_owned())
+        }
+        ResolveResult::Unbound => Ok(String::new()),
+        ResolveResult::Unknown(prefix) => Err(format!(
+            "parse {path}: XML element uses undeclared namespace prefix {}",
+            String::from_utf8_lossy(&prefix)
+        )),
+    }
+}
+
+pub(super) fn imported_chart_group_index(chart_groups: &[ChartPlotGroup<'_>]) -> Option<usize> {
+    ["pieChart", "scatterChart", "lineChart", "barChart"]
+        .iter()
+        .find_map(|name| chart_groups.iter().position(|group| &group.name == name))
+}
+
 const SPREADSHEET_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const STRICT_SPREADSHEET_NS: &str = "http://purl.oclc.org/ooxml/spreadsheetml/main";
 const X14_SPREADSHEET_NS: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
@@ -214,20 +452,30 @@ fn drawing_target_exists(
     drawing_path: &str,
     archive: &PackageArchive,
 ) -> bool {
+    drawing_target_path(relationships, attributes, expected_kind, drawing_path)
+        .is_some_and(|target| archive.get(&target).is_some())
+}
+
+fn drawing_target_path(
+    relationships: &[OoxmlRelationship],
+    attributes: &BTreeMap<String, String>,
+    expected_kind: &str,
+    drawing_path: &str,
+) -> Option<String> {
     let relationship_id = attributes
         .get("r:id")
         .or_else(|| attributes.get("r:embed"))
         .or_else(|| attributes.get("id"))
         .or_else(|| attributes.get("embed"));
-    let Some(relationship_id) = relationship_id else {
-        return false;
-    };
+    let relationship_id = relationship_id?;
     relationships
         .iter()
         .find(|relationship| relationship.id == *relationship_id)
         .filter(|relationship| relationship.kind.ends_with(&format!("/{expected_kind}")))
-        .is_some_and(|relationship| {
-            let target = resolve_target(parent_path(drawing_path), &relationship.target);
-            archive.get(&target).is_some()
-        })
+        .map(|relationship| resolve_target(parent_path(drawing_path), &relationship.target))
+}
+
+fn unsupported_chart_type(chart_tag: &str) -> Option<XlsxChartType> {
+    let chart_type = XlsxChartType::from_tag(chart_tag);
+    (!chart_type.is_supported()).then_some(chart_type)
 }

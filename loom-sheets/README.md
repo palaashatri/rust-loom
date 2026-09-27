@@ -48,6 +48,10 @@ The matching test, build, and one-time Orca announcement results are recorded in
 
 The warning dialog now grows to fit short messages, caps itself to the window, and scrolls long warning text while leaving both actions visible. Renderer checks cover a short message, 2× text, and a long message: [short](docs/qa-renderer/ui28-xlsx-warning-short-1024x720-linux.png), [short at 2×](docs/qa-renderer/ui28-xlsx-warning-short-2x-1024x720-linux.png), and [long at 2×](docs/qa-renderer/ui28-xlsx-warning-long-2x-1024x720-linux.png). The live screenshot verifies visual sizing only; dialog focus, Escape, and button effects remain under CODE-23 review.
 
+![Native Linux warning before dropping a single unsupported area chart](docs/qa-native/code27-unsupported-area-warning-live-linux.png)
+
+The 2026-09-27 live capture shows “unsupported area charts” before workbook replacement, with the current workbook still visible and both actions available. The focused-window PNG is 1018×728 on a 1366×768 X11 desktop; Sol's visual review found no clipped copy or hidden buttons in the capture. Native button/focus actions and the picker/startup Open dispatch for this specific fixture remain open under the Sheets acceptance gate.
+
 ![Renderer capture of the aligned File menu popup](docs/qa-renderer/ui29-menu-popup-aligned-1024x720-linux.png)
 
 Menu rows use the shared exported `LoomMenuItem` from `loom-core/crates/loom-ui/ui/foundation.slint`. Other Loom applications should reuse it for consistent label, shortcut, check-mark, disabled, and selected layout. The popup now fits its visible rows. This menu popup image is renderer evidence; native popup interaction is still unverified under UI-01.
