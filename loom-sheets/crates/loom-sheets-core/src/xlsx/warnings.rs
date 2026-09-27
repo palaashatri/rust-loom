@@ -108,6 +108,28 @@ impl XlsxChartType {
             Self::Other => "additional unrecognized chart plots",
         }
     }
+
+    fn dropped_series_label(self) -> &'static str {
+        match self {
+            Self::Area => "additional area chart series",
+            Self::Area3D => "additional 3-D area chart series",
+            Self::Bar => "additional bar chart series",
+            Self::Bar3D => "additional 3-D bar chart series",
+            Self::Bubble => "additional bubble chart series",
+            Self::Doughnut => "additional doughnut chart series",
+            Self::Line => "additional line chart series",
+            Self::Line3D => "additional 3-D line chart series",
+            Self::OfPie => "additional of-pie chart series",
+            Self::Pie => "additional pie chart series",
+            Self::Pie3D => "additional 3-D pie chart series",
+            Self::Radar => "additional radar chart series",
+            Self::Scatter => "additional scatter chart series",
+            Self::Stock => "additional stock chart series",
+            Self::Surface => "additional surface chart series",
+            Self::Surface3D => "additional 3-D surface chart series",
+            Self::Other => "additional unrecognized chart series",
+        }
+    }
 }
 
 /// A known XLSX feature that the Loom workbook model cannot preserve.
@@ -124,6 +146,7 @@ pub enum XlsxImportWarning {
     PivotTables,
     UnsupportedChart(XlsxChartType),
     DroppedChartPlot(XlsxChartType),
+    DroppedChartSeries(XlsxChartType),
 }
 
 impl XlsxImportWarning {
@@ -141,6 +164,7 @@ impl XlsxImportWarning {
             Self::PivotTables => "Excel PivotTables (only their cached cell values are imported)",
             Self::UnsupportedChart(chart_type) => chart_type.unsupported_label(),
             Self::DroppedChartPlot(chart_type) => chart_type.dropped_plot_label(),
+            Self::DroppedChartSeries(chart_type) => chart_type.dropped_series_label(),
         }
     }
 }
@@ -293,12 +317,19 @@ pub(super) fn detect_import_warnings(
                 if chart_groups.is_empty() {
                     warnings.insert(XlsxImportWarning::UnsupportedChart(XlsxChartType::Other));
                 }
+                let imported_index = imported_chart_group_index(&chart_groups);
+                if let Some(group) = imported_index.and_then(|index| chart_groups.get(index)) {
+                    if group.series_count > 1 {
+                        warnings.insert(XlsxImportWarning::DroppedChartSeries(
+                            XlsxChartType::from_tag(&group.name),
+                        ));
+                    }
+                }
                 if chart_groups.len() == 1 {
                     if let Some(chart_type) = unsupported_chart_type(&chart_groups[0].name) {
                         warnings.insert(XlsxImportWarning::UnsupportedChart(chart_type));
                     }
                 } else if chart_groups.len() > 1 {
-                    let imported_index = imported_chart_group_index(&chart_groups);
                     for (index, group) in chart_groups.iter().enumerate() {
                         if Some(index) == imported_index {
                             continue;
@@ -338,14 +369,18 @@ fn is_chart_namespace(namespace: &str) -> bool {
 
 pub(super) struct ChartPlotGroup<'a> {
     pub(super) name: String,
-    pub(super) body: &'a str,
+    pub(super) first_series_body: Option<&'a str>,
+    series_count: usize,
 }
 
 struct ChartXmlFrame {
     namespace: String,
     name: String,
     is_plot_area: bool,
-    plot_group_body_start: Option<usize>,
+    is_plot_group: bool,
+    plot_group_series_count: usize,
+    plot_group_first_series_range: Option<(usize, usize)>,
+    plot_series_body_start: Option<usize>,
 }
 
 pub(super) fn chart_plot_groups<'a>(
@@ -366,6 +401,15 @@ pub(super) fn chart_plot_groups<'a>(
             Event::Start(element) => {
                 let namespace = resolved_chart_namespace(path, resolved_namespace)?;
                 let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                let mut plot_series_body_start = None;
+                if name == "ser" && is_chart_namespace(&namespace) {
+                    if let Some(parent) = stack.last_mut().filter(|parent| parent.is_plot_group) {
+                        parent.plot_group_series_count += 1;
+                        if parent.plot_group_first_series_range.is_none() {
+                            plot_series_body_start = Some(reader.buffer_position() as usize);
+                        }
+                    }
+                }
                 let is_plot_area = name == "plotArea"
                     && is_chart_namespace(&namespace)
                     && stack.len() >= 2
@@ -376,34 +420,62 @@ pub(super) fn chart_plot_groups<'a>(
                 let is_plot_group = stack.last().is_some_and(|parent| parent.is_plot_area)
                     && is_chart_namespace(&namespace)
                     && name.ends_with("Chart");
-                let plot_group_body_start =
-                    is_plot_group.then(|| reader.buffer_position() as usize);
                 stack.push(ChartXmlFrame {
                     namespace,
                     name,
                     is_plot_area,
-                    plot_group_body_start,
+                    is_plot_group,
+                    plot_group_series_count: 0,
+                    plot_group_first_series_range: None,
+                    plot_series_body_start,
                 });
             }
             Event::Empty(element) => {
                 let namespace = resolved_chart_namespace(path, resolved_namespace)?;
                 let name = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                if name == "ser" && is_chart_namespace(&namespace) {
+                    if let Some(parent) = stack.last_mut().filter(|parent| parent.is_plot_group) {
+                        parent.plot_group_series_count += 1;
+                        if parent.plot_group_first_series_range.is_none() {
+                            parent.plot_group_first_series_range = Some((event_start, event_start));
+                        }
+                    }
+                }
                 if stack.last().is_some_and(|parent| parent.is_plot_area)
                     && is_chart_namespace(&namespace)
                     && name.ends_with("Chart")
                 {
-                    groups.push(ChartPlotGroup { name, body: "" });
+                    groups.push(ChartPlotGroup {
+                        name,
+                        first_series_body: None,
+                        series_count: 0,
+                    });
                 }
             }
             Event::End(_) => {
                 if let Some(frame) = stack.pop() {
-                    if let Some(body_start) = frame.plot_group_body_start {
-                        let body = chart_xml.get(body_start..event_start).ok_or_else(|| {
-                            format!("parse {path}: invalid chart plot group byte range")
-                        })?;
+                    if let Some(body_start) = frame.plot_series_body_start {
+                        if let Some(parent) = stack.last_mut().filter(|parent| parent.is_plot_group)
+                        {
+                            if parent.plot_group_first_series_range.is_none() {
+                                parent.plot_group_first_series_range =
+                                    Some((body_start, event_start));
+                            }
+                        }
+                    }
+                    if frame.is_plot_group {
+                        let first_series_body = frame
+                            .plot_group_first_series_range
+                            .map(|(start, end)| {
+                                chart_xml.get(start..end).ok_or_else(|| {
+                                    format!("parse {path}: invalid chart series byte range")
+                                })
+                            })
+                            .transpose()?;
                         groups.push(ChartPlotGroup {
                             name: frame.name,
-                            body,
+                            first_series_body,
+                            series_count: frame.plot_group_series_count,
                         });
                     }
                 }

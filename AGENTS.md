@@ -1376,6 +1376,25 @@ The live X11 window was opened with the valid area-chart fixture and captured us
 
 **Done when:** an absolute-anchor object is preserved or a pre-replacement warning truthfully names its loss.
 
+### CODE-29 — Warn before dropping additional series from an XLSX chart
+
+**P1 · Sheets XLSX import safety · NEEDS_REVIEW (2026-09-27 audit finding).** The workbook chart model stores one data series. When a supported XLSX plot group contains multiple `<c:ser>` entries, the importer keeps one series and silently drops the others; the import-loss scan does not report this. Open can therefore replace the active workbook without naming the missing chart data.
+
+**Reproduce:** Create a valid supported line or bar chart group containing two series with distinct value-column references and a series-title formula before its category and value formulas. Load the workbook and compare its chart model and warnings. Before repair, the model retains only one value column, can mistake the title formula for category data, and does not name the additional series.
+
+1. Inspect the shared `chart_plot_groups` scanner, `imported_chart_group_index`, chart import, and current single-series boundary.
+2. Add focused regressions proving that a second series is silently omitted before repair, that a title formula does not displace the first series' category/value formulas, and that scatter X/Y references remain intact; keep one-series supported charts warning-free.
+3. Add a typed pre-replacement warning for extra series in the supported plot group. Count only real chart-namespace series children of that group; do not change the single-series workbook model as part of this card.
+4. Verify a multi-series candidate warns before replacement, Cancel leaves the current workbook and recovery unchanged, Continue imports the first series' correct category/value columns and reports the dropped data, scatter charts keep their X/Y columns, and combined chart-group warnings remain accurate.
+
+**Done when:** every extra series omitted by the single-series model is named in the pre-replacement warning, the retained first series' category/value references remain correct even when its title formula comes first, scatter X/Y references are preserved, and supported one-series charts remain warning-free. This card makes the existing single-series interoperability boundary explicit at the point of loss; it does not add native multi-series editing.
+
+**Repair result (2026-09-27) — NEEDS_REVIEW.** Added a typed warning for additional series in the selected supported plot group, scoped the count to direct `<ser>` children in the chart namespace, and corrected chart-reference parsing so a series-title formula cannot shift the first series' category/value columns. Scatter charts keep their X/Y references. The UI reports the dropped data before replacement; Cancel preserves the active workbook and recovery bytes, and Continue imports the retained first series and reports the loss. The single-series model remains unchanged.
+
+**Verification:** `cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-core --locked --offline` passed 130 tests; `cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --locked --offline -- --test-threads=1` passed 255 unit tests and 2 integration tests. Focused core regressions for title-formula ordering, scatter references, multi-series warnings, and namespace decoys passed; the focused app journey `multi_series_xlsx_warning_cancels_safely_and_continue_reports_dropped_data` passed. Production app build, strict workspace all-target Clippy, formatting, governance audit, asset audit, and `git diff --check` passed. Logs: `.work/code29-core-suite-final.log`, `.work/code29-app-multiseries-final.log`, `.work/code29-app-package-tests.log`, `.work/code29-app-build-final.log`, `.work/code29-clippy-final.log`, `.work/code29-governance.log`, `.work/code29-assets.log`, and `.work/code29-structure.log`. Structure audit still reports six pre-existing findings in locked/out-of-scope applications; no changed Sheets source is implicated.
+
+**Visual and review evidence:** The actual Linux window was captured with `/usr/bin/gnome-screenshot -w -f` at `loom-sheets/docs/qa-native/code29-multiseries-warning-live-linux.png`; the image shows the startup `--open` warning over the visible recovery workbook with the loss explanation and both actions readable. The capture is linked from `loom-sheets/README.md`. Astra design-bible/UI audit and hostile Sol code, functionality, and visual reviews found no current blocker in this repair. Native button/focus actions and picker-driven multi-series import remain unverified, so this milestone is NEEDS_REVIEW rather than FIXED; broader XLSX interoperability remains an acceptance gap.
+
 ### PERF-01 — Keep large workbook work from freezing the window
 
 **P2 · Sheets performance · NEEDS_REVIEW.** A fast calculation benchmark is only one part of performance. Users also need immediate feedback while editing, smooth scrolling, and a known memory limit.

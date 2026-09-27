@@ -52,6 +52,10 @@ The warning dialog now grows to fit short messages, caps itself to the window, a
 
 The 2026-09-27 live capture shows “unsupported area charts” before workbook replacement, with the current workbook still visible and both actions available. The focused-window PNG is 1018×728 on a 1366×768 X11 desktop; Sol's visual review found no clipped copy or hidden buttons in the capture. Native button/focus actions and the picker/startup Open dispatch for this specific fixture remain open under the Sheets acceptance gate.
 
+![Native Linux warning before dropping extra XLSX chart series](docs/qa-native/code29-multiseries-warning-live-linux.png)
+
+The 2026-09-27 live capture shows the “additional line chart series” warning before workbook replacement, with the current workbook visible and both actions in view. The native 1018×728 capture came from `/usr/bin/gnome-screenshot -w`. App tests verify Cancel preserves the workbook and recovery payload, and Continue imports the first series and names the dropped series in status. Native button/focus actions and multi-series picker/startup dispatch remain unverified under the Sheets acceptance gate.
+
 ![Renderer capture of the aligned File menu popup](docs/qa-renderer/ui29-menu-popup-aligned-1024x720-linux.png)
 
 Menu rows use the shared exported `LoomMenuItem` from `loom-core/crates/loom-ui/ui/foundation.slint`. Other Loom applications should reuse it for consistent label, shortcut, check-mark, disabled, and selected layout. The popup now fits its visible rows. This menu popup image is renderer evidence; native popup interaction is still unverified under UI-01.

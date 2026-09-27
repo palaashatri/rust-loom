@@ -382,7 +382,32 @@ mod tests {
 
     #[test]
     fn xlsx_import_reports_plot_groups_dropped_from_a_combined_chart() {
-        let bytes = xlsx_with_combined_chart_groups(ChartKind::Bar, ChartKind::Line);
+        let base = xlsx_with_combined_chart_groups(ChartKind::Bar, ChartKind::Line);
+        let archive = PackageArchive::from_bytes(&base).expect("read combined chart package");
+        let xml = String::from_utf8(
+            archive
+                .get("xl/charts/chart1.xml")
+                .expect("chart part")
+                .to_vec(),
+        )
+        .expect("chart XML is UTF-8");
+        let line_start = xml.find("<c:lineChart>").expect("line plot starts");
+        let line_body = &xml[line_start..];
+        let series_start = line_start + line_body.find("<c:ser>").expect("line series starts");
+        let series_end = series_start
+            + xml[series_start..]
+                .find("</c:ser>")
+                .map(|offset| offset + "</c:ser>".len())
+                .expect("line series ends");
+        let second_series = xml[series_start..series_end]
+            .replace("<c:idx val=\"1\"/>", "<c:idx val=\"2\"/>")
+            .replace("<c:order val=\"1\"/>", "<c:order val=\"2\"/>");
+        let xml = xml.replacen(
+            "</c:lineChart>",
+            &format!("{second_series}</c:lineChart>"),
+            1,
+        );
+        let bytes = test_xlsx_with_parts(&[("xl/charts/chart1.xml", xml)], &[], &[], Some(&base));
         let imported = import_xlsx_sheets(&bytes).expect("import combined chart workbook");
 
         let chart = imported.sheets[0]
@@ -406,6 +431,14 @@ mod tests {
             "the warning must name the dropped bar plot: {:?}",
             imported.warnings
         );
+        assert!(
+            imported
+                .warnings
+                .iter()
+                .any(|warning| { warning.label() == "additional line chart series" }),
+            "the warning must also name the dropped extra line series: {:?}",
+            imported.warnings
+        );
     }
 
     #[test]
@@ -424,6 +457,29 @@ mod tests {
                 .any(|warning| { warning.label() == "additional bar chart plots" }),
             "the warning must report the repeated, dropped bar plot: {:?}",
             imported.warnings
+        );
+    }
+
+    #[test]
+    fn xlsx_import_reports_extra_series_dropped_from_a_supported_plot_group() {
+        let bytes = xlsx_with_multiple_series_in_one_plot_group();
+        let imported = import_xlsx_sheets(&bytes).expect("import multi-series chart workbook");
+
+        let chart = imported.sheets[0]
+            .chart
+            .as_ref()
+            .expect("the supported line chart remains importable");
+        assert_eq!(chart.kind, ChartKind::Line);
+        assert_eq!(chart.cat_col, 0, "the first A-column category is retained");
+        assert_eq!(chart.val_col, 1, "the first B-column series is retained");
+        assert_eq!(
+            imported
+                .warnings
+                .iter()
+                .map(|warning| warning.label())
+                .collect::<Vec<_>>(),
+            vec!["additional line chart series"],
+            "the second C-column series must be named before workbook replacement"
         );
     }
 
@@ -466,6 +522,42 @@ mod tests {
     }
 
     #[test]
+    fn xlsx_import_preserves_scatter_x_and_y_reference_columns() {
+        let mut sheet = Sheet::new("Budget");
+        sheet.set_str("D1", "Elapsed");
+        sheet.set_str("D2", "1");
+        sheet.set_str("D3", "2");
+        sheet.set_str("E1", "Revenue");
+        sheet.set_str("E2", "10");
+        sheet.set_str("E3", "20");
+        sheet.chart = Some(SheetChart {
+            kind: ChartKind::Scatter,
+            cat_col: 3,
+            val_col: 4,
+            start_row: 1,
+            end_row: Some(2),
+            ..Default::default()
+        });
+        let bytes = export_xlsx_sheets(&[sheet]).expect("export scatter chart");
+        let imported = import_xlsx_sheets(&bytes).expect("import scatter chart");
+        let chart = imported.sheets[0]
+            .chart
+            .as_ref()
+            .expect("scatter chart remains supported");
+
+        assert_eq!(chart.kind, ChartKind::Scatter);
+        assert_eq!(
+            chart.cat_col, 3,
+            "x values should retain the D-column reference"
+        );
+        assert_eq!(
+            chart.val_col, 4,
+            "y values should retain the E-column reference"
+        );
+        assert!(imported.warnings.is_empty());
+    }
+
+    #[test]
     fn xlsx_import_ignores_chart_like_extension_elements_when_selecting_plot_type() {
         let mut sheet = Sheet::new("Budget");
         sheet.chart = Some(SheetChart {
@@ -481,6 +573,10 @@ mod tests {
                 .to_vec(),
         )
         .expect("chart XML is UTF-8")
+        .replace(
+            "</c:barChart>",
+            "<x:ser xmlns:x=\"urn:loom:test\"/><x:container xmlns:x=\"urn:loom:test\"><c:ser/></x:container></c:barChart>",
+        )
         .replace(
             "</c:chartSpace>",
             "<c:extLst><c:ext uri=\"urn:loom:test\"><x:pieChart xmlns:x=\"urn:loom:test\"/></c:ext></c:extLst></c:chartSpace>",
@@ -673,6 +769,61 @@ mod tests {
         let base = export_xlsx_sheets(&[sheet]).expect("export base workbook");
         test_xlsx_with_parts(
             &[("xl/charts/chart1.xml", combined_xml)],
+            &[],
+            &[],
+            Some(&base),
+        )
+    }
+
+    fn xlsx_with_multiple_series_in_one_plot_group() -> Vec<u8> {
+        let mut sheet = Sheet::new("Budget");
+        sheet.set_str("A1", "Q1");
+        sheet.set_str("A2", "Q2");
+        sheet.set_str("B1", "10");
+        sheet.set_str("B2", "20");
+        sheet.set_str("C1", "15");
+        sheet.set_str("C2", "30");
+        sheet.chart = Some(SheetChart {
+            kind: ChartKind::Line,
+            val_col: 1,
+            end_row: Some(2),
+            ..Default::default()
+        });
+        let base = export_xlsx_sheets(&[sheet]).expect("export base chart workbook");
+        let archive = PackageArchive::from_bytes(&base).expect("read chart package");
+        let xml = String::from_utf8(
+            archive
+                .get("xl/charts/chart1.xml")
+                .expect("chart part")
+                .to_vec(),
+        )
+        .expect("chart XML is UTF-8")
+        .replacen(
+            "<c:order val=\"0\"/>",
+            "<c:order val=\"0\"/><c:tx><c:strRef><c:f>'Budget'!$B$1</c:f></c:strRef></c:tx>",
+            1,
+        );
+        let series_start = xml.find("<c:ser>").expect("first chart series starts");
+        let series_end = xml[series_start..]
+            .find("</c:ser>")
+            .map(|offset| series_start + offset + "</c:ser>".len())
+            .expect("first chart series ends");
+        let second_series = xml[series_start..series_end]
+            .replace("<c:idx val=\"0\"/>", "<c:idx val=\"1\"/>")
+            .replace("<c:order val=\"0\"/>", "<c:order val=\"1\"/>")
+            .replace("'Budget'!$B$1", "'Budget'!$C$1")
+            .replace("'Budget'!$B$2:$B$3", "'Budget'!$C$2:$C$3");
+        assert!(
+            second_series.contains("'Budget'!$C$2:$C$3"),
+            "the fixture must give the second series a distinct value column: {second_series}"
+        );
+        let multi_series_xml = xml.replacen(
+            "</c:lineChart>",
+            &format!("{second_series}</c:lineChart>"),
+            1,
+        );
+        test_xlsx_with_parts(
+            &[("xl/charts/chart1.xml", multi_series_xml)],
             &[],
             &[],
             Some(&base),

@@ -323,18 +323,29 @@ fn parse_chart(path: &str, xml: &str) -> Result<Option<SheetChart>, String> {
         .next()
         .map(|tag| xml_unescape(tag.body.trim()))
         .unwrap_or_else(|| "Chart".to_string());
-    let formulas = elements(imported_group.body, "f")
-        .map(|tag| xml_unescape(tag.body.trim()))
-        .collect::<Vec<_>>();
-    let cat_col = formulas
-        .first()
-        .and_then(|formula| formula_column(formula))
+    let first_series = imported_group.first_series_body.unwrap_or_default();
+    let (category_tag, value_tag) = if kind == ChartKind::Scatter {
+        ("xVal", "yVal")
+    } else {
+        ("cat", "val")
+    };
+    let category_formula = elements(first_series, category_tag)
+        .next()
+        .and_then(|category| elements(category.body, "f").next())
+        .map(|formula| xml_unescape(formula.body.trim()));
+    let value_formula = elements(first_series, value_tag)
+        .next()
+        .and_then(|value| elements(value.body, "f").next())
+        .map(|formula| xml_unescape(formula.body.trim()));
+    let cat_col = category_formula
+        .as_deref()
+        .and_then(formula_column)
         .unwrap_or(0);
-    let val_col = formulas
-        .get(1)
-        .and_then(|formula| formula_column(formula))
+    let val_col = value_formula
+        .as_deref()
+        .and_then(formula_column)
         .unwrap_or(cat_col.saturating_add(1));
-    let rows = formulas.first().and_then(|formula| {
+    let rows = category_formula.as_deref().and_then(|formula| {
         let range = formula.rsplit('!').next()?.replace('$', "");
         let (first, last) = range.split_once(':')?;
         Some((CellRef::parse(first)?.row, CellRef::parse(last)?.row))

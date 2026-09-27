@@ -54,6 +54,59 @@ fn write_xlsx_with_unsupported_area_chart(path: &std::path::Path) {
         .expect("write XLSX fixture");
 }
 
+fn write_xlsx_with_multiple_series_line_chart(path: &std::path::Path) {
+    let mut source = Sheet::new("Imported");
+    source.set_str("A1", "Quarter");
+    source.set_str("A2", "Q1");
+    source.set_str("B1", "Revenue");
+    source.set_str("B2", "10");
+    source.set_str("B3", "20");
+    source.set_str("C1", "Costs");
+    source.set_str("C2", "5");
+    source.set_str("C3", "8");
+    source.chart = Some(loom_sheets_core::SheetChart {
+        kind: loom_sheets_core::ChartKind::Line,
+        end_row: Some(2),
+        ..Default::default()
+    });
+    let exported = loom_sheets_core::export_xlsx_sheets(&[source]).expect("export base XLSX");
+    let original = PackageArchive::from_bytes(&exported).expect("read base XLSX");
+    let mut rebuilt = PackageArchive::new();
+    for part in original.paths() {
+        let bytes = original.get(part).expect("XLSX part");
+        let bytes = if part == "xl/charts/chart1.xml" {
+            let xml = String::from_utf8(bytes.to_vec())
+                .expect("chart XML")
+                .replacen(
+                "<c:order val=\"0\"/>",
+                "<c:order val=\"0\"/><c:tx><c:strRef><c:f>'Imported'!$B$1</c:f></c:strRef></c:tx>",
+                1,
+            );
+            let series_start = xml.find("<c:ser>").expect("first series starts");
+            let series_end = xml[series_start..]
+                .find("</c:ser>")
+                .map(|offset| series_start + offset + "</c:ser>".len())
+                .expect("first series ends");
+            let second_series = xml[series_start..series_end]
+                .replace("<c:idx val=\"0\"/>", "<c:idx val=\"1\"/>")
+                .replace("<c:order val=\"0\"/>", "<c:order val=\"1\"/>")
+                .replace("'Imported'!$B$1", "'Imported'!$C$1")
+                .replace("'Imported'!$B$2:$B$3", "'Imported'!$C$2:$C$3");
+            xml.replacen(
+                "</c:lineChart>",
+                &format!("{second_series}</c:lineChart>"),
+                1,
+            )
+            .into_bytes()
+        } else {
+            bytes.to_vec()
+        };
+        rebuilt.add(part, bytes).expect("copy XLSX part");
+    }
+    std::fs::write(path, rebuilt.to_bytes().expect("build XLSX fixture"))
+        .expect("write XLSX fixture");
+}
+
 #[test]
 fn workbook_file_roundtrip_preserves_tabs_styles_and_freeze() {
     let dir =
@@ -305,6 +358,141 @@ fn continue_xlsx_import_replaces_the_workbook_only_after_confirmation() {
     assert!(app
         .get_status_left()
         .contains("dropped: unsupported area charts"));
+    std::fs::remove_dir_all(&incoming_dir).ok();
+}
+
+#[test]
+fn multi_series_xlsx_warning_cancels_safely_and_continue_reports_dropped_data() {
+    set_platform();
+    let incoming_dir = std::env::temp_dir().join(format!(
+        "loom-sheets-multi-series-warning-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&incoming_dir).expect("create incoming workbook directory");
+    let incoming_path = incoming_dir.join("incoming.xlsx");
+    write_xlsx_with_multiple_series_line_chart(&incoming_path);
+    if let Some(path) = std::env::var_os("LOOM_SHEETS_TEST_XLSX_COPY") {
+        std::fs::copy(&incoming_path, path).expect("copy multi-series XLSX fixture for inspection");
+    }
+
+    let cancel_app = SheetsApp::new().expect("create cancel SheetsApp");
+    let cancel_state = cross_sheet_state();
+    let recovery_dir = attach_test_worker(&cancel_app, &cancel_state, "cancel-multiseries-import");
+    let original_path = std::env::temp_dir().join("current-multiseries.loomtable");
+    *cancel_state.save_path.borrow_mut() = Some(original_path.clone());
+    cancel_state
+        .current
+        .borrow_mut()
+        .set_str("C1", "unsaved current value");
+    cancel_state.mark_content_dirty();
+    apply_sheet(&cancel_app, &cancel_state);
+    let revision = cancel_state.worker_revision.get();
+    let result = cancel_state
+        .workbook_worker
+        .borrow()
+        .as_ref()
+        .expect("recovery worker")
+        .wait_for_result(revision)
+        .expect("persist current workbook before warning");
+    assert!(apply_workbook_worker_result(
+        &cancel_app,
+        &cancel_state,
+        result
+    ));
+    let original_sheets = workbook_sheets(&cancel_state).0;
+    let original_active = *cancel_state.active_sheet_index.borrow();
+    let original_workbook = workbook_to_json(&original_sheets, original_active);
+    let original_recovery = workbook_package_bytes(&original_sheets, original_active)
+        .expect("package current recovery");
+    let original_current = sheet_to_json(&cancel_state.current.borrow());
+    let original_revision = cancel_state.worker_revision.get();
+
+    let loaded = load_workbook_with_report(&incoming_path).expect("load multi-series workbook");
+    assert_eq!(
+        loaded
+            .warnings
+            .iter()
+            .map(|warning| warning.label())
+            .collect::<Vec<_>>(),
+        vec!["additional line chart series"],
+        "the additional series warning must be the only import loss"
+    );
+    let retained = loaded.workbook.sheets[0]
+        .chart
+        .as_ref()
+        .expect("first line series remains available");
+    assert_eq!(
+        retained.cat_col, 0,
+        "the first series keeps A-column categories"
+    );
+    assert_eq!(
+        retained.val_col, 1,
+        "the first series keeps B-column values"
+    );
+    stage_xlsx_import(
+        &cancel_app,
+        &cancel_state,
+        incoming_path.clone(),
+        loaded.workbook,
+        loaded.warnings,
+    );
+    assert!(cancel_app.get_xlsx_import_warning_open());
+    assert!(cancel_app
+        .get_xlsx_import_warning_message()
+        .contains("additional line chart series"));
+    assert_eq!(
+        sheet_to_json(&cancel_state.current.borrow()),
+        original_current,
+        "the active workbook must remain visible while the warning is open"
+    );
+
+    cancel_pending_xlsx_import(&cancel_app, &cancel_state);
+    assert!(!cancel_app.get_xlsx_import_warning_open());
+    assert!(cancel_state.pending_xlsx_import.borrow().is_none());
+    let (sheets_after_cancel, active_after_cancel) = workbook_sheets(&cancel_state);
+    assert_eq!(
+        workbook_to_json(&sheets_after_cancel, active_after_cancel),
+        original_workbook
+    );
+    assert_eq!(*cancel_state.save_path.borrow(), Some(original_path));
+    assert_eq!(cancel_state.worker_revision.get(), original_revision);
+    drop(cancel_state.workbook_worker.borrow_mut().take());
+    assert_eq!(
+        recovered_worker_payload(&recovery_dir),
+        Some(original_recovery),
+        "Cancel must leave the last durable workbook unchanged"
+    );
+    crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
+
+    set_platform();
+    let continue_app = SheetsApp::new().expect("create Continue SheetsApp");
+    let continue_state = cross_sheet_state();
+    let loaded = load_workbook_with_report(&incoming_path).expect("reload multi-series workbook");
+    stage_xlsx_import(
+        &continue_app,
+        &continue_state,
+        incoming_path.clone(),
+        loaded.workbook,
+        loaded.warnings,
+    );
+    assert!(continue_app.get_xlsx_import_warning_open());
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    continue_pending_xlsx_import(&continue_app, &continue_state, &menu_service);
+    assert!(!continue_app.get_xlsx_import_warning_open());
+    assert_eq!(continue_state.current.borrow().name, "Imported");
+    let retained = continue_state
+        .current
+        .borrow()
+        .chart
+        .clone()
+        .expect("continue imports the retained chart series");
+    assert_eq!(retained.kind, loom_sheets_core::ChartKind::Line);
+    assert_eq!(retained.cat_col, 0);
+    assert_eq!(retained.val_col, 1);
+    assert!(continue_app
+        .get_status_left()
+        .contains("dropped: additional line chart series"));
+
     std::fs::remove_dir_all(&incoming_dir).ok();
 }
 
