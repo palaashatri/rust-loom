@@ -14,7 +14,7 @@ For a performance card, write down the exact workbook size and machine. Measure 
 
 **Sheets performance status (2026-09-25):** Formula-bar commits send one changed cell to a bounded worker and show “Calculating…” immediately. Picker-selected and startup Open parsing run on a background loader. Native Save and Save As use a worker barrier at revision N: the worker builds one package, atomically writes it, checkpoints the same bytes, and returns a separate FIFO completion. CSV/XLSX exports now wait for their accepted workbook revision, package and write on the worker, and return through an ordered completion queue; at most one export is accepted at a time. Close drains accepted worker/file operations, keeps the window visible on failures, and uses Save/Cancel for dirty work. A consumed worker input error is retained by document generation and revision; Save, Export, and Close stay blocked, New/Open require the existing replacement decision, and only a successful covering full replacement clears the barrier. Save completion updates the baseline only for its document generation and leaves newer revisions dirty. The UI now says newer edits remain unsaved and recovery may still be catching up. A crash before the later recovery batch completes can still lose N+1; that recovery-freshness gap remains open under PERF-01 and REC-02. Many non-cell full-workbook copies still happen on the UI thread. The last fixed million-cell run (2026-09-24, Intel Core i3-2350M) measured 2.56 seconds for evaluation, 12.72 seconds for package creation, and 43.05 seconds for recovery-journal writing; full file callbacks, visible-frame, export-scale, and current recovery-freshness measurements remain open. Do not mark PERF-01 or Sheets accepted until those paths, native scrolling, the reviewed app memory limit, accessibility, and interoperability have passing evidence. Use the running Linux window and native screenshot tool only while the desktop is unlocked; a renderer picture is not live-window proof.
 
-**Sheets source-size status (2026-09-26):** The Sheets maintenance split now puts CSV interop, command dispatch, close handling, file completion ordering, and worker-failure recovery in named modules. `loom-sheets-app/src/main.rs` is 107,128 bytes against its 108,783-byte legacy ceiling; `ui/app.slint` is 39,629 bytes against its 39,732-byte ceiling. The new Rust and Slint modules remain below their source limits. The six generated renderer captures under `loom-sheets/docs/qa-renderer/` have a narrowly scoped provenance rule. The latest repo-wide code-structure audit reports 17 pre-existing findings outside active Sheets/REC-02 sources; changed recovery modules and loom-production/src/lib.rs remain within source limits. Do not edit locked applications or unrelated shared modules to clear them. The asset audit passes.
+**Sheets source-size status (2026-09-28):** The Sheets maintenance split now puts CSV interop, command dispatch, close handling, file completion ordering, and worker-failure recovery in named modules. `loom-sheets-app/src/main.rs` is 107,128 bytes against its 108,783-byte legacy ceiling; `ui/app.slint` is 39,629 bytes against its 39,732-byte ceiling. The new Rust and Slint modules remain below their source limits. The six generated renderer captures under `loom-sheets/docs/qa-renderer/` have a narrowly scoped provenance rule. A fresh repo-wide code-structure audit reports six size findings in locked Encode, Motion, Video, Writer, and Photo files; active Sheets/REC-02 sources are below their limits. Evidence: `.work/audit-20260928/ui35-code-structure.log`. Do not edit locked applications or unrelated shared modules to clear them. The asset audit passes.
 
 **Sheets XLSX export status (2026-09-24):** The rich XLSX exporter must link its generated `xl/styles.xml` part from `xl/_rels/workbook.xml.rels`. The exporter previously wrote the style part and cell style IDs but omitted this workbook relationship, so LibreOffice ignored exported cell formatting. `xlsx_export_links_the_styles_part_from_the_workbook` now guards the relationship. LibreOffice Calc 24.2.7.2 applied the tested fill, bold font, border, right alignment, and currency format to a converted fixture. This verifies one fixture and one LibreOffice version; it does not prove Microsoft Excel compatibility or full XLSX interoperability. Keep the Sheets acceptance gate blocked until the broader import/export matrix and remaining acceptance evidence pass.
 
@@ -932,7 +932,7 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 ### UI-35 — Give every Sheets icon action a meaningful accessible name
 
-**P1 · Sheets accessibility · OPEN.** `LoomIconButton` defaults its accessible label to `Action`; setting only its tooltip changes the accessible description, not its name. Astra found this on the chart's Close action and inspector row/column/font/decimal steppers. Other Sheets icon-only actions need the same audit. This is a source-only finding.
+**P1 · Sheets accessibility · NEEDS_REVIEW (2026-09-28).** `LoomIconButton` defaults its accessible label to `Action`; setting only its tooltip changes the accessible description, not its name. Astra found this on the chart's Close action and inspector row/column/font/decimal steppers. Other Sheets icon-only actions need the same audit. This is a source-only finding.
 
 **Source:** `loom-core/crates/loom-ui/ui/foundation/controls.slint` (`LoomIconButton`); `loom-sheets/crates/loom-sheets-app/ui/chart.slint`; `loom-sheets/crates/loom-sheets-app/ui/inspector.slint`. UI-26 fixes Export CSV only.
 
@@ -941,6 +941,29 @@ Each card shows its current state. A screenshot proves only the visible state; n
 3. Inspect the rebuilt native AT-SPI tree and verify Orca announces the action and purpose when focused and activated.
 
 **Done when:** each icon-only action has an accurate unique name and useful description in the live accessibility tree, and the existing action remains keyboard reachable. UI-26's Export CSV result remains intact.
+
+**Repair result (2026-09-28) — NEEDS_REVIEW.** Audited all 32 Sheets `LoomIconButton` instances and replaced generic or underspecified labels with distinct action names and descriptions that match their callbacks, including chart hiding and the row/column size limits. The Cell inspector now sizes its scroll viewport to its content and resets scroll when the user switches tabs; without that reset, the Table row controls stayed clipped after leaving a scrolled Cell tab. Slint ElementHandle debug metadata is enabled for ordinary debug/test builds and remains opt-in for release builds.
+
+Changed product/evidence files: `loom-sheets/crates/loom-sheets-app/build.rs`, `src/main_tests.rs`, new `src/main_tests/icon_accessibility_tests.rs`, `ui/chart.slint`, `ui/components.slint`, `ui/inspector.slint`, `ui/toolbar.slint`, the three `docs/qa-native/ui35-icon-accessibility-*.png` captures, and `loom-sheets/README.md`.
+
+`icon_accessibility_tests.rs` checks the 32 source instances against the Slint test tree, exact labels/descriptions, Button roles, uniqueness, callback effects, lower Cell controls after scrolling, and the Cell-to-Table scroll reset. The focused tests passed 2/2 with `SLINT_EMIT_DEBUG_INFO` unset. The full Sheets app test suite passed 259/259; the debug app build and workspace formatting check passed. Exact verification commands:
+
+```sh
+env -u SLINT_EMIT_DEBUG_INFO PKG_CONFIG_PATH=/tmp/loom-fontconfig LIBRARY_PATH=/tmp/loom-fontconfig CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 nice -n 19 ionice -c3 cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --bin loom-sheets icon_accessibility_tests:: --locked --offline -- --nocapture --test-threads=1
+env -u SLINT_EMIT_DEBUG_INFO PKG_CONFIG_PATH=/tmp/loom-fontconfig LIBRARY_PATH=/tmp/loom-fontconfig CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 nice -n 19 ionice -c3 cargo test --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --bin loom-sheets --locked --offline -- --test-threads=1
+env -u SLINT_EMIT_DEBUG_INFO PKG_CONFIG_PATH=/tmp/loom-fontconfig LIBRARY_PATH=/tmp/loom-fontconfig CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1 nice -n 19 ionice -c3 cargo build --manifest-path loom-sheets/Cargo.toml -p loom-sheets-app --locked --offline
+cargo fmt --manifest-path loom-sheets/Cargo.toml --all -- --check
+python3 loom-bootstrap/scripts/audit-governance.py
+python3 loom-bootstrap/scripts/audit-assets.py
+git diff --check
+python3 loom-bootstrap/scripts/audit-code-structure.py
+```
+
+Results: 2/2 focused tests and 259/259 app tests passed; build, formatting, governance, assets, and diff check passed. The structure audit exits 1 on six locked/out-of-scope files and reports no active Sheets finding; output is `.work/audit-20260928/ui35-code-structure.log`. Detailed build/test logs: `.work/audit-20260928/ui35-app-build-final.log` and `.work/audit-20260928/ui35-app-full-tests.log`.
+
+Native `/usr/bin/gnome-screenshot -w` captures from the 1018×728 Linux Mint window are linked in `loom-sheets/README.md`: Table actions and chart close, scrolled lower Cell controls, and Add row after native keyboard activation. The row count and visible status changed from the keyboard action, then Ctrl+Z restored the example workbook. The reusable X11 input skill was used with its active-title guard. Sol's hostile code review found no P0–P2 source blocker. The Sol visual audit found the “Column width” property label visibly truncated to “Column wi…”; this is recorded separately under UI-39. The Sol functionality audit confirmed the native Add row evidence and noted that lower-stepper keyboard activation is not complete.
+
+**Remaining acceptance gap:** do not mark FIXED until a native AT-SPI tree exposes the final names/descriptions, Orca announces their purpose on focus/activation, and native keyboard traversal/activation covers the lower inspector steppers. Orca was stopped after it caused the owner discomfort; no screen reader is running, and spoken-output evidence was not recreated. UI-35 remains NEEDS_REVIEW and the Sheets acceptance gate stays open.
 
 ### UI-36 — Expose chart data to keyboard and screen-reader users
 
@@ -978,6 +1001,20 @@ Each card shows its current state. A screenshot proves only the visible state; n
 3. Add layout/interaction checks at 1.0, 1.25, 1.5, and 2.0 scales across the required viewports and themes, then inspect native output.
 
 **Done when:** app labels and controls visibly honor every supported scale without clipping or hidden actions, and the full dialog/menu/inspector workflow remains keyboard accessible. The chooser-specific UI-03/UI-27 fixes and warning layout UI-28 do not establish whole-app scaling.
+
+### UI-39 — Keep Sheets inspector property labels readable
+
+**P2 · Sheets visual layout · OPEN.** At a normal 1018×728 native Linux window size, the Cell inspector truncates the “Selected column width” property label to “Column wi…”, even though both adjacent steppers remain visible. The design-bible contract requires property labels not to truncate and calls for stacking a row when its label cannot fit.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/inspector.slint`; `loom-design-bible/contracts/desktop-ui.toml` `[inspector]` property-label sizing and truncation rules.
+
+1. Reflow or resize the property row so its full label is visible at supported window widths and text scales.
+2. Add layout regression coverage for narrow/normal widths and larger text scales.
+3. Capture and inspect the live Cell inspector at the relevant sizes.
+
+**Evidence:** `loom-sheets/docs/qa-native/ui35-icon-accessibility-cell-live-linux.png`; the Sol visual audit independently observed the clipped label. UI-35's accessible action names are unrelated to this visible property-label truncation.
+
+**Done when:** the complete property label remains readable without ellipsis or clipping at required sizes/scales, and the row's controls stay reachable.
 
 ### UI-02 — Stop opening a mostly empty Sheets inspector by default
 

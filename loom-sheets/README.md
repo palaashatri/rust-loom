@@ -114,6 +114,18 @@ These live-window captures show all seven supported shape fills in each theme, p
 
 The shape foreground uses the theme's `paper-ink` role on colored fills and `ink` on the unfilled surface. The workbook was also launched with `--text-scale 2.0`; anchored object text keeps its document formatting, as specified by UI-38, so that capture was pixel-identical to the light-theme image and is not duplicated here. These images verify visual contrast and selection affordance only; keyboard object actions, assistive-technology behavior, and cross-platform rendering remain open under UI-37 and the Sheets acceptance gate.
 
+## Accessible icon actions — UI-35
+
+These 1018×728 Linux Mint captures came from the live Sheets window with `/usr/bin/gnome-screenshot -w`. The native X11 input helper activated Add row from the keyboard; the screenshot shows the new row and “Added row 7” feedback. Undo restored the example workbook afterward.
+
+![Live Table inspector with the chart-close icon visible](docs/qa-native/ui35-icon-accessibility-table-live-linux.png)
+
+![Live Cell inspector scrolled to decimal, row-height, and column-width actions](docs/qa-native/ui35-icon-accessibility-cell-live-linux.png)
+
+![Add row activated from the keyboard with visible focus and result](docs/qa-native/ui35-icon-accessibility-keyboard-live-linux.png)
+
+Automated UI-35 checks cover all 32 icon-button names, descriptions, roles, uniqueness, default actions, inspector scrolling, and returning from the scrolled Cell tab to Table. Native evidence verifies the displayed controls and a keyboard action. The final native AT-SPI tree, Orca announcements, and keyboard activation of every inspector stepper remain unverified; see the [UI-35 repair record](../AGENTS.md#ui-35--give-every-sheets-icon-action-a-meaningful-accessible-name).
+
 ## Visual QA Evidence
 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.

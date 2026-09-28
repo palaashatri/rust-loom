@@ -25,7 +25,7 @@ export component SheetTabs inherits Rectangle {
         LoomIconButton {
             icon: "plus";
             label: "Add sheet";
-            tooltip: "Add sheet";
+            tooltip: "Add a worksheet to this workbook.";
             enabled: root.can-add-sheet;
             clicked => { root.add-sheet(); }
         }
@@ -125,13 +125,13 @@ export component FormulaNameBar inherits Rectangle {
         LoomIconButton {
             icon: "check";
             label: "Commit formula";
-            tooltip: "Commit formula (Return)";
+            tooltip: "Apply the formula bar entry to the selected cell.";
             clicked => { root.commit(root.formula-edit-buffer); }
         }
         LoomIconButton {
             icon: "close";
-            label: "Cancel editing";
-            tooltip: "Cancel editing (Escape)";
+            label: "Cancel formula edit";
+            tooltip: "Discard formula bar changes and keep the current cell value.";
             clicked => {
                 root.formula-edit-buffer = root.selection-formula;
                 root.cancel();

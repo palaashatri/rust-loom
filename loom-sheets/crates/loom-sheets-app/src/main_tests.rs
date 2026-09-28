@@ -8,6 +8,9 @@ mod template_chooser_tests;
 
 mod inspector_tests;
 
+#[path = "main_tests/icon_accessibility_tests.rs"]
+mod icon_accessibility_tests;
+
 mod local_menu_tests;
 
 #[path = "main_tests/app_startup_tests.rs"]

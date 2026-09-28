@@ -61,7 +61,7 @@ export component SheetActionToolbar inherits LoomToolbar {
         if !root.wide : LoomIconButton {
             icon: "plus";
             label: "New workbook";
-            tooltip: "New workbook";
+            tooltip: "Start a new workbook. Confirm before replacing unsaved changes.";
             clicked => { root.new-sheet(); }
         }
         if root.wide : LoomButton {
@@ -73,7 +73,7 @@ export component SheetActionToolbar inherits LoomToolbar {
         if !root.wide : LoomIconButton {
             icon: "open";
             label: "Open workbook";
-            tooltip: "Open workbook";
+            tooltip: "Choose a workbook file to open.";
             clicked => { root.open-sheet(); }
         }
         if root.wide : LoomButton {
@@ -85,7 +85,7 @@ export component SheetActionToolbar inherits LoomToolbar {
         if !root.wide : LoomIconButton {
             icon: "save";
             label: "Save workbook";
-            tooltip: "Save workbook";
+            tooltip: "Save changes to the current workbook.";
             clicked => { root.save-sheet(); }
         }
         if root.wide : LoomButton {
@@ -97,7 +97,7 @@ export component SheetActionToolbar inherits LoomToolbar {
         if !root.wide : LoomIconButton {
             icon: "save-as";
             label: "Save workbook as";
-            tooltip: "Save workbook as";
+            tooltip: "Choose a file and save the current workbook there.";
             clicked => { root.save-as-sheet(); }
         }
         if root.wide : LoomButton {
@@ -109,7 +109,7 @@ export component SheetActionToolbar inherits LoomToolbar {
         if !root.wide : LoomIconButton {
             icon: "search";
             label: "Command palette";
-            tooltip: "Command palette (Ctrl+K)";
+            tooltip: "Open the command palette to search for and run commands.";
             clicked => { root.open-palette(); }
         }
     }
@@ -126,14 +126,14 @@ export component SheetActionToolbar inherits LoomToolbar {
         LoomIconButton {
             icon: "undo";
             label: "Undo";
-            tooltip: "Undo last edit (Cmd+Z)";
+            tooltip: "Undo the most recent workbook change.";
             enabled: root.can-undo;
             clicked => { root.undo(); }
         }
         LoomIconButton {
             icon: "redo";
             label: "Redo";
-            tooltip: "Redo last edit (Cmd+Shift+Z)";
+            tooltip: "Redo the last undone workbook change.";
             enabled: root.can-redo;
             clicked => { root.redo(); }
         }
@@ -144,22 +144,22 @@ export component SheetActionToolbar inherits LoomToolbar {
     LoomToolbarGroup {
         LoomIconButton {
             icon: "bold";
-            label: "Bold";
-            tooltip: "Bold (Cmd+B)";
+            label: "Toggle bold formatting (toolbar)";
+            tooltip: "Turn bold formatting on or off for selected cells from the toolbar.";
             selected: root.cell-bold;
             clicked => { root.toggle-bold(); }
         }
         LoomIconButton {
             icon: "italic";
-            label: "Italic";
-            tooltip: "Italic (Cmd+I)";
+            label: "Toggle italic formatting (toolbar)";
+            tooltip: "Turn italic formatting on or off for selected cells from the toolbar.";
             selected: root.cell-italic;
             clicked => { root.toggle-italic(); }
         }
         LoomIconButton {
             icon: "underline";
-            label: "Underline";
-            tooltip: "Underline (Cmd+U)";
+            label: "Toggle underline formatting (toolbar)";
+            tooltip: "Turn underline formatting on or off for selected cells from the toolbar.";
             selected: root.cell-underline;
             clicked => { root.toggle-underline(); }
         }
@@ -170,22 +170,22 @@ export component SheetActionToolbar inherits LoomToolbar {
     LoomToolbarGroup {
         LoomIconButton {
             icon: "align-left";
-            label: "Align Left";
-            tooltip: "Align Left";
+            label: "Align selected cells left";
+            tooltip: "Set horizontal alignment of selected cells to left.";
             selected: root.cell-alignment == 0;
             clicked => { root.set-cell-alignment(0); }
         }
         LoomIconButton {
             icon: "align-center";
-            label: "Align Center";
-            tooltip: "Align Center";
+            label: "Align selected cells center";
+            tooltip: "Set horizontal alignment of selected cells to center.";
             selected: root.cell-alignment == 1;
             clicked => { root.set-cell-alignment(1); }
         }
         LoomIconButton {
             icon: "align-right";
-            label: "Align Right";
-            tooltip: "Align Right";
+            label: "Align selected cells right";
+            tooltip: "Set horizontal alignment of selected cells to right.";
             selected: root.cell-alignment == 2;
             clicked => { root.set-cell-alignment(2); }
         }

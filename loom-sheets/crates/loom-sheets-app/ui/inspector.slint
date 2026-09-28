@@ -91,6 +91,10 @@ export component SheetInspector inherits LoomPanel {
         if (root.active) { panel-focus.focus(); }
     }
 
+    changed inspector-tab => {
+        inspector-scroll.viewport-y = 0px;
+    }
+
     panel-focus := FocusScope {
         enabled: root.active;
         key-pressed(event) => {
@@ -133,13 +137,13 @@ export component SheetInspector inherits LoomPanel {
             selected(idx) => { root.inspector-context-changed(idx); }
         }
 
-        Flickable {
+        inspector-scroll := Flickable {
             horizontal-stretch: 1;
             vertical-stretch: 1;
             viewport-width: parent.width;
-            viewport-height: max(parent.height, 460px);
+            viewport-height: max(parent.height, cell-property-layout.preferred-height);
 
-            VerticalLayout {
+            cell-property-layout := VerticalLayout {
                 width: parent.width;
                 spacing: Theme.tokens.space.lg;
 
@@ -159,8 +163,8 @@ export component SheetInspector inherits LoomPanel {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Worksheet rows"; value: root.table-rows-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "plus"; tooltip: "Add row"; clicked => { root.add-table-row(); } }
-                            LoomIconButton { icon: "minus"; tooltip: "Delete row"; clicked => { root.delete-table-row(); } }
+                            LoomIconButton { icon: "plus"; label: "Add worksheet row"; tooltip: "Add a row after the last used worksheet row."; clicked => { root.add-table-row(); } }
+                            LoomIconButton { icon: "minus"; label: "Delete selected row"; tooltip: "Remove the row containing the selected cell and shift later rows up."; clicked => { root.delete-table-row(); } }
                         }
                     }
                     SheetPropertyRow {
@@ -168,8 +172,8 @@ export component SheetInspector inherits LoomPanel {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Worksheet columns"; value: root.table-cols-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "plus"; tooltip: "Add column"; clicked => { root.add-table-col(); } }
-                            LoomIconButton { icon: "minus"; tooltip: "Delete column"; clicked => { root.delete-table-col(); } }
+                            LoomIconButton { icon: "plus"; label: "Add worksheet column"; tooltip: "Add a column after the last used worksheet column."; clicked => { root.add-table-col(); } }
+                            LoomIconButton { icon: "minus"; label: "Delete selected column"; tooltip: "Remove the column containing the selected cell and shift later columns left."; clicked => { root.delete-table-col(); } }
                         }
                     }
                 }
@@ -194,22 +198,22 @@ export component SheetInspector inherits LoomPanel {
                         spacing: Theme.tokens.space.xs;
                         LoomIconButton {
                             icon: "bold";
-                            label: "Bold";
-                            tooltip: "Bold (Cmd+B)";
+                            label: "Toggle bold formatting (Cell inspector)";
+                            tooltip: "Turn bold formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-bold;
                             clicked => { root.toggle-bold(); }
                         }
                         LoomIconButton {
                             icon: "italic";
-                            label: "Italic";
-                            tooltip: "Italic (Cmd+I)";
+                            label: "Toggle italic formatting (Cell inspector)";
+                            tooltip: "Turn italic formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-italic;
                             clicked => { root.toggle-italic(); }
                         }
                         LoomIconButton {
                             icon: "underline";
-                            label: "Underline";
-                            tooltip: "Underline (Cmd+U)";
+                            label: "Toggle underline formatting (Cell inspector)";
+                            tooltip: "Turn underline formatting on or off for selected cells in the Cell inspector.";
                             selected: root.cell-underline;
                             clicked => { root.toggle-underline(); }
                         }
@@ -239,8 +243,8 @@ export component SheetInspector inherits LoomPanel {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Font size in points"; value: root.cell-font-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; tooltip: "Decrease font size"; clicked => { root.adjust-font(-1); } }
-                            LoomIconButton { icon: "plus"; tooltip: "Increase font size"; clicked => { root.adjust-font(1); } }
+                            LoomIconButton { icon: "minus"; label: "Decrease selected cell font size"; tooltip: "Reduce the font size of selected cells by one step."; clicked => { root.adjust-font(-1); } }
+                            LoomIconButton { icon: "plus"; label: "Increase selected cell font size"; tooltip: "Increase the font size of selected cells by one step."; clicked => { root.adjust-font(1); } }
                         }
                     }
                     LoomSectionHeader { title: "Data Format"; }
@@ -272,8 +276,8 @@ export component SheetInspector inherits LoomPanel {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Decimals count"; value: root.cell-decimals-label; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; tooltip: "Decrease decimals"; clicked => { root.adjust-decimals(-1); } }
-                            LoomIconButton { icon: "plus"; tooltip: "Increase decimals"; clicked => { root.adjust-decimals(1); } }
+                            LoomIconButton { icon: "minus"; label: "Decrease displayed decimal places"; tooltip: "Show one fewer decimal place in the selected cells."; clicked => { root.adjust-decimals(-1); } }
+                            LoomIconButton { icon: "plus"; label: "Increase displayed decimal places"; tooltip: "Show one more decimal place in the selected cells."; clicked => { root.adjust-decimals(1); } }
                         }
                     }
                     LoomSectionHeader { title: "Alignment"; }
@@ -300,8 +304,8 @@ export component SheetInspector inherits LoomPanel {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Selected row height"; value: root.selected-row-height; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; tooltip: "Decrease row height"; clicked => { root.adjust-row-height(-4); } }
-                            LoomIconButton { icon: "plus"; tooltip: "Increase row height"; clicked => { root.adjust-row-height(4); } }
+                            LoomIconButton { icon: "minus"; label: "Decrease selected row height"; tooltip: "Reduce the selected row height by 4 px, down to 16 px."; clicked => { root.adjust-row-height(-4); } }
+                            LoomIconButton { icon: "plus"; label: "Increase selected row height"; tooltip: "Increase the selected row height by 4 px, up to 160 px."; clicked => { root.adjust-row-height(4); } }
                         }
                     }
                     SheetPropertyRow {
@@ -309,8 +313,8 @@ export component SheetInspector inherits LoomPanel {
                         HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             LoomTextField { label: "Selected column width"; value: root.selected-col-width; enabled: false; horizontal-stretch: 1; }
-                            LoomIconButton { icon: "minus"; tooltip: "Decrease column width"; clicked => { root.adjust-col-width(-10); } }
-                            LoomIconButton { icon: "plus"; tooltip: "Increase column width"; clicked => { root.adjust-col-width(10); } }
+                            LoomIconButton { icon: "minus"; label: "Decrease selected column width"; tooltip: "Reduce the selected column width by 10 px, down to 32 px."; clicked => { root.adjust-col-width(-10); } }
+                            LoomIconButton { icon: "plus"; label: "Increase selected column width"; tooltip: "Increase the selected column width by 10 px, up to 400 px."; clicked => { root.adjust-col-width(10); } }
                         }
                     }
                 }

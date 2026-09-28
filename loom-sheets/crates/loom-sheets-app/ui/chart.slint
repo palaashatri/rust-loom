@@ -65,7 +65,8 @@ export component SheetChart inherits Rectangle {
 
             LoomIconButton {
                 icon: "close";
-                tooltip: "Dismiss chart";
+                label: "Hide chart panel";
+                tooltip: "Hide the chart preview and keep the chart in the worksheet.";
                 clicked => { root.close-chart(); }
             }
         }
