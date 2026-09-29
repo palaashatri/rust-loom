@@ -2,8 +2,9 @@ name: Loom active-phase CI
 
 on:
   pull_request:
+    branches: [main]
   push:
-    branches: [main, cline-implementation]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
