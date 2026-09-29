@@ -21,6 +21,7 @@ application_order = [
 # Outer file boundary for the active application phase. The current owner
 # override authorizes Sheets work; keep later applications serially locked.
 allowed_active_prefixes = [
+  ".agents/",
   ".github/",
   "AGENTS.md",
   "README.md",

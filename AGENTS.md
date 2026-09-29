@@ -59,6 +59,10 @@ The owner explicitly authorized advancing the workflow to Sheets and completing 
 
 The owner explicitly directed this continuation to use `main`, overriding the active-branch default below for this run. The checkout contains only `main` and `origin/main`; keep this Sheets work on `main`, and continue committing and pushing the authorized Sheets milestones serially. The workflow remains in the `sheets` phase and later applications remain locked.
 
+## Owner override — 2026-09-29 reusable Linux desktop input skill
+
+The owner explicitly requested that the reusable Linux desktop mouse and keyboard interaction skill be added, committed, and pushed in this repository before they split skills into a separate repository. For this skill only, `.agents/skills/linux-desktop-input/SKILL.md` is an authorized exception to the Markdown consolidation rule, and `.agents/` is an authorized active-file prefix. Keep the skill's guarded X11 behavior and documented Wayland limits. Commit this tooling change separately from Sheets product work; it does not change the active Sheets phase or unlock later applications.
+
 ## Start here — one small repair at a time
 
 The owner requested the 2026-09-14 code and UI/UX audit and these repair instructions. Findings and exact repair cards live in the [current-truth section](AGENTS.md#current-truth); each card keeps its original finding and records its current repair result. New findings start OPEN.

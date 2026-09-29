@@ -14,6 +14,9 @@ AGENTS = ROOT / "AGENTS.md"
 TRUTH_BEGIN = "<!-- CURRENT TRUTH START -->"
 TRUTH_END = "<!-- CURRENT TRUTH END -->"
 APPS = ("sheets", "writer", "present", "photo", "motion", "video", "studio", "encode")
+OWNER_AUTHORIZED_MARKDOWN = {
+    Path(".agents/skills/linux-desktop-input/SKILL.md"),
+}
 errors: list[str] = []
 workflow: dict = {}
 phase = None
@@ -164,8 +167,9 @@ for directory, child_directories, filenames in os.walk(ROOT):
             continue
         is_markdown = path.suffix.lower() in {".md", ".markdown"}
         is_readme = path.name.lower().startswith("readme.")
-        if is_markdown and path != AGENTS and not is_readme:
-            fail(f"non-README Markdown must be consolidated into root AGENTS.md: {path.relative_to(ROOT)}")
+        relative = path.relative_to(ROOT)
+        if is_markdown and path != AGENTS and not is_readme and relative not in OWNER_AUTHORIZED_MARKDOWN:
+            fail(f"non-README Markdown must be consolidated into root AGENTS.md: {relative}")
 
 for stale in (
     ROOT / ".superpowers",

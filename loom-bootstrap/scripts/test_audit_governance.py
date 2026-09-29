@@ -280,6 +280,19 @@ class GovernanceTests(unittest.TestCase):
         path.write_text("Performance notes")
         self.rejects("non-README Markdown must be consolidated into root AGENTS.md")
 
+    def test_owner_authorized_linux_input_skill_markdown_is_allowed(self):
+        path = self.root / ".agents/skills/linux-desktop-input/SKILL.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("Reusable Linux desktop interaction skill")
+        result = self.run_audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_other_skill_markdown_is_still_rejected(self):
+        path = self.root / ".agents/skills/another-skill/SKILL.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("Not an owner-authorized exception")
+        self.rejects("non-README Markdown must be consolidated into root AGENTS.md")
+
     def test_project_readmes_are_exempt_from_consolidation(self):
         path = self.root / "loom-sheets/README.md"
         path.parent.mkdir(parents=True)
