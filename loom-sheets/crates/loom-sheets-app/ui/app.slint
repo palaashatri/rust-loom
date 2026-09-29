@@ -7,7 +7,7 @@ import {
     LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
 } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
-import { SheetObjectLayer } from "objects.slint";
+import { SheetObjectLayer, SheetObjectView } from "objects.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
     FormulaNameBar, SheetActionToolbar, SheetGridSurface, SheetInspector, SheetSelectionOverlay,
@@ -18,7 +18,6 @@ import { Theme, ResponsivePolicy } from "theme.slint";
 import { LocalMenuBar, LocalMenuEntry, LocalMenuPopup } from "local_menu.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "local_menu.slint";
-
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
@@ -27,7 +26,6 @@ export component SheetsApp inherits Window {
     preferred-width: 1280px;
     preferred-height: 800px;
     background: Theme.palette().canvas;
-
     in property <bool> show-quick-formulas: false;
     in property <bool> local-menu-visible: true;
     in property <[string]> local-menu-labels: ["File", "Edit", "View", "Table", "Help"];
@@ -46,8 +44,6 @@ export component SheetsApp inherits Window {
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
     in-out property <bool> toolbar-overflow-open: false;
-    // The work surface owns the first-launch width. The Format inspector is
-    // opt-in and its preference survives compact/wide breakpoint changes.
     in-out property <bool> show-inspector: false;
     in-out property <bool> inspector-preference: false;
     in property <bool> inspector-available: true;
@@ -79,7 +75,6 @@ export component SheetsApp inherits Window {
             root.close-toolbar-overflow();
         }
     }
-
     in property <string> sheet-name: "Untitled";
     in property <string> status-left: "";
     in property <string> status-summary: "";
@@ -96,17 +91,9 @@ export component SheetsApp inherits Window {
     in property <[bool]> cell-borders: [];
     in property <[int]> cell-fills: [];
     in property <[int]> cell-font-sizes: [];
-    in property <[string]> object-kinds: [];
-    in property <[string]> object-labels: [];
-    in property <[image]> object-images: [];
-    in property <[length]> object-positions-x: [];
-    in property <[length]> object-positions-y: [];
-    in property <[int]> object-widths: [];
-    in property <[int]> object-heights: [];
-    in property <[int]> object-fills: [];
-    in property <[bool]> visible-objects: [];
-    in property <[bool]> selected-objects: [];
+    in property <[SheetObjectView]> object-views: [];
     in-out property <int> selected-object: -1;
+    in-out property <int> object-state: 0;
     in property <bool> cell-bold: false;
     in property <bool> cell-italic: false;
     in property <bool> cell-underline: false;
@@ -116,8 +103,6 @@ export component SheetsApp inherits Window {
     in property <string> cell-font-label: "14";
     in property <int> cell-decimals: 2;
     in property <string> cell-decimals-label: "2";
-    // The grid renders a bounded slice of the sparse workbook. These are
-    // zero-based worksheet coordinates, not visual row/column indexes.
     in property <int> view-row-origin: 0;
     in property <int> view-col-origin: 0;
     in property <int> workbook-rows: 1;
@@ -162,7 +147,6 @@ export component SheetsApp inherits Window {
     in-out property <int> active-sheet-index: 0;
     in-out property <string> zoom-level: "100%";
     in-out property <float> zoom-factor: 1.0;
-
     in-out property <bool> template-chooser-open: false;
     in-out property <bool> template-chooser-focus-request: false;
     in-out property <int> template-selected: 0;
@@ -179,7 +163,6 @@ export component SheetsApp inherits Window {
     in-out property <bool> close-draining: false;
     in-out property <bool> xlsx-import-warning-open: false;
     in-out property <string> xlsx-import-warning-message: "";
-
     callback new-sheet;
     callback open-sheet;
     callback save-sheet;
@@ -228,6 +211,7 @@ export component SheetsApp inherits Window {
     callback object-resized(int, float, float);
     callback object-resize-ended(int);
     callback object-resize-cancelled(int);
+    callback object-keyboard-action(int, int, int, int);
     callback rename-sheet(string);
     callback add-table-col;
     callback delete-row;
@@ -257,7 +241,6 @@ export component SheetsApp inherits Window {
     callback close-chart;
     callback cycle-chart-kind;
     callback pivot-summary(int);
-
     in-out property <bool> chart-visible: false;
     in-out property <bool> chart-focused: false;
     in-out property <bool> chart-focus-request: false;
@@ -275,7 +258,6 @@ export component SheetsApp inherits Window {
     in-out property <[float]> chart-pie-opacities: [];
     in-out property <int> cell-format: 0;
     in-out property <int> cell-alignment: 0;
-
     in-out property <[CommandPaletteItem]> palette-commands: [];
     in-out property <bool> palette-open: false;
     in-out property <string> palette-query: "";
@@ -286,48 +268,39 @@ export component SheetsApp inherits Window {
     callback palette-key-text(string);
     callback palette-backspace;
     callback palette-close;
-
     public function open-palette() {
         root.palette-open = true;
         root.palette-query = "";
         palette.grab-focus();
     }
-
-    // Restore focus after formula-bar or toolbar actions.
     public function focus-grid() {
         grid-surface.focus-grid();
     }
-
+    public function focus-objects() { worksheet-objects.focus-objects(); }
     public function focus-xlsx-import-warning() {
         xlsx-import-warning.focus-dialog();
     }
-
     public function focus-template-chooser() {
         root.template-chooser-focus-request = !root.template-chooser-focus-request;
     }
-
     public function focus-formula-bar() {
         root.is-editing = true;
         formula-bar.focus-formula-bar();
     }
-
     public function reset-formula-edit-buffer() {
         formula-edit-buffer = selection-formula;
     }
-
     public function close-toolbar-overflow() {
         if (root.toolbar-overflow-open) {
             root.toolbar-overflow-open = false;
             app-focus.focus();
         }
     }
-
     changed overflow-toolbar => {
         if (!root.overflow-toolbar) {
             root.close-toolbar-overflow();
         }
     }
-
     overflow-menu-focus := FocusScope {
         enabled: root.toolbar-overflow-open;
         key-pressed(event) => {
@@ -338,7 +311,6 @@ export component SheetsApp inherits Window {
             return reject;
         }
     }
-
     changed save-changes-open => {
         if (root.save-changes-open) {
             root.palette-open = false;
@@ -348,7 +320,6 @@ export component SheetsApp inherits Window {
             app-focus.focus();
         }
     }
-
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.close-draining && !root.save-changes-open) { return accept; }
@@ -361,7 +332,10 @@ export component SheetsApp inherits Window {
                 if (event.text == "h" || event.text == "H") { root.local-menu-open-index = 4; return accept; }
             }
             if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open || root.xlsx-import-warning-open) { return reject; }
-            if (event.text == Key.F6 && root.chart-visible && !root.is-editing && root.formula-edit-buffer == root.selection-formula) { root.chart-focus-request = !root.chart-focus-request; return accept; }
+            if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
+                if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; } else { worksheet-objects.focus-objects(); }
+                return accept;
+            }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -433,7 +407,6 @@ export component SheetsApp inherits Window {
                 return accept;
             }
             if (event.text == Key.Escape) {
-                // Editors consume Escape before this chart dismissal.
                 if (root.chart-visible) {
                     root.close-chart();
                     return accept;
@@ -458,17 +431,14 @@ export component SheetsApp inherits Window {
             }
             return reject;
         }
-
         VerticalLayout {
             spacing: 0px;
             padding: 0px;
-
             if root.local-menu-visible : LocalMenuBar {
                 labels: root.local-menu-labels;
                 open-index <=> root.local-menu-open-index;
             }
 
-            // Numbers Unified Action Toolbar
             action-toolbar := SheetActionToolbar {
                 rtl: root.rtl;
                 wide: root.wide-toolbar;
@@ -510,8 +480,6 @@ export component SheetsApp inherits Window {
                     }
                 }
             }
-
-            // Numbers-style sheet tabs
             SheetTabs {
                 sheets: root.sheet-names;
                 active-sheet: root.active-sheet-index;
@@ -538,8 +506,6 @@ export component SheetsApp inherits Window {
                 quick-formula(function) => { root.quick-formula(function); }
                 fill-selection => { root.fill-selection(); }
             }
-
-            // Main spreadsheet workspace
             workspace := Rectangle {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
@@ -549,19 +515,18 @@ export component SheetsApp inherits Window {
                     height: parent.height;
                     spacing: 0px;
                     vertical-stretch: 1;
-
                 if root.rtl && root.inspector-docked-visible : Rectangle { width: 320px; background: transparent; }
 
                 Rectangle {
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
-
                     grid-surface := SheetGridSurface {
                         width: parent.width;
                         height: parent.height;
                         sheet-name: root.sheet-name;
                         zoom-factor: root.zoom-factor;
                         selection-formula: root.selection-formula;
+                        object-navigation-active: root.object-state != 0;
                         rows: root.rows;
                         cols: root.cols;
                         column-headers: root.column-headers;
@@ -604,26 +569,21 @@ export component SheetsApp inherits Window {
                         }
                         navigate-selection(row-delta, col-delta) => { root.navigate-selection(row-delta, col-delta); }
                         extend-selection(row-delta, col-delta) => { root.extend-selection(row-delta, col-delta); }
+                        object-navigation-key-pressed(text, control, meta, alt, shift) => {
+                            worksheet-objects.handle-key-event(text, control, meta, alt, shift);
+                        }
                         begin-edit(initial-text) => {
                             root.is-editing = true;
                             root.begin-edit(initial-text);
                         }
                     }
 
-                    SheetObjectLayer {
+                    worksheet-objects := SheetObjectLayer {
                         width: parent.width;
                         height: parent.height;
-                        kinds: root.object-kinds;
-                        labels: root.object-labels;
-                        images: root.object-images;
-                        positions-x: root.object-positions-x;
-                        positions-y: root.object-positions-y;
-                        widths: root.object-widths;
-                        heights: root.object-heights;
-                        fills: root.object-fills;
-                        visible-objects: root.visible-objects;
-                        selected-objects: root.selected-objects;
-                        selected-object: root.selected-object;
+                        objects: root.object-views;
+                        selected-object <=> root.selected-object;
+                        keyboard-state <=> root.object-state;
                         object-move-started(index) => { root.object-move-started(index); }
                         object-moved(index, delta-x, delta-y) => { root.object-moved(index, delta-x, delta-y); }
                         object-move-ended(index) => { root.object-move-ended(index); }
@@ -632,8 +592,9 @@ export component SheetsApp inherits Window {
                         object-resized(index, delta-x, delta-y) => { root.object-resized(index, delta-x, delta-y); }
                         object-resize-ended(index) => { root.object-resize-ended(index); }
                         object-resize-cancelled(index) => { root.object-resize-cancelled(index); }
+                        object-keyboard-action(index, mode, delta-x, delta-y) => { root.object-keyboard-action(index, mode, delta-x, delta-y); }
+                        focus-grid-requested => { grid-surface.focus-grid(); }
                     }
-
                     if root.chart-visible : SheetChartOverlay {
                         width: parent.width;
                         height: parent.height;
@@ -673,7 +634,6 @@ export component SheetsApp inherits Window {
                     background: Theme.palette().scrim;
                     TouchArea { clicked => { root.toggle-inspector(); } }
                 }
-
                 inspector-panel := SheetInspector {
                     visible: root.inspector-visible;
                     active: root.inspector-visible;
@@ -739,7 +699,6 @@ export component SheetsApp inherits Window {
             }
         }
     }
-
     LocalMenuPopup {
         x: 0px;
         y: 36px;
@@ -756,14 +715,12 @@ export component SheetsApp inherits Window {
         menu-action(id) => { root.local-menu-action(id); }
     }
 
-    // Compact toolbar overflow menu
     if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
         background: transparent;
-
         TouchArea {
             clicked => { root.close-toolbar-overflow(); }
         }
@@ -780,7 +737,6 @@ export component SheetsApp inherits Window {
             drop-shadow-blur: 16px;
             drop-shadow-offset-y: 4px;
             drop-shadow-color: Theme.palette().shadow;
-
             VerticalLayout {
                 spacing: Theme.tokens.space.sm;
                 padding: Theme.tokens.space.md;
@@ -795,8 +751,6 @@ export component SheetsApp inherits Window {
             }
         }
     }
-
-    // Numbers-Style Template Chooser Modal
     if root.template-chooser-open : TemplateChooserModal {
         width: root.width;
         height: root.height;
@@ -825,7 +779,6 @@ export component SheetsApp inherits Window {
         discard => { root.save-changes-discard(); }
         save => { root.save-changes-save(); }
     }
-
     xlsx-import-warning := XlsxImportWarningDialog {
         x: 0px;
         y: 0px;
@@ -873,7 +826,6 @@ export component SheetsApp inherits Window {
             root.palette-close();
         }
     }
-
     close-drain-shield := CloseDrainShield {
         active: root.close-draining && !root.save-changes-open;
         window-width: root.width;

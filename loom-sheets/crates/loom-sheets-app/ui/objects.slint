@@ -1,22 +1,27 @@
 import { Theme } from "theme.slint";
 
+export struct SheetObjectView {
+    kind: string,
+    label: string,
+    details: string,
+    image: image,
+    x: length,
+    y: length,
+    width: int,
+    height: int,
+    fill: int,
+    visible: bool,
+}
+
 /// Non-cell content placed on a worksheet at a cell anchor.
 ///
-/// The native controller supplies pixel geometry and decoded images. Keeping
-/// this layer data-driven lets the virtual grid remain bounded while objects
-/// still scroll with the worksheet.
+/// The native controller supplies document geometry and decoded images.
+/// This layer stays data-driven so the virtual grid remains bounded.
 export component SheetObjectLayer inherits Rectangle {
-    in property <[string]> kinds: [];
-    in property <[string]> labels: [];
-    in property <[image]> images: [];
-    in property <[length]> positions-x: [];
-    in property <[length]> positions-y: [];
-    in property <[int]> widths: [];
-    in property <[int]> heights: [];
-    in property <[int]> fills: [];
-    in property <[bool]> visible-objects: [];
-    in property <[bool]> selected-objects: [];
-    in property <int> selected-object: -1;
+    in property <[SheetObjectView]> objects: [];
+    in-out property <int> selected-object: -1;
+    in-out property <int> keyboard-state: 0;
+    property <bool> focus-request: false;
     callback object-move-started(int);
     callback object-moved(int, float, float);
     callback object-move-ended(int);
@@ -25,39 +30,181 @@ export component SheetObjectLayer inherits Rectangle {
     callback object-resized(int, float, float);
     callback object-resize-ended(int);
     callback object-resize-cancelled(int);
+    callback object-keyboard-action(int, int, int, int);
+    callback focus-grid-requested();
+
+    public function cancel-keyboard-preview() {
+        if (root.keyboard-state == 2 && root.selected-object >= 0) {
+            root.object-keyboard-action(root.selected-object, -3, 0, 0);
+        }
+        if (root.keyboard-state == 3 && root.selected-object >= 0) {
+            root.object-keyboard-action(root.selected-object, -4, 0, 0);
+        }
+        if (root.keyboard-state > 1) { root.keyboard-state = 1; }
+    }
+
+    public function cancel-active-gesture() {
+        root.cancel-keyboard-preview();
+        root.keyboard-state = 0;
+    }
+
+    public function focus-objects() {
+        if (root.objects.length > 0) {
+            root.cancel-keyboard-preview();
+            if (root.selected-object < 0 || root.selected-object >= root.objects.length) {
+                root.selected-object = 0;
+            }
+            root.keyboard-state = 1;
+            root.object-keyboard-action(root.selected-object, 0, 0, 0);
+            root.focus-request = !root.focus-request;
+        }
+    }
+
+    public function cycle-object(backwards: bool) {
+        if (root.keyboard-state == 0 || root.objects.length == 0) { return; }
+        if (root.keyboard-state > 1) {
+            root.cancel-keyboard-preview();
+            return;
+        }
+        let current = root.selected-object >= 0 && root.selected-object < root.objects.length
+            ? root.selected-object : 0;
+        if (backwards) {
+            root.selected-object = current > 0 ? current - 1 : root.objects.length - 1;
+        } else {
+            root.selected-object = current + 1 < root.objects.length ? current + 1 : 0;
+        }
+        root.object-keyboard-action(root.selected-object, 0, 0, 0);
+        root.focus-request = !root.focus-request;
+    }
+
+    public function focus-resize(index: int) {
+        if (index >= 0 && index < root.objects.length) {
+            root.cancel-keyboard-preview();
+            root.selected-object = index;
+            root.keyboard-state = 3;
+            root.object-keyboard-action(index, 0, 0, 0);
+            root.focus-request = !root.focus-request;
+            root.object-resize-started(index);
+        }
+    }
+
+    public function handle-key-event(key: string, control: bool, meta: bool, alt: bool, shift: bool) {
+        if (root.keyboard-state == 0) { return; }
+        if (control || meta || alt) {
+            if (root.keyboard-state > 1) { root.cancel-keyboard-preview(); }
+            return;
+        }
+        if (key == Key.F6) {
+            root.cancel-keyboard-preview();
+            return;
+        }
+        if (key == Key.Tab || key == Key.Backtab) {
+            root.cycle-object(shift || key == Key.Backtab);
+            return;
+        }
+        if (key == Key.Escape) {
+            root.cancel-keyboard-preview();
+            root.keyboard-state = 0;
+            root.focus-grid-requested();
+            return;
+        }
+        if (root.keyboard-state == 1) {
+            if (key == "m" || key == "M") {
+                root.keyboard-state = 2;
+                root.object-move-started(root.selected-object);
+            } else if (key == "r" || key == "R") {
+                root.keyboard-state = 3;
+                root.object-resize-started(root.selected-object);
+            }
+            return;
+        }
+        if (key == Key.Return) {
+            if (root.keyboard-state == 2) { root.object-keyboard-action(root.selected-object, -1, 0, 0); }
+            if (root.keyboard-state == 3) { root.object-keyboard-action(root.selected-object, -2, 0, 0); }
+            root.keyboard-state = 1;
+            return;
+        }
+        if (root.keyboard-state > 1) {
+            let action = root.keyboard-state - 1;
+            if (key == Key.LeftArrow) { root.object-keyboard-action(root.selected-object, action, -1, 0); }
+            if (key == Key.RightArrow) { root.object-keyboard-action(root.selected-object, action, 1, 0); }
+            if (key == Key.UpArrow) { root.object-keyboard-action(root.selected-object, action, 0, -1); }
+            if (key == Key.DownArrow) { root.object-keyboard-action(root.selected-object, action, 0, 1); }
+        }
+    }
 
     background: transparent;
     clip: true;
+    accessible-role: list;
+    accessible-label: "Worksheet objects";
+    accessible-description: "F6 or the command palette selects worksheet objects. Tab and Shift+Tab browse; M moves; R resizes; arrows preview; Enter commits; Escape cancels or returns to the sheet.";
 
-    for idx in root.kinds.length : Rectangle {
-        property <bool> is-selected: (idx < root.selected-objects.length && root.selected-objects[idx])
-            || idx == root.selected-object;
-        x: idx < root.positions-x.length ? root.positions-x[idx] : 0px;
-        y: idx < root.positions-y.length ? root.positions-y[idx] : 0px;
-        width: idx < root.widths.length ? max(80px, root.widths[idx] * 1px) : 80px;
-        height: idx < root.heights.length ? max(48px, root.heights[idx] * 1px) : 48px;
-        visible: idx < root.visible-objects.length && root.visible-objects[idx];
+    object-nav-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        enabled: true;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (root.keyboard-state != 0 && (event.text == Key.Tab || event.text == Key.Backtab)) {
+                root.handle-key-event(event.text, event.modifiers.control, event.modifiers.meta,
+                    event.modifiers.alt, event.modifiers.shift);
+                return accept;
+            }
+            return reject;
+        }
+        key-pressed(event) => {
+            root.handle-key-event(event.text, event.modifiers.control, event.modifiers.meta,
+                event.modifiers.alt, event.modifiers.shift);
+            if (event.text == Key.F6 || event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
+                return reject;
+            }
+            return accept;
+        }
+
+        for idx in root.objects.length : Rectangle {
+        property <bool> is-selected: idx == root.selected-object;
+        property <string> object-name: root.objects[idx].kind == "image" ? "Image " : "Shape ";
+        property <string> object-label: root.objects[idx].label != ""
+            ? root.objects[idx].label : "Unnamed object";
+        x: root.objects[idx].x;
+        y: root.objects[idx].y;
+        width: max(80px, root.objects[idx].width * 1px);
+        height: max(48px, root.objects[idx].height * 1px);
+        visible: root.objects[idx].visible;
         border-width: is-selected ? 2px : 1px;
         border-color: is-selected ? Theme.palette().focus : Theme.palette().border-strong;
         border-radius: Theme.tokens.metrics.radius-medium;
-        background: root.kinds[idx] == "shape"
-            ? (idx < root.fills.length && root.fills[idx] == 0 ? #FECACA
-                : idx < root.fills.length && root.fills[idx] == 1 ? #FED7AA
-                : idx < root.fills.length && root.fills[idx] == 2 ? #FEF08A
-                : idx < root.fills.length && root.fills[idx] == 3 ? #BBF7D0
-                : idx < root.fills.length && root.fills[idx] == 4 ? #BFDBFE
-                : idx < root.fills.length && root.fills[idx] == 5 ? #DDD6FE
-                : idx < root.fills.length && root.fills[idx] == 6 ? #E5E7EB
+        background: root.objects[idx].kind == "shape"
+            ? (root.objects[idx].fill == 0 ? #FECACA
+                : root.objects[idx].fill == 1 ? #FED7AA
+                : root.objects[idx].fill == 2 ? #FEF08A
+                : root.objects[idx].fill == 3 ? #BBF7D0
+                : root.objects[idx].fill == 4 ? #BFDBFE
+                : root.objects[idx].fill == 5 ? #DDD6FE
+                : root.objects[idx].fill == 6 ? #E5E7EB
                 : Theme.palette().surface-raised)
             : Theme.palette().surface;
+        accessible-role: list-item;
+        accessible-label: object-name + (idx + 1) + ": " + object-label;
+        accessible-description: (is-selected ? "Selected. " : "")
+            + root.objects[idx].details
+            + (root.keyboard-state == 2 ? " Move preview: use arrows, Enter to commit, or Escape to cancel."
+                : root.keyboard-state == 3 ? " Resize preview: use arrows, Enter to commit, or Escape to cancel."
+                : " Press M to move or R to resize.");
+        accessible-live-region: AccessibleLiveness.polite;
+        accessible-action-default => {
+            root.cancel-keyboard-preview();
+            root.selected-object = idx;
+            root.focus-objects();
+        }
 
-        if root.kinds[idx] == "shape" : Text {
+        if root.objects[idx].kind == "shape" : Text {
             x: Theme.tokens.space.sm;
             y: Theme.tokens.space.sm;
             width: parent.width - 2 * Theme.tokens.space.sm;
             height: parent.height - 2 * Theme.tokens.space.sm;
-            text: idx < root.labels.length ? root.labels[idx] : "Shape";
-            color: idx < root.fills.length && root.fills[idx] >= 0 && root.fills[idx] <= 6
+            text: object-label;
+            color: root.objects[idx].fill >= 0 && root.objects[idx].fill <= 6
                 ? Theme.palette().paper-ink
                 : Theme.palette().ink;
             font-size: Theme.tokens.typography.body;
@@ -66,17 +213,47 @@ export component SheetObjectLayer inherits Rectangle {
             vertical-alignment: center;
             wrap: word-wrap;
             overflow: elide;
-            accessible-role: text;
-            accessible-label: self.text;
         }
 
-        if root.kinds[idx] == "image" : Image {
+        if root.objects[idx].kind == "image" : Image {
             x: 2px;
             y: 2px;
             width: parent.width - 4px;
             height: parent.height - 4px;
-            source: root.images[idx];
+            source: root.objects[idx].image;
             image-fit: contain;
+        }
+
+        object-focus := FocusScope {
+            property <int> observed-selected-object: root.selected-object;
+            property <bool> observed-focus-request: root.focus-request;
+            width: parent.width;
+            height: parent.height;
+            enabled: root.keyboard-state != 0 && root.selected-object == idx;
+        focus-on-tab-navigation: false;
+        changed has-focus => {
+            if (!object-focus.has-focus) {
+                    if (root.keyboard-state > 1) { root.cancel-keyboard-preview(); }
+                    if (root.selected-object == idx) { root.keyboard-state = 0; }
+            }
+        }
+            changed observed-selected-object => {
+                if (root.keyboard-state != 0 && root.selected-object == idx) {
+                    root.object-keyboard-action(idx, 0, 0, 0);
+                    object-focus.focus();
+                }
+            }
+            changed observed-focus-request => {
+                if (root.keyboard-state != 0 && root.selected-object == idx) { object-focus.focus(); }
+            }
+            key-pressed(event) => {
+                root.handle-key-event(event.text, event.modifiers.control, event.modifiers.meta,
+                    event.modifiers.alt, event.modifiers.shift);
+                if (event.text == Key.F6 || event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
+                    return reject;
+                }
+                return accept;
+            }
         }
 
         drag := TouchArea {
@@ -85,12 +262,8 @@ export component SheetObjectLayer inherits Rectangle {
                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                     root.object-move-started(idx);
                 }
-                if (event.kind == PointerEventKind.up) {
-                    root.object-move-ended(idx);
-                }
-                if (event.kind == PointerEventKind.cancel) {
-                    root.object-move-cancelled(idx);
-                }
+                if (event.kind == PointerEventKind.up) { root.object-move-ended(idx); }
+                if (event.kind == PointerEventKind.cancel) { root.object-move-cancelled(idx); }
             }
             moved => {
                 if (self.pressed) {
@@ -100,27 +273,35 @@ export component SheetObjectLayer inherits Rectangle {
         }
 
         if is-selected : Rectangle {
-            x: parent.width - 12px;
-            y: parent.height - 12px;
-            width: 12px;
-            height: 12px;
-            border-radius: 6px;
-            border-width: 2px;
-            border-color: Theme.palette().focus;
-            background: Theme.palette().paper;
+            x: parent.width - 8px;
+            y: parent.height - 8px;
+            width: 20px;
+            height: 20px;
+            background: transparent;
+            accessible-role: button;
+            accessible-label: "Resize " + object-name + (idx + 1) + ": " + object-label;
+            accessible-description: "20 by 20 pixel target. Activate to resize with arrow keys, Enter to commit, or Escape to cancel.";
+            accessible-action-default => { root.focus-resize(idx); }
+
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                border-width: 2px;
+                border-color: Theme.palette().focus;
+                background: Theme.palette().paper;
+            }
 
             resize := TouchArea {
+                width: parent.width;
+                height: parent.height;
                 mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.se-resize;
                 pointer-event(event) => {
                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                         root.object-resize-started(idx);
                     }
-                    if (event.kind == PointerEventKind.up) {
-                        root.object-resize-ended(idx);
-                    }
-                    if (event.kind == PointerEventKind.cancel) {
-                        root.object-resize-cancelled(idx);
-                    }
+                    if (event.kind == PointerEventKind.up) { root.object-resize-ended(idx); }
+                    if (event.kind == PointerEventKind.cancel) { root.object-resize-cancelled(idx); }
                 }
                 moved => {
                     if (self.pressed) {
@@ -128,6 +309,28 @@ export component SheetObjectLayer inherits Rectangle {
                     }
                 }
             }
+        }
+
+        if root.keyboard-state != 0 && root.selected-object == idx : Rectangle {
+            x: -6px;
+            y: -6px;
+            width: parent.width + 12px;
+            height: parent.height + 12px;
+            background: transparent;
+            border-width: 2px;
+            border-color: Theme.palette().ink;
+            border-radius: Theme.tokens.metrics.radius-medium + 4px;
+        }
+        if root.keyboard-state != 0 && root.selected-object == idx : Rectangle {
+            x: -4px;
+            y: -4px;
+            width: parent.width + 8px;
+            height: parent.height + 8px;
+            background: transparent;
+            border-width: 2px;
+            border-color: Theme.palette().focus;
+            border-radius: Theme.tokens.metrics.radius-medium + 2px;
+        }
         }
     }
 }

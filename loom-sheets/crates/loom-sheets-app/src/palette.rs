@@ -48,6 +48,7 @@ pub enum PaletteAction {
     InsertShape,
     InsertImage,
     CycleChartKind,
+    WorksheetObjects,
     Borders,
     FillCycle,
     FontIncrease,
@@ -102,6 +103,7 @@ pub fn dispatch_palette_action(app: &SheetsApp, action: PaletteAction) -> bool {
         PaletteAction::InsertShape => dispatch_command(app, "sheets.insert_shape"),
         PaletteAction::InsertImage => dispatch_command(app, "sheets.insert_image"),
         PaletteAction::CycleChartKind => dispatch_command(app, "sheets.cycle_chart_kind"),
+        PaletteAction::WorksheetObjects => dispatch_command(app, "sheets.worksheet-objects"),
         PaletteAction::Borders => dispatch_command(app, "format.borders"),
         PaletteAction::FillCycle => dispatch_command(app, "format.fill_cycle"),
         PaletteAction::FontIncrease => dispatch_command(app, "format.font_increase"),
@@ -158,6 +160,7 @@ pub fn palette_action_for_id(id: &str) -> Option<PaletteAction> {
         "sheets.insert_shape" => Some(PaletteAction::InsertShape),
         "sheets.insert_image" => Some(PaletteAction::InsertImage),
         "sheets.cycle_chart_kind" => Some(PaletteAction::CycleChartKind),
+        "sheets.worksheet-objects" => Some(PaletteAction::WorksheetObjects),
         "format.borders" => Some(PaletteAction::Borders),
         "format.fill_cycle" => Some(PaletteAction::FillCycle),
         "format.font_increase" => Some(PaletteAction::FontIncrease),
@@ -371,6 +374,12 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
             "",
         ),
         (
+            PaletteAction::WorksheetObjects,
+            "sheets.worksheet-objects",
+            "Select Worksheet Objects",
+            "F6",
+        ),
+        (
             PaletteAction::Borders,
             "format.borders",
             "Borders: Toggle",
@@ -437,6 +446,7 @@ pub fn master_palette(app: &SheetsApp) -> Vec<PaletteCommand> {
     .filter(|c| match c.action {
         PaletteAction::Undo => app.get_can_undo(),
         PaletteAction::Redo => app.get_can_redo(),
+        PaletteAction::WorksheetObjects => app.get_object_views().row_count() > 0,
         _ => true,
     })
     .collect()

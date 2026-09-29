@@ -135,6 +135,7 @@ impl ExportOperations {
 }
 
 pub(crate) fn export_with_picker(app: &SheetsApp, state: &GuiState, format: ExportFormat) {
+    crate::object_actions::cancel_active_gesture(app, state);
     if crate::close_operations::reject_admission(app, state) {
         return;
     }

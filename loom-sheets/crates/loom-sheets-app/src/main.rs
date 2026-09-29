@@ -59,6 +59,11 @@ use xlsx_import::{prepare_startup_import, stage_xlsx_import};
 
 mod object_actions;
 
+mod object_layout;
+use object_layout::editor_dimensions_with_preview;
+#[cfg(test)]
+use object_layout::editor_dimensions_with_width;
+
 mod chart_actions;
 
 mod local_menu;
@@ -109,10 +114,10 @@ mod cell_actions;
 pub(crate) use cell_actions::register_cell_edit_action;
 
 const DEFAULT_SIZE: (u32, u32) = (1280, 800);
-const DEFAULT_VISIBLE_COLS: u32 = 8;
-const DEFAULT_VISIBLE_ROWS: u32 = 15;
-const GRID_ROW_HEIGHT: f32 = DEFAULT_ROW_HEIGHT;
-const GRID_COL_WIDTH: f32 = DEFAULT_COL_WIDTH;
+pub(crate) const DEFAULT_VISIBLE_COLS: u32 = 8;
+pub(crate) const DEFAULT_VISIBLE_ROWS: u32 = 15;
+pub(crate) const GRID_ROW_HEIGHT: f32 = DEFAULT_ROW_HEIGHT;
+pub(crate) const GRID_COL_WIDTH: f32 = DEFAULT_COL_WIDTH;
 const GRID_ROW_HEADER_WIDTH: f32 = 36.0;
 const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
 const FIT_COLUMN_MAX_WIDTH: f32 = 160.0;
@@ -241,33 +246,13 @@ fn project_sheet_grid(sheet: &Sheet, viewport: SheetViewport) -> ProjectedSheetG
 /// fills the viewport plus a scroll-ahead margin so tall/wide windows show a
 /// live worksheet (not a fixed 15x8 card on dead canvas) and the void beyond
 /// content stays navigable. `fill` is `None` in unit tests without a window.
+#[cfg(test)]
 fn editor_dimensions(
     sheet: &Sheet,
     selected: CellRef,
     fill: Option<(u32, u32)>,
 ) -> SheetDimensions {
-    const SCROLL_AHEAD_COLS: u32 = 12;
-    const SCROLL_AHEAD_ROWS: u32 = 30;
-    let dimensions = sheet.dimensions();
-    // Unit tests without a window keep the legacy 15x8 minimum exactly.
-    let (fill_cols, fill_rows) = fill.unwrap_or((DEFAULT_VISIBLE_COLS, DEFAULT_VISIBLE_ROWS));
-    let (ahead_cols, ahead_rows) = if fill.is_some() {
-        (SCROLL_AHEAD_COLS, SCROLL_AHEAD_ROWS)
-    } else {
-        (0, 0)
-    };
-    SheetDimensions::new(
-        dimensions
-            .rows
-            .max(selected.row.saturating_add(1))
-            .max(DEFAULT_VISIBLE_ROWS)
-            .max(fill_rows + ahead_rows),
-        dimensions
-            .cols
-            .max(selected.col.saturating_add(1))
-            .max(DEFAULT_VISIBLE_COLS)
-            .max(fill_cols + ahead_cols),
-    )
+    editor_dimensions_with_width(sheet, selected, fill, GRID_COL_WIDTH)
 }
 
 /// Return the default width used by the projected grid. Small workbooks (at
@@ -276,7 +261,7 @@ fn editor_dimensions(
 /// default so horizontal scrolling stays useful. The fit keys off *used*
 /// columns (not the fill-expanded addressable grid) so navigating or
 /// auto-filling the void never fattens cells.
-fn grid_default_col_width(sheet: &Sheet, viewport_width: f32) -> f32 {
+pub(crate) fn grid_default_col_width(sheet: &Sheet, viewport_width: f32) -> f32 {
     if !sheet.col_widths.is_empty() || sheet.dimensions().cols > DEFAULT_VISIBLE_COLS {
         return GRID_COL_WIDTH;
     }
@@ -304,7 +289,7 @@ fn dimension_size(
     )
 }
 
-fn dimension_extent(
+pub(crate) fn dimension_extent(
     count: u32,
     default_size: f32,
     custom: &std::collections::BTreeMap<u32, f32>,
@@ -318,7 +303,7 @@ fn dimension_extent(
     extent.max(default_size)
 }
 
-fn dimension_offset(
+pub(crate) fn dimension_offset(
     first: u32,
     default_size: f32,
     custom: &std::collections::BTreeMap<u32, f32>,
@@ -486,26 +471,16 @@ struct GridGeometry {
 /// retain worksheet coordinates in the core model while the UI receives only
 /// the small list of objects and their current viewport-relative geometry.
 struct ProjectedSheetObjects {
-    kinds: Vec<SharedString>,
-    labels: Vec<SharedString>,
-    images: Vec<Image>,
-    positions_x: Vec<f32>,
-    positions_y: Vec<f32>,
-    widths: Vec<i32>,
-    heights: Vec<i32>,
-    fills: Vec<i32>,
-    visible: Vec<bool>,
-    selected: Vec<bool>,
+    views: Vec<SheetObjectView>,
 }
 
 fn project_sheet_objects(
     sheet: &Sheet,
-    viewport: SheetViewport,
     geometry: &GridGeometry,
     zoom: f32,
     scroll_x: f32,
     scroll_y: f32,
-    selected_object: i32,
+    preview: Option<(usize, CellRef, u32, u32)>,
 ) -> ProjectedSheetObjects {
     let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
@@ -517,48 +492,53 @@ fn project_sheet_objects(
         .iter()
         .map(|(&row, &height)| (row, height * zoom))
         .collect();
-    let first_row = viewport.first_row;
-    let first_col = viewport.first_col;
-    let last_row = first_row.saturating_add(viewport.visible_rows);
-    let last_col = first_col.saturating_add(viewport.visible_cols);
     let mut projected = ProjectedSheetObjects {
-        kinds: Vec::with_capacity(sheet.objects.len()),
-        labels: Vec::with_capacity(sheet.objects.len()),
-        images: Vec::with_capacity(sheet.objects.len()),
-        positions_x: Vec::with_capacity(sheet.objects.len()),
-        positions_y: Vec::with_capacity(sheet.objects.len()),
-        widths: Vec::with_capacity(sheet.objects.len()),
-        heights: Vec::with_capacity(sheet.objects.len()),
-        fills: Vec::with_capacity(sheet.objects.len()),
-        visible: Vec::with_capacity(sheet.objects.len()),
-        selected: Vec::with_capacity(sheet.objects.len()),
+        views: Vec::with_capacity(sheet.objects.len()),
     };
-    for object in &sheet.objects {
-        let absolute_x =
-            dimension_offset(object.anchor.col, geometry.default_col_width, &scaled_cols);
-        let absolute_y = dimension_offset(object.anchor.row, GRID_ROW_HEIGHT * zoom, &scaled_rows);
-        projected.kinds.push(object.kind.as_str().into());
-        projected.labels.push(object.label.as_str().into());
-        let image = load_sheet_object_image(object);
-        projected.images.push(image);
-        projected.positions_x.push(24.0 + absolute_x + scroll_x);
-        projected.positions_y.push(52.0 + absolute_y + scroll_y);
-        projected
-            .widths
-            .push((object.width as f32 * zoom).round().max(1.0) as i32);
-        projected
-            .heights
-            .push((object.height as f32 * zoom).round().max(1.0) as i32);
-        projected.fills.push(object.fill.swatch_index());
-        projected.visible.push(
-            object.anchor.row >= first_row
-                && object.anchor.row < last_row
-                && object.anchor.col >= first_col
-                && object.anchor.col < last_col,
+    for (index, object) in sheet.objects.iter().enumerate() {
+        let (anchor, width, height) = preview
+            .filter(|(preview_index, _, _, _)| *preview_index == index)
+            .map(|(_, anchor, width, height)| (anchor, width, height))
+            .unwrap_or((object.anchor, object.width, object.height));
+        let absolute_x = dimension_offset(anchor.col, geometry.default_col_width, &scaled_cols);
+        let absolute_y = dimension_offset(anchor.row, GRID_ROW_HEIGHT * zoom, &scaled_rows);
+        let details = format!(
+                "Anchor {}; size {} by {} document pixels. Tab and Shift+Tab browse objects; M moves one cell; R resizes by 10 pixels; arrow keys preview; Enter commits one undo step; Escape cancels.",
+                anchor.to_a1(),
+                width,
+                height,
+            );
+        let x = 24.0 + absolute_x + scroll_x;
+        let y = 52.0 + absolute_y + scroll_y;
+        let rendered_width = object_layout::rendered_object_extent(
+            width,
+            zoom,
+            object_layout::MIN_RENDERED_OBJECT_WIDTH,
         );
-        projected
-            .selected
-            .push(selected_object == projected.kinds.len() as i32 - 1);
+        let rendered_height = object_layout::rendered_object_extent(
+            height,
+            zoom,
+            object_layout::MIN_RENDERED_OBJECT_HEIGHT,
+        );
+        projected.views.push(SheetObjectView {
+            kind: object.kind.as_str().into(),
+            label: object.label.as_str().into(),
+            details: details.into(),
+            image: load_sheet_object_image(object),
+            x,
+            y,
+            width: rendered_width,
+            height: rendered_height,
+            fill: object.fill.swatch_index(),
+            visible: object_layout::intersects_object_viewport(
+                x,
+                y,
+                rendered_width as f32,
+                rendered_height as f32,
+                geometry.visible_width,
+                geometry.visible_height,
+            ),
+        });
     }
     projected
 }
@@ -655,7 +635,11 @@ fn window_fill(app: &SheetsApp, zoom: f32) -> Option<(u32, u32)> {
     }
 }
 
-fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
+fn viewport_from_app(
+    app: &SheetsApp,
+    sheet: &Sheet,
+    preview: Option<(usize, CellRef, u32, u32)>,
+) -> SheetViewport {
     let selected = selection_from_app(app).focus;
     let zoom = zoom_factor(app);
     let viewport_width = if app.get_grid_viewport_width() > 1.0 {
@@ -668,7 +652,14 @@ fn viewport_from_app(app: &SheetsApp, sheet: &Sheet) -> SheetViewport {
     } else {
         GRID_ROW_HEIGHT * DEFAULT_VISIBLE_ROWS as f32 + GRID_COLUMN_HEADER_HEIGHT
     };
-    let dimensions = editor_dimensions(sheet, selected, window_fill(app, zoom));
+    let dimensions = editor_dimensions_with_preview(
+        sheet,
+        selected,
+        window_fill(app, zoom),
+        grid_default_col_width(sheet, viewport_width),
+        zoom,
+        preview,
+    );
     let default_col_width = grid_default_col_width(sheet, viewport_width) * zoom;
     let default_row_height = GRID_ROW_HEIGHT * zoom;
     // Zoom scales rendered geometry uniformly; the persisted model keeps
@@ -710,6 +701,7 @@ pub(crate) fn zoom_factor(app: &SheetsApp) -> f32 {
 }
 
 pub(crate) fn apply_sheet(app: &SheetsApp, state: &GuiState) {
+    object_actions::cancel_active_gesture(app, state);
     state.mark_content_dirty();
     sync_window_title(app, state);
     let worker_running = state.workbook_worker.borrow().is_some();
@@ -780,7 +772,13 @@ pub(crate) fn project_current(app: &SheetsApp, state: &GuiState) {
     sync_window_title(app, state);
     let sheet = state.current.borrow();
     let vals = values_for_projection(state);
-    project_sheet_inner(app, &sheet, &vals, true);
+    project_sheet_inner_with_preview(
+        app,
+        &sheet,
+        &vals,
+        true,
+        object_actions::preview_geometry(state),
+    );
 }
 
 /// Re-project without revealing the selection and without snapshotting.
@@ -788,7 +786,13 @@ pub(crate) fn project_current_without_reveal(app: &SheetsApp, state: &GuiState) 
     sync_window_title(app, state);
     let sheet = state.current.borrow();
     let vals = values_for_projection(state);
-    project_sheet_inner(app, &sheet, &vals, false);
+    project_sheet_inner_with_preview(
+        app,
+        &sheet,
+        &vals,
+        false,
+        object_actions::preview_geometry(state),
+    );
 }
 
 pub(crate) fn project_sheet(app: &SheetsApp, sheet: &Sheet) {
@@ -881,11 +885,33 @@ fn project_sheet_inner(
     vals: &std::collections::HashMap<CellRef, Value>,
     reveal_selection: bool,
 ) {
+    project_sheet_inner_with_preview(app, sheet, vals, reveal_selection, None);
+}
+
+fn project_sheet_inner_with_preview(
+    app: &SheetsApp,
+    sheet: &Sheet,
+    vals: &std::collections::HashMap<CellRef, Value>,
+    reveal_selection: bool,
+    preview: Option<(usize, CellRef, u32, u32)>,
+) {
     let selection = selection_from_app(app);
     let selected = selection.focus;
     let dimensions = sheet.dimensions();
     let zoom = zoom_factor(app);
-    let editor_dimensions = editor_dimensions(sheet, selected, window_fill(app, zoom));
+    let viewport_width = if app.get_grid_viewport_width() > 1.0 {
+        app.get_grid_viewport_width()
+    } else {
+        GRID_COL_WIDTH * DEFAULT_VISIBLE_COLS as f32 + GRID_ROW_HEADER_WIDTH
+    };
+    let editor_dimensions = editor_dimensions_with_preview(
+        sheet,
+        selected,
+        window_fill(app, zoom),
+        grid_default_col_width(sheet, viewport_width),
+        zoom,
+        preview,
+    );
     // Set content extents before touching Flickable offsets.  The two-way
     // viewport binding clamps offsets against these extents, so updating them
     // first preserves a requested tail scroll on a newly loaded sparse sheet.
@@ -893,7 +919,7 @@ fn project_sheet_inner(
     app.set_workbook_cols(editor_dimensions.cols as i32);
     let current_scroll_x = (-app.get_grid_scroll_x()).max(0.0);
     let current_scroll_y = (-app.get_grid_scroll_y()).max(0.0);
-    let mut viewport = viewport_from_app(app, sheet);
+    let mut viewport = viewport_from_app(app, sheet, preview);
     let projected_before_reveal = viewport;
     if reveal_selection {
         viewport.reveal(selected);
@@ -945,12 +971,11 @@ fn project_sheet_inner(
     let grid = project_sheet_grid_with_values(sheet, vals, viewport);
     let objects = project_sheet_objects(
         sheet,
-        viewport,
         &geometry,
         zoom,
         app.get_grid_scroll_x(),
         app.get_grid_scroll_y(),
-        app.get_selected_object(),
+        preview,
     );
 
     app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
@@ -980,16 +1005,7 @@ fn project_sheet_inner(
     app.set_cell_borders(ModelRc::new(VecModel::from(grid.cell_borders)));
     app.set_cell_fills(ModelRc::new(VecModel::from(grid.cell_fills)));
     app.set_cell_font_sizes(ModelRc::new(VecModel::from(grid.cell_font_sizes)));
-    app.set_object_kinds(ModelRc::new(VecModel::from(objects.kinds)));
-    app.set_object_labels(ModelRc::new(VecModel::from(objects.labels)));
-    app.set_object_images(ModelRc::new(VecModel::from(objects.images)));
-    app.set_object_positions_x(ModelRc::new(VecModel::from(objects.positions_x)));
-    app.set_object_positions_y(ModelRc::new(VecModel::from(objects.positions_y)));
-    app.set_object_widths(ModelRc::new(VecModel::from(objects.widths)));
-    app.set_object_heights(ModelRc::new(VecModel::from(objects.heights)));
-    app.set_object_fills(ModelRc::new(VecModel::from(objects.fills)));
-    app.set_visible_objects(ModelRc::new(VecModel::from(objects.visible)));
-    app.set_selected_objects(ModelRc::new(VecModel::from(objects.selected)));
+    app.set_object_views(ModelRc::new(VecModel::from(objects.views)));
     app.set_grid_col_width(geometry.default_col_width);
     app.set_grid_row_height(GRID_ROW_HEIGHT * zoom);
     app.set_grid_col_offset(geometry.col_offset);
@@ -1254,6 +1270,7 @@ impl WorkbookUndoState {
     }
 
     fn restore(&self, state: &GuiState) {
+        state.advance_object_context();
         *state.sheets.borrow_mut() = self.sheets.clone();
         let active = self.active.min(self.sheets.len().saturating_sub(1));
         *state.active_sheet_index.borrow_mut() = active;
@@ -1445,6 +1462,7 @@ pub(crate) fn commit_workbook_transaction(
     if after_sheets.is_empty() {
         return;
     }
+    state.advance_object_context();
     let old_active = *state.active_sheet_index.borrow();
 
     // Stash the outgoing tab's live stacks, mirroring sheet switching.
@@ -1805,6 +1823,7 @@ pub(crate) struct GuiState {
     pub(crate) xlsx_filter: FileFilter,
     pub(crate) clipboard: RefCell<Option<Vec<Vec<String>>>>,
     pub(crate) object_gesture: RefCell<Option<object_actions::ObjectGesture>>,
+    pub(crate) object_context_generation: Cell<u64>,
 }
 
 impl GuiState {
@@ -1856,13 +1875,25 @@ impl GuiState {
             xlsx_filter,
             clipboard: RefCell::new(None),
             object_gesture: RefCell::new(None),
+            object_context_generation: Cell::new(0),
         }
+    }
+
+    pub(crate) fn advance_object_context(&self) {
+        self.object_context_generation.set(
+            self.object_context_generation
+                .get()
+                .checked_add(1)
+                .expect("Sheets object context generation exhausted"),
+        );
     }
 
     /// Install a fully loaded workbook (all tabs + active index) into a fresh
     /// single-sheet state. Histories start empty: loading is not an undoable
     /// edit, matching open/new/template behavior.
     pub(crate) fn install_workbook(&self, sheets: Vec<Sheet>, active: usize) {
+        self.advance_object_context();
+        self.object_gesture.borrow_mut().take();
         let mut sheets = sheets;
         if sheets.is_empty() {
             sheets.push(blank_sheet());
@@ -2108,7 +2139,13 @@ pub(crate) fn apply_workbook_worker_result(
         .set_values(result.active_sheet, result.values);
     let sheet = state.current.borrow();
     let formula_draft = app.get_formula_edit_buffer();
-    project_sheet_inner(app, &sheet, &values, false);
+    project_sheet_inner_with_preview(
+        app,
+        &sheet,
+        &values,
+        false,
+        object_actions::preview_geometry(state),
+    );
     app.set_formula_edit_buffer(formula_draft);
     drop(sheet);
 
@@ -2197,6 +2234,7 @@ pub(crate) fn save_current_sheet(
     state: &GuiState,
     force_picker: bool,
 ) -> Result<bool, String> {
+    object_actions::cancel_active_gesture(app, state);
     if close_operations::reject_admission(app, state) {
         return Err("workbook file operations are paused while the window is closing".into());
     }
@@ -2286,6 +2324,7 @@ pub(crate) fn register_history_actions(
         let menu_service = menu_service.clone();
         app.on_undo(move || {
             if let Some(app) = app_ref.upgrade() {
+                object_actions::cancel_active_gesture(&app, &state);
                 let popped = state.undo_stack.borrow_mut().pop();
                 if let Some(edit) = popped {
                     if let SheetTransaction::Workbook { before, .. } = &edit {
@@ -2311,6 +2350,7 @@ pub(crate) fn register_history_actions(
         let menu_service = menu_service.clone();
         app.on_redo(move || {
             if let Some(app) = app_ref.upgrade() {
+                object_actions::cancel_active_gesture(&app, &state);
                 let popped = state.redo_stack.borrow_mut().pop();
                 if let Some(edit) = popped {
                     if let SheetTransaction::Workbook { after, .. } = &edit {

@@ -476,6 +476,8 @@ pub(super) fn replace_opened_workbook(
     sheets: Vec<Sheet>,
     active: usize,
 ) {
+    crate::object_actions::cancel_active_gesture(app, state);
+    state.advance_object_context();
     state.open_operations.borrow_mut().document_replaced();
     let active = active.min(sheets.len().saturating_sub(1));
     *state.current.borrow_mut() = sheets[active].clone();
@@ -500,6 +502,8 @@ pub(super) fn begin_new_workbook(
     if crate::close_operations::reject_admission(app, state) {
         return;
     }
+    crate::object_actions::cancel_active_gesture(app, state);
+    state.advance_object_context();
     state.open_operations.borrow_mut().document_replaced();
     let sheet = blank_sheet();
     *state.current.borrow_mut() = sheet.clone();

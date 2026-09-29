@@ -57,6 +57,55 @@ fn grid_geometry_uses_core_defaults_and_fits_small_workbooks() {
 }
 
 #[test]
+fn object_geometry_and_resize_target_extend_the_grid_content_bounds() {
+    let mut sheet = Sheet::new("Object bounds");
+    let mut object =
+        loom_sheets_core::SheetObject::shape(CellRef { row: 99, col: 25 }, "Far object");
+    object.width = 300;
+    object.height = 120;
+    sheet.objects.push(object);
+
+    let dimensions = editor_dimensions(&sheet, CellRef::parse("A1").unwrap(), None);
+
+    assert!(
+        dimensions.cols >= 29,
+        "resize target needs horizontal headroom: {dimensions:?}"
+    );
+    assert!(
+        dimensions.rows >= 105,
+        "resize target needs vertical headroom: {dimensions:?}"
+    );
+}
+
+#[test]
+fn low_zoom_object_viewport_reserves_space_for_minimum_rendered_bounds() {
+    let mut sheet = Sheet::new("Small object bounds");
+    let mut object =
+        loom_sheets_core::SheetObject::shape(CellRef { row: 15, col: 9 }, "Small object");
+    object.width = 80;
+    object.height = 48;
+    sheet.objects.push(object);
+
+    let dimensions = object_layout::editor_dimensions_with_preview(
+        &sheet,
+        CellRef::parse("A1").unwrap(),
+        None,
+        GRID_COL_WIDTH,
+        0.5,
+        None,
+    );
+
+    assert!(
+        dimensions.cols >= 12,
+        "zoomed minimum object width needs horizontal scroll room: {dimensions:?}"
+    );
+    assert!(
+        dimensions.rows >= 20,
+        "zoomed minimum object height needs vertical scroll room: {dimensions:?}"
+    );
+}
+
+#[test]
 fn grid_geometry_retains_persisted_row_and_column_dimensions() {
     let mut sheet = Sheet::new("custom");
     sheet.set_str("B3", "value");

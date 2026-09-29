@@ -142,6 +142,16 @@ These live Linux Mint captures were taken from the rebuilt 1018×728 Sheets wind
 
 The native AT-SPI tree exposes the chart type, source range, series, unit, selected category, point detail, and numeric value. With screen-reader narration disabled, keyboard navigation changed the native selected point from Rent/1200 to Food/450; the temporary AT-SPI inspection setting was restored afterward. Spoken announcements remain unverified, so UI-36 stays `NEEDS_REVIEW`. The 2× bar-proportion defect and inert resize handle are tracked separately under UI-40 and UI-41.
 
+## Keyboard anchored objects — UI-37 (open)
+
+These 1018×712 live Linux captures were taken with `/usr/bin/gnome-screenshot -w` after entering the object list with F6 and navigating with the guarded Linux X11 input helper.
+
+![Purple worksheet shape selected with keyboard focus](docs/qa-native/ui37-object-keyboard-focus-live-linux.png)
+
+![Escape returns to the grid while the active A1 cell remains offscreen](docs/qa-native/ui37-object-escape-return-offscreen-cell-live-linux.png)
+
+The dark/orange focus ring is clear and the selected shape label is readable. The second capture records an open focus-return defect: A1 remains the active address while the visible grid is scrolled to rows 12–25 and columns D–J. The green shape is clipped at the left viewport edge. These captures do not verify the invisible 20×20 resize hit target, screen-reader announcements, image traversal, or save/reopen behavior; see the [UI-37 repair record](../AGENTS.md#ui-37--make-anchored-objects-operable-without-a-pointer).
+
 ## Visual QA Evidence
 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.

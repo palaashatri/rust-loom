@@ -134,6 +134,8 @@ pub(crate) fn register_sheet_actions(
             if let Some(app) = app_ref.upgrade() {
                 let idx = idx as usize;
                 if idx < state.sheets.borrow().len() && idx != *state.active_sheet_index.borrow() {
+                    crate::object_actions::cancel_active_gesture(&app, &state);
+                    state.advance_object_context();
                     let cur = state.current.borrow().clone();
                     let active_idx = *state.active_sheet_index.borrow();
                     state.sheets.borrow_mut()[active_idx] = cur;
@@ -182,6 +184,7 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_add_sheet(move || {
             if let Some(app) = app_ref.upgrade() {
+                crate::object_actions::cancel_active_gesture(&app, &state);
                 sync_current_to_tabs(&state);
                 let mut after_sheets = state.sheets.borrow().clone();
                 // Generated tab names stay unique even after deletions.
@@ -716,6 +719,7 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_pivot_summary(move |agg_idx| {
             if let Some(app) = app_ref.upgrade() {
+                crate::object_actions::cancel_active_gesture(&app, &state);
                 let aggregation = match agg_idx {
                     1 => PivotAggregation::Count,
                     2 => PivotAggregation::Average,
@@ -759,6 +763,7 @@ pub(crate) fn register_sheet_actions(
         let menu_service = menu_service.clone();
         app.on_rename_sheet(move |new_name| {
             if let Some(app) = app_ref.upgrade() {
+                crate::object_actions::cancel_active_gesture(&app, &state);
                 let trimmed = new_name.trim().to_string();
                 sync_current_to_tabs(&state);
                 let active_idx = *state.active_sheet_index.borrow();
@@ -1528,6 +1533,7 @@ pub(crate) fn delete_active_sheet(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) -> bool {
+    crate::object_actions::cancel_active_gesture(app, state);
     let count = state.sheets.borrow().len();
     if count <= 1 {
         app.set_status_left("Cannot delete the only worksheet".into());

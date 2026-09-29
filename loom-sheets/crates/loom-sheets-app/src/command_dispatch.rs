@@ -1,7 +1,7 @@
 //! Shared command dispatch for menu, toolbar, and palette actions.
 
 use loom_desktop::{CommandAction, DesktopError};
-use slint::SharedString;
+use slint::{Model, SharedString};
 
 use crate::SheetsApp;
 
@@ -68,6 +68,12 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "sheets.insert_chart" => app.invoke_insert_chart(),
         "sheets.insert_shape" => app.invoke_insert_shape(),
         "sheets.insert_image" => app.invoke_insert_image(),
+        "sheets.worksheet-objects" => {
+            if app.get_object_views().row_count() == 0 {
+                return false;
+            }
+            app.invoke_focus_objects();
+        }
         "sheets.cycle_chart_kind" => app.invoke_cycle_chart_kind(),
         "table.pivot_sum" => app.invoke_pivot_summary(0),
         "table.pivot_count" => app.invoke_pivot_summary(1),

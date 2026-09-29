@@ -43,8 +43,16 @@ pub(crate) enum ObjectGestureMode {
 #[derive(Debug, Clone)]
 pub(crate) struct ObjectGesture {
     pub(crate) index: usize,
-    pub(crate) before: Sheet,
+    pub(crate) before_anchor: CellRef,
+    pub(crate) before_width: u32,
+    pub(crate) before_height: u32,
+    pub(crate) preview_anchor: CellRef,
+    pub(crate) preview_width: u32,
+    pub(crate) preview_height: u32,
     pub(crate) mode: ObjectGestureMode,
+    pub(crate) sheet_index: usize,
+    pub(crate) document_generation: u64,
+    pub(crate) context_generation: u64,
 }
 
 fn finite_delta(value: f32) -> f32 {
@@ -105,32 +113,9 @@ pub(crate) fn anchor_after_drag(
     }
 }
 
-/// Apply a live object move. `start` is the anchor captured at pointer-down;
-/// Slint supplies cumulative pointer deltas for each move event.
-pub(crate) fn move_object(
-    sheet: &mut Sheet,
-    index: usize,
-    start: CellRef,
-    delta_x: f32,
-    delta_y: f32,
-    zoom: f32,
-    viewport_width: f32,
-) -> bool {
-    let anchor = anchor_after_drag(sheet, start, delta_x, delta_y, zoom, viewport_width);
-    let Some(object) = sheet.objects.get_mut(index) else {
-        return false;
-    };
-    if object.anchor == anchor {
-        return false;
-    }
-    object.anchor = anchor;
-    true
-}
-
-/// Calculate persisted logical-pixel dimensions from a rendered pointer
-/// delta, respecting zoom and the same visible minimum used by the handles.
-pub(crate) fn resized_dimensions(
-    object: &SheetObject,
+fn resized_dimensions_from_size(
+    width: u32,
+    height: u32,
     delta_x: f32,
     delta_y: f32,
     zoom: f32,
@@ -140,51 +125,292 @@ pub(crate) fn resized_dimensions(
     } else {
         1.0
     };
-    let width = (object.width as f32 + finite_delta(delta_x) / zoom)
+    let width = (width as f32 + finite_delta(delta_x) / zoom)
         .round()
         .clamp(MIN_OBJECT_WIDTH as f32, MAX_OBJECT_SIZE as f32) as u32;
-    let height = (object.height as f32 + finite_delta(delta_y) / zoom)
+    let height = (height as f32 + finite_delta(delta_y) / zoom)
         .round()
         .clamp(MIN_OBJECT_HEIGHT as f32, MAX_OBJECT_SIZE as f32) as u32;
     (width, height)
 }
 
-/// Apply a live resize to one object and report whether its dimensions moved.
-pub(crate) fn resize_object(
-    sheet: &mut Sheet,
-    index: usize,
-    before: &Sheet,
-    delta_x: f32,
-    delta_y: f32,
-    zoom: f32,
+fn keyboard_step_object(
+    anchor: &mut CellRef,
+    width: &mut u32,
+    height: &mut u32,
+    mode: ObjectGestureMode,
+    delta_col: i32,
+    delta_row: i32,
 ) -> bool {
-    let Some(original) = before.objects.get(index) else {
-        return false;
-    };
-    let dimensions = resized_dimensions(original, delta_x, delta_y, zoom);
-    let Some(object) = sheet.objects.get_mut(index) else {
-        return false;
-    };
-    if (object.width, object.height) == dimensions {
-        return false;
+    match mode {
+        ObjectGestureMode::Move => {
+            let col = anchor.col.saturating_add_signed(delta_col);
+            let row = anchor.row.saturating_add_signed(delta_row);
+            if (anchor.col, anchor.row) == (col, row) {
+                return false;
+            }
+            anchor.col = col;
+            anchor.row = row;
+        }
+        ObjectGestureMode::Resize => {
+            let new_width = (*width as i64 + i64::from(delta_col) * 10)
+                .clamp(MIN_OBJECT_WIDTH as i64, MAX_OBJECT_SIZE as i64)
+                as u32;
+            let new_height = (*height as i64 + i64::from(delta_row) * 10)
+                .clamp(MIN_OBJECT_HEIGHT as i64, MAX_OBJECT_SIZE as i64)
+                as u32;
+            if (*width, *height) == (new_width, new_height) {
+                return false;
+            }
+            *width = new_width;
+            *height = new_height;
+        }
     }
-    (object.width, object.height) = dimensions;
     true
+}
+
+fn reveal_object(app: &SheetsApp, state: &Rc<GuiState>, index: usize) {
+    let sheet = state.current.borrow();
+    let Some(object) = sheet.objects.get(index) else {
+        return;
+    };
+    let anchor = preview_geometry(state)
+        .filter(|(preview_index, _, _, _)| *preview_index == index)
+        .map(|(_, anchor, _, _)| anchor)
+        .unwrap_or(object.anchor);
+    let zoom = crate::zoom_factor(app);
+    let columns: std::collections::BTreeMap<u32, f32> = sheet
+        .col_widths
+        .iter()
+        .map(|(&column, &width)| (column, width * zoom))
+        .collect();
+    let rows: std::collections::BTreeMap<u32, f32> = sheet
+        .row_heights
+        .iter()
+        .map(|(&row, &height)| (row, height * zoom))
+        .collect();
+    let x = crate::dimension_offset(
+        anchor.col,
+        crate::grid_default_col_width(&sheet, app.get_grid_viewport_width()) * zoom,
+        &columns,
+    );
+    let y = crate::dimension_offset(anchor.row, crate::GRID_ROW_HEIGHT * zoom, &rows);
+    app.set_grid_scroll_x(-x);
+    app.set_grid_scroll_y(-y);
+    drop(sheet);
+    project_current_without_reveal(app, state);
+}
+
+fn gesture_context_matches(state: &GuiState, gesture: &ObjectGesture) -> bool {
+    *state.active_sheet_index.borrow() == gesture.sheet_index
+        && state.open_operations.borrow().document_generation() == gesture.document_generation
+        && state.object_context_generation.get() == gesture.context_generation
+}
+
+fn apply_gesture_geometry(object: &mut SheetObject, gesture: &ObjectGesture) {
+    match gesture.mode {
+        ObjectGestureMode::Move => object.anchor = gesture.preview_anchor,
+        ObjectGestureMode::Resize => {
+            object.width = gesture.preview_width;
+            object.height = gesture.preview_height;
+        }
+    }
+}
+
+fn gesture_changed(gesture: &ObjectGesture) -> bool {
+    match gesture.mode {
+        ObjectGestureMode::Move => gesture.preview_anchor != gesture.before_anchor,
+        ObjectGestureMode::Resize => {
+            (gesture.preview_width, gesture.preview_height)
+                != (gesture.before_width, gesture.before_height)
+        }
+    }
+}
+
+pub(crate) fn preview_geometry(state: &GuiState) -> Option<(usize, CellRef, u32, u32)> {
+    let gesture = state.object_gesture.borrow();
+    let gesture = gesture.as_ref()?;
+    gesture_context_matches(state, gesture).then_some((
+        gesture.index,
+        gesture.preview_anchor,
+        gesture.preview_width,
+        gesture.preview_height,
+    ))
+}
+
+fn finish_gesture_state(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    menu_service: &Arc<NativeMenuBar>,
+    index: usize,
+    mode: ObjectGestureMode,
+    cancelled: bool,
+    reveal_selection_on_cancel: bool,
+    preserve_scroll_after_commit: bool,
+) {
+    let gesture = state.object_gesture.borrow_mut().take();
+    let Some(gesture) = gesture else { return };
+    if gesture.index != index || gesture.mode != mode {
+        *state.object_gesture.borrow_mut() = Some(gesture);
+        return;
+    }
+    if !gesture_context_matches(state, &gesture) {
+        app.set_object_state(0);
+        project_current_without_reveal(app, state);
+        return;
+    }
+    if cancelled {
+        if reveal_selection_on_cancel {
+            project_current(app, state);
+        } else {
+            project_current_without_reveal(app, state);
+        }
+        return;
+    }
+
+    if !gesture_changed(&gesture) {
+        return;
+    }
+    let before = state.current.borrow().clone();
+    let mut after = before.clone();
+    let Some(object) = after.objects.get_mut(index) else {
+        return;
+    };
+    apply_gesture_geometry(object, &gesture);
+    *state.current.borrow_mut() = after.clone();
+    push_history(
+        &mut state.undo_stack.borrow_mut(),
+        SheetTransaction::Snapshot {
+            before: Box::new(before),
+            after: Box::new(after),
+        },
+    );
+    state.redo_stack.borrow_mut().clear();
+    let scroll_x = app.get_grid_scroll_x();
+    let scroll_y = app.get_grid_scroll_y();
+    apply_sheet(app, state);
+    if preserve_scroll_after_commit {
+        app.set_grid_scroll_x(scroll_x);
+        app.set_grid_scroll_y(scroll_y);
+        project_current_without_reveal(app, state);
+    }
+    sync_menu_state(menu_service, app, state);
+}
+
+/// Cancel the current object preview before a context-changing action.
+pub(crate) fn cancel_active_gesture(app: &SheetsApp, state: &GuiState) {
+    let gesture = state.object_gesture.borrow_mut().take();
+    if gesture.is_none() {
+        return;
+    }
+    app.set_object_state(0);
+    project_current_without_reveal(app, state);
+}
+
+fn handle_keyboard_action(
+    app: &SheetsApp,
+    state: &Rc<GuiState>,
+    index: i32,
+    action: i32,
+    delta_col: i32,
+    delta_row: i32,
+    menu_service: &Arc<NativeMenuBar>,
+) {
+    let Ok(index) = usize::try_from(index) else {
+        return;
+    };
+    match action {
+        0 => reveal_object(app, state, index),
+        1 | 2 => {
+            let mode = if action == 1 {
+                ObjectGestureMode::Move
+            } else {
+                ObjectGestureMode::Resize
+            };
+            let context_matches = state
+                .object_gesture
+                .borrow()
+                .as_ref()
+                .is_some_and(|gesture| gesture_context_matches(state, gesture));
+            if !context_matches {
+                cancel_active_gesture(app, state);
+                return;
+            }
+            let changed = {
+                let mut active = state.object_gesture.borrow_mut();
+                let Some(gesture) = active.as_mut() else {
+                    return;
+                };
+                if gesture.index != index || gesture.mode != mode {
+                    return;
+                }
+                keyboard_step_object(
+                    &mut gesture.preview_anchor,
+                    &mut gesture.preview_width,
+                    &mut gesture.preview_height,
+                    mode,
+                    delta_col,
+                    delta_row,
+                )
+            };
+            if changed {
+                if mode == ObjectGestureMode::Move {
+                    reveal_object(app, state, index);
+                } else {
+                    project_current_without_reveal(app, state);
+                }
+            }
+        }
+        -1 | -2 | -3 | -4 => {
+            let (mode, cancelled) = match action {
+                -1 => (ObjectGestureMode::Move, false),
+                -2 => (ObjectGestureMode::Resize, false),
+                -3 => (ObjectGestureMode::Move, true),
+                -4 => (ObjectGestureMode::Resize, true),
+                _ => unreachable!(),
+            };
+            finish_gesture_state(
+                app,
+                state,
+                menu_service,
+                index,
+                mode,
+                cancelled,
+                false,
+                true,
+            );
+        }
+        _ => {}
+    }
 }
 
 fn begin_gesture(app: &SheetsApp, state: &Rc<GuiState>, index: i32, mode: ObjectGestureMode) {
     let Ok(index) = usize::try_from(index) else {
         return;
     };
-    let before = state.current.borrow().clone();
-    if index >= before.objects.len() {
-        return;
+    if state.object_gesture.borrow().is_some() {
+        cancel_active_gesture(app, state);
     }
+    let (before_anchor, before_width, before_height) = {
+        let current = state.current.borrow();
+        let Some(object) = current.objects.get(index) else {
+            return;
+        };
+        (object.anchor, object.width, object.height)
+    };
     app.set_selected_object(index as i32);
     *state.object_gesture.borrow_mut() = Some(ObjectGesture {
         index,
-        before,
+        before_anchor,
+        before_width,
+        before_height,
+        preview_anchor: before_anchor,
+        preview_width: before_width,
+        preview_height: before_height,
         mode,
+        sheet_index: *state.active_sheet_index.borrow(),
+        document_generation: state.open_operations.borrow().document_generation(),
+        context_generation: state.object_context_generation.get(),
     });
     project_current_without_reveal(app, state);
 }
@@ -200,31 +426,56 @@ fn update_gesture(
     let Ok(index) = usize::try_from(index) else {
         return;
     };
-    let gesture = state.object_gesture.borrow().clone();
-    let Some(gesture) = gesture else { return };
-    if gesture.index != index || gesture.mode != mode {
+    let context_matches = state
+        .object_gesture
+        .borrow()
+        .as_ref()
+        .is_some_and(|gesture| gesture_context_matches(state, gesture));
+    if !context_matches {
+        cancel_active_gesture(app, state);
         return;
     }
     let changed = {
-        let mut current = state.current.borrow_mut();
+        let current = state.current.borrow();
+        let mut active = state.object_gesture.borrow_mut();
+        let Some(gesture) = active.as_mut() else {
+            return;
+        };
+        if gesture.index != index || gesture.mode != mode {
+            return;
+        }
         match mode {
-            ObjectGestureMode::Move => move_object(
-                &mut current,
-                index,
-                gesture.before.objects[index].anchor,
-                delta_x,
-                delta_y,
-                crate::zoom_factor(app),
-                app.get_grid_viewport_width(),
-            ),
-            ObjectGestureMode::Resize => resize_object(
-                &mut current,
-                index,
-                &gesture.before,
-                delta_x,
-                delta_y,
-                crate::zoom_factor(app),
-            ),
+            ObjectGestureMode::Move => {
+                let anchor = anchor_after_drag(
+                    &current,
+                    gesture.before_anchor,
+                    delta_x,
+                    delta_y,
+                    crate::zoom_factor(app),
+                    app.get_grid_viewport_width(),
+                );
+                if gesture.preview_anchor == anchor {
+                    false
+                } else {
+                    gesture.preview_anchor = anchor;
+                    true
+                }
+            }
+            ObjectGestureMode::Resize => {
+                let dimensions = resized_dimensions_from_size(
+                    gesture.before_width,
+                    gesture.before_height,
+                    delta_x,
+                    delta_y,
+                    crate::zoom_factor(app),
+                );
+                if (gesture.preview_width, gesture.preview_height) == dimensions {
+                    false
+                } else {
+                    (gesture.preview_width, gesture.preview_height) = dimensions;
+                    true
+                }
+            }
         }
     };
     if changed {
@@ -243,31 +494,16 @@ fn finish_gesture(
     let Ok(index) = usize::try_from(index) else {
         return;
     };
-    let gesture = state.object_gesture.borrow_mut().take();
-    let Some(gesture) = gesture else { return };
-    if gesture.index != index || gesture.mode != mode {
-        *state.object_gesture.borrow_mut() = Some(gesture);
-        return;
-    }
-    if cancelled {
-        *state.current.borrow_mut() = gesture.before;
-        project_current(app, state);
-        return;
-    }
-    let after = state.current.borrow().clone();
-    if after.objects == gesture.before.objects {
-        return;
-    }
-    push_history(
-        &mut state.undo_stack.borrow_mut(),
-        SheetTransaction::Snapshot {
-            before: Box::new(gesture.before),
-            after: Box::new(after),
-        },
+    finish_gesture_state(
+        app,
+        state,
+        menu_service,
+        index,
+        mode,
+        cancelled,
+        cancelled,
+        false,
     );
-    state.redo_stack.borrow_mut().clear();
-    apply_sheet(app, state);
-    sync_menu_state(menu_service, app, state);
 }
 
 /// Connect object selection, move, and resize gestures to the undoable sheet
@@ -278,6 +514,24 @@ pub(crate) fn register_object_actions(
     state: &Rc<GuiState>,
     menu_service: &Arc<NativeMenuBar>,
 ) {
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        let menu_service = menu_service.clone();
+        app.on_object_keyboard_action(move |index, action, delta_col, delta_row| {
+            if let Some(app) = app_ref.upgrade() {
+                handle_keyboard_action(
+                    &app,
+                    &state,
+                    index,
+                    action,
+                    delta_col,
+                    delta_row,
+                    &menu_service,
+                );
+            }
+        });
+    }
     {
         let state = state.clone();
         let app_ref = app.as_weak();
@@ -401,7 +655,10 @@ pub(crate) fn register_object_actions(
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use super::{anchor_after_drag, resized_dimensions};
+    use super::{
+        anchor_after_drag, keyboard_step_object, resized_dimensions_from_size, ObjectGestureMode,
+    };
+    use loom_sheets_core::SheetObject;
 
     #[test]
     fn object_drag_uses_custom_dimension_geometry_and_clamps() {
@@ -418,8 +675,42 @@ mod tests {
 
     #[test]
     fn object_resize_scales_pointer_delta_and_enforces_minimums() {
-        let object = loom_sheets_core::SheetObject::shape(CellRef { row: 0, col: 0 }, "Resizable");
+        assert_eq!(
+            resized_dimensions_from_size(240, 100, 100.0, -200.0, 2.0),
+            (290, 48)
+        );
+    }
 
-        assert_eq!(resized_dimensions(&object, 100.0, -200.0, 2.0), (290, 48));
+    #[test]
+    fn keyboard_object_steps_move_by_cells_and_resize_in_document_pixels() {
+        let mut object = SheetObject::shape(CellRef { row: 2, col: 3 }, "Callout");
+
+        assert!(keyboard_step_object(
+            &mut object.anchor,
+            &mut object.width,
+            &mut object.height,
+            ObjectGestureMode::Move,
+            1,
+            -1
+        ));
+        assert_eq!(object.anchor, CellRef { row: 1, col: 4 });
+        assert!(keyboard_step_object(
+            &mut object.anchor,
+            &mut object.width,
+            &mut object.height,
+            ObjectGestureMode::Resize,
+            1,
+            -1
+        ));
+        assert_eq!((object.width, object.height), (250, 102));
+        assert!(keyboard_step_object(
+            &mut object.anchor,
+            &mut object.width,
+            &mut object.height,
+            ObjectGestureMode::Move,
+            -1,
+            1
+        ));
+        assert_eq!(object.anchor, CellRef { row: 2, col: 3 });
     }
 }

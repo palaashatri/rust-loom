@@ -35,14 +35,73 @@ fn sheet_object_projection_tracks_anchor_and_visibility() {
 
     project_sheet(&app, &sheet);
 
-    assert_eq!(app.get_object_kinds().row_count(), 2);
-    assert_eq!(app.get_object_kinds().row_data(0).as_deref(), Some("shape"));
-    assert_eq!(
-        app.get_object_labels().row_data(0).as_deref(),
-        Some("Callout")
+    let objects = app.get_object_views();
+    assert_eq!(objects.row_count(), 2);
+    let first = objects.row_data(0).expect("first projected object");
+    let second = objects.row_data(1).expect("second projected object");
+    assert_eq!(first.kind.as_str(), "shape");
+    assert_eq!(first.label.as_str(), "Callout");
+    assert!(first.visible);
+    assert!(!second.visible);
+}
+
+#[test]
+fn wide_object_remains_visible_when_its_anchor_scrolls_out_of_view() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_grid_viewport_width(400.0);
+    app.set_grid_viewport_height(200.0);
+    app.set_grid_scroll_x(-400.0);
+    let mut sheet = Sheet::new("Wide object viewport");
+    let mut object = loom_sheets_core::SheetObject::shape(CellRef { row: 0, col: 0 }, "Wide");
+    object.width = 800;
+    object.height = 120;
+    sheet.objects.push(object);
+
+    project_sheet_without_reveal(&app, &sheet);
+
+    assert!(
+        app.get_object_views()
+            .row_data(0)
+            .is_some_and(|object| object.visible),
+        "an object must remain projected while its rendered bounds or resize handle intersects the viewport"
     );
-    assert!(app.get_visible_objects().row_data(0).unwrap_or(false));
-    assert!(!app.get_visible_objects().row_data(1).unwrap_or(true));
+}
+
+#[test]
+fn small_object_remains_visible_at_minimum_render_size_and_low_zoom() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_grid_viewport_width(100.0);
+    app.set_grid_viewport_height(100.0);
+    app.set_zoom_factor(0.5);
+    app.set_grid_scroll_x(-70.0);
+    app.set_grid_scroll_y(-55.0);
+    let mut sheet = Sheet::new("Small object viewport");
+    let mut object = loom_sheets_core::SheetObject::shape(CellRef { row: 0, col: 0 }, "Small");
+    object.width = 80;
+    object.height = 48;
+    sheet.objects.push(object);
+
+    project_sheet_without_reveal(&app, &sheet);
+
+    let object = app
+        .get_object_views()
+        .row_data(0)
+        .expect("projected object");
+    assert_eq!(
+        (object.width, object.height),
+        (
+            object_layout::MIN_RENDERED_OBJECT_WIDTH,
+            object_layout::MIN_RENDERED_OBJECT_HEIGHT
+        )
+    );
+    assert!(
+        object.visible,
+        "culling must use the same minimum rendered size as the visible object"
+    );
 }
 
 #[test]
@@ -64,9 +123,10 @@ fn embedded_image_object_projects_without_a_source_path() {
     project_sheet(&app, &sheet);
 
     let image = app
-        .get_object_images()
+        .get_object_views()
         .row_data(0)
-        .expect("projected image");
+        .expect("projected image")
+        .image;
     assert_eq!(image.size().width, 1);
     assert_eq!(image.size().height, 1);
 }
@@ -103,13 +163,28 @@ fn object_gestures_are_live_previewed_and_committed_as_one_undoable_change() {
     assert_eq!(app.get_selected_object(), 0);
     app.invoke_object_moved(0, 80.0, 24.0);
     assert_eq!(
+        state
+            .object_gesture
+            .borrow()
+            .as_ref()
+            .map(|gesture| gesture.preview_anchor),
+        Some(CellRef { row: 1, col: 1 }),
+        "pointer motion updates the visible preview geometry"
+    );
+    assert_eq!(
         state.current.borrow().objects[0].anchor,
-        CellRef { row: 1, col: 1 }
+        CellRef { row: 0, col: 0 },
+        "live motion must not change the saved worksheet model"
     );
     assert!(state.undo_stack.borrow().is_empty());
     app.invoke_object_move_ended(0);
     assert_eq!(state.undo_stack.borrow().len(), 1);
     assert!(state.is_dirty());
+    assert_eq!(
+        state.current.borrow().objects[0].anchor,
+        CellRef { row: 1, col: 1 },
+        "ending the gesture commits the new anchor"
+    );
 
     app.invoke_undo();
     assert!(!state.is_dirty());
@@ -121,15 +196,32 @@ fn object_gestures_are_live_previewed_and_committed_as_one_undoable_change() {
     app.invoke_object_resize_started(0);
     app.invoke_object_resized(0, 100.0, 100.0);
     assert_eq!(
+        state
+            .object_gesture
+            .borrow()
+            .as_ref()
+            .map(|gesture| (gesture.preview_width, gesture.preview_height)),
+        Some((340, 212)),
+        "resize motion updates the preview dimensions"
+    );
+    assert_eq!(
+        (
+            state.current.borrow().objects[0].width,
+            state.current.borrow().objects[0].height
+        ),
+        (240, 112),
+        "resize preview stays outside the saved worksheet model"
+    );
+    app.invoke_object_resize_ended(0);
+    assert_eq!(state.undo_stack.borrow().len(), 1);
+    assert!(state.is_dirty());
+    assert_eq!(
         (
             state.current.borrow().objects[0].width,
             state.current.borrow().objects[0].height
         ),
         (340, 212)
     );
-    app.invoke_object_resize_ended(0);
-    assert_eq!(state.undo_stack.borrow().len(), 1);
-    assert!(state.is_dirty());
     app.invoke_undo();
     assert!(!state.is_dirty());
     assert_eq!(
@@ -152,7 +244,7 @@ fn sparse_viewport_projection_tracks_scroll_and_dimensions() {
 
     let mut sheet = Sheet::new("sparse");
     sheet.set_str("AZ1000", "tail");
-    let viewport = viewport_from_app(&app, &sheet);
+    let viewport = viewport_from_app(&app, &sheet, None);
 
     assert_eq!(sheet.dimensions(), SheetDimensions::new(1_000, 52));
     assert_eq!(viewport.first_row, 28);

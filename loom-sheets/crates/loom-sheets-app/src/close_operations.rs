@@ -251,6 +251,7 @@ fn request_close(app: &SheetsApp, state: &GuiState) -> CloseRequestResponse {
     if state.close_state.get() != CloseState::Idle {
         return CloseRequestResponse::KeepWindowShown;
     }
+    crate::object_actions::cancel_active_gesture(app, state);
     if app.get_save_changes_open() || app.get_xlsx_import_warning_open() {
         app.set_status_left("Resolve the open workbook dialog before closing.".into());
         return CloseRequestResponse::KeepWindowShown;

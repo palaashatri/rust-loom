@@ -553,6 +553,7 @@ export component SheetTable inherits Rectangle {
 /// table's dominant surface separate from the surrounding app chrome.
 export component SheetGridSurface inherits Rectangle {
     in property <string> sheet-name: "Untitled";
+    in property <bool> object-navigation-active: false;
     in property <float> zoom-factor: 1.0;
     in property <string> selection-formula: "";
     in property <[int]> rows: [];
@@ -594,6 +595,7 @@ export component SheetGridSurface inherits Rectangle {
     callback navigate-selection(int, int);
     callback extend-selection(int, int);
     callback begin-edit(string);
+    callback object-navigation-key-pressed(string, bool, bool, bool, bool);
 
     background: Theme.palette().canvas;
     accessible-role: groupbox;
@@ -604,6 +606,14 @@ export component SheetGridSurface inherits Rectangle {
 
     grid-focus := FocusScope {
         key-pressed(event) => {
+            if (root.object-navigation-active) {
+                root.object-navigation-key-pressed(event.text, event.modifiers.control,
+                    event.modifiers.meta, event.modifiers.alt, event.modifiers.shift);
+                if (event.text == Key.F6 || event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
+                    return reject;
+                }
+                return accept;
+            }
             if (event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
                 return reject;
             }
