@@ -967,7 +967,7 @@ Native `/usr/bin/gnome-screenshot -w` captures from the 1018×728 Linux Mint win
 
 ### UI-36 — Expose chart data to keyboard and screen-reader users
 
-**P1 · Sheets chart accessibility · OPEN.** Charts render plotted shapes and a visual legend, but expose no chart summary or keyboard navigation among data points. A screen-reader user cannot inspect the plotted categories and values, and a keyboard user cannot move through the data. This is a source-only finding; UI-08's source-range, unit, and comparison semantics remain fixed and should not be reopened.
+**P1 · Sheets chart accessibility · NEEDS_REVIEW (2026-09-29).** At the time of the finding, charts rendered plotted shapes and a visual legend but exposed no chart summary or keyboard navigation among data points. A screen-reader user could not inspect the plotted categories and values, and a keyboard user could not move through the data. This was a source-only finding; UI-08's source-range, unit, and comparison semantics remain fixed and should not be reopened.
 
 **Source:** `loom-sheets/crates/loom-sheets-app/ui/chart.slint`; chart model and accessible source-range semantics are covered by UI-08.
 
@@ -976,6 +976,16 @@ Native `/usr/bin/gnome-screenshot -w` captures from the 1018×728 Linux Mint win
 3. Add regressions for bar, line, and pie data; empty, long, and changing series; then inspect the native AT-SPI tree and keyboard/Orca interaction.
 
 **Done when:** a keyboard-only and screen-reader user can enter a chart, inspect each plotted value with its category and unit, and leave without losing worksheet context. Do not treat a rendered screenshot or chart-range label as data accessibility.
+
+**Repair result (2026-09-29) — NEEDS_REVIEW.** Charts now expose a named summary and a selected point with category, series, value, and unit. F6 enters/leaves chart data review; arrows and Home/End navigate points; Escape returns to the worksheet. Regressions cover bar, line, pie, scatter, empty/long/changing values, zero and mixed-sign pies, and preservation of a newly typed formula draft after Escape followed by F6. A fresh native Linux run on the rebuilt app verified chart entry, movement from Point 1 (Rent) to Point 2 (Food), Escape back to the grid, and that F6 leaves a new formula draft focused. Sol code review found no blocker in the F6 guard and regression. A native-size visual regression now keeps the selected Amount/value/unit line inside the clipped detail viewport with four pixels of margin; this followed Sol's finding that the line was clipped at 1×. Native AT-SPI inspection exposed the chart list summary, source range, series, unit, selected category, point description, and numeric value. With `ScreenReaderEnabled` kept false, XTEST-driven F6 and Right changed the native point entry from Rent/1200 to Food/450; `org.a11y.Status.IsEnabled` was restored to false afterward. No narrator or screen reader was started.
+
+Changed product files: `loom-sheets/crates/loom-sheets-app/src/actions.rs`, `src/actions_tests.rs`, `src/analysis.rs`, `src/chart_actions.rs`, `src/main_tests.rs`, `src/main_tests/chart_accessibility_tests.rs`, `ui/app.slint`, and `ui/chart.slint`.
+
+**Verification:** The value viewport regression first failed because the value line exceeded the viewport by 1.7 logical pixels; after the layout change it passed. `chart_accessibility_tests::` passed 27/27, and the full Sheets app suite passed 286/286. The production app build, formatting, governance, asset, and `git diff --check` audits pass. The repository code-structure audit still exits 1 for six pre-existing findings in locked applications; it reports no active Sheets source-size finding. A fresh Sol code review of the full diff found no P0–P2 blocker; Astra's current UI/UX review found no new P0–P2 issue in the 1× changes and confirmed the value line is readable.
+
+**Native evidence:** `/usr/bin/gnome-screenshot -w` captured the rebuilt 1018×728 Linux window after the latest change: [chart overview](loom-sheets/docs/qa-native/ui36-chart-live-linux.png), [Point 1 focus](loom-sheets/docs/qa-native/ui36-chart-point-1-focused-live-linux.png), [Point 2 focus](loom-sheets/docs/qa-native/ui36-chart-point-2-focused-live-linux.png), [Escape back to the grid](loom-sheets/docs/qa-native/ui36-chart-grid-return-live-linux.png), and [formula draft preserved after F6](loom-sheets/docs/qa-native/ui36-chart-formula-draft-f6-preserved-live-linux.png). Sol's post-fix visual review confirms the selected value line is fully visible at 1× with no new visual findings. The passive native AT-SPI tree and dynamic Point 1→2 values are recorded in `.work/ui36-native-atspi-tree.log`; `IsEnabled` and `ScreenReaderEnabled` were both false after inspection. Spoken announcements were not checked. Leave UI-36 NEEDS_REVIEW until screen-reader announcements are independently verified.
+
+Two separate P2 chart findings from the Astra/Sol visual audit remain open as UI-40 (bars collapse at 2× text scale) and UI-41 (inert resize handle). Their cards follow UI-39 in the repair order.
 
 ### UI-37 — Make anchored objects operable without a pointer
 
@@ -1015,6 +1025,32 @@ Native `/usr/bin/gnome-screenshot -w` captures from the 1018×728 Linux Mint win
 **Evidence:** `loom-sheets/docs/qa-native/ui35-icon-accessibility-cell-live-linux.png`; the Sol visual audit independently observed the clipped label. UI-35's accessible action names are unrelated to this visible property-label truncation.
 
 **Done when:** the complete property label remains readable without ellipsis or clipping at required sizes/scales, and the row's controls stay reachable.
+
+### UI-40 — Preserve chart bar proportions at 2× text scale
+
+**P2 · Sheets chart visual scaling · OPEN (2026-09-29).** At 2× text scale, value and category labels consume most of the plot height. The remaining bar area and `max(1px, ...)` floor collapse distinct values into nearly identical one-pixel bars, so the chart no longer communicates magnitude. Sol and Astra independently identified this in the native 2× chart capture.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/chart.slint`, `bar-column` sizing and bar shape geometry.
+
+1. Reflow the plot and labels so supported text scales retain enough area to encode bar magnitude; do not remove labels or apply a hidden text shrink.
+2. Preserve the zero baseline and positive/negative bar semantics.
+3. Add geometry regressions at 1×, 1.5×, and 2×, then inspect the live window at 2×.
+
+**Evidence:** `loom-sheets/docs/qa-native/ui36-chart-2x-live-linux.png` shows the collapsed bars.
+
+**Done when:** representative positive and negative bar heights remain proportional and visibly distinct at 2×, with labels readable and no chart content clipped.
+
+### UI-41 — Remove or implement the chart resize action
+
+**P2 · Sheets chart interaction · OPEN (2026-09-29).** The chart shows a `Chart resize handle` from `LoomCanvasHandle`, but wires no `picked`/`nudged` action to change the chart's size. The visible affordance promises an action that has no effect.
+
+**Source:** `loom-sheets/crates/loom-sheets-app/ui/chart.slint`, the direct-manipulation corner handle and `SheetChartOverlay` sizing.
+
+1. Give the handle a real resize interaction that updates visible chart bounds, or remove the handle until chart resizing is supported.
+2. Keep the handle accessible and large enough to use without obscuring chart content.
+3. Add a regression that checks the visible size change and persistence if resizing is retained; inspect the native result.
+
+**Done when:** every visible chart resize affordance changes the chart as advertised, or no inert resize affordance is exposed.
 
 ### UI-02 — Stop opening a mostly empty Sheets inspector by default
 

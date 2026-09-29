@@ -11,6 +11,9 @@ mod inspector_tests;
 #[path = "main_tests/icon_accessibility_tests.rs"]
 mod icon_accessibility_tests;
 
+#[path = "main_tests/chart_accessibility_tests.rs"]
+mod chart_accessibility_tests;
+
 mod local_menu_tests;
 
 #[path = "main_tests/app_startup_tests.rs"]

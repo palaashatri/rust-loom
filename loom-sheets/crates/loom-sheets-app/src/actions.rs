@@ -574,6 +574,7 @@ pub(crate) fn register_sheet_actions(
         app.on_close_chart(move || {
             if let Some(app) = app_ref.upgrade() {
                 app.set_chart_visible(false);
+                app.invoke_focus_grid();
                 app.set_status_left("Chart hidden".into());
             }
         });

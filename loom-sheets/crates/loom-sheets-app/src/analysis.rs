@@ -9,6 +9,77 @@ use crate::{cell_value, selection_from_app, SheetsApp};
 /// A pivot formula builder: group key in, live cross-sheet formula out.
 type PivotFormula = Box<dyn Fn(&str) -> String>;
 
+/// Plot extents for a bar series using a shared zero baseline.
+#[derive(Debug, PartialEq)]
+pub(crate) struct BarPlotGeometry {
+    pub(crate) baseline: f32,
+    pub(crate) signed_heights: Vec<f32>,
+}
+
+pub(crate) fn bar_plot_geometry(values: &[f64]) -> BarPlotGeometry {
+    let scale = values
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    if scale == 0.0 || !scale.is_finite() {
+        return BarPlotGeometry {
+            baseline: 1.0,
+            signed_heights: vec![0.0; values.len()],
+        };
+    }
+
+    // Scaling before subtraction keeps finite, opposite-sign extremes from
+    // overflowing their range (for example -1e308..1e308).
+    let min = values
+        .iter()
+        .map(|value| value / scale)
+        .fold(0.0_f64, f64::min);
+    let max = values
+        .iter()
+        .map(|value| value / scale)
+        .fold(0.0_f64, f64::max);
+    let span = max - min;
+    let baseline = (max / span) as f32;
+    let signed_heights = values
+        .iter()
+        .map(|value| ((value / scale) / span) as f32)
+        .collect();
+    BarPlotGeometry {
+        baseline,
+        signed_heights,
+    }
+}
+
+/// Normalize finite values to the unit axis without overflowing a wide span.
+/// `constant_value` selects the coordinate for a series with no range: line Y
+/// values use the top of the plot, while scatter X values use its center.
+pub(crate) fn normalize_plot_values(values: &[f64], constant_value: f32) -> Vec<f32> {
+    let scale = values
+        .iter()
+        .filter(|value| value.is_finite())
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    if scale == 0.0 || !scale.is_finite() {
+        return vec![constant_value; values.len()];
+    }
+    let min = values
+        .iter()
+        .map(|value| value / scale)
+        .fold(f64::INFINITY, f64::min);
+    let max = values
+        .iter()
+        .map(|value| value / scale)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let span = max - min;
+    if span <= 0.0 || !span.is_finite() {
+        return vec![constant_value; values.len()];
+    }
+    values
+        .iter()
+        .map(|value| (((value / scale) - min) / span).clamp(0.0, 1.0) as f32)
+        .collect()
+}
+
 /// Pick label/value source columns: the selection's first two columns when
 /// it spans a pair inside the used range, else columns A (labels) and B.
 /// Shared by chart insert and pivot summary so both read the same columns.
@@ -245,17 +316,48 @@ pub(crate) fn line_path_commands(normalized: &[f32]) -> String {
 }
 
 /// SVG wedge paths for a pie series in a 100x100 space (center 50,50, r 46).
-/// Non-positive values contribute no angle; an all-empty pie renders one
-/// full placeholder ring so the overlay never shows a silently blank plot.
+/// Non-positive values contribute no angle. An all-nonpositive series has no
+/// slices; the chart UI explains why instead of inventing a proportion.
 pub(crate) fn pie_wedge_commands(values: &[f64]) -> Vec<String> {
-    let total: f64 = values.iter().map(|v| v.max(0.0)).sum();
-    if total <= 0.0 || !total.is_finite() {
-        return vec!["M50,50 L50,4 A46,46 0 1,1 49.9,4 Z".to_string()];
+    let maximum = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .fold(0.0, f64::max);
+    if maximum == 0.0 {
+        return Vec::new();
+    }
+    let positive_count = values
+        .iter()
+        .filter(|value| value.is_finite() && **value > 0.0)
+        .count();
+    let scaled: Vec<f64> = values
+        .iter()
+        .map(|value| {
+            if value.is_finite() && *value > 0.0 {
+                *value / maximum
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let total: f64 = scaled.iter().sum();
+    if positive_count == 1 {
+        return values
+            .iter()
+            .map(|value| {
+                if value.is_finite() && *value > 0.0 {
+                    "M50,50 L50,4 A46,46 0 1,1 50,96 A46,46 0 1,1 50,4 Z".to_string()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
     }
     let mut wedges = Vec::with_capacity(values.len());
     let mut angle = -std::f64::consts::FRAC_PI_2;
-    for &value in values {
-        let span = value.max(0.0) / total * std::f64::consts::TAU;
+    for value in scaled {
+        let span = value / total * std::f64::consts::TAU;
         if span <= 0.0 {
             wedges.push(String::new());
             continue;
@@ -263,10 +365,19 @@ pub(crate) fn pie_wedge_commands(values: &[f64]) -> Vec<String> {
         let end = angle + span;
         let (x1, y1) = (50.0 + 46.0 * angle.cos(), 50.0 + 46.0 * angle.sin());
         let (x2, y2) = (50.0 + 46.0 * end.cos(), 50.0 + 46.0 * end.sin());
-        let large = if span > std::f64::consts::PI { 1 } else { 0 };
-        wedges.push(format!(
-            "M50,50 L{x1:.1},{y1:.1} A46,46 0 {large},1 {x2:.1},{y2:.1} Z"
-        ));
+        if (x1 * 10.0).round() == (x2 * 10.0).round() && (y1 * 10.0).round() == (y2 * 10.0).round()
+        {
+            let middle = angle + span / 2.0;
+            let (xm, ym) = (50.0 + 46.0 * middle.cos(), 50.0 + 46.0 * middle.sin());
+            wedges.push(format!(
+                "M50,50 L{x1:.1},{y1:.1} A46,46 0 0,1 {xm:.1},{ym:.1} A46,46 0 0,1 {x2:.1},{y2:.1} Z"
+            ));
+        } else {
+            let large = if span > std::f64::consts::PI { 1 } else { 0 };
+            wedges.push(format!(
+                "M50,50 L{x1:.1},{y1:.1} A46,46 0 {large},1 {x2:.1},{y2:.1} Z"
+            ));
+        }
         angle = end;
     }
     wedges

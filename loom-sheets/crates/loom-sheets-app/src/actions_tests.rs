@@ -1147,7 +1147,7 @@ fn test_chart_path_builders_and_snapshot_undo() {
         assert!(wedge.contains('A'), "wedge: {wedge}");
     }
     let empty_pie = pie_wedge_commands(&[0.0, -1.0]);
-    assert_eq!(empty_pie.len(), 1);
+    assert!(empty_pie.is_empty());
 
     // Inserting a chart is one Snapshot transaction: revert removes it.
     let mut sheet = Sheet::new("Snap");

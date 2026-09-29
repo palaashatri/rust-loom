@@ -126,6 +126,22 @@ These 1018×728 Linux Mint captures came from the live Sheets window with `/usr/
 
 Automated UI-35 checks cover all 32 icon-button names, descriptions, roles, uniqueness, default actions, inspector scrolling, and returning from the scrolled Cell tab to Table. Native evidence verifies the displayed controls and a keyboard action. The final native AT-SPI tree, Orca announcements, and keyboard activation of every inspector stepper remain unverified; see the [UI-35 repair record](../AGENTS.md#ui-35--give-every-sheets-icon-action-a-meaningful-accessible-name).
 
+## Accessible chart data — UI-36
+
+These live Linux Mint captures were taken from the rebuilt 1018×728 Sheets window with `/usr/bin/gnome-screenshot -w`. The guarded X11 input helper entered chart review with F6, moved from Point 1 to Point 2, and returned to the grid with Escape. A separate run confirms F6 leaves a newly typed formula draft focused. Sol's post-fix visual review found the selected category, amount/unit line, and keyboard help readable at 1×.
+
+![Chart overview in the live Sheets window](docs/qa-native/ui36-chart-live-linux.png)
+
+![Point 1 selected in chart review](docs/qa-native/ui36-chart-point-1-focused-live-linux.png)
+
+![Point 2 selected after keyboard navigation](docs/qa-native/ui36-chart-point-2-focused-live-linux.png)
+
+![Escape returns focus to the worksheet grid](docs/qa-native/ui36-chart-grid-return-live-linux.png)
+
+![A new formula draft remains focused after F6](docs/qa-native/ui36-chart-formula-draft-f6-preserved-live-linux.png)
+
+The native AT-SPI tree exposes the chart type, source range, series, unit, selected category, point detail, and numeric value. With screen-reader narration disabled, keyboard navigation changed the native selected point from Rent/1200 to Food/450; the temporary AT-SPI inspection setting was restored afterward. Spoken announcements remain unverified, so UI-36 stays `NEEDS_REVIEW`. The 2× bar-proportion defect and inert resize handle are tracked separately under UI-40 and UI-41.
+
 ## Visual QA Evidence
 
 - The existing `.work/acceptance/` set contains 18 renderer captures across four viewports and three themes, plus chooser, palette, chart, and zoom states.
