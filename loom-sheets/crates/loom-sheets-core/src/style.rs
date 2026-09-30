@@ -166,6 +166,8 @@ impl CellStyle {
                 NumberFormat::General | NumberFormat::PlainText => {
                     if let Some(dec) = self.decimal_places {
                         format!("{:.1$}", num, dec as usize)
+                    } else if self.number_format == NumberFormat::General {
+                        general_display(num, raw)
                     } else {
                         raw.to_string()
                     }
@@ -184,9 +186,40 @@ impl CellStyle {
     }
 }
 
+/// General format shows at most 10 significant digits, like other spreadsheets,
+/// so an Average of 1100/3 reads `366.6666667` instead of a 16-digit float. The
+/// stored value is untouched; only the grid text is shortened.
+fn general_display(num: f64, raw: &str) -> String {
+    let raw = raw.trim();
+    if !num.is_finite() || !raw.contains('.') || raw.len() <= 11 {
+        return raw.to_string();
+    }
+    let magnitude = num.abs().log10().floor() as i32;
+    if !(-5..10).contains(&magnitude) {
+        return raw.to_string();
+    }
+    let decimals = (9 - magnitude).max(0) as usize;
+    let text = format!("{num:.decimals$}");
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        text
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn general_format_shortens_long_floats_but_keeps_short_values() {
+        let style = CellStyle::default();
+        assert_eq!(style.format_value("366.6666666666667"), "366.6666667");
+        assert_eq!(style.format_value("0.30000000000000004"), "0.3");
+        assert_eq!(style.format_value("1800"), "1800");
+        assert_eq!(style.format_value("3.14"), "3.14");
+        assert_eq!(style.format_value("-2.5"), "-2.5");
+    }
 
     #[test]
     fn test_default_style_is_default() {
