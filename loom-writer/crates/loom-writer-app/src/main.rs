@@ -1332,6 +1332,7 @@ fn save_current_document(
     *state.save_path.borrow_mut() = Some(path.clone());
     let checkpoint_result = recovery::checkpoint_document(&document);
     *state.last_saved.borrow_mut() = document;
+    app.set_document_dirty(document_is_dirty(state));
     let status = match checkpoint_result {
         Ok(()) => format!("Saved {}", path.display()),
         Err(error) => {

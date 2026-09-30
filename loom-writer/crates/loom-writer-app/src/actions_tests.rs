@@ -1857,3 +1857,29 @@ fn styled_spans_keep_edge_whitespace_outside_their_delimiters() {
 
     assert_eq!(markup, "***open*** **.loomdoc** packages");
 }
+
+/// After a successful Save or Save As the window must stop showing the unsaved
+/// marker; it used to stay lit until the next edit.
+#[test]
+fn successful_save_clears_the_unsaved_marker() {
+    let path = std::env::temp_dir().join(format!(
+        "loom-writer-dirty-after-save-{}.loomdoc",
+        std::process::id()
+    ));
+    let dialogs: Rc<dyn FileDialogService> = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [],
+        [Some(path.clone())],
+    ));
+    let (app, state) = test_state(text_document("before"), dialogs);
+    state
+        .current
+        .borrow_mut()
+        .replace_paragraphs("after the edit");
+    apply_state(&app, &state);
+    assert!(app.get_document_dirty(), "an edited document is dirty");
+
+    assert!(save_current_document(&app, &state, true).expect("save succeeds"));
+
+    assert!(!app.get_document_dirty(), "a saved document is not dirty");
+    let _ = std::fs::remove_file(&path);
+}
