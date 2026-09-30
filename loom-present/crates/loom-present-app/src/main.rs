@@ -705,7 +705,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
         n => format!("{} {slides} · {n} issues to fix", document.len()),
     };
     app.set_status_left(SharedString::from(status));
-    app.set_status_right(if session.can_undo() { "Edited" } else { "" }.into());
+    app.set_status_right(if deck_is_dirty(state) { "Edited" } else { "" }.into());
     let drag = state.drag_state.borrow();
     app.set_snap_guides_x(ModelRc::new(VecModel::from(
         drag.guides
@@ -949,6 +949,7 @@ fn save_current_deck(
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
     *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
+    app.set_status_right("".into());
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
         Err(error) => set_status(

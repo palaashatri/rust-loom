@@ -823,3 +823,49 @@ fn undo_and_redo_shortcuts_reach_the_session() {
     app.invoke_redo();
     assert_eq!(state.session.borrow().document.len(), before + 1);
 }
+
+#[test]
+fn successful_save_clears_the_edited_status() {
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let dir =
+        std::env::temp_dir().join(format!("loom-present-saved-status-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join("deck.loomdeck");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [],
+        [Some(path.clone())],
+    ));
+    let state = GuiState {
+        session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        pending_replacement: Cell::new(None),
+        selected_element: Cell::new(0),
+        inspector_available: Cell::new(true),
+        save_path: RefCell::new(None),
+        dialogs,
+        deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+        pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+        menu_service: None,
+        drag_state: RefCell::new(DragState::default()),
+    };
+    state
+        .session
+        .borrow_mut()
+        .document
+        .add_slide("Changed", "content");
+    refresh_without_recovery(&app, &state);
+    assert_eq!(app.get_status_right(), "Edited");
+
+    assert_eq!(save_current_deck(&app, &state, true), Ok(true));
+    assert_eq!(app.get_status_right(), "");
+
+    state
+        .session
+        .borrow_mut()
+        .document
+        .add_slide("Again", "content");
+    refresh_without_recovery(&app, &state);
+    assert_eq!(app.get_status_right(), "Edited");
+    let _ = std::fs::remove_dir_all(&dir);
+}
