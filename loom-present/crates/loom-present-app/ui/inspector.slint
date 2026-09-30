@@ -162,19 +162,10 @@ export component PresentInspector inherits LoomPanel {
             spacing: Theme.tokens.space.md;
             LoomSectionHeader { title: "Slide Transition"; }
             LoomSegmentedControl {
-                items: ["None", "Dissolve", "Push", "Wipe"];
+                items: ["None", "Dissolve", "Push", "Morph"];
                 current <=> root.transition-index;
                 label: "Transition Type";
                 selected(idx) => { root.set-transition(idx); }
-            }
-            InspectorPropertyRow {
-                label: "Duration";
-                Text {
-                    text: "1.00 s";
-                    font-size: Theme.tokens.typography.body;
-                    color: Theme.palette().ink-secondary;
-                    vertical-alignment: center;
-                }
             }
         }
 
