@@ -1164,3 +1164,104 @@ fn neither_the_chart_nor_the_grid_advertises_an_inert_resize_handle() {
         );
     }
 }
+
+/// UI-40: at 2x text scale the label boxes consumed the plot, the remaining bar
+/// area hit its `max(1px, ...)` floor, and every distinct value rendered as an
+/// identical one-pixel line. Bar magnitude has to stay readable at every
+/// supported scale and panel size, without hiding or shrinking a label.
+#[test]
+fn bars_keep_their_proportions_at_every_supported_text_scale() {
+    // 1.0/1.5/2.0 are the contract's reference, stress, and accessibility
+    // targets. 1018x728 and 1280x720 are the reference viewports; the shorter
+    // heights are the compact panel sizes where the plot used to collapse.
+    for (text_scale, width, height) in [
+        (1.0f32, 1280.0f32, 720.0f32),
+        (1.0, 1018.0, 728.0),
+        (1.5, 1280.0, 720.0),
+        (1.5, 1018.0, 728.0),
+        (1.5, 1018.0, 640.0),
+        (2.0, 1280.0, 720.0),
+        (2.0, 1018.0, 728.0),
+        (2.0, 1018.0, 640.0),
+        (2.0, 1018.0, 560.0),
+    ] {
+        let categories = ["One", "Two", "Three", "Four"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let values = ["100", "450", "1200", "150"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let app = chart_app("bar", &categories, &values);
+        app.set_template_text_scale(text_scale);
+        app.window()
+            .set_size(PhysicalSize::new(width as u32, height as u32));
+        let _ = snapshot_component(&app, width, height, 1.0)
+            .unwrap_or_else(|error| panic!("render bar chart at {text_scale}x: {error}"));
+
+        let bars: Vec<_> =
+            ElementHandle::find_by_element_id(&app, "SheetChart::bar-shape").collect();
+        assert_eq!(
+            bars.len(),
+            values.len(),
+            "every category keeps its bar at {text_scale}x / {width}x{height}"
+        );
+        let heights: Vec<f32> = bars.iter().map(|bar| bar.size().height).collect();
+        let largest = heights.iter().copied().fold(0.0f32, f32::max);
+
+        assert!(
+            largest >= 24.0,
+            "at {text_scale}x / {width}x{height} the largest bar must keep a measurable height, got {heights:?}"
+        );
+        let expected = 100.0 / 1200.0;
+        let actual = heights[0] / heights[2];
+        assert!(
+            (actual - expected).abs() < 0.02,
+            "bars must stay proportional at {text_scale}x / {width}x{height}: 100 vs 1200 measured {actual:.3}, expected {expected:.3}; heights={heights:?}"
+        );
+        let smallest = heights.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            largest - smallest >= 4.0,
+            "distinct values must not render as the same bar at {text_scale}x / {width}x{height}, got {heights:?}"
+        );
+
+        // The zero baseline and sign semantics must survive the reflow.
+        let baselines: Vec<f32> = bars
+            .iter()
+            .map(|bar| bar.absolute_position().y + bar.size().height)
+            .collect();
+        let lowest = baselines.iter().copied().fold(f32::INFINITY, f32::min);
+        let highest = baselines.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            highest - lowest <= 1.0,
+            "all bars must share the zero baseline at {text_scale}x / {width}x{height}, got {baselines:?}"
+        );
+    }
+}
+
+/// The positive/negative split must keep its shared baseline at a large text
+/// scale as well, not only at 1x.
+#[test]
+fn mixed_sign_bars_keep_a_shared_baseline_at_every_text_scale() {
+    for text_scale in [1.0f32, 1.5, 2.0] {
+        let mixed = chart_app(
+            "bar",
+            &["Negative".to_owned(), "Positive".to_owned()],
+            &["-100".to_owned(), "100".to_owned()],
+        );
+        mixed.set_template_text_scale(text_scale);
+        let _ = snapshot_component(&mixed, 1280.0, 720.0, 1.0)
+            .unwrap_or_else(|error| panic!("render mixed-sign chart at {text_scale}x: {error}"));
+        let bars: Vec<_> =
+            ElementHandle::find_by_element_id(&mixed, "SheetChart::bar-shape").collect();
+        assert_eq!(bars.len(), 2, "one bar per sign at {text_scale}x");
+        let negative = bars[0].absolute_position();
+        let positive = bars[1].absolute_position();
+        let positive_size = bars[1].size();
+        assert!(
+            (negative.y - (positive.y + positive_size.height)).abs() <= 1.0,
+            "positive and negative bars must meet at the same zero baseline at {text_scale}x: negative={negative:?}, positive={positive:?}"
+        );
+    }
+}

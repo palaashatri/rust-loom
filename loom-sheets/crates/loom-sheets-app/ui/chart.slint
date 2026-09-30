@@ -226,7 +226,10 @@ export component SheetChart inherits Rectangle {
             border-color: Theme.palette().border;
             border-radius: Theme.tokens.space.xs;
             clip: true;
-            min-height: min(112px * max(1.0, root.text-scale), root.height * 0.20);
+            // Reserve enough height for the labels and a scaled bar area before
+            // the percentage cap, so a short panel at a large text scale cannot
+            // collapse the plot onto its own captions.
+            min-height: max(20px + 61px * max(1.0, root.text-scale), min(112px * max(1.0, root.text-scale), root.height * 0.20));
 
             if root.point-count == 0 : Text {
                 x: Theme.tokens.space.lg;
@@ -402,9 +405,18 @@ export component SheetChart inherits Rectangle {
                     min-width: 0px;
                     preferred-width: 0px;
                     height: parent.height;
-                    property <length> value-label-height: 18px * max(1.0, root.text-scale);
-                    property <length> category-label-height: 20px * max(1.0, root.text-scale);
-                    property <length> bar-area-height: max(1px, parent.height - self.value-label-height - self.category-label-height - 8px * max(1.0, root.text-scale));
+                    // The value and category labels render at the 10px micro
+                    // type token, so their boxes track the scaled line height
+                    // rather than a fixed 18/20px pair that over-allocated the
+                    // plot at every text scale.
+                    property <length> value-label-height: 14px * max(1.0, root.text-scale);
+                    property <length> category-label-height: 15px * max(1.0, root.text-scale);
+                    // A bar chart encodes magnitude by height, so the bars keep
+                    // a floor that scales with the text instead of being squeezed
+                    // to the 1px visibility minimum. Below this the chart would
+                    // show several distinct values as one identical line.
+                    property <length> min-bar-area-height: 24px * max(1.0, root.text-scale);
+                    property <length> bar-area-height: max(self.min-bar-area-height, parent.height - self.value-label-height - self.category-label-height - 8px * max(1.0, root.text-scale));
                     property <float> signed-bar-height: idx < root.normalized.length ? root.normalized[idx] : 0.0;
                     property <float> bar-top-fraction: self.signed-bar-height >= 0.0
                         ? root.bar-baseline-fraction - self.signed-bar-height : root.bar-baseline-fraction;
