@@ -62,6 +62,38 @@ jobs:
         working-directory: loom-sheets
         run: cargo test --workspace --locked
 
+  sheets-scroll-budget:
+    name: Sheets scroll budget (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native UI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             build-essential pkg-config libasound2-dev libfontconfig1-dev             libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+      - name: Select Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loom-sheets -> target
+            loom-core -> target
+          shared-key: loom-sheets-scroll-${{ matrix.os }}
+      # Scrolls a 300,000-cell sheet through the real scroll callback and a
+      # software render. Fails the build if the callback or a frame exceeds its
+      # budget, and prints the measured numbers for the ledger.
+      - name: Scroll callback and frame budget
+        working-directory: loom-sheets
+        env:
+          LOOM_FRAME_BENCH: enforce
+        run: cargo test --release --locked -p loom-sheets-app --bin loom-sheets frame_bench_tests -- --nocapture
+
   recovery:
     name: Recovery journal (${{ matrix.os }})
     strategy:
