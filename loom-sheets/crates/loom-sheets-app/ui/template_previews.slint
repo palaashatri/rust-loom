@@ -15,23 +15,6 @@ export component BlankPreview inherits VerticalLayout {
     }
 }
 
-export component BlankBlackPreview inherits VerticalLayout {
-    spacing: 0px;
-    Rectangle { height: 16px; background: #27272a; }
-    for idx in 4 : Rectangle {
-        height: 16px;
-        background: #18181b;
-        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: #27272a; }
-        HorizontalLayout {
-            spacing: 0px;
-            Rectangle { width: 32px; border-width: 0.5px; border-color: #3f3f46; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
-            Rectangle { width: 44px; border-width: 0.5px; border-color: #3f3f46; }
-            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #3f3f46; }
-        }
-    }
-}
-
 export component TableChartPreview inherits VerticalLayout {
     spacing: 2px;
     padding: 4px;
@@ -233,3 +216,51 @@ export component InvoicePreview inherits VerticalLayout {
     }
 }
 
+
+// The Checklist template (`template_sheet(3)`) generates a two-column task
+// table: Task/Done headers, four task rows where two are marked done, a gap
+// row, then Done/Total summary rows. This preview shows that structure so the
+// card does not promise an empty grid the application never creates.
+export component ChecklistPreview inherits VerticalLayout {
+    spacing: 0px;
+    Rectangle {
+        height: 15px;
+        background: #e5e7eb;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 62px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #cbd5e1; }
+        }
+    }
+    for done in 2 : Rectangle {
+        height: 13px;
+        background: Math.mod(done, 2) == 0 ? #ffffff : #f8fafc;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 62px; border-width: 0.5px; border-color: #e2e8f0; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e2e8f0; }
+        }
+    }
+    for done in 2 : Rectangle {
+        height: 13px;
+        background: Math.mod(done, 2) == 1 ? #ffffff : #f8fafc;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 62px; border-width: 0.5px; border-color: #e2e8f0; }
+            Rectangle { horizontal-stretch: 1; border-width: 0.5px; border-color: #e2e8f0; }
+        }
+    }
+    Rectangle {
+        height: 8px;
+        background: #ffffff;
+    }
+    for summary in 2 : Rectangle {
+        height: 12px;
+        background: #f1f5f9;
+        HorizontalLayout {
+            spacing: 0px;
+            Rectangle { width: 62px; border-width: 0.5px; border-color: #cbd5e1; }
+            Rectangle { width: 26px; border-width: 0.5px; border-color: #cbd5e1; }
+        }
+    }
+}

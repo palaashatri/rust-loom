@@ -510,14 +510,6 @@ export component SheetTable inherits Rectangle {
                         }
                     }
                 }
-
-                // Canonical canvas resize handle
-                LoomCanvasHandle {
-                    x: root.grid-col-offset + 36px + root.grid-visible-width + 2px;
-                    y: root.grid-row-offset + 26px + root.grid-visible-height + 2px;
-                    label: "Resize table handle";
-                    selected: true;
-                }
             }
 
             SheetScrollbars {

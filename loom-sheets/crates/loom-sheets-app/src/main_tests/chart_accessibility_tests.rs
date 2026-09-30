@@ -1092,3 +1092,75 @@ fn hiding_an_empty_chart_does_not_steal_formula_bar_focus() {
         "automatic chart hiding must leave the formula editor focused instead of routing arrows to the grid"
     );
 }
+
+/// UI-41: the chart advertised a `Chart resize handle` corner affordance with no
+/// `picked`/`nudged` action behind it, and the grid had an equally inert
+/// `Resize table handle`. Both announced themselves as buttons and swallowed
+/// arrow and Enter keys while changing nothing.
+///
+/// A chart resize needs geometry in the core `SheetChart` model, persistence,
+/// and the XLSX round trip, which is new feature work and therefore locked
+/// during the audit-repair phase. The bounded honest repair is to remove the
+/// affordance rather than keep a placebo, and this guard proves no canvas handle
+/// in the Sheets UI can be reintroduced unwired.
+#[test]
+fn every_visible_canvas_handle_in_sheets_wires_its_action() {
+    let sources = [
+        ("ui/chart.slint", include_str!("../../ui/chart.slint")),
+        (
+            "ui/components.slint",
+            include_str!("../../ui/components.slint"),
+        ),
+        ("ui/objects.slint", include_str!("../../ui/objects.slint")),
+    ];
+
+    let mut handles = 0usize;
+    for (name, source) in sources {
+        let mut cursor = 0usize;
+        while let Some(offset) = source[cursor..].find("LoomCanvasHandle {") {
+            let start = cursor + offset;
+            // Take the whole brace-balanced instance body.
+            let mut depth = 0i32;
+            let mut end = source.len() - 1;
+            for (index, byte) in source[start..].bytes().enumerate() {
+                match byte {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = start + index;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let body = &source[start..=end];
+            handles += 1;
+            assert!(
+                body.contains("picked =>"),
+                "{name} exposes a LoomCanvasHandle with no action:\n{body}"
+            );
+            cursor = end + 1;
+        }
+    }
+    assert!(
+        handles > 0,
+        "the guard must actually find a handle, or it proves nothing"
+    );
+}
+
+#[test]
+fn neither_the_chart_nor_the_grid_advertises_an_inert_resize_handle() {
+    set_platform();
+    let app = chart_app("bar", &["One".to_owned()], &["1".to_owned()]);
+    let _ = snapshot_component(&app, 1280.0, 720.0, 1.0).expect("render a chart with a grid");
+
+    for label in ["Chart resize handle", "Resize table handle"] {
+        let handles: Vec<_> = ElementHandle::find_by_accessible_label(&app, label).collect();
+        assert!(
+            handles.is_empty(),
+            "{label:?} is an enabled affordance with no operation behind it"
+        );
+    }
+}

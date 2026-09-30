@@ -2,7 +2,7 @@ import { LoomButton } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 import {
-    BlankPreview, BlankBlackPreview, TableChartPreview, PivotPreview,
+    BlankPreview, ChecklistPreview, TableChartPreview, PivotPreview,
     ChartingPreview, BudgetPreview, MonthlyBudgetPreview, MonthlyGoalPreview,
     PortfolioPreview, NetWorthPreview, InvoicePreview,
 } from "template_previews.slint";
@@ -328,7 +328,7 @@ export component TemplateChooserModal inherits Rectangle {
                                         if recent == 0 : BlankPreview {}
                                         if recent == 1 : MonthlyBudgetPreview {}
                                         if recent == 2 : InvoicePreview {}
-                                        if recent == 3 : BlankBlackPreview {}
+                                        if recent == 3 : ChecklistPreview {}
                                         if recent == 4 : TableChartPreview {}
                                         if recent == 5 : PivotPreview {}
                                         if recent == 6 : ChartingPreview {}
@@ -366,7 +366,7 @@ export component TemplateChooserModal inherits Rectangle {
                                         selected: root.template-selected == 3;
                                         text-scale: root.text-scale;
                                         clicked => { root.template-selected = 3; }
-                                        BlankBlackPreview {}
+                                        ChecklistPreview {}
                                     }
                                     SheetsTemplateCard {
                                         title: "Table and Chart";

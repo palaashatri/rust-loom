@@ -1,6 +1,4 @@
-import {
-    LoomCanvasHandle, LoomIconButton, LoomButton
-} from "foundation.slint";
+import { LoomIconButton, LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 export component SheetChart inherits Rectangle {
@@ -644,13 +642,6 @@ export component SheetChart inherits Rectangle {
             }
 
         }
-    }
-
-    // Direct manipulation corner handle
-    LoomCanvasHandle {
-        x: parent.width - 10px;
-        y: parent.height - 10px;
-        label: "Chart resize handle";
     }
 }
 

@@ -116,3 +116,82 @@ fn escape_closes_template_chooser_without_replacing_the_workbook() {
     assert!(!created.get());
     assert_eq!(app.get_sheet_name(), "Keep this workbook");
 }
+
+/// UI-31: the Checklist card must preview the workbook it creates. It previously
+/// drew an empty dark grid while `template_sheet(3)` generates a light
+/// two-column task table with headers, four task rows, and summary rows.
+#[test]
+fn the_checklist_card_previews_the_workbook_it_creates() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_template_chooser_open(true);
+    app.set_template_category(2); // Basic
+    app.set_template_selected(3); // Checklist
+    let image = snapshot_component(&app, 1280.0, 720.0, 1.0).expect("render the Basic section");
+
+    // The card is a button labelled with its template name; its upper band is
+    // the preview frame.
+    let cards: Vec<_> =
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "Checklist")
+            .collect();
+    // The chooser also lists the template name as text, so keep only the card
+    // itself: a button whose frame is at least the preview's height.
+    let cards: Vec<_> = cards
+        .into_iter()
+        .filter(|card| card.size().height >= 96.0)
+        .collect();
+    assert!(!cards.is_empty(), "the Checklist card must be visible");
+    // Every place the card appears must preview the real worksheet: Recents and
+    // the category section both used the same preview component.
+    for card in cards {
+        let position = card.absolute_position();
+        let size = card.size();
+
+        // `BlankBlackPreview` painted #18181b over most of the frame. The
+        // created worksheet is a light table, so the preview must be light.
+        let mut dark = 0;
+        let mut light = 0;
+        for step in 1..=12 {
+            let x = (position.x + 6.0 + (size.width - 12.0) * (step as f32 / 13.0)) as u32;
+            for y in [
+                (position.y + 4.0) as u32,
+                (position.y + size.height * 0.25) as u32,
+                (position.y + size.height * 0.5) as u32,
+            ] {
+                let pixel = image.get_pixel(x, y);
+                let luminance =
+                    (u16::from(pixel[0]) + u16::from(pixel[1]) + u16::from(pixel[2])) / 3;
+                if luminance < 80 {
+                    dark += 1;
+                } else {
+                    light += 1;
+                }
+            }
+        }
+        assert!(
+            light > dark * 4,
+            "the Checklist preview must be a light worksheet, not a dark grid: {light} light vs {dark} dark samples"
+        );
+    }
+
+    // Identity must stay bound to the template ID, not to display order, and
+    // that ID must still create the advertised sheet.
+    let created = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let sink = created.clone();
+    app.on_create_template(move |idx| {
+        sink.borrow_mut().replace(idx);
+    });
+    app.invoke_create_template(3);
+    assert_eq!(created.borrow().as_ref().copied(), Some(3));
+    let sheet = crate::template_sheet(3);
+    assert_eq!(sheet.name, "Checklist");
+    let raw = |a1: &str| {
+        CellRef::parse(a1)
+            .and_then(|cell| sheet.raw(cell))
+            .map(str::to_string)
+    };
+    assert_eq!(raw("A1").as_deref(), Some("Task"));
+    assert_eq!(raw("B1").as_deref(), Some("Done"));
+    assert_eq!(raw("A3").as_deref(), Some("Pay rent"));
+    assert_eq!(raw("B7").as_deref(), Some("=COUNTIF(B2:B5, \"x\")"));
+}

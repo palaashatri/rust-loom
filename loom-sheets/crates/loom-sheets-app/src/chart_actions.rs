@@ -36,9 +36,7 @@ fn numeric_axis_value(raw: &str) -> Option<f64> {
     let raw = raw.strip_prefix('$').unwrap_or(raw).trim();
     let text = raw.strip_suffix('%').unwrap_or(raw).trim();
     if text.contains(',') {
-        let integer_end = text
-            .find(['.', 'e', 'E'])
-            .unwrap_or(text.len());
+        let integer_end = text.find(['.', 'e', 'E']).unwrap_or(text.len());
         if text[integer_end..].contains(',') {
             return None;
         }

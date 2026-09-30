@@ -452,7 +452,7 @@ Quality and permission to work are different. The owner override permits the act
 | 7 | Studio | ACCEPTANCE_BLOCKED | LOCKED | CODE-10 repaired in code; audio and visual acceptance checks remain |
 | 8 | Encode | ACCEPTANCE_BLOCKED | LOCKED | CODE-09/UI-23 repaired in code; filesystem/media checks remain |
 
-**Sheets pending snapshot (2026-09-30): 14 tracked cards/gates remain.** Five UI cards are OPEN (UI-31, UI-37, UI-38, UI-40, UI-41); four UI cards are NEEDS_REVIEW (UI-01, UI-35, UI-36); four XLSX cards are NEEDS_REVIEW (CODE-23, CODE-27, CODE-28, CODE-29); REC-02 is OPEN; and PERF-01 is NEEDS_REVIEW. UI-30, UI-32, and UI-39 are FIXED in code with renderer and native-size geometry regressions. CODE-30 is a new P1 card: recovery refused to start anywhere on macOS because the policy walked to the filesystem root and rejected the operating system's own `/var` symlink; 85 of 302 app tests failed at `ef0f8dd` for that reason alone. It is FIXED, and the Sheets workspace is now fully green on macOS arm64 for the first time.
+**Sheets pending snapshot (2026-09-30): 12 tracked cards/gates remain.** Three UI cards are OPEN (UI-37, UI-38, UI-40); four UI cards are NEEDS_REVIEW (UI-01, UI-35, UI-36); four XLSX cards are NEEDS_REVIEW (CODE-23, CODE-27, CODE-28, CODE-29); REC-02 is OPEN; and PERF-01 is NEEDS_REVIEW. UI-30, UI-31, UI-32, UI-39, and UI-41 are FIXED in code with renderer, pixel, and native-size geometry regressions. CODE-30 is a new P1 card: recovery refused to start anywhere on macOS because the policy walked to the filesystem root and rejected the operating system's own `/var` symlink; 85 of 302 app tests failed at `ef0f8dd` for that reason alone. It is FIXED, and the Sheets workspace is now fully green on macOS arm64 for the first time.
 
 **Clippy gate (2026-09-30):** `cargo clippy --manifest-path loom-sheets/Cargo.toml --workspace --all-targets --locked --offline -- -D warnings` now exits 0. The nine errors recorded on the UI-37 card plus three in `local_menu_tests.rs` were real and all sat in active Sheets sources: `object_actions.rs` (an 8-argument `finish_gesture_state` and an integer OR pattern), `chart_actions.rs` (two manual char comparisons), `chart_accessibility_tests.rs` (a single-element loop and a `cloned_ref_to_slice_refs`), and `local_menu_tests.rs` (macOS-unused import and two dead pixel probes). The two trailing booleans in `finish_gesture_state` became a named `GestureScroll` policy, which is also the first place those two booleans were readable. This count does not include additional gate evidence: native menu, warning, close, and Open interactions; screen-reader announcements; recovery cadence, admission pause, failure/restart coverage, and 250 ms p95 durability; full callback/frame, export-scale, native million-cell scroll, and app-memory measurements; or broad XLSX interoperability. UI-37 remains OPEN after native QA exposed a focus-return defect. Keep Writer LOCKED.
 
@@ -878,15 +878,13 @@ Each card shows its current state. A screenshot proves only the visible state; n
 
 ### UI-31 — Make the Checklist preview match the workbook it creates
 
-**P2 · Sheets template chooser · OPEN.** The Checklist card shows an empty dark grid, while creating it produces a light task table with Task/Done columns, example rows, and summary formulas.
+**P2 · Sheets template chooser · FIXED (2026-09-30).** The Checklist card showed an empty dark grid, while creating it produced a light task table with Task/Done columns, example rows, and summary formulas. A card must not promise a document the application never creates.
 
-**Evidence:** Native captures `owner-20260927-08-template-checklist-selected-live-linux.png` and `owner-20260927-09-template-created-live-linux.png`; the created template is built by `template_sheet(3)` in `workbook_io.rs`.
+**Original evidence:** native captures `owner-20260927-08-template-checklist-selected-live-linux.png` and `owner-20260927-09-template-created-live-linux.png`. `BlankBlackPreview` was the *only* consumer-facing use of that component, and its sole role was the Checklist card: a `#27272a` header strip, four empty `#18181b` rows, and no text at all.
 
-1. Keep the template's stable identity and generated sheet data connected; update the Checklist preview to show its header, several task rows, and summary rows with the same neutral worksheet appearance.
-2. Keep names, descriptions, and selection tied to the template ID; do not shift identity to display order.
-3. Test chooser selection and generated workbook contents, then capture the chooser and created workbook in the live window.
+**Repair result (2026-09-30):** `ChecklistPreview` replaces it and draws the structure `template_sheet(3)` actually generates — a light header row, four task rows with alternating banding, a gap row, and the two summary rows. Both call sites (the category section and Recents) were updated, so the card is consistent everywhere it appears, and the now-dead `BlankBlackPreview` was deleted rather than left as residue.
 
-**Done when:** selecting Checklist previews the structure users receive after Create, and the stable ID still creates the tested Checklist workbook.
+**Verification:** `the_checklist_card_previews_the_workbook_it_creates` renders the chooser, samples pixels inside every visible Checklist card frame, and fails on a dark grid. Against the old preview it measured 0 light against 36 dark samples; it passes on the repair. The same test then proves identity is still bound to the template ID: `invoke_create_template(3)` reports 3 and `template_sheet(3)` still yields `Checklist` with `A1=Task`, `B1=Done`, `A3=Pay rent`, and the live `B7=COUNTIF(B2:B5, "x")` summary. The full workspace suite passed 444 tests. Native chooser and created-workbook captures are recorded under the milestone-6 evidence.
 
 ### UI-32 — Remove the redundant worksheet heading above the grid
 
@@ -1052,15 +1050,15 @@ Two separate P2 chart findings from the Astra/Sol visual audit remain open as UI
 
 ### UI-41 — Remove or implement the chart resize action
 
-**P2 · Sheets chart interaction · OPEN (2026-09-29).** The chart shows a `Chart resize handle` from `LoomCanvasHandle`, but wires no `picked`/`nudged` action to change the chart's size. The visible affordance promises an action that has no effect.
+**P2 · Sheets chart interaction · FIXED (2026-09-30).** The chart showed a `Chart resize handle` from `LoomCanvasHandle` with no `picked`/`nudged` action behind it, so the affordance promised an operation that did not exist.
 
-**Source:** `loom-sheets/crates/loom-sheets-app/ui/chart.slint`, the direct-manipulation corner handle and `SheetChartOverlay` sizing.
+**Why removal, not implementation:** the core `SheetChart` model has no width, height, or anchor — only `kind`, `title`, `cat_col`, `val_col`, `start_row`, and `end_row` — and `PersistedChart` persists none of them. The XLSX exporter writes the chart frame with hard-coded `CellRef { row: 0, col: 3 }, 560, 320` literals, and the importer discards the anchor it already parses. A real resize therefore needs a model change, backward-compatible persistence, an export/import round trip, a new command, and an undoable transaction. That is new feature work, and `AGENTS.md` §3 locks new application features during `audit-repair`. The card's Done criterion explicitly allows removal, and `AGENTS.md` §7 forbids a visible control without real semantics, so removal is the correct bounded step. The follow-up requirement is recorded rather than silently dropped.
 
-1. Give the handle a real resize interaction that updates visible chart bounds, or remove the handle until chart resizing is supported.
-2. Keep the handle accessible and large enough to use without obscuring chart content.
-3. Add a regression that checks the visible size change and persistence if resizing is retained; inspect the native result.
+**Repair result (2026-09-30):** the corner handle is removed from `SheetChart` and the now-unused import is dropped. The same audit found a second instance of the same defect: `components.slint` also drew an unwired `Resize table handle` that was additionally hard-coded `selected: true`. That is removed as well. The one remaining `LoomCanvasHandle` in Sheets is `Table select handle`, which correctly wires `picked`.
 
-**Done when:** every visible chart resize affordance changes the chart as advertised, or no inert resize affordance is exposed.
+**Verification:** `neither_the_chart_nor_the_grid_advertises_an_inert_resize_handle` renders a chart over a grid and asserts no accessible node is named either handle. `every_visible_canvas_handle_in_sheets_wires_its_action` is a structural guard: it walks every brace-balanced `LoomCanvasHandle` instance in `chart.slint`, `components.slint`, and `objects.slint` and fails if any lacks a `picked` binding, so a placebo cannot be reintroduced silently. Re-adding an unwired handle to `chart.slint` was confirmed to fail the guard with the offending instance printed. The inert handle also swallowed arrow and Enter keys while focused, since the shared component's focus scope returns `accept` for unconnected callbacks; removing it returns those keys to the worksheet. The full workspace suite passed 444 tests.
+
+**Follow-up required before chart resizing can be offered:** add anchor and size to `SheetChart` with backward-compatible `#[serde(default)]` persistence, use them in the XLSX exporter and importer, and add an undoable resize command. Until then no chart resize affordance may be shown.
 
 ### UI-02 — Stop opening a mostly empty Sheets inspector by default
 
