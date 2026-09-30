@@ -41,6 +41,15 @@ pub(crate) fn starter_workbook() -> Sheet {
     }
     // Keep the example's complete unit label visible without manual resizing.
     sheet.set_col_width(1, 190.0);
+    // Real bold formatting, so the header row and totals read as such without
+    // the grid guessing that row 1 is always a header.
+    for cell in ["A1", "B1", "C1", "A5", "B5"] {
+        if let Some(cell) = loom_sheets_core::CellRef::parse(cell) {
+            let mut style = sheet.cell_style(cell);
+            style.bold = true;
+            sheet.set_cell_style(cell, style);
+        }
+    }
     sheet
 }
 

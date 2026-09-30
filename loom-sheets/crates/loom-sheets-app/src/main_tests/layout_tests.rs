@@ -57,10 +57,19 @@ fn layout_breakpoints_scale_with_accessibility_text() {
         }
         apply_layout_breakpoints(&app, (1400.0 * scale) as u32);
         apply_headless_viewport_size(&app, (1400.0 * scale) as u32, 800);
+        // The inspector starts closed and the grid runs edge to edge, so the
+        // whole window width is the grid's.
+        assert_eq!(
+            app.get_grid_viewport_width(),
+            1400.0 * scale - TABLE_HORIZONTAL_MARGIN
+        );
+        app.set_show_inspector(true);
+        apply_headless_viewport_size(&app, (1400.0 * scale) as u32, 800);
         assert_eq!(
             app.get_grid_viewport_width(),
             1400.0 * scale - INSPECTOR_WIDTH - TABLE_HORIZONTAL_MARGIN
         );
+        app.set_show_inspector(false);
         assert!(!app.get_icon_only_toolbar());
     }
     assert_eq!(policy.get_priority_1_icon_only_below(), 1180.0);

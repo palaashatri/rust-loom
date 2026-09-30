@@ -13,8 +13,8 @@ pub(crate) fn intersects_object_viewport(
     viewport_width: f32,
     viewport_height: f32,
 ) -> bool {
-    const CANVAS_LEFT: f32 = 24.0;
-    const CANVAS_TOP: f32 = 52.0;
+    const CANVAS_LEFT: f32 = 0.0;
+    const CANVAS_TOP: f32 = 0.0;
     const RESIZE_HANDLE_OVERHANG: f32 = 12.0;
     object_x + object_width + RESIZE_HANDLE_OVERHANG > CANVAS_LEFT
         && object_x < CANVAS_LEFT + viewport_width

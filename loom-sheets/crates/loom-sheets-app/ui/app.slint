@@ -486,14 +486,6 @@ export component SheetsApp inherits Window {
                     }
                 }
             }
-            SheetTabs {
-                sheets: root.sheet-names;
-                active-sheet: root.active-sheet-index;
-                can-add-sheet: true;
-                select-sheet(idx) => { root.select-sheet(idx); }
-                add-sheet => { root.add-sheet(); }
-            }
-
             formula-bar := FormulaNameBar {
                 selection-range: root.selection-range;
                 selection-formula: root.selection-formula;
@@ -585,8 +577,10 @@ export component SheetsApp inherits Window {
                     }
 
                     worksheet-objects := SheetObjectLayer {
-                        width: parent.width;
-                        height: parent.height;
+                        x: 36px;
+                        y: 26px;
+                        width: max(1px, parent.width - 36px);
+                        height: max(1px, parent.height - 26px);
                         objects: root.object-views;
                         selected-object <=> root.selected-object;
                         keyboard-state <=> root.object-state;
@@ -693,6 +687,14 @@ export component SheetsApp inherits Window {
 
                 }
             }
+            SheetTabs {
+                sheets: root.sheet-names;
+                active-sheet: root.active-sheet-index;
+                can-add-sheet: true;
+                select-sheet(idx) => { root.select-sheet(idx); }
+                add-sheet => { root.add-sheet(); }
+            }
+
             LoomStatusBar {
                 SheetsOperationStatusText { message: root.status-left; }
                 LoomStatusText {

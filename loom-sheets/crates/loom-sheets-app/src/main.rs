@@ -123,7 +123,7 @@ const GRID_ROW_HEADER_WIDTH: f32 = 36.0;
 const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
 const FIT_COLUMN_MAX_WIDTH: f32 = 160.0;
 const INSPECTOR_WIDTH: f32 = 320.0;
-const TABLE_HORIZONTAL_MARGIN: f32 = 48.0;
+const TABLE_HORIZONTAL_MARGIN: f32 = 0.0;
 const SHELL_VERTICAL_CHROME: f32 = 220.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
@@ -203,12 +203,17 @@ fn project_sheet_grid_with_values(
             };
             let cell = CellRef { row, col };
             let style = sheet.cell_style(cell);
+            let raw_val = cell_value(sheet, values, row, col);
+            // General alignment follows the content, as in every mainstream
+            // spreadsheet: numbers sit against the right edge, text on the left.
+            let numeric = matches!(values.get(&cell), Some(Value::Number(_)))
+                || raw_val.trim().parse::<f64>().is_ok();
             let align_code = match sheet.cell_alignment(cell) {
+                CellAlignment::General if numeric => 2,
                 CellAlignment::General | CellAlignment::Left => 0,
                 CellAlignment::Center => 1,
                 CellAlignment::Right => 2,
             };
-            let raw_val = cell_value(sheet, values, row, col);
             let display_val = style.format_value(&raw_val);
             cells.push(display_val);
             cell_alignments.push(align_code);
@@ -513,8 +518,8 @@ fn project_sheet_objects(
                 width,
                 height,
             );
-        let x = 24.0 + absolute_x + scroll_x;
-        let y = 52.0 + absolute_y + scroll_y;
+        let x = absolute_x + scroll_x;
+        let y = absolute_y + scroll_y;
         let rendered_width = object_layout::rendered_object_extent(
             width,
             zoom,
@@ -1735,11 +1740,12 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
 pub(crate) fn apply_headless_viewport_size(app: &SheetsApp, width: u32, height: u32) {
     let policy = ResponsivePolicy::get(app);
     let effective_width = width as f32 / app.get_template_text_scale().max(1.0);
-    let inspector_width = if effective_width >= policy.get_priority_1_icon_only_below() {
-        INSPECTOR_WIDTH
-    } else {
-        0.0
-    };
+    let inspector_width =
+        if app.get_show_inspector() && effective_width >= policy.get_priority_1_icon_only_below() {
+            INSPECTOR_WIDTH
+        } else {
+            0.0
+        };
     app.set_grid_viewport_width(
         (width as f32 - inspector_width - TABLE_HORIZONTAL_MARGIN).max(GRID_COL_WIDTH),
     );
