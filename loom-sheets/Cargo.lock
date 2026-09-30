@@ -3075,6 +3075,7 @@ version = "0.1.0"
 dependencies = [
  "fs2",
  "i-slint-backend-testing",
+ "i-slint-backend-winit",
  "i-slint-common",
  "image",
  "loom-desktop",

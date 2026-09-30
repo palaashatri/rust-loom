@@ -2377,6 +2377,15 @@ pub(crate) fn register_history_actions(
 }
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let backend = i_slint_backend_winit::Backend::builder()
+            .with_default_menu_bar(false)
+            .build()
+            .map_err(|error| error.to_string())?;
+        slint::platform::set_platform(Box::new(backend)).map_err(|error| error.to_string())?;
+    }
+
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     app.set_local_menu_visible(!cfg!(target_os = "macos"));
     configure_direction(&app, args.rtl);
