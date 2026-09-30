@@ -1929,7 +1929,11 @@ fn writer_render_markup(block: &RichBlock) -> String {
         boundaries.insert(floor_char_boundary_for_render(text, run.end));
     }
     let boundaries = boundaries.into_iter().collect::<Vec<_>>();
-    let mut markup = String::with_capacity(text.len() + block.runs.len() * 8);
+    // Neighbouring pieces that render alike (runs can differ in font size or
+    // family, which the markup does not express) must share one wrapper:
+    // wrapping each separately puts `**` next to `**`, which the parser then
+    // prints as literal asterisks.
+    let mut spans: Vec<(usize, usize, Option<&loom_text::CharacterStyle>)> = Vec::new();
     for pair in boundaries.windows(2) {
         let (start, end) = (pair[0], pair[1]);
         if start >= end {
@@ -1940,10 +1944,30 @@ fn writer_render_markup(block: &RichBlock) -> String {
             .iter()
             .find(|run| run.start <= start && start < run.end)
             .map(|run| &run.style);
+        match spans.last_mut() {
+            Some(last) if markup_signature(last.2) == markup_signature(style) => last.1 = end,
+            _ => spans.push((start, end, style)),
+        }
+    }
+    let mut markup = String::with_capacity(text.len() + block.runs.len() * 8);
+    for (start, end, style) in spans {
         let escaped = escape_writer_markdown(&text[start..end]);
         append_writer_styled_span(&mut markup, &escaped, style);
     }
     markup
+}
+
+/// The character attributes the page markup can express.
+fn markup_signature(style: Option<&loom_text::CharacterStyle>) -> (bool, bool, bool, bool) {
+    match style {
+        None => (false, false, false, false),
+        Some(style) => (
+            style.underline,
+            style.strikethrough,
+            style.italic,
+            style.weight.numeric() >= loom_text::FontWeight::Bold.numeric(),
+        ),
+    }
 }
 
 fn floor_char_boundary_for_render(text: &str, offset: usize) -> usize {
@@ -1980,6 +2004,23 @@ fn append_writer_styled_span(
         markup.push_str(escaped);
         return;
     };
+
+    // CommonMark cannot close emphasis after whitespace or open it before
+    // whitespace, so such delimiters would print literally. Keep the edge
+    // whitespace outside the wrappers.
+    let core = escaped.trim_matches(|c: char| c.is_whitespace());
+    if core.len() != escaped.len() {
+        let lead = escaped.len()
+            - escaped
+                .trim_start_matches(|c: char| c.is_whitespace())
+                .len();
+        markup.push_str(&escaped[..lead]);
+        if !core.is_empty() {
+            append_writer_styled_span(markup, core, Some(style));
+        }
+        markup.push_str(&escaped[lead + core.len()..]);
+        return;
+    }
 
     // Keep the wrappers properly nested so StyledText's CommonMark parser
     // preserves combined bold/italic/underline runs.

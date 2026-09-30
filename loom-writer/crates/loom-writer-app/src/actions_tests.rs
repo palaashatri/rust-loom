@@ -1816,3 +1816,44 @@ fn closing_a_clean_document_does_not_prompt() {
     assert!(!app.get_save_changes_open());
     assert_eq!(state.pending_replacement.get(), None);
 }
+
+#[test]
+fn adjacent_runs_that_render_alike_merge_into_one_span() {
+    // Regression: runs that differ only in font size or family (attributes the
+    // page markup does not express) were each wrapped separately, so delimiters
+    // met as `****` / `~~~~` and the page showed literal asterisks and tildes.
+    let mut document = text_document("Write, format, and export.");
+    set_selection_bold(&mut document, DocumentSelection::range(0, 13), true);
+    set_selection_strikethrough(&mut document, DocumentSelection::range(0, 13), true);
+    let mut first = document.blocks[0].runs[0].clone();
+    first.end = 6;
+    let mut second = document.blocks[0].runs[0].clone();
+    second.start = 6;
+    second.style.font_size += 2.0;
+    document.blocks[0].runs = vec![first, second];
+
+    let markup = writer_render_markup(&document.blocks[0]);
+
+    assert!(
+        !markup.contains("****") && !markup.contains("~~~~"),
+        "spans that render alike must merge, got {markup:?}"
+    );
+    assert!(
+        markup.starts_with("~~**Write, format**~~"),
+        "one merged bold+strike span expected, got {markup:?}"
+    );
+}
+
+#[test]
+fn styled_spans_keep_edge_whitespace_outside_their_delimiters() {
+    // Regression: a styled span ending in a space produced `**text **`, which
+    // CommonMark cannot close, so the page showed literal asterisks.
+    let mut document = text_document("open .loomdoc packages");
+    set_selection_bold(&mut document, DocumentSelection::range(0, 5), true);
+    set_selection_italic(&mut document, DocumentSelection::range(0, 5), true);
+    set_selection_bold(&mut document, DocumentSelection::range(5, 13), true);
+
+    let markup = writer_render_markup(&document.blocks[0]);
+
+    assert_eq!(markup, "***open*** **.loomdoc** packages");
+}
