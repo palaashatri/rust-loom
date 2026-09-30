@@ -145,7 +145,18 @@ export component LoomTextField inherits VerticalLayout {
     callback edited(string);
     callback accepted(string);
     callback cancelled;
-    public function focus-input() { input.focus(); }
+    // Opt in to Tab and Shift+Tab as editing keys, as in a spreadsheet cell.
+    // Left off, Tab keeps moving focus between controls.
+    in property <bool> capture-tab: false;
+    callback tabbed(bool);
+    // Focus the field with the caret after its text. When a host seeds the
+    // value and then focuses the field (typing into a spreadsheet cell does
+    // this), the caret would otherwise sit at the start and every following
+    // character would land in front of the first one.
+    public function focus-input() {
+        input.focus();
+        input.set-selection-offsets(input.text.character-count, input.text.character-count);
+    }
 
     spacing: Theme.tokens.space.xs;
     horizontal-stretch: 1;
@@ -181,7 +192,7 @@ export component LoomTextField inherits VerticalLayout {
             x: Theme.tokens.space.md;
             width: parent.width - Theme.tokens.space.xl;
             height: parent.height;
-            text: root.value;
+            text <=> root.value;
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;
@@ -191,10 +202,14 @@ export component LoomTextField inherits VerticalLayout {
             accepted => { root.accepted(input.text); }
             key-pressed(event) => {
                 if (event.text == Key.Escape) { root.cancelled(); return accept; }
+                if (root.capture-tab && (event.text == Key.Tab || event.text == Key.Backtab)) {
+                    root.tabbed(event.modifiers.shift || event.text == Key.Backtab);
+                    return accept;
+                }
                 return reject;
             }
         }
-        if root.value == "" : Text {
+        if input.text == "" : Text {
             x: Theme.tokens.space.md;
             width: parent.width - Theme.tokens.space.xl;
             height: parent.height;
@@ -256,7 +271,7 @@ export component LoomSearchField inherits VerticalLayout {
             x: Theme.rtl ? Theme.tokens.space.xxxxl - Theme.tokens.space.xxxl : Theme.tokens.space.xxxl;
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
-            text: root.value;
+            text <=> root.value;
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;
@@ -264,7 +279,7 @@ export component LoomSearchField inherits VerticalLayout {
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             edited => { root.value = input.text; root.edited(input.text); }
         }
-        if root.value == "" : Text {
+        if input.text == "" : Text {
             x: Theme.rtl ? Theme.tokens.space.xxxxl - Theme.tokens.space.xxxl : Theme.tokens.space.xxxl;
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;

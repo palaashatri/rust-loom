@@ -18,7 +18,7 @@ fn has_button_border_near_bottom(image: &image::RgbaImage, surface_height: u32) 
     let bottom = image
         .height()
         .saturating_sub((image.height().saturating_sub(surface_height)) / 2);
-    let border = image::Rgba([215, 215, 222, 255]);
+    let border = image::Rgba([227, 227, 232, 255]); // the light `border` token
     (bottom.saturating_sub(50)..bottom.saturating_sub(39)).any(|y| {
         (550..780)
             .filter(|&x| image.get_pixel(x, y) == &border)

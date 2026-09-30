@@ -518,9 +518,16 @@ export component SheetsApp inherits Window {
                     root.is-editing = false;
                     root.commit-selected-cell(text);
                 }
+                commit-advance(text, row-delta, col-delta) => {
+                    root.is-editing = false;
+                    root.commit-selected-cell(text);
+                    root.navigate-selection(row-delta, col-delta);
+                    grid-surface.focus-grid();
+                }
                 cancel => {
                     root.is-editing = false;
                     root.cancel-selected-cell();
+                    grid-surface.focus-grid();
                 }
                 quick-formula(function) => { root.quick-formula(function); }
                 fill-selection => { root.fill-selection(); }

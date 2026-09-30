@@ -147,6 +147,10 @@ export component SheetObjectLayer inherits Rectangle {
         width: parent.width;
         height: parent.height;
         enabled: true;
+        // This scope spans the whole grid, above the cells. A FocusScope takes
+        // mouse presses by default, which swallowed every click meant for a
+        // cell and kept the grid from ever receiving keyboard focus.
+        focus-on-click: false;
         focus-on-tab-navigation: false;
         capture-key-pressed(event) => {
             if (root.keyboard-state != 0 && (event.text == Key.Tab || event.text == Key.Backtab)) {

@@ -58,6 +58,7 @@ export component FormulaNameBar inherits Rectangle {
     in-out property <string> formula-edit-buffer: "";
     in property <bool> is-editing: false;
     callback commit(string);
+    callback commit-advance(string, int, int);
     callback cancel;
     callback quick-formula(string);
     callback fill-selection;
@@ -108,7 +109,11 @@ export component FormulaNameBar inherits Rectangle {
             placeholder: "Enter a value or formula (=SUM, =AVERAGE)";
             value <=> root.formula-edit-buffer;
             horizontal-stretch: 1;
-            accepted(text) => { root.commit(text); }
+            capture-tab: true;
+            // Enter commits and moves down; Tab and Shift+Tab commit and move
+            // sideways, as in every spreadsheet. The check button commits in place.
+            accepted(text) => { root.commit-advance(text, 1, 0); }
+            tabbed(back) => { root.commit-advance(root.formula-edit-buffer, 0, back ? -1 : 1); }
             cancelled => {
                 root.formula-edit-buffer = root.selection-formula;
                 root.cancel();

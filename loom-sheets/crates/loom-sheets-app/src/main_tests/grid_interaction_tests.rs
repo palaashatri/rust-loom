@@ -643,3 +643,50 @@ fn typing_is_mirrored_inside_the_active_cell() {
         "the active cell must show the text being typed"
     );
 }
+
+#[test]
+fn a_pointer_click_on_a_cell_reports_that_cell() {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    apply_layout_breakpoints(&app, 1280);
+    apply_headless_viewport_size(&app, 1280, 800);
+    project_sheet(&app, &Sheet::new("Empty"));
+    snapshot_component(&app, 1280.0, 800.0, 1.0).expect("lay out the window");
+
+    let clicked = Rc::new(std::cell::Cell::new(None));
+    {
+        let clicked = clicked.clone();
+        app.on_cell_clicked(move |row, col| clicked.set(Some((row, col))));
+    }
+    let cell = i_slint_backend_testing::ElementHandle::find_by_accessible_label(&app, "C3")
+        .next()
+        .expect("cell C3 is in the accessibility tree");
+    let position = cell.absolute_position();
+    let size = cell.size();
+    let point = slint::LogicalPosition::new(
+        position.x + size.width / 2.0,
+        position.y + size.height / 2.0,
+    );
+    eprintln!("CLICK cell at {position:?} size {size:?} -> {point:?}");
+    let window = app.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position: point });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+    // Let the delayed press fire, as a real click's duration would.
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    slint::platform::update_timers_and_animations();
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position: point,
+        button: PointerEventButton::Left,
+    });
+
+    assert_eq!(
+        clicked.get(),
+        Some((2, 2)),
+        "clicking C3 must select row 2, column 2"
+    );
+}
