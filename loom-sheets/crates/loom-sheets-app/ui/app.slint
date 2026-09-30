@@ -4,7 +4,7 @@ import { SaveChangesDialog } from "save_changes_dialog.slint";
 import { CloseDrainShield } from "close_drain_shield.slint";
 import { SheetsOperationStatusText } from "operation_status_text.slint";
 import {
-    LoomToolbar, LoomStatusBar, LoomStatusText,
+    LoomToolbar, LoomStatusBar, LoomStatusText, LoomTitleBar, LoomWindowResizeEdges,
 } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
 import { SheetToolbarOverflow } from "toolbar_overflow.slint";
@@ -16,12 +16,20 @@ import {
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
-import { LocalMenuBar, LocalMenuEntry, LocalMenuPopup } from "local_menu.slint";
+import { LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup } from "local_menu.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "local_menu.slint";
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;
+    default-font-family: "Inter";
+    // Windows and Linux draw their own frame so the menu and the title share
+    // one row. macOS keeps the native frame and global menu bar.
+    in property <bool> custom-chrome: false;
+    no-frame: root.custom-chrome;
+    callback window-drag;
+    callback window-close;
+    callback window-resize(int);
     min-width: 900px;
     min-height: 680px;
     preferred-width: 1280px;
@@ -439,7 +447,20 @@ export component SheetsApp inherits Window {
         VerticalLayout {
             spacing: 0px;
             padding: 0px;
-            if root.local-menu-visible : LocalMenuBar {
+            if root.custom-chrome : LoomTitleBar {
+                title: root.window-title;
+                maximized: root.maximized;
+                drag-requested => { root.window-drag(); }
+                // `maximized` and `minimized` are Slint's own window properties.
+                toggle-maximize => { root.maximized = !root.maximized; }
+                minimize => { root.minimized = true; }
+                close => { root.window-close(); }
+                LocalMenuLabels {
+                    labels: root.local-menu-labels;
+                    open-index <=> root.local-menu-open-index;
+                }
+            }
+            if root.local-menu-visible && !root.custom-chrome : LocalMenuBar {
                 labels: root.local-menu-labels;
                 open-index <=> root.local-menu-open-index;
             }
@@ -820,4 +841,13 @@ export component SheetsApp inherits Window {
         window-height: root.height;
         activated => { app-focus.focus(); }
     }
+    LoomWindowResizeEdges {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.custom-chrome && !root.maximized;
+        resize(direction) => { root.window-resize(direction); }
+    }
 }
+

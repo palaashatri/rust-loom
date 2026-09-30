@@ -95,3 +95,22 @@ values = [
   "BSD-3-Clause",
   "Apache-2.0",
 ]
+
+# Bundled UI typeface. Inter is the closest open-licensed face to the system UI
+# fonts of the platforms Loom competes with; shipping it makes text metrics
+# identical on Windows, Linux, and macOS.
+[[allow]]
+glob = "loom-core/crates/loom-ui/ui/fonts/Inter-*.ttf"
+origin = "Inter 4.0 (https://github.com/rsms/inter/releases/tag/v4.0), static TTF instances"
+license = "SIL Open Font License 1.1 (loom-core/crates/loom-ui/ui/fonts/Inter-LICENSE.txt)"
+commercial = true
+redistributable = true
+attribution_required = true
+
+[[allow]]
+glob = "loom-core/crates/loom-ui/ui/fonts/Inter-LICENSE.txt"
+origin = "Inter 4.0 license text"
+license = "SIL Open Font License 1.1"
+commercial = true
+redistributable = true
+attribution_required = true

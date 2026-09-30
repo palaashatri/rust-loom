@@ -6,6 +6,7 @@ pub(super) fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     app.set_local_menu_visible(!cfg!(target_os = "macos"));
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.set_template_text_scale(args.text_scale);

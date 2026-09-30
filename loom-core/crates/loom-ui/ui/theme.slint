@@ -4,6 +4,14 @@
 // design contract/token set. Application UI must not invent local colors or
 // standard control geometry to compensate for a missing runtime token.
 
+// The bundled UI typeface. Importing the files registers the family for every
+// window that loads this module; a window opts in with
+// `default-font-family: "Inter"`. See assets.toml for provenance.
+import "fonts/Inter-Regular.ttf";
+import "fonts/Inter-Medium.ttf";
+import "fonts/Inter-SemiBold.ttf";
+import "fonts/Inter-Bold.ttf";
+
 struct Palette {
     canvas: color, canvas-alt: color, surface: color, surface-raised: color,
     surface-sunken: color, chrome: color, panel: color, overlay: color,

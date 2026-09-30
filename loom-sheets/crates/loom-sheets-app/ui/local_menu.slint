@@ -43,6 +43,26 @@ export component LocalMenuBar inherits Rectangle {
     }
 }
 
+/// The menu labels without their own row, for hosting inside the title bar.
+export component LocalMenuLabels inherits HorizontalLayout {
+    in property <[string]> labels: [];
+    in-out property <int> open-index: -1;
+
+    spacing: 0px;
+    alignment: start;
+
+    for label[index] in root.labels : LoomButton {
+        width: 64px;
+        height: 36px;
+        label: label;
+        variant: "ghost";
+        selected: root.open-index == index;
+        clicked => {
+            root.open-index = root.open-index == index ? -1 : index;
+        }
+    }
+}
+
 export component LocalMenuPopup inherits Rectangle {
     in property <bool> menu-enabled: true;
     in property <[string]> labels: [];

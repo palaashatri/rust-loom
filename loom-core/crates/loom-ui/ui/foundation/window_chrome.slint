@@ -1,0 +1,223 @@
+// Window chrome for platforms where Loom draws its own frame (Windows and
+// Linux). The title bar hosts the application menu on its left, the document
+// title in the middle, and the window controls on the right, so menu and title
+// share one row instead of stacking two.
+//
+// The host owns behaviour: it starts a window drag, toggles maximize, and so
+// on, in response to these callbacks. macOS keeps the native frame and global
+// menu bar and never instantiates this component.
+
+import { Theme } from "../theme.slint";
+
+/// One caption button. `kind` selects the glyph: "minimize", "maximize",
+/// "restore", or "close". The close button turns red on hover.
+component LoomCaptionButton inherits Rectangle {
+    in property <string> kind: "minimize";
+    in property <string> label: "";
+    callback clicked;
+
+    width: 46px;
+    background: touch.has-hover
+        ? (root.kind == "close" ? #e5484d : Theme.palette().surface-sunken)
+        : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    property <color> glyph: touch.has-hover && root.kind == "close"
+        ? #ffffff : Theme.palette().ink;
+
+    if root.kind == "minimize" : Rectangle {
+        x: (parent.width - 10px) / 2;
+        y: parent.height / 2;
+        width: 10px;
+        height: 1px;
+        background: root.glyph;
+    }
+    if root.kind == "maximize" : Rectangle {
+        x: (parent.width - 10px) / 2;
+        y: (parent.height - 10px) / 2;
+        width: 10px;
+        height: 10px;
+        border-width: 1px;
+        border-color: root.glyph;
+    }
+    if root.kind == "restore" : Rectangle {
+        x: (parent.width - 10px) / 2;
+        y: (parent.height - 10px) / 2;
+        width: 10px;
+        height: 10px;
+        Rectangle {
+            x: 2px;
+            y: 0px;
+            width: 8px;
+            height: 8px;
+            border-width: 1px;
+            border-color: root.glyph;
+        }
+        Rectangle {
+            x: 0px;
+            y: 2px;
+            width: 8px;
+            height: 8px;
+            border-width: 1px;
+            border-color: root.glyph;
+            background: touch.has-hover && root.kind == "close" ? transparent : Theme.palette().chrome;
+        }
+    }
+    if root.kind == "close" : Path {
+        x: (parent.width - 10px) / 2;
+        y: (parent.height - 10px) / 2;
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        stroke: root.glyph;
+        stroke-width: 1px;
+        commands: "M 0 0 L 10 10 M 10 0 L 0 10";
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// The title bar. Children fill the left area (the menu); everything else is
+/// draggable.
+export component LoomTitleBar inherits Rectangle {
+    in property <string> title: "";
+    in property <bool> maximized: false;
+    in property <bool> active: true;
+    callback drag-requested;
+    callback toggle-maximize;
+    callback minimize;
+    callback close;
+
+    height: 36px;
+    background: Theme.palette().chrome;
+
+    // Everything behind the controls drags the window; a double click toggles
+    // maximize, exactly like a native title bar.
+    TouchArea {
+        mouse-cursor: MouseCursor.default;
+        double-clicked => { root.toggle-maximize(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.drag-requested();
+            }
+        }
+    }
+
+    Text {
+        x: 380px;
+        y: 0px;
+        width: max(0px, root.width - 760px);
+        height: root.height;
+        text: root.title;
+        color: root.active ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+        font-size: Theme.type.body;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+        // Centered in the space the menu and caption buttons leave free.
+        accessible-role: none;
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.tokens.space.md;
+        spacing: 0px;
+        alignment: start;
+        @children
+    }
+
+    HorizontalLayout {
+        x: root.width - self.preferred-width;
+        width: self.preferred-width;
+        height: root.height;
+        alignment: end;
+
+        LoomCaptionButton {
+            kind: "minimize";
+            label: "Minimize window";
+            height: root.height;
+            clicked => { root.minimize(); }
+        }
+        LoomCaptionButton {
+            kind: root.maximized ? "restore" : "maximize";
+            label: root.maximized ? "Restore window" : "Maximize window";
+            height: root.height;
+            clicked => { root.toggle-maximize(); }
+        }
+        LoomCaptionButton {
+            kind: "close";
+            label: "Close window";
+            height: root.height;
+            clicked => { root.close(); }
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: root.height - 1px;
+        width: root.width;
+        height: 1px;
+        background: Theme.palette().border;
+    }
+}
+
+/// Invisible resize handles along the window edges, for frameless windows.
+/// `direction` is 0..7: N, S, E, W, NE, NW, SE, SW. Place it over the whole
+/// window, above the content, and inset by `thickness`.
+export component LoomWindowResizeEdges inherits Rectangle {
+    in property <length> thickness: 6px;
+    in property <bool> enabled: true;
+    callback resize(int);
+
+    background: transparent;
+    visible: root.enabled;
+
+    // Edges
+    TouchArea {
+        x: root.thickness; y: 0px; width: root.width - 2 * root.thickness; height: root.thickness;
+        mouse-cursor: MouseCursor.ns-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(0); } }
+    }
+    TouchArea {
+        x: root.thickness; y: root.height - root.thickness; width: root.width - 2 * root.thickness; height: root.thickness;
+        mouse-cursor: MouseCursor.ns-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(1); } }
+    }
+    TouchArea {
+        x: root.width - root.thickness; y: root.thickness; width: root.thickness; height: root.height - 2 * root.thickness;
+        mouse-cursor: MouseCursor.ew-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(2); } }
+    }
+    TouchArea {
+        x: 0px; y: root.thickness; width: root.thickness; height: root.height - 2 * root.thickness;
+        mouse-cursor: MouseCursor.ew-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(3); } }
+    }
+    // Corners
+    TouchArea {
+        x: root.width - root.thickness; y: 0px; width: root.thickness; height: root.thickness;
+        mouse-cursor: MouseCursor.nesw-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(4); } }
+    }
+    TouchArea {
+        x: 0px; y: 0px; width: root.thickness; height: root.thickness;
+        mouse-cursor: MouseCursor.nwse-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(5); } }
+    }
+    TouchArea {
+        x: root.width - root.thickness; y: root.height - root.thickness; width: root.thickness; height: root.thickness;
+        mouse-cursor: MouseCursor.nwse-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(6); } }
+    }
+    TouchArea {
+        x: 0px; y: root.height - root.thickness; width: root.thickness; height: root.thickness;
+        mouse-cursor: MouseCursor.nesw-resize;
+        pointer-event(event) => { if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) { root.resize(7); } }
+    }
+}

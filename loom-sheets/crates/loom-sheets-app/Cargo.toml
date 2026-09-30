@@ -25,6 +25,8 @@ sha2 = "0.10"
 slint = "1.17.1"
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 
+i-slint-backend-winit = { version = "=1.17.1", default-features = false }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 i-slint-backend-winit = { version = "=1.17.1", default-features = false, features = ["muda"] }
 

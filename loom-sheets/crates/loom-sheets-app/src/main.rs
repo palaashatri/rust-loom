@@ -104,6 +104,7 @@ use journey::*;
 
 mod scroll_projection;
 mod template_navigation;
+mod window_chrome;
 
 mod actions;
 use actions::*;
@@ -2381,6 +2382,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     let app = SheetsApp::new().map_err(|e| e.to_string())?;
     app.set_local_menu_visible(!cfg!(target_os = "macos"));
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.set_template_text_scale(args.text_scale);
