@@ -835,3 +835,25 @@ fn failed_async_startup_open_preserves_fallback_path_and_recovery() {
     );
     crate::cell_edit_recovery::remove_test_recovery_data(&recovery_dir);
 }
+
+#[test]
+fn startup_marks_a_recovered_workbook_unsaved_but_not_a_fresh_one() {
+    let recovered = WorkbookFile {
+        sheets: vec![blank_sheet()],
+        active: 0,
+    };
+    let (_, unsaved) = startup_workbook(Some(recovered), false);
+    assert!(
+        unsaved,
+        "recovered contents exist only in the recovery store"
+    );
+
+    let (fresh, unsaved) = startup_workbook(None, false);
+    assert!(!unsaved, "a blank start has nothing to lose");
+    assert_eq!(fresh.sheets.len(), 1);
+    assert_eq!(fresh.active, 0);
+
+    let (example, unsaved) = startup_workbook(None, true);
+    assert!(!unsaved);
+    assert_eq!(example.sheets[0].name, "Example Budget");
+}

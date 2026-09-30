@@ -2374,6 +2374,26 @@ pub(crate) fn register_history_actions(
     }
 }
 
+/// Picks the workbook a session starts with. A recovered workbook has no save
+/// path: its contents exist only in the recovery store, so the caller must show
+/// it as unsaved. The bool is true exactly when the workbook was recovered.
+fn startup_workbook(recovered: Option<WorkbookFile>, example: bool) -> (WorkbookFile, bool) {
+    match recovered {
+        Some(file) => (file, true),
+        None => (
+            WorkbookFile {
+                sheets: vec![if example {
+                    starter_workbook()
+                } else {
+                    blank_sheet()
+                }],
+                active: 0,
+            },
+            false,
+        ),
+    }
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -2405,18 +2425,13 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         export_completion_sender,
     )?;
     let startup_recovery_error = startup.recovery_error.clone();
-    let fallback = startup
-        .restored_payload
-        .as_deref()
-        .and_then(restore_workbook_from_snapshot)
-        .unwrap_or_else(|| WorkbookFile {
-            sheets: vec![if args.example {
-                starter_workbook()
-            } else {
-                blank_sheet()
-            }],
-            active: 0,
-        });
+    let (fallback, recovered_unsaved) = startup_workbook(
+        startup
+            .restored_payload
+            .as_deref()
+            .and_then(restore_workbook_from_snapshot),
+        args.example,
+    );
     let startup_open = args.open.as_ref().map(PathBuf::from);
     let mut initial = fallback;
     if initial.sheets.is_empty() {
@@ -2472,6 +2487,9 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     worker_failure::mark_full_resync_accepted(&state, initial_generation, initial_revision);
     state.install_workbook(initial_model.sheets, initial_model.active_sheet);
     state.mark_saved();
+    if recovered_unsaved && startup_open.is_none() {
+        state.mark_content_dirty();
+    }
     *state.workbook_worker.borrow_mut() = Some(worker);
     if args.objects && startup_open.is_none() {
         app.set_selected_object(0);
