@@ -1,4 +1,5 @@
 //! Loom Studio local-first DAW application.
+#![cfg_attr(all(windows, not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
 mod audio_io;
 

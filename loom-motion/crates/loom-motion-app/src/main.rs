@@ -1,4 +1,5 @@
 //! Loom Motion desktop application.
+#![cfg_attr(all(windows, not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};

@@ -1,0 +1,5 @@
+# The Slint compiler and the generated UI recurse deeply. Windows gives the main
+# thread 1 MiB by default, which overflows in build scripts, tests, and at
+# startup. Match the 32 MiB stack the CI matrix already links with.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:33554432"]

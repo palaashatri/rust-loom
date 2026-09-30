@@ -1,4 +1,5 @@
 //! Loom Video desktop application with local FFmpeg media workflows.
+#![cfg_attr(all(windows, not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::collections::VecDeque;
 use std::io::{BufReader, Read};

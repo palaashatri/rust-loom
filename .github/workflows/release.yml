@@ -79,11 +79,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Windows: link a 32 MiB stack (Slint's generated UI recurses deeply)
-          # and use the GUI subsystem so double-clicking does not open a console.
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            export RUSTFLAGS="-C link-arg=/STACK:33554432 -C link-arg=/SUBSYSTEM:WINDOWS -C link-arg=/ENTRY:mainCRTStartup"
-          fi
+          # Windows: each workspace's .cargo/config.toml links a 32 MiB stack
+          # (Slint's generated UI recurses deeply) and every app crate opts into
+          # the GUI subsystem itself, so double-clicking opens no console.
+          # Do not pass global RUSTFLAGS here: they also reach proc-macro DLLs
+          # and build scripts, where /ENTRY breaks linking.
           for app in $APPS; do
             echo "::group::build loom-$app"
             cargo build --release --locked \
