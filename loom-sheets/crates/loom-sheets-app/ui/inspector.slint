@@ -18,7 +18,7 @@ component SheetPropertyRow inherits HorizontalLayout {
         max-width: 100px;
         font-size: Theme.type.caption;
         color: Theme.palette().ink-secondary;
-        wrap: char-wrap;
+        wrap: word-wrap;
         vertical-alignment: center;
         accessible-role: text;
         accessible-label: root.label;
@@ -125,6 +125,8 @@ export component SheetInspector inherits LoomPanel {
                 font-weight: 600;
                 color: Theme.palette().ink-secondary;
                 horizontal-stretch: 1;
+                min-width: 0px;
+                wrap: word-wrap;
             }
             LoomButton {
                 label: "Close";
@@ -154,6 +156,7 @@ export component SheetInspector inherits LoomPanel {
             cell-property-layout := VerticalLayout {
                 width: parent.width;
                 spacing: Theme.tokens.space.lg;
+                padding-bottom: Theme.tokens.space.xl * Theme.text-scale;
 
                 if root.inspector-tab == 0 && root.inspector-show-table : VerticalLayout {
                     spacing: Theme.tokens.space.md;

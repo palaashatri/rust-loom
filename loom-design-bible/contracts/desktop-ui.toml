@@ -44,11 +44,14 @@ baseline-diff-pixel-ratio = 0.035
 # One owner for responsive toolbar decisions. The probes are intentionally
 # adjacent to each boundary so a host cannot accidentally treat a transition
 # as a fuzzy range or move it to an app-local magic number.
+# Thresholds and transition probes are base-scale logical widths. Evaluate
+# transitions against viewport width / max(text scale, 1.0); render each probe
+# at its base width * max(text scale, 1.0) to preserve its boundary semantics.
 [responsive]
 priority-1-icon-only-below = 1180
 priority-2-overflow-below = 1320
 transition-probes = [1179, 1180, 1279, 1280, 1319, 1320]
-text-scale-probes = [1.0, 1.5]
+text-scale-probes = [1.0, 1.25, 1.5, 2.0]
 direction-probes = ["ltr", "rtl"]
 
 # Geometry is validated independently of screenshot hashes. The audit builds

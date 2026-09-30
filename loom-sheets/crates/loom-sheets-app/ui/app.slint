@@ -4,9 +4,10 @@ import { SaveChangesDialog } from "save_changes_dialog.slint";
 import { CloseDrainShield } from "close_drain_shield.slint";
 import { SheetsOperationStatusText } from "operation_status_text.slint";
 import {
-    LoomButton, LoomToolbar, LoomStatusBar, LoomStatusText,
+    LoomToolbar, LoomStatusBar, LoomStatusText,
 } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
+import { SheetToolbarOverflow } from "toolbar_overflow.slint";
 import { SheetObjectLayer, SheetObjectView } from "objects.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
 import {
@@ -43,6 +44,7 @@ export component SheetsApp inherits Window {
     in property <bool> labeled-export: false;
     in property <bool> overflow-toolbar: false;
     in property <bool> rtl: false;
+    property <length> responsive-width: root.width / max(root.template-text-scale, 1.0);
     in-out property <bool> toolbar-overflow-open: false;
     in-out property <bool> show-inspector: false;
     in-out property <bool> inspector-preference: false;
@@ -71,7 +73,7 @@ export component SheetsApp inherits Window {
     }
     changed width => {
         root.window-resized(root.width);
-        if (!ResponsivePolicy.priority-2-overflow(root.width)) {
+        if (!ResponsivePolicy.priority-2-overflow(root.responsive-width)) {
             root.close-toolbar-overflow();
         }
     }
@@ -155,7 +157,10 @@ export component SheetsApp inherits Window {
     in-out property <[int]> template-recents: [];
     in-out property <int> template-scroll-position: 0;
     in property <float> template-text-scale: 1.0;
-    changed template-text-scale => { Theme.text-scale = root.template-text-scale; }
+    changed template-text-scale => {
+        Theme.text-scale = root.template-text-scale;
+        root.window-resized(root.width);
+    }
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
     in-out property <bool> save-changes-close-mode: false;
@@ -296,22 +301,13 @@ export component SheetsApp inherits Window {
     public function close-toolbar-overflow() {
         if (root.toolbar-overflow-open) {
             root.toolbar-overflow-open = false;
-            app-focus.focus();
+            if (root.overflow-toolbar) { action-toolbar.focus-overflow-trigger(); }
+            else { app-focus.focus(); }
         }
     }
     changed overflow-toolbar => {
         if (!root.overflow-toolbar) {
             root.close-toolbar-overflow();
-        }
-    }
-    overflow-menu-focus := FocusScope {
-        enabled: root.toolbar-overflow-open;
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.close-toolbar-overflow();
-                return accept;
-            }
-            return reject;
         }
     }
     changed save-changes-open => {
@@ -451,6 +447,7 @@ export component SheetsApp inherits Window {
             action-toolbar := SheetActionToolbar {
                 rtl: root.rtl;
                 wide: root.wide-toolbar;
+                icon-only: root.icon-only-toolbar;
                 overflow: root.overflow-toolbar;
                 inspector-available: root.inspector-available;
                 inspector-visible: root.inspector-visible;
@@ -485,7 +482,7 @@ export component SheetsApp inherits Window {
                         root.close-toolbar-overflow();
                     } else {
                         root.toolbar-overflow-open = true;
-                        overflow-menu-focus.focus();
+                        toolbar-overflow.focus-first-action();
                     }
                 }
             }
@@ -725,41 +722,19 @@ export component SheetsApp inherits Window {
         menu-action(id) => { root.local-menu-action(id); }
     }
 
-    if root.toolbar-overflow-open && root.overflow-toolbar : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        background: transparent;
-        TouchArea {
-            clicked => { root.close-toolbar-overflow(); }
-        }
-
-        Rectangle {
-            x: max(8px, root.width - 272px);
-            y: Theme.tokens.metrics.header-height + Theme.tokens.metrics.sheet-tab-height + Theme.tokens.metrics.toolbar-height + 8px;
-            width: 256px;
-            height: 76px;
-            border-radius: Theme.tokens.metrics.radius-medium;
-            border-width: 1px;
-            border-color: Theme.palette().border;
-            background: Theme.palette().surface;
-            drop-shadow-blur: 16px;
-            drop-shadow-offset-y: 4px;
-            drop-shadow-color: Theme.palette().shadow;
-            VerticalLayout {
-                spacing: Theme.tokens.space.sm;
-                padding: Theme.tokens.space.md;
-
-                LoomButton {
-                    icon: "export";
-                    label: "Export CSV";
-                    variant: "ghost";
-                    horizontal-stretch: 1;
-                    clicked => { root.export-csv(); root.close-toolbar-overflow(); }
-                }
-            }
-        }
+    toolbar-overflow := SheetToolbarOverflow {
+        open: root.toolbar-overflow-open;
+        available: root.overflow-toolbar;
+        rtl: root.rtl;
+        content-width: root.width;
+        content-height: root.height;
+        close-requested => { root.close-toolbar-overflow(); }
+        add-row => { root.add-row(); root.close-toolbar-overflow(); }
+        add-column => { root.add-table-col(); root.close-toolbar-overflow(); }
+        insert-chart => { root.insert-chart(); root.close-toolbar-overflow(); }
+        export-csv => { root.export-csv(); root.close-toolbar-overflow(); }
+        export-xlsx => { root.export-xlsx(); root.close-toolbar-overflow(); }
+        organize => { root.organize(); root.close-toolbar-overflow(); }
     }
     if root.template-chooser-open : TemplateChooserModal {
         width: root.width;

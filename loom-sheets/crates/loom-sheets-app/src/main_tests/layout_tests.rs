@@ -1,5 +1,5 @@
 use super::*;
-use i_slint_backend_testing::ElementHandle;
+use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 
 #[test]
 fn layout_breakpoints_match_supported_width_boundaries() {
@@ -30,6 +30,66 @@ fn layout_breakpoints_match_supported_width_boundaries() {
         assert_eq!(app.get_overflow_toolbar(), overflow);
         assert_eq!(app.get_labeled_toolbar(), labeled);
     }
+}
+
+#[test]
+fn layout_breakpoints_scale_with_accessibility_text() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let policy = ResponsivePolicy::get(&app);
+    for scale in [1.0f32, 1.25, 1.5, 2.0] {
+        app.set_template_text_scale(scale);
+        for (base_width, expected) in [
+            (1179, (true, true, false)),
+            (1180, (false, true, false)),
+            (1279, (false, true, false)),
+            (1280, (false, true, false)),
+            (1319, (false, true, false)),
+            (1320, (false, false, true)),
+        ] {
+            let width = (base_width as f32 * scale).floor() as u32;
+            let state = layout_breakpoints(&app, width);
+            assert_eq!(
+                (state.icon_only, state.overflow, state.labeled),
+                expected,
+                "base width {base_width}, scale {scale}, physical width {width}"
+            );
+        }
+        apply_layout_breakpoints(&app, (1400.0 * scale) as u32);
+        apply_headless_viewport_size(&app, (1400.0 * scale) as u32, 800);
+        assert_eq!(
+            app.get_grid_viewport_width(),
+            1400.0 * scale - INSPECTOR_WIDTH - TABLE_HORIZONTAL_MARGIN
+        );
+        assert!(!app.get_icon_only_toolbar());
+    }
+    assert_eq!(policy.get_priority_1_icon_only_below(), 1180.0);
+    assert_eq!(policy.get_priority_2_overflow_below(), 1320.0);
+}
+
+#[test]
+fn text_scale_change_reapplies_responsive_state_without_resizing() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    wire_responsive_layout(&app);
+    app.window().set_size(PhysicalSize::new(1400, 800));
+    let _ = snapshot_component(&app, 1400.0, 800.0, 1.0).expect("render the workspace");
+    app.invoke_window_resized(1400.0);
+    assert!(!app.get_icon_only_toolbar());
+    assert!(!app.get_overflow_toolbar());
+
+    app.set_template_text_scale(1.25);
+    let _ = snapshot_component(&app, 1400.0, 800.0, 1.0).expect("render after text scale change");
+    assert!(app.get_icon_only_toolbar());
+    assert!(app.get_overflow_toolbar());
+    assert!(!app.get_labeled_toolbar());
+
+    app.set_template_text_scale(1.0);
+    let _ =
+        snapshot_component(&app, 1400.0, 800.0, 1.0).expect("render after restoring text scale");
+    assert!(!app.get_icon_only_toolbar());
+    assert!(!app.get_overflow_toolbar());
+    assert!(app.get_labeled_toolbar());
 }
 
 #[test]
@@ -171,33 +231,61 @@ fn zoom_scales_geometry_and_cycles_through_presets() {
     assert!(dispatch_command(&app, "view.zoom_actual"));
 }
 
-/// No sheet chrome may be laid out outside the window at a text scale the
-/// application supports. 1.0 and 1.5 hold today; 2.0 does not, and that gap is
-/// tracked as UI-42 rather than quietly excluded. See the ignored case below for
-/// the exact measured reproduction.
-///
-/// Removed on 2026-09-30: the 2.0 arm was folded into
-/// `text_scale_2x_overflows_the_toolbar_until_the_responsive_policy_scales`.
 #[test]
-fn no_sheet_chrome_escapes_the_window_at_a_supported_text_scale() {
-    for text_scale in [1.0f32, 1.5] {
-        assert_inspector_and_toolbar_fit(1018.0, 728.0, text_scale);
+fn sheet_chrome_fits_the_contract_viewport_scale_and_theme_matrix() {
+    for theme in ["light", "dark", "high-contrast"] {
+        for rtl in [false, true] {
+            for (width, height) in [
+                (1024.0, 720.0),
+                (1280.0, 800.0),
+                (1440.0, 900.0),
+                (1920.0, 1200.0),
+            ] {
+                for scale in [1.0f32, 1.25, 1.5, 2.0] {
+                    assert_inspector_and_toolbar_fit(width, height, scale, theme, rtl);
+                }
+            }
+        }
     }
 }
 
-#[test]
-#[ignore = "UI-42: the responsive policy compares window width only, so at 2x text the toolbar overruns a 1018 px window and the overflow menu never opens"]
-fn text_scale_2x_overflows_the_toolbar_until_the_responsive_policy_scales() {
-    assert_inspector_and_toolbar_fit(1018.0, 728.0, 2.0);
-}
-
-fn assert_inspector_and_toolbar_fit(width: f32, height: f32, text_scale: f32) {
+fn assert_inspector_and_toolbar_fit(
+    width: f32,
+    height: f32,
+    text_scale: f32,
+    theme: &str,
+    rtl: bool,
+) {
     set_platform();
     let app = SheetsApp::new().expect("create SheetsApp");
     app.window()
         .set_size(PhysicalSize::new(width as u32, height as u32));
+    apply_theme(&app, theme);
+    configure_direction(&app, rtl);
     app.set_template_text_scale(text_scale);
+    apply_layout_breakpoints(&app, width as u32);
     app.set_show_inspector(true);
+
+    app.set_inspector_tab(0);
+    let _ = snapshot_component(&app, width, height, 1.0).expect("render the Table inspector");
+    for label in [
+        "Close",
+        "Table name",
+        "Add worksheet row",
+        "Add worksheet column",
+    ] {
+        assert_control_inside(&app, width, height, text_scale, theme, label);
+        assert_control_inside_component(
+            &app,
+            "SheetsApp::inspector-panel",
+            label,
+            width,
+            height,
+            text_scale,
+            theme,
+        );
+    }
+
     app.set_inspector_tab(1);
     let _ = snapshot_component(&app, width, height, 1.0).expect("render the workspace");
     // The Cell tab's lower controls sit below the fold, so scroll the way a user
@@ -206,6 +294,14 @@ fn assert_inspector_and_toolbar_fit(width: f32, height: f32, text_scale: f32) {
         ElementHandle::find_by_accessible_label(&app, "Toggle bold formatting (Cell inspector)")
             .collect();
     assert_eq!(bold.len(), 1, "one bold toggle in the Cell inspector");
+    assert_control_inside(
+        &app,
+        width,
+        height,
+        text_scale,
+        theme,
+        "Toggle bold formatting (Cell inspector)",
+    );
     bold[0].clone().scroll(0.0, -1_000.0);
     let _ = snapshot_component(&app, width, height, 1.0).expect("render the scrolled inspector");
 
@@ -215,26 +311,277 @@ fn assert_inspector_and_toolbar_fit(width: f32, height: f32, text_scale: f32) {
         "Increase selected row height",
         "Selected column width",
         "Increase selected column width",
-        "Format",
     ] {
-        let matches: Vec<_> = ElementHandle::find_by_accessible_label(&app, label).collect();
-        assert!(!matches.is_empty(), "{label:?} must exist at {text_scale}x");
-        let inside = matches
-            .iter()
-            .filter(|element| {
-                let position = element.absolute_position();
-                let size = element.size();
-                position.x >= -1.0
-                    && position.y >= -1.0
-                    && position.x + size.width <= width + 1.0
-                    && position.y + size.height <= height + 1.0
-            })
-            .count();
-        assert_eq!(
-            inside,
-            matches.len(),
-            "{label:?} must be fully inside a {width}x{height} window at {text_scale}x: {inside} of {} copies are inside",
-            matches.len()
+        assert_control_inside(&app, width, height, text_scale, theme, label);
+        assert_control_inside_component(
+            &app,
+            "SheetsApp::inspector-panel",
+            label,
+            width,
+            height,
+            text_scale,
+            theme,
         );
     }
+
+    let icon_only = width / text_scale.max(1.0) < 1180.0;
+    let mut always_visible = vec![
+        "Undo",
+        "Redo",
+        "Toggle bold formatting (toolbar)",
+        "Toggle italic formatting (toolbar)",
+        "Toggle underline formatting (toolbar)",
+        "Align selected cells left",
+        "Align selected cells center",
+        "Align selected cells right",
+        if icon_only {
+            "Format inspector"
+        } else {
+            "Format"
+        },
+    ];
+    if app.get_labeled_toolbar() {
+        always_visible.extend(["New", "Open", "Save", "Save As", "Commands"]);
+    } else {
+        always_visible.extend([
+            "New workbook",
+            "Open workbook",
+            "Save workbook",
+            "Save workbook as",
+            "Command palette",
+        ]);
+    }
+    for label in always_visible {
+        assert_control_inside(&app, width, height, text_scale, theme, label);
+    }
+
+    if app.get_overflow_toolbar() {
+        assert_control_inside(&app, width, height, text_scale, theme, "More actions");
+        app.set_toolbar_overflow_open(true);
+        let _ = snapshot_component(&app, width, height, 1.0).expect("render toolbar overflow");
+        let actions = [
+            "Add row",
+            "Add column",
+            "Insert chart",
+            "Export CSV",
+            "Export Excel",
+            "Sort",
+        ];
+        let mut previous_bottom = None;
+        for label in actions {
+            assert_control_inside(&app, width, height, text_scale, theme, label);
+            let control = assert_control_inside_component(
+                &app,
+                "SheetToolbarOverflow::popup-panel",
+                label,
+                width,
+                height,
+                text_scale,
+                theme,
+            );
+            let position = control.absolute_position();
+            if let Some(bottom) = previous_bottom {
+                assert!(
+                    bottom <= position.y + 1.0,
+                    "overflow action {label:?} overlaps the previous entry at {text_scale}x in {theme} at {width}x{height}"
+                );
+            }
+            previous_bottom = Some(position.y + control.size().height);
+        }
+    } else {
+        for label in ["Row", "Col", "Chart", "Export CSV", "Sort"] {
+            assert_control_inside(&app, width, height, text_scale, theme, label);
+        }
+    }
+}
+
+#[test]
+fn compact_overflow_entries_dispatch_their_actions() {
+    use std::{cell::RefCell, rc::Rc};
+
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let action_calls = calls.clone();
+    app.on_add_row(move || action_calls.borrow_mut().push("row"));
+    let action_calls = calls.clone();
+    app.on_add_table_col(move || action_calls.borrow_mut().push("column"));
+    let action_calls = calls.clone();
+    app.on_insert_chart(move || action_calls.borrow_mut().push("chart"));
+    let action_calls = calls.clone();
+    app.on_export_csv(move || action_calls.borrow_mut().push("csv"));
+    let action_calls = calls.clone();
+    app.on_export_xlsx(move || action_calls.borrow_mut().push("xlsx"));
+    let action_calls = calls.clone();
+    app.on_organize(move || action_calls.borrow_mut().push("sort"));
+
+    app.set_template_text_scale(2.0);
+    apply_layout_breakpoints(&app, 1024);
+    assert!(app.get_overflow_toolbar());
+    for (label, expected) in [
+        ("Add row", "row"),
+        ("Add column", "column"),
+        ("Insert chart", "chart"),
+        ("Export CSV", "csv"),
+        ("Export Excel", "xlsx"),
+        ("Sort", "sort"),
+    ] {
+        app.set_toolbar_overflow_open(true);
+        let _ = snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render toolbar overflow");
+        let action = ElementHandle::find_by_accessible_label(&app, label)
+            .next()
+            .unwrap_or_else(|| panic!("overflow entry {label:?} is accessible"));
+        action.invoke_accessible_default_action();
+        assert_eq!(calls.borrow().last(), Some(&expected));
+        assert!(
+            !app.get_toolbar_overflow_open(),
+            "{label:?} closes the menu"
+        );
+    }
+}
+
+#[test]
+fn compact_overflow_keyboard_activation_and_escape_restore_trigger_focus() {
+    use std::{cell::Cell, rc::Rc};
+
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.set_template_text_scale(2.0);
+    apply_layout_breakpoints(&app, 1024);
+    let rows = Rc::new(Cell::new(0));
+    let row_calls = rows.clone();
+    app.on_add_row(move || row_calls.set(row_calls.get() + 1));
+    let render =
+        || snapshot_component(&app, 1024.0, 720.0, 1.0).expect("render keyboard overflow journey");
+    let press = |key: slint::platform::Key| {
+        let text: SharedString = key.into();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+    };
+    let _ = render();
+    ElementHandle::find_by_accessible_label(&app, "More actions")
+        .next()
+        .expect("overflow trigger")
+        .invoke_accessible_default_action();
+    let _ = render();
+    assert!(app.get_toolbar_overflow_open());
+    press(slint::platform::Key::Return);
+    assert_eq!(rows.get(), 1, "Return activates the first popup entry");
+    assert!(!app.get_toolbar_overflow_open());
+
+    let _ = render();
+    press(slint::platform::Key::Return);
+    let _ = render();
+    assert!(
+        app.get_toolbar_overflow_open(),
+        "focus returns to More actions"
+    );
+    press(slint::platform::Key::Tab);
+    press(slint::platform::Key::Escape);
+    assert!(!app.get_toolbar_overflow_open(), "Escape works after Tab");
+    let _ = render();
+    press(slint::platform::Key::Return);
+    let _ = render();
+    assert!(
+        app.get_toolbar_overflow_open(),
+        "Escape restores trigger focus"
+    );
+    assert_eq!(rows.get(), 1, "reopening must not activate a popup entry");
+}
+
+fn assert_control_inside(
+    app: &SheetsApp,
+    width: f32,
+    height: f32,
+    text_scale: f32,
+    theme: &str,
+    label: &str,
+) {
+    let matches: Vec<_> = ElementHandle::find_by_accessible_label(app, label).collect();
+    assert!(
+        !matches.is_empty(),
+        "{label:?} must exist at {text_scale}x in {theme} at {width}x{height}"
+    );
+    let inside = matches
+        .iter()
+        .filter(|element| {
+            let position = element.absolute_position();
+            let size = element.size();
+            position.x >= -1.0
+                && position.y >= -1.0
+                && position.x + size.width <= width + 1.0
+                && position.y + size.height <= height + 1.0
+        })
+        .count();
+    assert_eq!(
+        inside,
+        matches.len(),
+        "{label:?} must be fully inside a {width}x{height} window at {text_scale}x in {theme}: {inside} of {} copies are inside",
+        matches.len()
+    );
+}
+
+fn assert_control_inside_component(
+    app: &SheetsApp,
+    component_id: &str,
+    label: &str,
+    width: f32,
+    height: f32,
+    text_scale: f32,
+    theme: &str,
+) -> ElementHandle {
+    let component = ElementHandle::find_by_element_id(app, component_id)
+        .next()
+        .unwrap_or_else(|| panic!("{component_id:?} exists at {text_scale}x in {theme}"));
+    let parent_position = component.absolute_position();
+    let parent_size = component.size();
+    let all_matches: Vec<_> = ElementHandle::find_by_accessible_label(app, label).collect();
+    let controls: Vec<_> = all_matches
+        .iter()
+        .filter(|control| {
+            let position = control.absolute_position();
+            let size = control.size();
+            control.accessible_role() != Some(AccessibleRole::Text)
+                && position.x >= parent_position.x - 1.0
+                && position.y >= parent_position.y - 1.0
+                && position.x + size.width <= parent_position.x + parent_size.width + 1.0
+                && position.y + size.height <= parent_position.y + parent_size.height + 1.0
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        controls.len(),
+        1,
+        "{label:?} should have one visible control at {text_scale}x in {theme} at {width}x{height}; panel=({}, {}, {}, {}), matches={:?}",
+        parent_position.x,
+        parent_position.y,
+        parent_size.width,
+        parent_size.height,
+        all_matches.iter().map(|item| {
+            let position = item.absolute_position();
+            let size = item.size();
+            format!("id={:?} role={:?} bounds=({}, {}, {}, {})", item.id(), item.accessible_role(), position.x, position.y, size.width, size.height)
+        }).collect::<Vec<_>>(),
+    );
+    let control = controls.into_iter().next().expect("one visible control");
+    let position = control.absolute_position();
+    let size = control.size();
+    assert!(
+        position.x >= parent_position.x - 1.0
+            && position.y >= parent_position.y - 1.0
+            && position.x + size.width <= parent_position.x + parent_size.width + 1.0
+            && position.y + size.height <= parent_position.y + parent_size.height + 1.0,
+        "{label:?} must fit inside {component_id:?} at {text_scale}x in {theme} at {width}x{height}: control ({}, {}, {}, {}), parent ({}, {}, {}, {})",
+        position.x,
+        position.y,
+        size.width,
+        size.height,
+        parent_position.x,
+        parent_position.y,
+        parent_size.width,
+        parent_size.height,
+    );
+    control
 }

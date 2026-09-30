@@ -1,0 +1,104 @@
+import { LoomButton } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+export component SheetToolbarOverflow inherits Rectangle {
+    in property <bool> open: false;
+    in property <bool> available: false;
+    in property <bool> rtl: false;
+    in property <length> content-width: 0px;
+    in property <length> content-height: 0px;
+    callback close-requested;
+    callback add-row;
+    callback add-column;
+    callback insert-chart;
+    callback export-csv;
+    callback export-xlsx;
+    callback organize;
+    public function focus-first-action() {
+        if (root.open && root.available) { first-action.grab-focus(); }
+    }
+
+    visible: root.open && root.available;
+    width: root.content-width;
+    height: root.content-height;
+    background: transparent;
+
+    TouchArea { clicked => { root.close-requested(); } }
+
+    popup-panel := Rectangle {
+        x: root.rtl ? 8px : max(8px, root.content-width - 272px);
+        y: Theme.tokens.metrics.header-height
+            + Theme.tokens.metrics.sheet-tab-height
+            + Theme.tokens.metrics.toolbar-height + 8px;
+        width: 256px;
+        height: min(248px, root.content-height
+            - Theme.tokens.metrics.header-height
+            - Theme.tokens.metrics.sheet-tab-height
+            - Theme.tokens.metrics.toolbar-height - 16px);
+        border-radius: Theme.tokens.metrics.radius-medium;
+        border-width: 1px;
+        border-color: Theme.palette().border;
+        background: Theme.palette().surface;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: Theme.palette().shadow;
+
+        FocusScope {
+            enabled: root.open && root.available;
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.close-requested();
+                    return accept;
+                }
+                return reject;
+            }
+            VerticalLayout {
+                spacing: Theme.tokens.space.sm;
+                padding: Theme.tokens.space.md;
+
+                first-action := LoomButton {
+                    icon: "plus";
+                    label: "Add row";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.add-row(); }
+                }
+                LoomButton {
+                    icon: "plus";
+                    label: "Add column";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.add-column(); }
+                }
+                LoomButton {
+                    icon: "chart";
+                    label: "Insert chart";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.insert-chart(); }
+                }
+                LoomButton {
+                    icon: "export";
+                    label: "Export CSV";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.export-csv(); }
+                }
+                LoomButton {
+                    icon: "export";
+                    label: "Export Excel";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.export-xlsx(); }
+                }
+                LoomButton {
+                    icon: "organize";
+                    label: "Sort";
+                    variant: "ghost";
+                    horizontal-stretch: 1;
+                    clicked => { root.organize(); }
+                }
+            }
+        }
+    }
+}

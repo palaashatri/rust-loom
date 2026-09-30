@@ -1717,7 +1717,7 @@ struct ResponsiveToolbarState {
 
 fn layout_breakpoints(app: &SheetsApp, width: u32) -> ResponsiveToolbarState {
     let policy = ResponsivePolicy::get(app);
-    let width = width as f32;
+    let width = width as f32 / app.get_template_text_scale().max(1.0);
     ResponsiveToolbarState {
         icon_only: width < policy.get_priority_1_icon_only_below(),
         overflow: width < policy.get_priority_2_overflow_below(),
@@ -1732,10 +1732,10 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
     app.set_show_quick_formulas(state.labeled);
     app.set_wide_toolbar(state.labeled);
     app.set_labeled_export(state.labeled);
+    app.set_overflow_toolbar(state.overflow);
     if !state.overflow && app.get_toolbar_overflow_open() {
         app.invoke_close_toolbar_overflow();
     }
-    app.set_overflow_toolbar(state.overflow);
     if !state.overflow {
         app.set_toolbar_overflow_open(false);
     }
@@ -1748,7 +1748,8 @@ pub(crate) fn apply_layout_breakpoints(app: &SheetsApp, width: u32) {
 /// skips the native resize event, so compute the viewport before projecting.
 pub(crate) fn apply_headless_viewport_size(app: &SheetsApp, width: u32, height: u32) {
     let policy = ResponsivePolicy::get(app);
-    let inspector_width = if (width as f32) >= policy.get_priority_1_icon_only_below() {
+    let effective_width = width as f32 / app.get_template_text_scale().max(1.0);
+    let inspector_width = if effective_width >= policy.get_priority_1_icon_only_below() {
         INSPECTOR_WIDTH
     } else {
         0.0

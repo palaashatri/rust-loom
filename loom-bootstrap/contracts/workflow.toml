@@ -28,6 +28,8 @@ allowed_active_prefixes = [
   "loom-bootstrap/",
   "loom-core/",
   "loom-sheets/",
+  # UI-42 authorizes this exact responsive contract file only.
+  "loom-design-bible/contracts/desktop-ui.toml",
 ]
 
 [foundation_gate]

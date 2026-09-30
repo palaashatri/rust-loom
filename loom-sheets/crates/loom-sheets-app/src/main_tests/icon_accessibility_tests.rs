@@ -213,9 +213,12 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
             .count()
     })
     .sum::<usize>();
+    let semantic_action_count = SHARED_ACTIONS.len() + TABLE_ACTIONS.len() + CELL_ACTIONS.len();
+    // Format has one labeled button and one compact icon-button implementation;
+    // the responsive variants are one action and only one is visible at a time.
     assert_eq!(
         source_instances,
-        SHARED_ACTIONS.len() + TABLE_ACTIONS.len() + CELL_ACTIONS.len(),
+        semantic_action_count + 1,
         "update this accessibility contract when adding or removing a Sheets icon action"
     );
 
@@ -240,8 +243,8 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
 
     assert_eq!(
         seen_labels.len(),
-        source_instances,
-        "all 32 Sheets icon actions must have a distinct accessible name"
+        semantic_action_count,
+        "all {semantic_action_count} Sheets icon actions must have a distinct accessible name"
     );
 }
 

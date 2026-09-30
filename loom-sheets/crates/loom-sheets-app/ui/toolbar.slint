@@ -7,6 +7,7 @@ import { Theme } from "theme.slint";
 export component SheetActionToolbar inherits LoomToolbar {
     in property <bool> rtl: Theme.rtl;
     in property <bool> wide: false;
+    in property <bool> icon-only: false;
     in property <bool> overflow: false;
     in property <bool> inspector-available: true;
     in property <bool> inspector-visible: false;
@@ -38,14 +39,19 @@ export component SheetActionToolbar inherits LoomToolbar {
     callback add-col;
     callback insert-chart;
     callback organize;
+    public function focus-overflow-trigger() { overflow-button.grab-focus(); }
 
     public function focus-inspector-trigger() {
-        inspector-button.grab-focus();
+        if (root.icon-only) {
+            inspector-icon-button.grab-focus();
+        } else {
+            inspector-button.grab-focus();
+        }
     }
 
     changed inspector-visible => {
         if (!root.inspector-visible) {
-            inspector-button.grab-focus();
+            root.focus-inspector-trigger();
         }
     }
 
@@ -194,19 +200,19 @@ export component SheetActionToolbar inherits LoomToolbar {
     LoomToolbarDivider { }
 
     LoomToolbarGroup {
-        LoomButton {
+        if !root.overflow : LoomButton {
             icon: "plus";
             label: "Row";
             variant: "ghost";
             clicked => { root.add-row(); }
         }
-        LoomButton {
+        if !root.overflow : LoomButton {
             icon: "plus";
             label: "Col";
             variant: "ghost";
             clicked => { root.add-col(); }
         }
-        LoomButton {
+        if !root.overflow : LoomButton {
             icon: "chart";
             label: "Chart";
             variant: "ghost";
@@ -217,7 +223,7 @@ export component SheetActionToolbar inherits LoomToolbar {
     LoomToolbarSpacer { }
 
     LoomToolbarGroup {
-        LoomButton {
+        if !root.overflow : LoomButton {
             icon: "export";
             label: root.labeled-export ? "Export" : "";
             accessible-label: "Export CSV";
@@ -225,7 +231,17 @@ export component SheetActionToolbar inherits LoomToolbar {
             variant: "ghost";
             clicked => { root.export-csv(); }
         }
+        inspector-icon-button := LoomIconButton {
+            visible: root.icon-only;
+            icon: "format";
+            label: "Format inspector";
+            tooltip: "Open or close the format inspector.";
+            selected: root.inspector-visible;
+            enabled: root.inspector-available;
+            clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
+        }
         inspector-button := LoomButton {
+            visible: !root.icon-only;
             icon: "format";
             label: "Format";
             variant: root.inspector-visible ? "primary" : "ghost";
@@ -233,13 +249,14 @@ export component SheetActionToolbar inherits LoomToolbar {
             enabled: root.inspector-available;
             clicked => { if (root.inspector-available) { root.toggle-inspector(); } }
         }
-        LoomButton {
+        if !root.overflow : LoomButton {
             icon: "organize";
             label: "Sort";
             variant: "ghost";
             clicked => { root.organize(); }
         }
-        if root.overflow : LoomOverflowButton {
+        overflow-button := LoomOverflowButton {
+            visible: root.overflow;
             clicked => { root.overflow-requested(); }
         }
     }
