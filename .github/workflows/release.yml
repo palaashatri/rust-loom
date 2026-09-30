@@ -86,8 +86,10 @@ jobs:
           # and build scripts, where /ENTRY breaks linking.
           for app in $APPS; do
             echo "::group::build loom-$app"
-            cargo build --release --locked \
-              --manifest-path "loom-$app/Cargo.toml" -p "loom-$app-app"
+            # Build from inside the workspace: cargo reads .cargo/config.toml
+            # (the Windows stack size) from the working directory, not from
+            # --manifest-path.
+            (cd "loom-$app" && cargo build --release --locked -p "loom-$app-app")
             echo "::endgroup::"
           done
 
