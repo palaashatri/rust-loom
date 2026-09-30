@@ -4,7 +4,6 @@ import { Theme } from "theme.slint";
 export component XlsxImportWarningDialog inherits Rectangle {
     in property <bool> open: false;
     in property <string> warning-message: "";
-    in property <float> text-scale: 1.0;
     in property <bool> save-changes-open: false;
     in property <bool> template-chooser-open: false;
 
@@ -97,7 +96,7 @@ export component XlsxImportWarningDialog inherits Rectangle {
 
                     dialog-title := Text {
                         text: "This Excel file has features Loom cannot keep";
-                        font-size: Theme.tokens.typography.heading * root.text-scale;
+                        font-size: Theme.type.heading;
                         font-weight: 700;
                         color: Theme.palette().ink;
                         wrap: word-wrap;
@@ -114,7 +113,7 @@ export component XlsxImportWarningDialog inherits Rectangle {
                         warning-copy := Text {
                             width: parent.width;
                             text: root.warning-message;
-                            font-size: Theme.tokens.typography.body * root.text-scale;
+                            font-size: Theme.type.body;
                             color: Theme.palette().ink-secondary;
                             wrap: word-wrap;
                         }

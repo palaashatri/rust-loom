@@ -25,7 +25,7 @@ export component IconGridWindow inherits Window {
 
             Text {
                 text: root.caption + " (" + root.names.length + " icons)";
-                font-size: Theme.tokens.typography.body-large;
+                font-size: Theme.type.body-large;
                 font-weight: 700;
                 color: Theme.palette().ink;
             }
@@ -52,7 +52,7 @@ export component IconGridWindow inherits Window {
                             }
                             Text {
                                 text: root.names[r * 8 + c];
-                                font-size: Theme.tokens.typography.micro;
+                                font-size: Theme.type.micro;
                                 color: Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
                                 overflow: elide;

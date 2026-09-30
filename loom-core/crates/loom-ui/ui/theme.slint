@@ -113,6 +113,25 @@ export global Theme {
     // platform/document locale; primitives consume it without introducing
     // app-local palette or spacing overrides.
     in-out property <bool> rtl: false;
+    // Accessibility text scale. It lives on the shared theme, not in an
+    // application, so every primitive honours the same factor instead of each
+    // app inventing its own multiplier. Hosts that support no scaling leave it
+    // at 1.0, which renders exactly as before.
+    //
+    // `type` is the raw type scale multiplied by that factor. It is a bound
+    // property rather than a function so a primitive can read it from a pure
+    // measurement context such as `preferred-width`.
+    in-out property <float> text-scale: 1.0;
+    in-out property <TypeScale> type: {
+        micro: tokens.typography.micro * max(1.0, root.text-scale),
+        caption: tokens.typography.caption * max(1.0, root.text-scale),
+        body: tokens.typography.body * max(1.0, root.text-scale),
+        body-large: tokens.typography.body-large * max(1.0, root.text-scale),
+        title: tokens.typography.title * max(1.0, root.text-scale),
+        heading: tokens.typography.heading * max(1.0, root.text-scale),
+        display: tokens.typography.display * max(1.0, root.text-scale),
+        display-large: tokens.typography.display-large * max(1.0, root.text-scale),
+    };
     changed active-theme => {
         tokens = active-theme == "dark" ? ThemeDark.tokens
             : active-theme == "high-contrast" ? ThemeHighContrast.tokens

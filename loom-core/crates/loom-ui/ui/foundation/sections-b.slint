@@ -20,7 +20,7 @@ component StatusBadge inherits HorizontalLayout {
     }
     Text {
         text: root.text;
-        font-size: Theme.tokens.typography.caption;
+        font-size: Theme.type.caption;
         color: Theme.palette().ink-secondary;
         vertical-alignment: center;
     }
@@ -70,7 +70,7 @@ export component OverlaysSection inherits Rectangle {
                 spacing: Theme.tokens.space.lg;
                 Text {
                     text: "Menus expose a closed state and long labels without clipping action text";
-                    font-size: Theme.tokens.typography.caption;
+                    font-size: Theme.type.caption;
                     color: Theme.palette().ink-secondary;
                 }
                 Rectangle {
@@ -117,7 +117,7 @@ export component OverlaysSection inherits Rectangle {
                         spacing: Theme.tokens.space.sm;
                         Text {
                             text: "Popover is an anchored surface; Escape or Close dismisses it";
-                            font-size: Theme.tokens.typography.caption;
+                            font-size: Theme.type.caption;
                             color: Theme.palette().ink-secondary;
                             wrap: word-wrap;
                         }
@@ -141,7 +141,7 @@ export component OverlaysSection inherits Rectangle {
                         spacing: Theme.tokens.space.sm;
                         Text {
                             text: "Dialog carries title, body, and primary, destructive, and disabled actions";
-                            font-size: Theme.tokens.typography.caption;
+                            font-size: Theme.type.caption;
                             color: Theme.palette().ink-secondary;
                             wrap: word-wrap;
                         }
@@ -293,7 +293,7 @@ export component CanvasSection inherits Rectangle {
                                 background: Theme.palette().selection-soft;
                                 Text {
                                     text: "Slide";
-                                    font-size: Theme.tokens.typography.caption;
+                                    font-size: Theme.type.caption;
                                     font-weight: 600;
                                     color: Theme.palette().accent;
                                     horizontal-alignment: center;
@@ -305,13 +305,13 @@ export component CanvasSection inherits Rectangle {
                                 alignment: center;
                                 Text {
                                     text: "Hero Banner Component";
-                                    font-size: Theme.tokens.typography.body;
+                                    font-size: Theme.type.body;
                                     font-weight: 600;
                                     color: Theme.palette().ink;
                                 }
                                 Text {
                                     text: "1920 × 1080 · Vector Graphic Shape";
-                                    font-size: Theme.tokens.typography.caption;
+                                    font-size: Theme.type.caption;
                                     color: Theme.palette().ink-secondary;
                                 }
                             }

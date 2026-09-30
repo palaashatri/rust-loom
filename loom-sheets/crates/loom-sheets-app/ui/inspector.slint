@@ -16,7 +16,7 @@ component SheetPropertyRow inherits HorizontalLayout {
         text: root.label;
         min-width: 84px;
         max-width: 100px;
-        font-size: Theme.tokens.typography.caption;
+        font-size: Theme.type.caption;
         color: Theme.palette().ink-secondary;
         wrap: char-wrap;
         vertical-alignment: center;
@@ -121,7 +121,7 @@ export component SheetInspector inherits LoomPanel {
             cross-axis-alignment: center;
             Text {
                 text: "Format and table properties";
-                font-size: Theme.tokens.typography.caption;
+                font-size: Theme.type.caption;
                 font-weight: 600;
                 color: Theme.palette().ink-secondary;
                 horizontal-stretch: 1;

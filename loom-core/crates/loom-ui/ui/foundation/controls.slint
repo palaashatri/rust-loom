@@ -19,7 +19,7 @@ export component LoomButton inherits Rectangle {
         : Theme.palette().ink;
 
     height: Theme.tokens.metrics.control-height;
-    measure := Text { visible: false; text: root.label; font-size: Theme.tokens.typography.body; font-weight: 600; }
+    measure := Text { visible: false; text: root.label; font-size: Theme.type.body; font-weight: 600; }
     min-width: max(Theme.tokens.metrics.control-height,
         measure.preferred-width + (root.icon != "" ? Theme.tokens.metrics.icon-size + Theme.tokens.space.md : 0px) + Theme.tokens.space.xxl);
     preferred-width: root.min-width;
@@ -61,7 +61,7 @@ export component LoomButton inherits Rectangle {
         }
         Text {
             text: root.label;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: 600;
             color: root.foreground;
             vertical-alignment: center;
@@ -155,7 +155,7 @@ export component LoomTextField inherits VerticalLayout {
 
     if root.title != "" : Text {
         text: root.title;
-        font-size: Theme.tokens.typography.caption;
+        font-size: Theme.type.caption;
         font-weight: 500;
         color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
         overflow: elide;
@@ -185,7 +185,7 @@ export component LoomTextField inherits VerticalLayout {
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             edited => { root.value = input.text; root.edited(input.text); }
             accepted => { root.accepted(input.text); }
@@ -199,7 +199,7 @@ export component LoomTextField inherits VerticalLayout {
             width: parent.width - Theme.tokens.space.xl;
             height: parent.height;
             text: root.placeholder;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             color: Theme.palette().ink-disabled;
             vertical-alignment: center;
             overflow: elide;
@@ -223,7 +223,7 @@ export component LoomSearchField inherits VerticalLayout {
 
     if root.title != "" : Text {
         text: root.title;
-        font-size: Theme.tokens.typography.caption;
+        font-size: Theme.type.caption;
         font-weight: 500;
         color: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
         overflow: elide;
@@ -260,7 +260,7 @@ export component LoomSearchField inherits VerticalLayout {
             enabled: root.enabled;
             single-line: true;
             vertical-alignment: center;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             edited => { root.value = input.text; root.edited(input.text); }
         }
@@ -269,7 +269,7 @@ export component LoomSearchField inherits VerticalLayout {
             width: parent.width - Theme.tokens.space.xxxxl;
             height: parent.height;
             text: root.placeholder;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             color: Theme.palette().ink-disabled;
             vertical-alignment: center;
             overflow: elide;
@@ -288,7 +288,7 @@ export component LoomToggle inherits Rectangle {
     measure := Text {
         visible: false;
         text: root.label;
-        font-size: Theme.tokens.typography.body;
+        font-size: Theme.type.body;
         font-weight: 500;
     }
     min-width: measure.preferred-width + 34px + Theme.tokens.space.md;
@@ -309,7 +309,7 @@ export component LoomToggle inherits Rectangle {
         cross-axis-alignment: center;
         if Theme.rtl : Text {
             text: root.label;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: 500;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             vertical-alignment: center;
@@ -339,7 +339,7 @@ export component LoomToggle inherits Rectangle {
         }
         if !Theme.rtl : Text {
             text: root.label;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: 500;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             vertical-alignment: center;
@@ -413,7 +413,7 @@ export component LoomSegmentedControl inherits Rectangle {
             }
             item-label := Text {
                 text: root.items[rel];
-                font-size: Theme.tokens.typography.body;
+                font-size: Theme.type.body;
                 font-weight: rel == root.current ? 600 : 500;
                 color: root.enabled ? (rel == root.current ? Theme.palette().ink : Theme.palette().ink-secondary) : Theme.palette().ink-disabled;
                 horizontal-alignment: center;

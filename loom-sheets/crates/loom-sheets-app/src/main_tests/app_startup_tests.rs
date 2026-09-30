@@ -1,5 +1,6 @@
 use super::*;
 use crate::open_operations::{is_native_workbook, open_request};
+use i_slint_backend_testing::ElementHandle;
 
 #[test]
 fn rtl_argument_is_parsed_and_applied_to_the_root() {
@@ -272,4 +273,128 @@ fn formula_bar_commit_records_one_transaction_and_noop_records_none() {
         &mut sheet, &mut undo, &mut redo, selected, "new",
     ));
     assert_eq!(undo.len(), 1);
+}
+
+/// UI-38: `--text-scale` reached only the template chooser and the XLSX warning.
+/// The shared theme now owns the scale, so chrome, controls, and dialogs all
+/// honour it. A standard control keeps its contract height at every scale, so
+/// the observable that proves the scale reached a visible label is the control
+/// width: a larger label needs more room in the same control height.
+#[test]
+fn app_chrome_honours_the_text_scale() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1018, 728));
+
+    // Measure a labeled button in a dialog that is present at every scale.
+    let cancel_width_at = |scale: f32| -> f32 {
+        app.set_template_text_scale(scale);
+        app.set_save_changes_close_mode(true);
+        app.set_save_changes_document("Household.loomtable".into());
+        app.set_save_changes_open(true);
+        let _ = snapshot_component(&app, 1018.0, 728.0, 1.0)
+            .expect("render the dialog at the requested text scale");
+        let control = dialog_control(&app, "Cancel");
+        let size = control.size();
+        assert_eq!(
+            size.height, 28.0,
+            "a standard control keeps its contract height at {scale}x"
+        );
+        size.width
+    };
+
+    let normal = cancel_width_at(1.0);
+    let large = cancel_width_at(1.5);
+    let stress = cancel_width_at(2.0);
+
+    assert!(
+        large > normal + 1.0,
+        "a control label must grow at 1.5x text scale, got width {normal} then {large}"
+    );
+    assert!(
+        stress > large + 1.0,
+        "a control label must keep growing at 2x text scale, got width {large} then {stress}"
+    );
+    // Scaling back must restore the reference geometry, not compound.
+    assert!(
+        (cancel_width_at(1.0) - normal).abs() < 0.5,
+        "returning to 1.0x must restore the original control width"
+    );
+}
+
+/// The actionable control carrying `label`, ignoring the label's own text run,
+/// which appears in the tree with the same name at a smaller size.
+fn dialog_control(app: &SheetsApp, label: &str) -> ElementHandle {
+    let matches: Vec<_> = ElementHandle::find_by_accessible_label(app, label)
+        .filter(|element| element.size().height >= 20.0)
+        .collect();
+    assert!(!matches.is_empty(), "no actionable control named {label:?}");
+    matches[0].clone()
+}
+
+/// UI-38: the Save Changes dialog had a fixed 208 px height, so a large text
+/// scale clipped its content instead of reflowing. It must grow with its
+/// content, stay inside the window, and keep both actions visible.
+#[test]
+fn the_save_changes_dialog_reflows_at_large_text_scale() {
+    let mut panel_heights = Vec::new();
+    for text_scale in [1.0f32, 1.5, 2.0] {
+        set_platform();
+        let app = SheetsApp::new().expect("create SheetsApp");
+        app.window().set_size(PhysicalSize::new(1018, 560));
+        app.set_template_text_scale(text_scale);
+        app.set_save_changes_close_mode(true);
+        app.set_save_changes_document("Household.loomtable".into());
+        app.set_save_changes_open(true);
+        let _ =
+            snapshot_component(&app, 1018.0, 560.0, 1.0).expect("render the Save Changes dialog");
+
+        // The accessible landmark is the full-window scrim, so measure the panel.
+        let scrims: Vec<_> =
+            ElementHandle::find_by_accessible_label(&app, "Save changes dialog").collect();
+        assert_eq!(scrims.len(), 1, "one Save Changes dialog at {text_scale}x");
+        let panels: Vec<_> =
+            ElementHandle::find_by_element_id(&app, "SaveChangesDialog::panel").collect();
+        assert_eq!(panels.len(), 1, "one Save Changes panel at {text_scale}x");
+        let panel = panels[0].clone();
+        let bounds = panel.absolute_position();
+        let size = panel.size();
+        panel_heights.push(size.height);
+
+        assert!(
+            size.height > 0.0 && size.height <= 560.0 - 32.0 + 1.0,
+            "the panel must have real content height and stay inside the window at {text_scale}x, got {size:?}"
+        );
+
+        // Both actions must remain inside the panel at every scale.
+        for label in ["Cancel", "Save and close"] {
+            let inside: Vec<_> = ElementHandle::find_by_accessible_label(&app, label)
+                .filter(|control| {
+                    if control.size().height < 20.0 {
+                        return false; // the label's own text run, not the control
+                    }
+                    let position = control.absolute_position();
+                    position.y >= bounds.y - 1.0
+                        && position.y + control.size().height <= bounds.y + size.height + 1.0
+                        && position.x >= bounds.x - 1.0
+                        && position.x + control.size().width <= bounds.x + size.width + 1.0
+                })
+                .collect();
+            assert!(
+                !inside.is_empty(),
+                "{label} must sit inside the Save Changes panel at {text_scale}x; panel={bounds:?}{size:?}"
+            );
+            // The action must still be a full-size, operable control rather than
+            // a shrunken remnant.
+            assert_eq!(
+                inside[0].size().height,
+                28.0,
+                "{label} must keep the standard control target at {text_scale}x"
+            );
+        }
+    }
+    assert!(
+        panel_heights[2] > panel_heights[0] + 8.0,
+        "the panel must grow with the text scale, measured {panel_heights:?}"
+    );
 }

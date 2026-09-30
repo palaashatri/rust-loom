@@ -85,7 +85,7 @@ export component FormulaNameBar inherits Rectangle {
             Text {
                 text: root.selection-range;
                 font-weight: 600;
-                font-size: Theme.tokens.typography.caption;
+                font-size: Theme.type.caption;
                 color: Theme.palette().ink;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -96,7 +96,7 @@ export component FormulaNameBar inherits Rectangle {
         Text {
             text: "fx";
             width: 20px;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: 700;
             color: Theme.palette().accent;
             horizontal-alignment: center;
@@ -396,7 +396,7 @@ export component SheetTable inherits Rectangle {
                             border-color: is-col-selected ? Theme.palette().selection : Theme.palette().border;
                             Text {
                                 text: root.column-headers[c];
-                                font-size: Theme.tokens.typography.caption * root.zoom-factor;
+                                font-size: Theme.type.caption * root.zoom-factor;
                                 font-weight: is-col-selected ? 700 : 500;
                                 color: is-col-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;
@@ -417,7 +417,7 @@ export component SheetTable inherits Rectangle {
                             border-color: is-row-selected ? Theme.palette().selection : Theme.palette().border;
                             Text {
                                 text: root.row-headers[r];
-                                font-size: Theme.tokens.typography.caption * root.zoom-factor;
+                                font-size: Theme.type.caption * root.zoom-factor;
                                 font-weight: is-row-selected ? 700 : 500;
                                 color: is-row-selected ? Theme.palette().accent : Theme.palette().ink-secondary;
                                 horizontal-alignment: center;

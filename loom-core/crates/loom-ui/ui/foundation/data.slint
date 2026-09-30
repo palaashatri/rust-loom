@@ -41,7 +41,7 @@ export component LoomTableRow inherits Rectangle {
         cross-axis-alignment: center;
         Text {
             text: root.label;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: root.selected ? 600 : 500;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             vertical-alignment: center;
@@ -50,7 +50,7 @@ export component LoomTableRow inherits Rectangle {
         }
         if root.detail != "" : Text {
             text: root.detail;
-            font-size: Theme.tokens.typography.caption;
+            font-size: Theme.type.caption;
             color: Theme.palette().ink-secondary;
             vertical-alignment: center;
             max-width: 160px;
@@ -58,7 +58,7 @@ export component LoomTableRow inherits Rectangle {
         }
         if root.status != "" : Text {
             text: root.status;
-            font-size: Theme.tokens.typography.caption;
+            font-size: Theme.type.caption;
             font-weight: 500;
             color: !root.enabled ? Theme.palette().ink-disabled
                 : root.selected ? Theme.palette().accent
@@ -75,7 +75,7 @@ export component LoomTableRow inherits Rectangle {
         cross-axis-alignment: center;
         if root.status != "" : Text {
             text: root.status;
-            font-size: Theme.tokens.typography.caption;
+            font-size: Theme.type.caption;
             font-weight: 500;
             color: !root.enabled ? Theme.palette().ink-disabled
                 : root.selected ? Theme.palette().accent
@@ -86,7 +86,7 @@ export component LoomTableRow inherits Rectangle {
         }
         if root.detail != "" : Text {
             text: root.detail;
-            font-size: Theme.tokens.typography.caption;
+            font-size: Theme.type.caption;
             color: Theme.palette().ink-secondary;
             vertical-alignment: center;
             max-width: 160px;
@@ -94,7 +94,7 @@ export component LoomTableRow inherits Rectangle {
         }
         Text {
             text: root.label;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             font-weight: root.selected ? 600 : 500;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             vertical-alignment: center;
@@ -155,7 +155,7 @@ export component LoomEmptyState inherits Rectangle {
         }
         Text {
             text: root.title;
-            font-size: Theme.tokens.typography.body-large;
+            font-size: Theme.type.body-large;
             font-weight: 600;
             color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
             horizontal-alignment: center;
@@ -163,7 +163,7 @@ export component LoomEmptyState inherits Rectangle {
         }
         Text {
             text: root.hint;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             color: Theme.palette().ink-secondary;
             horizontal-alignment: center;
             wrap: word-wrap;
@@ -216,7 +216,7 @@ export component LoomErrorState inherits Rectangle {
         }
         Text {
             text: root.title;
-            font-size: Theme.tokens.typography.body-large;
+            font-size: Theme.type.body-large;
             font-weight: 600;
             color: root.enabled ? Theme.palette().danger : Theme.palette().ink-disabled;
             horizontal-alignment: center;
@@ -224,7 +224,7 @@ export component LoomErrorState inherits Rectangle {
         }
         Text {
             text: root.message;
-            font-size: Theme.tokens.typography.body;
+            font-size: Theme.type.body;
             color: Theme.palette().ink-secondary;
             horizontal-alignment: center;
             wrap: word-wrap;
