@@ -188,3 +188,30 @@ fn the_worksheet_has_no_redundant_heading_above_the_grid() {
         .is_some());
     assert!(table.accessible_label().is_some());
 }
+
+/// At a normal 1280x800 window the Table tab's controls must end inside the
+/// inspector's own padding; the capture showed the Name field and the row/column
+/// steppers running into the window edge.
+#[test]
+fn table_inspector_controls_stay_inside_the_panel_padding() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    app.set_show_inspector(true);
+    app.set_inspector_tab(0);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render the Table inspector");
+    for label in [
+        "Table name",
+        "Delete selected row",
+        "Delete selected column",
+    ] {
+        let found: Vec<_> = ElementHandle::find_by_accessible_label(&app, label).collect();
+        assert_eq!(found.len(), 1, "one control named {label}");
+        let el = &found[0];
+        let right = el.absolute_position().x + el.size().width;
+        assert!(
+            right <= 1280.0 - 8.0 + 0.5,
+            "{label} must end inside the 8 px panel padding, right edge is {right}"
+        );
+    }
+}

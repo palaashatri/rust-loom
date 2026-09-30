@@ -154,6 +154,7 @@ export component SheetInspector inherits LoomPanel {
             viewport-height: max(parent.height, cell-property-layout.preferred-height);
 
             cell-property-layout := VerticalLayout {
+                x: 0px;
                 width: parent.width;
                 spacing: Theme.tokens.space.lg;
                 padding-bottom: Theme.tokens.space.xl * Theme.text-scale;
