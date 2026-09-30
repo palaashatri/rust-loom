@@ -862,7 +862,7 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 
 ### CODE-19 — Undo Present transitions with the rest of the slide
 
-**P2 · Present · OPEN.** Undo must reverse a visible transition change.
+**P2 · Present · FIXED in the model and Transition tab handler (2026-10-01).** Undo must reverse a visible transition change. Session snapshots now hold the document together with its per-slide transitions (new `session_history.rs`), and the Transition tab checkpoints before it changes a slide's transition. `undo_and_redo_reverse_a_transition_change` in `tests/slide_ids.rs` covers set, undo, redo; it would have failed on the old document-only snapshots. Present core 49, app 33, integration 2 pass and workspace Clippy is clean. Not done: a transition-only change does not yet mark the deck as unsaved, because the dirty check compares documents only, and save/reopen after undo was not exercised.
 
 **Open:** Present app `src/main.rs`, transition callback; `loom-present/crates/loom-present-core/src/lib.rs`, session history and transition map.
 

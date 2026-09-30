@@ -5,6 +5,8 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+mod session_history;
+use session_history::Snapshot;
 
 /// Authoring-plane dimensions used by Present's scene and transform APIs.
 pub const SLIDE_WIDTH: f32 = 1000.0;
@@ -1804,9 +1806,9 @@ pub struct PresentationSession {
     pub transitions: std::collections::BTreeMap<String, TransitionKind>,
     /// Selected element IDs on the active slide.
     pub selected_elements: Vec<String>,
-    undo: Vec<PresentationDocument>,
-    redo: Vec<PresentationDocument>,
-    checkpoint_redo: Option<Vec<PresentationDocument>>,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    checkpoint_redo: Option<Vec<Snapshot>>,
     history_limit: usize,
 }
 
@@ -1823,59 +1825,6 @@ impl PresentationSession {
             checkpoint_redo: None,
             history_limit: 64,
         }
-    }
-
-    /// Records the current document before a mutation.
-    pub fn checkpoint(&mut self) {
-        self.checkpoint_redo = Some(std::mem::take(&mut self.redo));
-        self.undo.push(self.document.clone());
-        if self.undo.len() > self.history_limit {
-            self.undo.remove(0);
-        }
-    }
-
-    /// Cancels the most recent checkpoint and restores the document state it
-    /// captured. This is used when a pointer gesture is cancelled or returns
-    /// to its starting geometry; cancelled gestures must not leave an undo
-    /// entry or a partially transformed document.
-    pub fn cancel_checkpoint(&mut self) -> bool {
-        let Some(previous) = self.undo.pop() else {
-            return false;
-        };
-        self.document = previous;
-        self.redo = self.checkpoint_redo.take().unwrap_or_default();
-        true
-    }
-
-    /// Restores the previous document snapshot.
-    pub fn undo(&mut self) -> bool {
-        self.checkpoint_redo = None;
-        let Some(previous) = self.undo.pop() else {
-            return false;
-        };
-        self.redo
-            .push(std::mem::replace(&mut self.document, previous));
-        true
-    }
-
-    /// Reapplies the next document snapshot.
-    pub fn redo(&mut self) -> bool {
-        self.checkpoint_redo = None;
-        let Some(next) = self.redo.pop() else {
-            return false;
-        };
-        self.undo.push(std::mem::replace(&mut self.document, next));
-        true
-    }
-
-    /// Returns whether the session has an undo snapshot.
-    pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
-    }
-
-    /// Returns whether the session has a redo snapshot.
-    pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
     }
 
     /// Returns the outgoing transition for a slide.

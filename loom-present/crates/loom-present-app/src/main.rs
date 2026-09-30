@@ -2422,15 +2422,16 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 let mut session = state.session.borrow_mut();
                 if let Some(slide) = session.document.active_slide() {
                     let id = slide.id.clone();
-                    session.set_transition(
-                        &id,
-                        match index {
-                            1 => TransitionKind::Dissolve,
-                            2 => TransitionKind::Push,
-                            3 => TransitionKind::Morph,
-                            _ => TransitionKind::None,
-                        },
-                    );
+                    let kind = match index {
+                        1 => TransitionKind::Dissolve,
+                        2 => TransitionKind::Push,
+                        3 => TransitionKind::Morph,
+                        _ => TransitionKind::None,
+                    };
+                    if session.transition_for(&id) != kind {
+                        session.checkpoint();
+                        session.set_transition(&id, kind);
+                    }
                 }
                 drop(session);
                 refresh(&app, &state);
