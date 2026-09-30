@@ -357,6 +357,9 @@ export component WriterApp inherits Window {
             HorizontalLayout {
                 spacing: 0px;
                 vertical-stretch: 1;
+                // The page stack is taller than the window; it scrolls, so it
+                // must not raise the row's minimum and push the status bar off.
+                min-height: 0px;
 
                 if !root.rtl : WriterPageCanvas {
                     doc-title: root.doc-title;

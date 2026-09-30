@@ -69,7 +69,6 @@ export component WriterInspector inherits LoomPanel {
         }
     }
 
-    title: "Format";
     width: 320px;
 
     // Content scrolls; the panel never grows past the window height, so the
@@ -94,7 +93,15 @@ export component WriterInspector inherits LoomPanel {
                 height: Theme.tokens.metrics.control-height;
                 padding-left: Theme.tokens.space.md;
                 padding-right: Theme.tokens.space.md;
-                alignment: end;
+                cross-axis-alignment: center;
+                Text {
+                    text: "Format";
+                    font-size: Theme.type.body;
+                    font-weight: 600;
+                    color: Theme.palette().ink;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
                 LoomButton {
                     icon: "close";
                     label: "Close format panel";

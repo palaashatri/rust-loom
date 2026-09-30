@@ -31,7 +31,7 @@ export component SheetToolbarOverflow inherits Rectangle {
             + Theme.tokens.metrics.sheet-tab-height
             + Theme.tokens.metrics.toolbar-height + 8px;
         width: 256px;
-        height: min(248px, root.content-height
+        height: min(popup-layout.preferred-height, root.content-height
             - Theme.tokens.metrics.header-height
             - Theme.tokens.metrics.sheet-tab-height
             - Theme.tokens.metrics.toolbar-height - 16px);
@@ -52,7 +52,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                 }
                 return reject;
             }
-            VerticalLayout {
+            popup-layout := VerticalLayout {
                 spacing: Theme.tokens.space.sm;
                 padding: Theme.tokens.space.md;
 
@@ -60,6 +60,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                     icon: "plus";
                     label: "Add row";
                     variant: "ghost";
+                    leading: true;
                     horizontal-stretch: 1;
                     clicked => { root.add-row(); }
                 }
@@ -67,6 +68,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                     icon: "plus";
                     label: "Add column";
                     variant: "ghost";
+                    leading: true;
                     horizontal-stretch: 1;
                     clicked => { root.add-column(); }
                 }
@@ -74,6 +76,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                     icon: "chart";
                     label: "Insert chart";
                     variant: "ghost";
+                    leading: true;
                     horizontal-stretch: 1;
                     clicked => { root.insert-chart(); }
                 }
@@ -81,6 +84,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                     icon: "export";
                     label: "Export CSV";
                     variant: "ghost";
+                    leading: true;
                     horizontal-stretch: 1;
                     clicked => { root.export-csv(); }
                 }
@@ -88,6 +92,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                     icon: "export";
                     label: "Export Excel";
                     variant: "ghost";
+                    leading: true;
                     horizontal-stretch: 1;
                     clicked => { root.export-xlsx(); }
                 }
@@ -95,6 +100,7 @@ export component SheetToolbarOverflow inherits Rectangle {
                     icon: "organize";
                     label: "Sort";
                     variant: "ghost";
+                    leading: true;
                     horizontal-stretch: 1;
                     clicked => { root.organize(); }
                 }

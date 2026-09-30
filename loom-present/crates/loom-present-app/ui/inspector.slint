@@ -172,10 +172,14 @@ export component PresentInspector inherits LoomPanel {
         if root.inspector-tab == 2 : VerticalLayout {
             spacing: Theme.tokens.space.md;
             LoomSectionHeader { title: "Slide Size"; }
-            LoomSegmentedControl {
-                items: ["16:9 Wide", "4:3 Standard"];
-                current: root.aspect-ratio-wide ? 0 : 1;
-                label: "Slide Aspect Ratio";
+            InspectorPropertyRow {
+                label: "Aspect ratio";
+                Text {
+                    text: root.aspect-ratio-wide ? "16:9 Wide" : "4:3 Standard";
+                    font-size: Theme.tokens.typography.body;
+                    color: Theme.palette().ink;
+                    vertical-alignment: center;
+                }
             }
             LoomSectionHeader { title: "Deck Information"; }
             InspectorPropertyRow {

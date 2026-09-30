@@ -7,6 +7,8 @@ export component LoomButton inherits Rectangle {
     in property <string> variant: "secondary";
     in property <bool> enabled: true;
     in property <bool> selected: false;
+    // Left-align the icon and label (menu-style rows) instead of centering them.
+    in property <bool> leading: false;
     callback clicked;
     public function grab-focus() { focus.focus(); }
 
@@ -51,7 +53,7 @@ export component LoomButton inherits Rectangle {
         spacing: Theme.tokens.space.md;
         padding-left: Theme.tokens.space.lg;
         padding-right: Theme.tokens.space.lg;
-        alignment: center;
+        alignment: root.leading ? start : center;
         cross-axis-alignment: center;
 
         if !Theme.rtl && root.icon != "" : Icon {
@@ -449,6 +451,10 @@ export component LoomSegmentedControl inherits Rectangle {
 
     focus := FocusScope {
         enabled: root.enabled;
+        // Declared after the segments, so it is on top of their TouchAreas. Taking
+        // focus on press would swallow the first click; each segment focuses the
+        // control itself when it is clicked.
+        focus-on-click: false;
         key-pressed(event) => {
             if (!root.enabled || root.items.length == 0) { return reject; }
             // Horizontal arrows follow visual order, so they mirror in RTL.

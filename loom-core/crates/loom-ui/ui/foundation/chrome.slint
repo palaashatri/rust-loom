@@ -168,6 +168,10 @@ export component LoomTabStrip inherits Rectangle {
     }
     tabs-focus := FocusScope {
         enabled: root.enabled;
+        // Declared after the segments, so it is on top of their TouchAreas. Taking
+        // focus on press would swallow the first click; each segment focuses the
+        // control itself when it is clicked.
+        focus-on-click: false;
         key-pressed(event) => {
             if (!root.enabled || root.items.length == 0) { return reject; }
             if (event.text == Key.LeftArrow) {
