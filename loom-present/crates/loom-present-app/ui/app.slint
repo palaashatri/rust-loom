@@ -241,6 +241,14 @@ export component PresentApp inherits Window {
                     root.export-pdf();
                     return accept;
                 }
+                if (event.text == "z" || event.text == "Z") {
+                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                    return accept;
+                }
+                if (event.text == "y" || event.text == "Y") {
+                    root.redo();
+                    return accept;
+                }
             }
             return reject;
         }

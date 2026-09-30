@@ -74,7 +74,7 @@ fn refresh_projects_selected_element_into_canvas_and_inspector() {
         .borrow_mut()
         .select_element("cover-body", false);
     refresh(&app, &state);
-    assert_eq!(app.get_active_element_label().as_str(), "BodyText");
+    assert_eq!(app.get_active_element_label().as_str(), "Body text");
     assert_eq!(app.get_selection_count(), 1);
     assert_eq!(
         app.get_active_element_content().as_str(),
@@ -107,7 +107,7 @@ fn refresh_clears_inspector_when_domain_selection_is_empty() {
         .borrow_mut()
         .select_element("cover-body", false);
     refresh(&app, &state);
-    assert_eq!(app.get_active_element_label().as_str(), "BodyText");
+    assert_eq!(app.get_active_element_label().as_str(), "Body text");
 
     state.session.borrow_mut().clear_selection();
     refresh(&app, &state);
@@ -786,4 +786,40 @@ fn closing_a_dirty_deck_asks_before_the_window_goes_away() {
         None,
         "cancel keeps the window open"
     );
+}
+
+#[test]
+fn selecting_a_slide_thumbnail_does_not_panic_on_the_session_borrow() {
+    // Regression: the select-slide callback kept the session mutably borrowed
+    // while `refresh` read it, so clicking any thumbnail aborted the app.
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = Rc::new(test_state());
+    state
+        .session
+        .borrow_mut()
+        .document
+        .add_slide("Second", "content");
+    wire_app_callbacks(&app, &state);
+
+    assert_eq!(state.session.borrow().document.active_index, 1);
+    app.invoke_select_slide(0);
+
+    assert_eq!(state.session.borrow().document.active_index, 0);
+}
+
+#[test]
+fn undo_and_redo_shortcuts_reach_the_session() {
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = Rc::new(test_state());
+    wire_app_callbacks(&app, &state);
+    let before = state.session.borrow().document.len();
+    app.invoke_add_slide();
+    assert_eq!(state.session.borrow().document.len(), before + 1);
+
+    app.invoke_undo();
+    assert_eq!(state.session.borrow().document.len(), before);
+    app.invoke_redo();
+    assert_eq!(state.session.borrow().document.len(), before + 1);
 }

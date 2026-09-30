@@ -527,6 +527,18 @@ fn nudge_selected(session: &mut PresentationSession, dx: f32, dy: f32) -> bool {
     true
 }
 
+/// Plain-language name for an element kind, for labels people read.
+fn element_type_name(kind: &ElementType) -> &'static str {
+    match kind {
+        ElementType::Title => "Title",
+        ElementType::Subtitle => "Subtitle",
+        ElementType::BodyText => "Body text",
+        ElementType::ShapeRectangle => "Rectangle",
+        ElementType::ShapeCircle => "Circle",
+        ElementType::StatCard => "Stat card",
+    }
+}
+
 fn refresh(app: &PresentApp, state: &GuiState) {
     refresh_with_recovery(app, state, true);
 }
@@ -560,9 +572,17 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
             .map(|element| {
                 let selected = session.selected_elements.iter().any(|id| id == &element.id);
                 SharedString::from(if selected {
-                    format!("Selected {:?} · {}", element.element_type, element.content)
+                    format!(
+                        "Selected {} · {}",
+                        element_type_name(&element.element_type),
+                        element.content
+                    )
                 } else {
-                    format!("{:?} · {}", element.element_type, element.content)
+                    format!(
+                        "{} · {}",
+                        element_type_name(&element.element_type),
+                        element.content
+                    )
                 })
             })
             .collect::<Vec<_>>();
@@ -646,7 +666,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
                 .elements
                 .get(selected)
                 .expect("selected element index comes from active slide");
-            app.set_active_element_label(format!("{:?}", element.element_type).into());
+            app.set_active_element_label(element_type_name(&element.element_type).into());
             app.set_active_element_content(element.content.as_str().into());
             app.set_element_x(element.x);
             app.set_element_y(element.y);
@@ -1786,9 +1806,12 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         app.on_select_slide(move |index| {
             if let Some(app) = app_ref.upgrade() {
                 if index >= 0 {
-                    let mut session = state.session.borrow_mut();
-                    if session.document.select_slide(index as usize) {
-                        session.clear_selection();
+                    {
+                        // Release the mutable borrow before `refresh` reads the session.
+                        let mut session = state.session.borrow_mut();
+                        if session.document.select_slide(index as usize) {
+                            session.clear_selection();
+                        }
                     }
                     state.selected_element.set(0);
                     refresh(&app, &state);
