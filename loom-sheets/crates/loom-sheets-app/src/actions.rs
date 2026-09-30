@@ -241,17 +241,19 @@ pub(crate) fn register_sheet_actions(
         app.on_organize(move || {
             if let Some(app) = app_ref.upgrade() {
                 let sel = selection_from_app(&app);
-                if sort_table(
+                let sorted = sort_table(
                     &mut state.current.borrow_mut(),
                     &mut state.undo_stack.borrow_mut(),
                     &mut state.redo_stack.borrow_mut(),
                     sel.anchor.col,
                     true,
-                ) {
+                );
+                if sorted {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left("Sorted table rows ascending".into());
                 }
+                let status = sort_status(&state.current.borrow(), sorted, "ascending");
+                app.set_status_left(status.into());
             }
         });
     }
@@ -1121,17 +1123,19 @@ pub(crate) fn register_sheet_actions(
         app.on_sort_ascending(move || {
             if let Some(app) = app_ref.upgrade() {
                 let sel = selection_from_app(&app);
-                if sort_table(
+                let sorted = sort_table(
                     &mut state.current.borrow_mut(),
                     &mut state.undo_stack.borrow_mut(),
                     &mut state.redo_stack.borrow_mut(),
                     sel.anchor.col,
                     true,
-                ) {
+                );
+                if sorted {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left("Sorted rows ascending".into());
                 }
+                let status = sort_status(&state.current.borrow(), sorted, "ascending");
+                app.set_status_left(status.into());
             }
         });
     }
@@ -1143,17 +1147,19 @@ pub(crate) fn register_sheet_actions(
         app.on_sort_descending(move || {
             if let Some(app) = app_ref.upgrade() {
                 let sel = selection_from_app(&app);
-                if sort_table(
+                let sorted = sort_table(
                     &mut state.current.borrow_mut(),
                     &mut state.undo_stack.borrow_mut(),
                     &mut state.redo_stack.borrow_mut(),
                     sel.anchor.col,
                     false,
-                ) {
+                );
+                if sorted {
                     apply_sheet(&app, &state);
                     sync_menu_state(&menu_service, &app, &state);
-                    app.set_status_left("Sorted rows descending".into());
                 }
+                let status = sort_status(&state.current.borrow(), sorted, "descending");
+                app.set_status_left(status.into());
             }
         });
     }
@@ -1487,6 +1493,42 @@ pub(crate) fn delete_col(sheet: &Sheet, target_col: u32) -> Option<Sheet> {
     Some(new_sheet)
 }
 
+/// Last row below the header that Sort may move. Formula cells keep absolute row
+/// references that do not follow a moved row, so sorting one into the data gives
+/// `#REF!` and wrong totals. Sort stops above the first row containing a formula
+/// and leaves that row and everything below it where it is.
+pub(crate) fn sortable_last_row(sheet: &Sheet) -> u32 {
+    let last_used = sheet.dimensions().rows.saturating_sub(1);
+    let first_formula_row = sheet
+        .cells
+        .iter()
+        .filter(|(at, cell)| at.row >= 1 && cell.is_formula())
+        .map(|(at, _)| at.row)
+        .min();
+    match first_formula_row {
+        Some(row) => row.saturating_sub(1).min(last_used),
+        None => last_used,
+    }
+}
+
+/// Status line for a finished (or impossible) sort.
+pub(crate) fn sort_status(sheet: &Sheet, sorted: bool, direction: &str) -> String {
+    let last_used = sheet.dimensions().rows.saturating_sub(1);
+    let last_row = sortable_last_row(sheet);
+    if !sorted {
+        return "Nothing to sort: a sort needs at least two rows of data above any formulas"
+            .to_string();
+    }
+    if last_row < last_used {
+        format!(
+            "Sorted rows 2–{} {direction}; rows with formulas stayed in place",
+            last_row + 1
+        )
+    } else {
+        format!("Sorted rows {direction}")
+    }
+}
+
 /// Sort table rows preserving header row 0 with undo transaction recording.
 pub(crate) fn sort_table(
     sheet: &mut Sheet,
@@ -1496,13 +1538,14 @@ pub(crate) fn sort_table(
     ascending: bool,
 ) -> bool {
     let dims = sheet.dimensions();
-    if dims.rows <= 1 {
+    let last_row = sortable_last_row(sheet);
+    if last_row < 2 {
         return false;
     }
     let range = CellRange::new(
         CellRef { row: 1, col: 0 },
         CellRef {
-            row: dims.rows.saturating_sub(1),
+            row: last_row,
             col: dims.cols.saturating_sub(1),
         },
     );

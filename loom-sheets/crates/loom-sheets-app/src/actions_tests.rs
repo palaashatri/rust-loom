@@ -1349,3 +1349,43 @@ fn chart_explicit_range_excludes_totals_and_stays_live() {
         3
     );
 }
+
+/// Sorting used to move the Total and Average formula rows into the data, which
+/// left `#REF!` and `#VALUE!` behind. Formula rows and everything under them must
+/// stay put, and the formulas must still evaluate.
+#[test]
+fn sort_leaves_formula_rows_in_place_and_keeps_formulas_valid() {
+    let state = make_test_state();
+    let mut sheet = state.current.borrow_mut();
+    let mut undo = state.undo_stack.borrow_mut();
+    let mut redo = state.redo_stack.borrow_mut();
+    let formulas_before: Vec<(CellRef, String)> = sheet
+        .cells
+        .iter()
+        .filter(|(_, cell)| cell.is_formula())
+        .map(|(at, cell)| (*at, cell.raw.clone()))
+        .collect();
+    assert!(
+        !formulas_before.is_empty(),
+        "the starter workbook has formula rows"
+    );
+
+    assert!(sort_table(&mut sheet, &mut undo, &mut redo, 1, false));
+
+    for (at, raw) in &formulas_before {
+        assert_eq!(
+            sheet.raw(*at).unwrap(),
+            raw.as_str(),
+            "formula at {at:?} must not move"
+        );
+    }
+    let values = loom_sheets_core::SheetModel::new(sheet.clone()).evaluate();
+    assert!(
+        !values
+            .values()
+            .any(|v| matches!(v, loom_sheets_core::Value::Error(_))),
+        "no cell may evaluate to an error after sorting: {values:?}"
+    );
+    let status = sort_status(&sheet, true, "descending");
+    assert!(status.contains("formulas stayed in place"), "{status}");
+}
