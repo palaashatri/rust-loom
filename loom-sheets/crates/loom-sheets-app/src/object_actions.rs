@@ -427,30 +427,6 @@ fn handle_keyboard_action(
                 _ => unreachable!(),
             };
             let name = object_display_name(state, index);
-            let outcome = if cancelled {
-                format!("{name} preview cancelled.")
-            } else {
-                let size = state
-                    .current
-                    .borrow()
-                    .objects
-                    .get(index)
-                    .map(|object| format!("{} by {} pixels", object.width, object.height))
-                    .unwrap_or_default();
-                match mode {
-                    ObjectGestureMode::Move => {
-                        let anchor = state
-                            .current
-                            .borrow()
-                            .objects
-                            .get(index)
-                            .map(|object| object.anchor.to_a1())
-                            .unwrap_or_default();
-                        format!("{name} moved to {anchor}, {size}.")
-                    }
-                    ObjectGestureMode::Resize => format!("{name} resized to {size}."),
-                }
-            };
             finish_gesture_state(
                 app,
                 state,
@@ -460,6 +436,33 @@ fn handle_keyboard_action(
                 cancelled,
                 GestureScroll::KEEP_ON_COMMIT,
             );
+            // Report the geometry that was actually committed. Reading it before
+            // `finish_gesture_state` announces the pre-move position, which told
+            // the user "moved to D3" for an object that had moved to E3.
+            let outcome = if cancelled {
+                format!("{name} preview cancelled.")
+            } else {
+                let geometry = state
+                    .current
+                    .borrow()
+                    .objects
+                    .get(index)
+                    .map(|object| {
+                        (
+                            object.anchor.to_a1(),
+                            format!("{} by {} pixels", object.width, object.height),
+                        )
+                    })
+                    .unwrap_or_default();
+                match mode {
+                    ObjectGestureMode::Move => {
+                        format!("{name} moved to {}, {}.", geometry.0, geometry.1)
+                    }
+                    ObjectGestureMode::Resize => {
+                        format!("{name} resized to {}.", geometry.1)
+                    }
+                }
+            };
             announce(app, state, outcome);
         }
         _ => {}

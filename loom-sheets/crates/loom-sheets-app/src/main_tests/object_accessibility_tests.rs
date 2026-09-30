@@ -909,12 +909,36 @@ fn object_keyboard_actions_report_their_outcome_in_the_status_bar() {
         previewing.contains("Moving") && previewing.contains("Enter commits"),
         "a move preview must say what it is doing and how to finish, got {previewing:?}"
     );
+    let preview_anchor = announced_anchor(&previewing);
+    assert!(
+        !preview_anchor.is_empty(),
+        "the move preview must name the target anchor, got {previewing:?}"
+    );
 
+    // Whatever the preview showed is what the commit must report. An earlier
+    // build read the geometry before applying the move, so the preview said
+    // "to E3" while the commit claimed "moved to D3" for an object at E3.
     press_key(&app, slint::platform::Key::Return);
     let committed = app.get_status_left().to_string();
     assert!(
         committed.contains("moved") && committed.contains("pixels"),
         "a committed move must report the resulting geometry, got {committed:?}"
+    );
+    assert_eq!(
+        announced_anchor(&committed),
+        preview_anchor,
+        "the commit must report the anchor the preview showed"
+    );
+    let (width, height) = _state
+        .current
+        .borrow()
+        .objects
+        .first()
+        .map(|object| (object.width, object.height))
+        .unwrap_or_default();
+    assert!(
+        committed.contains(&format!("{width} by {height} pixels")),
+        "the status must report the real committed size, got {committed:?}"
     );
 
     press_text(&app, "r");
@@ -924,4 +948,21 @@ fn object_keyboard_actions_report_their_outcome_in_the_status_bar() {
         cancelled.contains("cancelled"),
         "cancelling a preview must say so, got {cancelled:?}"
     );
+}
+
+/// Reads the `A1` anchor a status message announces, ignoring the punctuation
+/// that follows it ("to D2," or "to D2.").
+fn announced_anchor(status: &str) -> String {
+    status
+        .split(" to ")
+        .nth(1)
+        .or_else(|| status.split("moved to ").nth(1))
+        .map(|rest| {
+            rest.split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string()
+        })
+        .unwrap_or_default()
 }
