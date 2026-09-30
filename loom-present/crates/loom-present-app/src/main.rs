@@ -674,17 +674,18 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
         });
     }
     let issue_count = session.validate().len();
-    app.set_status_left(SharedString::from(format!(
-        "{} slides · {} validation issues · undo {}",
-        document.len(),
-        issue_count,
-        if session.can_undo() {
-            "available"
-        } else {
-            "clean"
-        }
-    )));
-    app.set_status_right("Local deck engine".into());
+    let slides = if document.len() == 1 {
+        "slide"
+    } else {
+        "slides"
+    };
+    let status = match issue_count {
+        0 => format!("{} {slides}", document.len()),
+        1 => format!("{} {slides} · 1 issue to fix", document.len()),
+        n => format!("{} {slides} · {n} issues to fix", document.len()),
+    };
+    app.set_status_left(SharedString::from(status));
+    app.set_status_right(if session.can_undo() { "Edited" } else { "" }.into());
     let drag = state.drag_state.borrow();
     app.set_snap_guides_x(ModelRc::new(VecModel::from(
         drag.guides
