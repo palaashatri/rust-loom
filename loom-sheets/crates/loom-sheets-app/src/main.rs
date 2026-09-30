@@ -102,6 +102,7 @@ use palette::*;
 mod journey;
 use journey::*;
 
+mod scroll_projection;
 mod template_navigation;
 
 mod actions;
@@ -428,10 +429,13 @@ fn viewport_from_dimensions(
         dimension_index_at_offset(scroll_x, dimensions.cols, default_col_width, col_widths);
     let first_row =
         dimension_index_at_offset(scroll_y, dimensions.rows, GRID_ROW_HEIGHT, row_heights);
+    // Materialize two extra columns and rows past the edge. The scroll offset
+    // usually sits partway into the first cell, so an exact-fit window leaves
+    // a blank strip on the far side until the next refresh.
     let visible_cols = dimension_visible_count(
         first_col,
         dimensions.cols,
-        viewport_width,
+        viewport_width + 2.0 * default_col_width,
         default_col_width,
         col_widths,
     )
@@ -439,7 +443,7 @@ fn viewport_from_dimensions(
     let visible_rows = dimension_visible_count(
         first_row,
         dimensions.rows,
-        viewport_height,
+        viewport_height + 2.0 * GRID_ROW_HEIGHT,
         GRID_ROW_HEIGHT,
         row_heights,
     )
@@ -481,6 +485,7 @@ fn project_sheet_objects(
     scroll_x: f32,
     scroll_y: f32,
     preview: Option<(usize, CellRef, u32, u32)>,
+    image_for: &dyn Fn(usize, &loom_sheets_core::SheetObject) -> Image,
 ) -> ProjectedSheetObjects {
     let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
@@ -524,7 +529,7 @@ fn project_sheet_objects(
             kind: object.kind.as_str().into(),
             label: object.label.as_str().into(),
             details: details.into(),
-            image: load_sheet_object_image(object),
+            image: image_for(index, object),
             x,
             y,
             width: rendered_width,
@@ -575,9 +580,26 @@ fn grid_geometry(
     viewport_width: f32,
     zoom: f32,
 ) -> GridGeometry {
+    grid_geometry_fit(
+        sheet,
+        dimensions,
+        viewport,
+        grid_default_col_width(sheet, viewport_width),
+        zoom,
+    )
+}
+
+/// Geometry for a known unscaled default column width. Scrolling reuses the
+/// width from the last full projection instead of rescanning the sheet.
+fn grid_geometry_fit(
+    sheet: &Sheet,
+    dimensions: SheetDimensions,
+    viewport: SheetViewport,
+    fit_col_width: f32,
+    zoom: f32,
+) -> GridGeometry {
     // Zoom scales rendered pixels uniformly; the persisted model keeps
     // unscaled pixels (see `viewport_from_app`).
-    let fit_col_width = grid_default_col_width(sheet, viewport_width);
     let default_col_width = fit_col_width * zoom;
     let default_row_height = GRID_ROW_HEIGHT * zoom;
     let scaled_cols: std::collections::BTreeMap<u32, f32> = sheet
@@ -976,46 +998,10 @@ fn project_sheet_inner_with_preview(
         app.get_grid_scroll_x(),
         app.get_grid_scroll_y(),
         preview,
+        &|_, object| load_sheet_object_image(object),
     );
 
-    app.set_cols(ModelRc::new(VecModel::from(grid.cols)));
-    app.set_rows(ModelRc::new(VecModel::from(grid.rows)));
-    app.set_column_headers(ModelRc::new(VecModel::from(
-        grid.column_headers
-            .into_iter()
-            .map(SharedString::from)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_row_headers(ModelRc::new(VecModel::from(
-        grid.row_headers
-            .into_iter()
-            .map(SharedString::from)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_cells(ModelRc::new(VecModel::from(
-        grid.cells
-            .into_iter()
-            .map(SharedString::from)
-            .collect::<Vec<_>>(),
-    )));
-    app.set_cell_alignments(ModelRc::new(VecModel::from(grid.cell_alignments)));
-    app.set_cell_bolds(ModelRc::new(VecModel::from(grid.cell_bolds)));
-    app.set_cell_italics(ModelRc::new(VecModel::from(grid.cell_italics)));
-    app.set_cell_underlines(ModelRc::new(VecModel::from(grid.cell_underlines)));
-    app.set_cell_borders(ModelRc::new(VecModel::from(grid.cell_borders)));
-    app.set_cell_fills(ModelRc::new(VecModel::from(grid.cell_fills)));
-    app.set_cell_font_sizes(ModelRc::new(VecModel::from(grid.cell_font_sizes)));
-    app.set_object_views(ModelRc::new(VecModel::from(objects.views)));
-    app.set_grid_col_width(geometry.default_col_width);
-    app.set_grid_row_height(GRID_ROW_HEIGHT * zoom);
-    app.set_grid_col_offset(geometry.col_offset);
-    app.set_grid_row_offset(geometry.row_offset);
-    app.set_grid_visible_width(geometry.visible_width);
-    app.set_grid_visible_height(geometry.visible_height);
-    app.set_grid_content_width(geometry.content_width);
-    app.set_grid_content_height(geometry.content_height);
-    app.set_grid_column_widths(ModelRc::new(VecModel::from(geometry.column_widths)));
-    app.set_grid_row_heights(ModelRc::new(VecModel::from(geometry.row_heights)));
+    scroll_projection::apply_grid(app, grid, Some(objects.views), &geometry, zoom);
     if app.get_selected_object() >= sheet.objects.len() as i32 {
         app.set_selected_object(-1);
     }
@@ -2693,7 +2679,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         let app_ref = app.as_weak();
         app.on_grid_scrolled(move || {
             if let Some(app) = app_ref.upgrade() {
-                project_current_without_reveal(&app, &state);
+                scroll_projection::project_scroll(&app, &state);
             }
         });
     }
@@ -2901,3 +2887,7 @@ mod tests;
 #[cfg(test)]
 #[path = "perf_tests.rs"]
 mod perf_tests;
+
+#[cfg(test)]
+#[path = "frame_bench_tests.rs"]
+mod frame_bench_tests;

@@ -40,7 +40,7 @@ use checkpoint_generations::{
     reconcile_checkpoint_generations, reconcile_checkpoint_generations_with_limits,
     CheckpointPointer,
 };
-#[cfg(windows)]
+#[cfg(all(windows, test))]
 use checkpoint_generations::{
     read_latest_commit_pointer, CHECKPOINT_COMMIT_PREFIX, CHECKPOINT_COMMIT_SUFFIX,
 };

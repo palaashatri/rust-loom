@@ -63,7 +63,11 @@ fn assert_checkpoint_lock_is_held(directory: &std::path::Path) {
     let error = lock
         .try_lock_exclusive()
         .expect_err("preflight callback runs under the shared checkpoint lock");
-    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    // Windows reports a lock violation rather than `WouldBlock`.
+    assert_eq!(
+        error.raw_os_error(),
+        fs2::lock_contended_error().raw_os_error()
+    );
 }
 
 #[test]

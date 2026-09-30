@@ -249,8 +249,10 @@ fn sparse_viewport_projection_tracks_scroll_and_dimensions() {
     assert_eq!(sheet.dimensions(), SheetDimensions::new(1_000, 52));
     assert_eq!(viewport.first_row, 28);
     assert_eq!(viewport.first_col, 2);
-    assert_eq!(viewport.visible_rows, 11);
-    assert_eq!(viewport.visible_cols, 5);
+    // Two extra rows and columns are materialized past the viewport edge so a
+    // partial first cell never leaves a blank strip while scrolling.
+    assert_eq!(viewport.visible_rows, 13);
+    assert_eq!(viewport.visible_cols, 7);
     assert!(viewport.contains(CellRef::parse("C29").unwrap()));
     assert!(!viewport.contains(CellRef::parse("B29").unwrap()));
 }
@@ -308,16 +310,17 @@ fn sparse_tail_scroll_materializes_tail_headers_and_values() {
     );
     assert_eq!(row_headers.row_data(0).as_deref(), Some("977"));
     let cells = app.get_cells();
+    let cols = app.get_cols().row_count() as u32;
     assert_eq!(
-        cells.row_data(((995 - first) * 8) as usize).as_deref(),
+        cells.row_data(((995 - first) * cols) as usize).as_deref(),
         Some("10")
     );
     assert_eq!(
-        cells.row_data(((996 - first) * 8) as usize).as_deref(),
+        cells.row_data(((996 - first) * cols) as usize).as_deref(),
         Some("20")
     );
     assert_eq!(
-        cells.row_data(((last - first) * 8) as usize).as_deref(),
+        cells.row_data(((last - first) * cols) as usize).as_deref(),
         Some("tail")
     );
     // The requested -26_600 is clamped to the deepest scroll. That maximum is

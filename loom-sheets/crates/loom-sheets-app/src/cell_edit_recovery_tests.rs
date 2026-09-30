@@ -165,9 +165,11 @@ fn legacy_recovery_directory_lock_is_held_until_cell_recovery_drops() {
 
     let while_open = FileExt::try_lock_exclusive(&lock_file)
         .expect_err("cell recovery retains the legacy directory lock");
+    // Windows reports a lock violation, not `WouldBlock`; ask the lock crate
+    // for the platform's contention error instead of hard-coding one.
     assert_eq!(
-        while_open.kind(),
-        std::io::ErrorKind::WouldBlock,
+        while_open.raw_os_error(),
+        fs2::lock_contended_error().raw_os_error(),
         "the retained lock must block another exclusive acquisition"
     );
 

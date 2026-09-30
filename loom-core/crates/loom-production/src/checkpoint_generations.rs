@@ -74,7 +74,7 @@ pub(super) fn read_checkpoint(
     Ok((state.bytes, state.metadata))
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, test))]
 pub(super) fn read_latest_commit_pointer(
     directory: &Path,
 ) -> Result<Option<CheckpointPointer>, ProductionError> {

@@ -16,6 +16,7 @@ impl TestDirectory {
     /// macOS caps `sun_path` at 104 bytes and its per-user temp directory alone
     /// is longer than that, so a socket fixture built under the default temp
     /// directory cannot be created there at all.
+    #[cfg(unix)]
     fn with_short_path() -> Self {
         Self::create_in(short_test_root(), "lrp")
     }
