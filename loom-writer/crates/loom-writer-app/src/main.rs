@@ -4626,6 +4626,8 @@ fn wire_palette(app: &WriterApp) {
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]
+mod review_tests;
+#[cfg(test)]
 mod audit_tests;
 #[cfg(test)]
 mod recovery_tests;

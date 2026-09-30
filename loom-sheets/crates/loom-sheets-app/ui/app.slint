@@ -314,9 +314,7 @@ export component SheetsApp inherits Window {
         }
     }
     changed overflow-toolbar => {
-        if (!root.overflow-toolbar) {
-            root.close-toolbar-overflow();
-        }
+        if (!root.overflow-toolbar) { root.close-toolbar-overflow(); }
     }
     changed save-changes-open => {
         if (root.save-changes-open) {
@@ -350,98 +348,38 @@ export component SheetsApp inherits Window {
                 return accept;
             }
             if (event.modifiers.control || event.modifiers.meta) {
-                if (event.text == Key.K || event.text == "k") {
-                    root.open-palette();
-                    return accept;
-                }
-                if (event.text == "n" || event.text == "N") {
-                    root.new-sheet();
-                    return accept;
-                }
-                if (event.text == "o" || event.text == "O") {
-                    root.open-sheet();
-                    return accept;
-                }
+                if (event.text == Key.K || event.text == "k") { root.open-palette(); return accept; }
+                if (event.text == "n" || event.text == "N") { root.new-sheet(); return accept; }
+                if (event.text == "o" || event.text == "O") { root.open-sheet(); return accept; }
                 if (event.text == "s" || event.text == "S") {
                     if (event.modifiers.shift) { root.save-as-sheet(); } else { root.save-sheet(); }
                     return accept;
                 }
-                if (event.text == "e" || event.text == "E") {
-                    root.export-csv();
-                    return accept;
-                }
+                if (event.text == "e" || event.text == "E") { root.export-csv(); return accept; }
                 if (event.text == "z" || event.text == "Z") {
                     if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
                     return accept;
                 }
-                if (event.text == "c" || event.text == "C") {
-                    root.copy-selection();
-                    return accept;
-                }
-                if (event.text == "x" || event.text == "X") {
-                    root.cut-selection();
-                    return accept;
-                }
-                if (event.text == "v" || event.text == "V") {
-                    root.paste-selection();
-                    return accept;
-                }
-                if (event.text == "a" || event.text == "A") {
-                    root.select-all();
-                    return accept;
-                }
-                if (event.text == "b" || event.text == "B") {
-                    root.toggle-bold();
-                    return accept;
-                }
-                if (event.text == "i" || event.text == "I") {
-                    root.toggle-italic();
-                    return accept;
-                }
-                if (event.text == "u" || event.text == "U") {
-                    root.toggle-underline();
-                    return accept;
-                }
-                if (event.text == "=" || event.text == "+") {
-                    root.zoom-in();
-                    return accept;
-                }
-                if (event.text == "-") {
-                    root.zoom-out();
-                    return accept;
-                }
-                if (event.text == "0") {
-                    root.zoom-actual();
-                    return accept;
-                }
+                if (event.text == "c" || event.text == "C") { root.copy-selection(); return accept; }
+                if (event.text == "x" || event.text == "X") { root.cut-selection(); return accept; }
+                if (event.text == "v" || event.text == "V") { root.paste-selection(); return accept; }
+                if (event.text == "a" || event.text == "A") { root.select-all(); return accept; }
+                if (event.text == "b" || event.text == "B") { root.toggle-bold(); return accept; }
+                if (event.text == "i" || event.text == "I") { root.toggle-italic(); return accept; }
+                if (event.text == "u" || event.text == "U") { root.toggle-underline(); return accept; }
+                if (event.text == "=" || event.text == "+") { root.zoom-in(); return accept; }
+                if (event.text == "-") { root.zoom-out(); return accept; }
+                if (event.text == "0") { root.zoom-actual(); return accept; }
             }
-            if (event.text == Key.Backspace || event.text == Key.Delete) {
-                root.clear-selected-cells();
-                return accept;
-            }
+            if (event.text == Key.Backspace || event.text == Key.Delete) { root.clear-selected-cells(); return accept; }
             if (event.text == Key.Escape) {
-                if (root.chart-visible) {
-                    root.close-chart();
-                    return accept;
-                }
+                if (root.chart-visible) { root.close-chart(); return accept; }
                 return reject;
             }
-            if (event.text == Key.LeftArrow) {
-                if (event.modifiers.shift) { root.extend-selection(0, -1); } else { root.navigate-selection(0, -1); }
-                return accept;
-            }
-            if (event.text == Key.RightArrow) {
-                if (event.modifiers.shift) { root.extend-selection(0, 1); } else { root.navigate-selection(0, 1); }
-                return accept;
-            }
-            if (event.text == Key.UpArrow) {
-                if (event.modifiers.shift) { root.extend-selection(-1, 0); } else { root.navigate-selection(-1, 0); }
-                return accept;
-            }
-            if (event.text == Key.DownArrow) {
-                if (event.modifiers.shift) { root.extend-selection(1, 0); } else { root.navigate-selection(1, 0); }
-                return accept;
-            }
+            if (event.text == Key.LeftArrow) { if (event.modifiers.shift) { root.extend-selection(0, -1); } else { root.navigate-selection(0, -1); } return accept; }
+            if (event.text == Key.RightArrow) { if (event.modifiers.shift) { root.extend-selection(0, 1); } else { root.navigate-selection(0, 1); } return accept; }
+            if (event.text == Key.UpArrow) { if (event.modifiers.shift) { root.extend-selection(-1, 0); } else { root.navigate-selection(-1, 0); } return accept; }
+            if (event.text == Key.DownArrow) { if (event.modifiers.shift) { root.extend-selection(1, 0); } else { root.navigate-selection(1, 0); } return accept; }
             return reject;
         }
         VerticalLayout {
@@ -658,8 +596,6 @@ export component SheetsApp inherits Window {
             }
 
                 if root.compact-inspector-visible : Rectangle {
-                    x: 0px;
-                    y: 0px;
                     width: parent.width;
                     height: parent.height;
                     background: Theme.palette().scrim;
@@ -669,7 +605,6 @@ export component SheetsApp inherits Window {
                     visible: root.inspector-visible;
                     active: root.inspector-visible;
                     x: root.rtl ? 0px : parent.width - self.width;
-                    y: 0px;
                     width: 320px;
                     height: parent.height;
                     close-requested => { root.toggle-inspector(); }
@@ -739,7 +674,6 @@ export component SheetsApp inherits Window {
         }
     }
     LocalMenuPopup {
-        x: 0px;
         y: 36px;
         width: root.width;
         height: root.height - 36px;
@@ -784,8 +718,6 @@ export component SheetsApp inherits Window {
     }
 
     save-changes-dialog := SaveChangesDialog {
-        x: 0px;
-        y: 0px;
         width: root.width;
         height: root.height;
         open: root.save-changes-open;
@@ -797,8 +729,6 @@ export component SheetsApp inherits Window {
         save => { root.save-changes-save(); }
     }
     xlsx-import-warning := XlsxImportWarningDialog {
-        x: 0px;
-        y: 0px;
         width: root.width;
         height: root.height;
         open: root.xlsx-import-warning-open;
@@ -821,8 +751,6 @@ export component SheetsApp inherits Window {
     }
 
     palette := CommandPalette {
-        x: 0px;
-        y: 0px;
         width: parent.width;
         height: parent.height;
         open: root.palette-open;
@@ -849,8 +777,6 @@ export component SheetsApp inherits Window {
         activated => { app-focus.focus(); }
     }
     LoomWindowResizeEdges {
-        x: 0px;
-        y: 0px;
         width: root.width;
         height: root.height;
         enabled: root.custom-chrome && !root.maximized;
