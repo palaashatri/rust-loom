@@ -6,7 +6,7 @@ use std::sync::Arc;
 use loom_desktop::NativeMenuBar;
 use loom_sheets_core::style::FillColor;
 use loom_sheets_core::{CellRef, Sheet, SheetObject};
-use slint::ComponentHandle;
+use slint::{ComponentHandle, SharedString};
 
 use crate::{
     apply_sheet, project_current, project_current_without_reveal, push_history, sync_menu_state,
@@ -348,7 +348,10 @@ fn handle_keyboard_action(
         return;
     };
     match action {
-        0 => reveal_object(app, state, index),
+        0 => {
+            reveal_object(app, state, index);
+            announce(app, state, object_selected_message(state, index));
+        }
         1 | 2 => {
             let mode = if action == 1 {
                 ObjectGestureMode::Move
@@ -387,6 +390,32 @@ fn handle_keyboard_action(
                 } else {
                     project_current_without_reveal(app, state);
                 }
+                let verb = if mode == ObjectGestureMode::Move {
+                    "Moving"
+                } else {
+                    "Resizing"
+                };
+                let preview = state
+                    .object_gesture
+                    .borrow()
+                    .as_ref()
+                    .map(|gesture| {
+                        format!(
+                            "{}, {} by {} pixels",
+                            gesture.preview_anchor.to_a1(),
+                            gesture.preview_width,
+                            gesture.preview_height
+                        )
+                    })
+                    .unwrap_or_default();
+                announce(
+                    app,
+                    state,
+                    format!(
+                        "{verb} {} to {preview}. Enter commits, Escape cancels.",
+                        object_display_name(state, index)
+                    ),
+                );
             }
         }
         -4..=-1 => {
@@ -397,6 +426,31 @@ fn handle_keyboard_action(
                 -4 => (ObjectGestureMode::Resize, true),
                 _ => unreachable!(),
             };
+            let name = object_display_name(state, index);
+            let outcome = if cancelled {
+                format!("{name} preview cancelled.")
+            } else {
+                let size = state
+                    .current
+                    .borrow()
+                    .objects
+                    .get(index)
+                    .map(|object| format!("{} by {} pixels", object.width, object.height))
+                    .unwrap_or_default();
+                match mode {
+                    ObjectGestureMode::Move => {
+                        let anchor = state
+                            .current
+                            .borrow()
+                            .objects
+                            .get(index)
+                            .map(|object| object.anchor.to_a1())
+                            .unwrap_or_default();
+                        format!("{name} moved to {anchor}, {size}.")
+                    }
+                    ObjectGestureMode::Resize => format!("{name} resized to {size}."),
+                }
+            };
             finish_gesture_state(
                 app,
                 state,
@@ -406,8 +460,63 @@ fn handle_keyboard_action(
                 cancelled,
                 GestureScroll::KEEP_ON_COMMIT,
             );
+            announce(app, state, outcome);
         }
         _ => {}
+    }
+}
+
+/// Name the selected object the way the accessibility tree does, so the status
+/// line and the announcement agree.
+fn object_display_name(state: &GuiState, index: usize) -> String {
+    state
+        .current
+        .borrow()
+        .objects
+        .get(index)
+        .map(|object| {
+            let kind = match object.kind {
+                loom_sheets_core::SheetObjectKind::Image => "Image",
+                loom_sheets_core::SheetObjectKind::Shape => "Shape",
+            };
+            let label = object.label.trim();
+            if label.is_empty() {
+                format!("{kind} {}", index + 1)
+            } else {
+                format!("{kind} {} \u{2014} {label}", index + 1)
+            }
+        })
+        .unwrap_or_else(|| format!("Object {}", index + 1))
+}
+
+/// Object actions have no visible chrome of their own, so every keyboard
+/// transition reports its outcome in the status bar. A keyboard user must be
+/// able to see what a move or resize did without a screen reader.
+fn announce(app: &SheetsApp, state: &GuiState, message: String) {
+    let _ = state;
+    app.set_status_left(SharedString::from(message));
+}
+
+fn object_selected_message(state: &GuiState, index: usize) -> String {
+    let name = object_display_name(state, index);
+    let geometry = state
+        .current
+        .borrow()
+        .objects
+        .get(index)
+        .map(|object| {
+            format!(
+                "Anchor {}, {} by {} pixels",
+                object.anchor.to_a1(),
+                object.width,
+                object.height
+            )
+        })
+        .unwrap_or_default();
+    if geometry.is_empty() {
+        format!("{name} selected.")
+    } else {
+        format!("{name} selected. {geometry}. M moves, R resizes, Escape returns to the grid.")
     }
 }
 

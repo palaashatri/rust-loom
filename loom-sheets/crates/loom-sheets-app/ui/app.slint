@@ -94,6 +94,7 @@ export component SheetsApp inherits Window {
     in property <[SheetObjectView]> object-views: [];
     in-out property <int> selected-object: -1;
     in-out property <int> object-state: 0;
+    callback reveal-selected-requested();
     in property <bool> cell-bold: false;
     in property <bool> cell-italic: false;
     in property <bool> cell-underline: false;
@@ -277,6 +278,7 @@ export component SheetsApp inherits Window {
         grid-surface.focus-grid();
     }
     public function focus-objects() { worksheet-objects.focus-objects(); }
+    public function reveal-selection() { root.reveal-selected-requested(); }
     public function focus-xlsx-import-warning() {
         xlsx-import-warning.focus-dialog();
     }
@@ -333,7 +335,13 @@ export component SheetsApp inherits Window {
             }
             if (root.palette-open || root.template-chooser-open || root.toolbar-overflow-open || root.save-changes-open || root.xlsx-import-warning-open) { return reject; }
             if (event.text == Key.F6 && !root.is-editing && root.formula-edit-buffer == root.selection-formula) {
-                if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; } else { worksheet-objects.focus-objects(); }
+                // Objects and chart data both claim F6. F6 leaves object
+                // navigation, and from the grid it enters the anchored objects
+                // when the sheet has any, otherwise chart data. Chart data keeps
+                // its own F6 to return to the grid.
+                if (root.object-state != 0) { root.object-state = 0; grid-surface.focus-grid(); }
+                else if (root.object-views.length > 0) { worksheet-objects.focus-objects(); }
+                else if (root.chart-visible) { root.chart-focus-request = !root.chart-focus-request; }
                 return accept;
             }
             if (event.modifiers.control || event.modifiers.meta) {
@@ -594,6 +602,7 @@ export component SheetsApp inherits Window {
                         object-resize-cancelled(index) => { root.object-resize-cancelled(index); }
                         object-keyboard-action(index, mode, delta-x, delta-y) => { root.object-keyboard-action(index, mode, delta-x, delta-y); }
                         focus-grid-requested => { grid-surface.focus-grid(); }
+                        selection-reveal-requested => { root.reveal-selection(); }
                     }
                     if root.chart-visible : SheetChartOverlay {
                         width: parent.width;

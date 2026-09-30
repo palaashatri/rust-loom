@@ -716,3 +716,212 @@ fn stale_object_gesture_cannot_replace_a_new_workbook() {
         CellRef { row: 9, col: 9 }
     );
 }
+
+/// Build a workbook with two anchored shapes and a visible chart, which is the
+/// configuration where the F6 collision appeared: a visible chart consumed F6
+/// and left anchored objects unreachable from the keyboard.
+fn sheet_with_shapes_and_chart() -> (
+    SheetsApp,
+    std::rc::Rc<GuiState>,
+    std::sync::Arc<NativeMenuBar>,
+) {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], []));
+    let mut sheet = Sheet::new("Mixed content");
+    sheet.objects.push(SheetObject::shape(
+        CellRef { row: 1, col: 2 },
+        "First callout",
+    ));
+    sheet.objects.push(SheetObject::shape(
+        CellRef { row: 4, col: 5 },
+        "Second callout",
+    ));
+    let state = Rc::new(GuiState::new(
+        sheet,
+        None,
+        dialogs,
+        FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+    ));
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    register_history_actions(&app, &state, &menu_service);
+    object_actions::register_object_actions(&app, &state, &menu_service);
+    app.set_chart_title("Revenue".into());
+    app.set_chart_source_range("A1:B3".into());
+    app.set_chart_categories(
+        Rc::new(VecModel::from(vec![
+            SharedString::from("One"),
+            SharedString::from("Two"),
+        ]))
+        .into(),
+    );
+    app.set_chart_values_display(
+        Rc::new(VecModel::from(vec![
+            SharedString::from("10"),
+            SharedString::from("20"),
+        ]))
+        .into(),
+    );
+    app.set_chart_normalized(Rc::new(VecModel::from(vec![0.5f32, 1.0f32])).into());
+    project_current(&app, &state);
+    // Show the chart last: the projection above resets the chart panel.
+    app.set_chart_visible(true);
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("render objects with a chart");
+    assert!(
+        app.get_chart_visible(),
+        "the chart must be visible for this case"
+    );
+    (app, state, menu_service)
+}
+
+/// UI-37: a visible chart used to take F6 exclusively, so the command palette's
+/// advertised `sheets.worksheet-objects` shortcut could not reach the anchored
+/// objects at all. F6 must cycle rather than collide.
+#[test]
+fn f6_reaches_anchored_objects_even_when_a_chart_is_visible() {
+    let (app, _state, _menu) = sheet_with_shapes_and_chart();
+    assert!(
+        app.get_chart_visible(),
+        "the chart is visible for this case"
+    );
+
+    app.invoke_focus_grid();
+    press_key(&app, slint::platform::Key::F6);
+    assert_eq!(
+        app.get_selected_object(),
+        0,
+        "F6 from the grid must reach anchored objects even with a chart visible"
+    );
+
+    // F6 leaves object navigation and returns control to the grid.
+    press_key(&app, slint::platform::Key::F6);
+    assert_eq!(
+        app.get_object_state(),
+        0,
+        "F6 must leave object navigation rather than trapping focus"
+    );
+
+    // And the palette's advertised command still reaches the same objects.
+    app.invoke_focus_grid();
+    press_key(&app, slint::platform::Key::F6);
+    assert_eq!(app.get_selected_object(), 0);
+}
+
+/// UI-37: the move and resize instructions are only true of the object actually
+/// in that mode. They used to be announced on every object in the list.
+#[test]
+fn only_the_selected_object_carries_the_move_or_resize_instructions() {
+    let (app, _state, _menu) = sheet_with_shapes_and_chart();
+    app.invoke_focus_grid();
+    press_key(&app, slint::platform::Key::F6);
+    assert_eq!(app.get_selected_object(), 0);
+    press_text(&app, "m");
+    assert_eq!(app.get_object_state(), 2, "Move preview is active");
+
+    let lists: Vec<_> =
+        ElementHandle::find_by_accessible_label(&app, "Worksheet objects").collect();
+    assert_eq!(lists.len(), 1, "objects are grouped as one named list");
+    let mut descriptions: Vec<String> = Vec::new();
+    lists[0].visit_descendants(|element| {
+        if element.accessible_role() == Some(AccessibleRole::ListItem) {
+            if let Some(text) = element.accessible_description() {
+                descriptions.push(text.to_string());
+            }
+        }
+        ControlFlow::<()>::Continue(())
+    });
+    assert_eq!(
+        descriptions.len(),
+        2,
+        "both shapes must expose a description, got {descriptions:?}"
+    );
+    let previewing = descriptions
+        .iter()
+        .filter(|text| text.contains("Move preview"))
+        .count();
+    assert_eq!(
+        previewing, 1,
+        "exactly one object may report a move preview, got {descriptions:?}"
+    );
+    assert!(
+        descriptions[0].contains("Selected.") && descriptions[0].contains("Move preview"),
+        "the selected object carries the live mode hint, got {:?}",
+        descriptions[0]
+    );
+    assert!(
+        descriptions[1].contains("Anchor") && !descriptions[1].contains("Move preview"),
+        "an unselected object keeps its geometry but not the live mode hint, got {:?}",
+        descriptions[1]
+    );
+}
+
+/// UI-37: returning from object mode scrolled the grid to the object and left
+/// the selected cell offscreen, so the address pill read a cell the user could
+/// not see. Escape must reveal the selection before focus returns.
+#[test]
+fn escape_from_object_mode_reveals_the_selected_cell() {
+    let (app, _state, _menu) = sheet_with_shapes_and_chart();
+    // Put the selection far away from the objects, then focus an object so the
+    // viewport scrolls away from it.
+    app.set_selected_cell(SharedString::from("A1"));
+    app.set_selection_range(SharedString::from("A1"));
+    app.invoke_reveal_selection();
+    app.invoke_focus_grid();
+    press_key(&app, slint::platform::Key::F6);
+    assert_eq!(app.get_selected_object(), 0);
+    // Scroll far away from A1, as following a distant object would.
+    app.set_grid_scroll_x(-4_000.0);
+    app.set_grid_scroll_y(-6_000.0);
+
+    press_key(&app, slint::platform::Key::Escape);
+    app.invoke_reveal_selection();
+    let _ = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("re-render after Escape");
+
+    assert_eq!(app.get_object_state(), 0, "Escape leaves object navigation");
+    let revealed: Vec<_> = ElementHandle::find_by_accessible_label(&app, "A1").collect();
+    assert!(
+        !revealed.is_empty(),
+        "the selected cell must be back in the accessibility tree after Escape"
+    );
+}
+
+/// UI-37: object actions had no visible chrome, so a keyboard user could not see
+/// what a move or resize did. Every transition now reports in the status bar.
+#[test]
+fn object_keyboard_actions_report_their_outcome_in_the_status_bar() {
+    let (app, _state, _menu) = sheet_with_shapes_and_chart();
+    app.invoke_focus_grid();
+    press_key(&app, slint::platform::Key::F6);
+    let selected = app.get_status_left().to_string();
+    assert!(
+        selected.contains("Shape 1") && selected.contains("M moves"),
+        "selection must name the object and its keyboard actions, got {selected:?}"
+    );
+
+    press_text(&app, "m");
+    press_key(&app, slint::platform::Key::RightArrow);
+    let previewing = app.get_status_left().to_string();
+    assert!(
+        previewing.contains("Moving") && previewing.contains("Enter commits"),
+        "a move preview must say what it is doing and how to finish, got {previewing:?}"
+    );
+
+    press_key(&app, slint::platform::Key::Return);
+    let committed = app.get_status_left().to_string();
+    assert!(
+        committed.contains("moved") && committed.contains("pixels"),
+        "a committed move must report the resulting geometry, got {committed:?}"
+    );
+
+    press_text(&app, "r");
+    press_key(&app, slint::platform::Key::Escape);
+    let cancelled = app.get_status_left().to_string();
+    assert!(
+        cancelled.contains("cancelled"),
+        "cancelling a preview must say so, got {cancelled:?}"
+    );
+}

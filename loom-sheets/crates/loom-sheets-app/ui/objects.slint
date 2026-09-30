@@ -32,6 +32,9 @@ export component SheetObjectLayer inherits Rectangle {
     callback object-resize-cancelled(int);
     callback object-keyboard-action(int, int, int, int);
     callback focus-grid-requested();
+    // Ask the worksheet to scroll the selected cell back into view before focus
+    // returns to the grid.
+    callback selection-reveal-requested();
 
     public function cancel-keyboard-preview() {
         if (root.keyboard-state == 2 && root.selected-object >= 0) {
@@ -105,6 +108,7 @@ export component SheetObjectLayer inherits Rectangle {
         if (key == Key.Escape) {
             root.cancel-keyboard-preview();
             root.keyboard-state = 0;
+            root.selection-reveal-requested();
             root.focus-grid-requested();
             return;
         }
@@ -186,11 +190,12 @@ export component SheetObjectLayer inherits Rectangle {
             : Theme.palette().surface;
         accessible-role: list-item;
         accessible-label: object-name + (idx + 1) + ": " + object-label;
-        accessible-description: (is-selected ? "Selected. " : "")
-            + root.objects[idx].details
+        // Only the selected object is in move or resize mode.
+        accessible-description: (is-selected ? "Selected. " + root.objects[idx].details
             + (root.keyboard-state == 2 ? " Move preview: use arrows, Enter to commit, or Escape to cancel."
                 : root.keyboard-state == 3 ? " Resize preview: use arrows, Enter to commit, or Escape to cancel."
-                : " Press M to move or R to resize.");
+                : " Press M to move or R to resize.")
+            : root.objects[idx].details);
         accessible-live-region: AccessibleLiveness.polite;
         accessible-action-default => {
             root.cancel-keyboard-preview();
