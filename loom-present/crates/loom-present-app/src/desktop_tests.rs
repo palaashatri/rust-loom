@@ -5,6 +5,7 @@ fn test_state() -> GuiState {
     GuiState {
         session: RefCell::new(empty_session()),
         last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -43,6 +44,7 @@ fn refresh_projects_selected_element_into_canvas_and_inspector() {
     let state = GuiState {
         session: RefCell::new(sample_session()),
         last_saved: RefCell::new(sample_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -91,6 +93,7 @@ fn refresh_clears_inspector_when_domain_selection_is_empty() {
     let state = GuiState {
         session: RefCell::new(sample_session()),
         last_saved: RefCell::new(sample_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(1),
         inspector_available: Cell::new(true),
@@ -341,6 +344,7 @@ fn compact_stage_render_is_safe_for_short_windows() {
     let state = GuiState {
         session: RefCell::new(sample_session()),
         last_saved: RefCell::new(sample_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -488,6 +492,7 @@ fn present_menu_projection_derives_live_session_and_window_state() {
     let state = GuiState {
         session: RefCell::new(empty_session()),
         last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -590,6 +595,7 @@ fn present_menu_disables_inspector_when_window_cannot_show_it() {
     let state = Rc::new(GuiState {
         session: RefCell::new(empty_session()),
         last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
@@ -636,6 +642,7 @@ fn present_menu_action_sink_dispatches_to_controller_and_guards_disabled_boundar
     let state = Rc::new(GuiState {
         session: RefCell::new(empty_session()),
         last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -711,6 +718,7 @@ fn notes_edit_refreshes_undo_menu_state() {
     let state = Rc::new(GuiState {
         session: RefCell::new(empty_session()),
         last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -839,6 +847,7 @@ fn successful_save_clears_the_edited_status() {
     let state = GuiState {
         session: RefCell::new(empty_session()),
         last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(true),
@@ -867,5 +876,50 @@ fn successful_save_clears_the_edited_status() {
         .add_slide("Again", "content");
     refresh_without_recovery(&app, &state);
     assert_eq!(app.get_status_right(), "Edited");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_transition_only_change_marks_the_deck_edited_until_saved() {
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let dir = std::env::temp_dir().join(format!(
+        "loom-present-transition-dirty-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new(
+        [],
+        [Some(dir.join("deck.loomdeck"))],
+    ));
+    let state = GuiState {
+        session: RefCell::new(empty_session()),
+        last_saved: RefCell::new(empty_session().document.clone()),
+        last_saved_transitions: RefCell::default(),
+        pending_replacement: Cell::new(None),
+        selected_element: Cell::new(0),
+        inspector_available: Cell::new(true),
+        save_path: RefCell::new(None),
+        dialogs,
+        deck_filter: FileFilter::new("Deck", ["loomdeck"]).expect("filter"),
+        pdf_filter: FileFilter::new("PDF", ["pdf"]).expect("filter"),
+        menu_service: None,
+        drag_state: RefCell::new(DragState::default()),
+    };
+    assert!(!deck_is_dirty(&state));
+    {
+        let mut session = state.session.borrow_mut();
+        let id = session.document.slides[0].id.clone();
+        session.checkpoint();
+        session.set_transition(&id, TransitionKind::Dissolve);
+    }
+    assert!(deck_is_dirty(&state));
+    assert_eq!(save_current_deck(&app, &state, true), Ok(true));
+    assert!(!deck_is_dirty(&state));
+    state.session.borrow_mut().undo();
+    assert!(
+        deck_is_dirty(&state),
+        "undoing a saved transition is an unsaved change"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

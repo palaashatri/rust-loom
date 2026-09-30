@@ -320,6 +320,7 @@ struct GuiState {
     inspector_available: Cell<bool>,
     save_path: RefCell<Option<PathBuf>>,
     last_saved: RefCell<PresentationDocument>,
+    last_saved_transitions: RefCell<std::collections::BTreeMap<String, TransitionKind>>,
     pending_replacement: Cell<Option<PendingReplacement>>,
     dialogs: Rc<dyn FileDialogService>,
     deck_filter: FileFilter,
@@ -815,6 +816,7 @@ fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     let initial = initial_session(args)?;
     let state = GuiState {
         last_saved: RefCell::new(initial.document.clone()),
+        last_saved_transitions: RefCell::new(initial.transitions.clone()),
         session: RefCell::new(initial),
         selected_element: Cell::new(0),
         inspector_available: Cell::new(inspector_available),
@@ -892,6 +894,7 @@ fn replace_opened_deck(
     session: PresentationSession,
 ) {
     *state.last_saved.borrow_mut() = session.document.clone();
+    *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
     *state.session.borrow_mut() = session;
     *state.save_path.borrow_mut() = Some(path);
     state.selected_element.set(0);
@@ -901,6 +904,7 @@ fn replace_opened_deck(
 fn replace_with_empty_deck(app: &PresentApp, state: &GuiState) {
     let session = empty_session();
     *state.last_saved.borrow_mut() = session.document.clone();
+    *state.last_saved_transitions.borrow_mut() = session.transitions.clone();
     *state.session.borrow_mut() = session;
     *state.save_path.borrow_mut() = None;
     state.selected_element.set(0);
@@ -949,6 +953,7 @@ fn save_current_deck(
         .map_err(|error| format!("failed to atomic write '{}': {error}", path.display()))?;
     *state.save_path.borrow_mut() = Some(path.clone());
     *state.last_saved.borrow_mut() = state.session.borrow().document.clone();
+    *state.last_saved_transitions.borrow_mut() = state.session.borrow().transitions.clone();
     app.set_status_right("".into());
     match checkpoint_snapshot_recovery(bytes) {
         Ok(()) => set_status(app, format!("Saved {}", path.display())),
@@ -1024,6 +1029,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     let initial = initial_session(args)?;
     let state = Rc::new(GuiState {
         last_saved: RefCell::new(initial.document.clone()),
+        last_saved_transitions: RefCell::new(initial.transitions.clone()),
         session: RefCell::new(initial),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
@@ -1351,6 +1357,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let menu_service = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
         last_saved: RefCell::new(initial.document.clone()),
+        last_saved_transitions: RefCell::new(initial.transitions.clone()),
         session: RefCell::new(initial),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
@@ -1570,7 +1577,9 @@ fn schedule_menu_action(
 }
 
 fn deck_is_dirty(state: &GuiState) -> bool {
-    !presentation_documents_match(&state.session.borrow().document, &state.last_saved.borrow())
+    let session = state.session.borrow();
+    !presentation_documents_match(&session.document, &state.last_saved.borrow())
+        || session.transitions != *state.last_saved_transitions.borrow()
 }
 
 fn request_deck_replacement(
