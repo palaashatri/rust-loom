@@ -612,3 +612,34 @@ fn quick_formula_insert_evaluation() {
     let vals = evaluate(&sheet);
     assert_eq!(vals.get(&target), Some(&Value::Number(150.0)));
 }
+
+#[test]
+fn typing_is_mirrored_inside_the_active_cell() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    app.window().set_size(PhysicalSize::new(1280, 800));
+    apply_layout_breakpoints(&app, 1280);
+    apply_headless_viewport_size(&app, 1280, 800);
+    project_sheet(&app, &Sheet::new("Empty"));
+
+    let cell_pixels = |image: &image::RgbaImage| -> Vec<[u8; 4]> {
+        // Only A1's pixels: below the pinned column header, right of the row
+        // header, and clear of the formula bar so its own text cannot count.
+        let mut pixels = Vec::new();
+        for y in 132..156 {
+            for x in 38..114 {
+                pixels.push(image.get_pixel(x, y).0);
+            }
+        }
+        pixels
+    };
+    let idle = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("idle frame");
+    app.set_is_editing(true);
+    app.set_formula_edit_buffer("typed text".into());
+    let editing = snapshot_component(&app, 1280.0, 800.0, 1.0).expect("editing frame");
+    assert_ne!(
+        cell_pixels(&idle),
+        cell_pixels(&editing),
+        "the active cell must show the text being typed"
+    );
+}

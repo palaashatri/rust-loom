@@ -318,6 +318,8 @@ export component SheetTable inherits Rectangle {
     in property <int> selection-end-row: 0;
     in property <int> selection-end-col: 0;
     in property <string> selection-announcement: "";
+    in property <bool> editing: false;
+    in property <string> edit-text: "";
     in property <length> grid-col-offset: 0px;
     in property <length> grid-row-offset: 0px;
     in property <length> grid-visible-width: 640px;
@@ -452,6 +454,28 @@ export component SheetTable inherits Rectangle {
                                 width: parent.width - 16px;
                                 height: 1px;
                                 background: Theme.palette().paper-ink;
+                            }
+
+                            // While a value is being typed the active cell shows it,
+                            // as in every spreadsheet. The formula bar stays the
+                            // editor; this is a live, read-only mirror of its text.
+                            if is-active && root.editing : Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                background: Theme.palette().paper;
+                                border-width: 2px;
+                                border-color: Theme.palette().selection;
+                                Text {
+                                    x: 8px;
+                                    width: parent.width - 16px;
+                                    height: parent.height;
+                                    text: root.edit-text;
+                                    font-size: font-px * 1px * root.zoom-factor;
+                                    color: Theme.palette().paper-ink;
+                                    horizontal-alignment: left;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
                             }
 
                             SheetSelectionOverlay {
@@ -605,6 +629,8 @@ export component SheetGridSurface inherits Rectangle {
     in property <int> selection-start-col: 0;
     in property <int> selection-end-col: 0;
     in property <string> selection-announcement: "Cell A1 selected";
+    in property <bool> editing: false;
+    in property <string> edit-text: "";
     in property <int> view-row-origin: 0;
     in property <int> view-col-origin: 0;
     in property <length> grid-col-offset: 0px;
@@ -725,6 +751,8 @@ export component SheetGridSurface inherits Rectangle {
         y: 0px;
         width: max(1px, parent.width);
         height: max(1px, parent.height);
+        editing: root.editing;
+        edit-text: root.edit-text;
         sheet-name: root.sheet-name;
         zoom-factor: root.zoom-factor;
         rows: root.rows;

@@ -521,6 +521,8 @@ export component SheetsApp inherits Window {
                     grid-surface := SheetGridSurface {
                         width: parent.width;
                         height: parent.height;
+                        editing: root.is-editing;
+                        edit-text: root.formula-edit-buffer;
                         sheet-name: root.sheet-name;
                         zoom-factor: root.zoom-factor;
                         selection-formula: root.selection-formula;
