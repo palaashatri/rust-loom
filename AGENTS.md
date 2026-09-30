@@ -827,7 +827,7 @@ Cards retain their original finding text. P1 means user data, trust, or a securi
 
 ### CODE-16 — Give every Present slide a unique ID
 
-**P2 · Present · OPEN.** Two slides must never share the same identity.
+**P2 · Present · FIXED at the document model (2026-10-01).** Two slides must never share the same identity. `add_slide` and `duplicate_slide` now allocate through the collision-checked `unique_slide_id`; `tests/slide_ids.rs` (add, delete, add, duplicate twice) failed before the change and passes now, with the Present core (49), app (33) and new integration test green. The save/reopen-with-transitions part of the original check was not exercised.
 
 **Open:** `loom-present/crates/loom-present-core/src/lib.rs`, `add_slide` and the existing unique-slide-ID helper used for duplication.
 

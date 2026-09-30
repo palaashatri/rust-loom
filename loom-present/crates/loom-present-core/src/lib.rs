@@ -1134,7 +1134,7 @@ impl PresentationDocument {
     }
 
     pub fn add_slide(&mut self, title: impl Into<String>, layout: impl Into<String>) {
-        let id = format!("slide-{}", self.slides.len() + 1);
+        let id = unique_slide_id(self, "slide");
         let slide = Slide::new(id, title, layout);
         self.slides.push(slide);
         self.active_index = self.slides.len() - 1;
@@ -1168,7 +1168,7 @@ impl PresentationDocument {
     pub fn duplicate_slide(&mut self, index: usize) -> Option<usize> {
         if index < self.slides.len() {
             let mut dup = self.slides[index].clone();
-            dup.id = format!("slide-{}-copy", self.slides.len() + 1);
+            dup.id = unique_slide_id(self, "slide");
             let new_index = index + 1;
             self.slides.insert(new_index, dup);
             self.active_index = new_index;
