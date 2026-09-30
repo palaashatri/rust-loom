@@ -342,25 +342,12 @@ export component SheetTable inherits Rectangle {
     VerticalLayout {
         spacing: 0px;
 
-        // Floating Table Header
-        Rectangle {
-            height: 32px;
-            background: transparent;
-
-            Text {
-                text: root.sheet-name == "" ? "Table 1" : root.sheet-name;
-                font-size: Theme.tokens.typography.title * root.zoom-factor;
-                font-weight: 700;
-                color: Theme.palette().ink;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
         grid-viewport := Rectangle {
             horizontal-stretch: 1;
             vertical-stretch: 1;
             min-height: 386px;
+            accessible-role: groupbox;
+            accessible-label: root.sheet-name + " cell canvas";
             clip: true;
             changed width => { root.grid-viewport-changed(self.width, self.height); }
             changed height => { root.grid-viewport-changed(self.width, self.height); }

@@ -83,6 +83,14 @@ pub(super) fn validate_recovery_roots(
     )
 }
 
+/// Reject a recovery directory that a hostile local process could redirect.
+///
+/// Only the store Loom itself owns is checked. Ancestors above it belong to the
+/// operating system, and those are commonly symlinks by design — macOS makes
+/// `/var` and `/tmp` symlinks to `/private/...`, so a blanket walk to the
+/// filesystem root would refuse to run anywhere on that platform. Ancestors are
+/// therefore resolved through `canonicalize` and the real store must be a
+/// genuine directory.
 fn validate_directory_path(directory: &Path, label: &str) -> Result<(), String> {
     if directory
         .components()
@@ -97,30 +105,47 @@ fn validate_directory_path(directory: &Path, label: &str) -> Result<(), String> 
             .map_err(|error| format!("resolve {label} recovery path: {error}"))?
             .join(directory)
     };
-    let ancestors = absolute.ancestors().collect::<Vec<_>>();
-    for path in ancestors.into_iter().rev() {
-        match fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!(
-                    "{label} recovery path contains a symlink: {}",
-                    path.display()
-                ));
-            }
-            Ok(metadata) if !metadata.file_type().is_dir() => {
-                return Err(format!(
-                    "{label} recovery path is not a directory: {}",
-                    path.display()
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "inspect {label} recovery path {}: {error}",
-                    path.display()
-                ));
-            }
+    match fs::symlink_metadata(&absolute) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!(
+                "{label} recovery path is a symlink: {}",
+                absolute.display()
+            ));
         }
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            return Err(format!(
+                "{label} recovery path is not a directory: {}",
+                absolute.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "inspect {label} recovery path {}: {error}",
+                absolute.display()
+            ));
+        }
+    }
+    // The store may not exist yet. Resolve the deepest existing ancestor so an
+    // OS-owned symlink is followed, and prove the result is a real directory.
+    let mut existing = absolute.as_path();
+    while !existing.exists() {
+        existing = existing
+            .parent()
+            .ok_or_else(|| format!("{label} recovery path has no existing ancestor"))?;
+    }
+    let resolved = fs::canonicalize(existing).map_err(|error| {
+        format!(
+            "resolve {label} recovery path {}: {error}",
+            existing.display()
+        )
+    })?;
+    if !resolved.is_dir() {
+        return Err(format!(
+            "{label} recovery path does not resolve to a directory: {}",
+            resolved.display()
+        ));
     }
     Ok(())
 }

@@ -448,20 +448,19 @@ fn very_long_chart_category_keeps_exit_help_visible_and_scrolls() {
     let summary_position = summary.absolute_position();
     let summary_size = summary.size();
     let summary_bottom = summary_position.y + summary_size.height;
-    for id in ["SheetChart::point-help-text"] {
-        let item = ElementHandle::find_by_element_id(&app, id)
-            .next()
-            .unwrap_or_else(|| panic!("missing visible summary item {id}"));
-        let position = item.absolute_position();
-        let size = item.size();
-        let bottom = position.y + size.height;
-        assert!(
-            position.y >= summary_position.y && bottom <= summary_bottom,
-            "{id} at y={}..{bottom} must remain in the visible summary y={}..{summary_bottom}",
-            position.y,
-            summary_position.y,
-        );
-    }
+    let id = "SheetChart::point-help-text";
+    let item = ElementHandle::find_by_element_id(&app, id)
+        .next()
+        .unwrap_or_else(|| panic!("missing visible summary item {id}"));
+    let position = item.absolute_position();
+    let size = item.size();
+    let bottom = position.y + size.height;
+    assert!(
+        position.y >= summary_position.y && bottom <= summary_bottom,
+        "{id} at y={}..{bottom} must remain in the visible summary y={}..{summary_bottom}",
+        position.y,
+        summary_position.y,
+    );
 
     let category_text = ElementHandle::find_by_element_id(&app, "SheetChart::category-text")
         .next()
@@ -498,7 +497,7 @@ fn very_long_series_value_and_unit_have_a_keyboard_reading_path() {
     let long_series = "Quarterly regional revenue ".repeat(8);
     let long_value = "1234567890".repeat(8);
     let long_unit = "million dollars per quarter ".repeat(7);
-    let app = chart_app("bar", &["Q1".to_owned()], &[long_value.clone()]);
+    let app = chart_app("bar", &["Q1".to_owned()], std::slice::from_ref(&long_value));
     app.window().set_size(PhysicalSize::new(900, 680));
     app.set_chart_series_label(long_series.clone().into());
     app.set_chart_unit_label(long_unit.clone().into());

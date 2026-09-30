@@ -71,6 +71,21 @@ fn cross_sheet_state_with_dialogs(dialogs: Rc<dyn FileDialogService>) -> Rc<GuiS
     state
 }
 
+/// A single-sheet state whose only document identity is `sheet_name` plus an
+/// optional save path. Used to prove the close prompt, replacement prompt, and
+/// window title all name the same document.
+fn state_with_identity(save_path: Option<PathBuf>, sheet_name: &str) -> GuiState {
+    GuiState::new(
+        Sheet::new(sheet_name),
+        save_path,
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+        FileFilter::new("Workbook", ["loomtable"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("CSV", ["csv"]).expect("filter"),
+        FileFilter::new("Excel", ["xlsx"]).expect("filter"),
+    )
+}
+
 fn attach_test_worker(app: &SheetsApp, state: &Rc<GuiState>, name: &str) -> PathBuf {
     let recovery_dir = std::env::temp_dir().join(format!(
         "loom-sheets-cell-worker-{name}-{}",

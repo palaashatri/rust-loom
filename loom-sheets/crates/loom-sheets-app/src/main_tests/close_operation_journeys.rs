@@ -984,3 +984,56 @@ fn idle_worker_input_failure_requires_confirmation_before_new_or_open() {
         "a successful replacement must discard the prior generation's worker input failure"
     );
 }
+
+/// UI-30: after creating the Checklist template, the window title, the sheet
+/// tab, and the close prompt must all name `Checklist`. The prompt previously
+/// said "Untitled workbook" because it only read the save path.
+#[test]
+fn dirty_close_prompt_names_the_created_template() {
+    let (app, state) = close_test_app([]);
+    let recovery = ScratchDirectory::new();
+    attach_worker(&app, &state, &recovery.0, true);
+    wire_close_actions(&app, &state);
+    let menu_service = std::sync::Arc::new(NativeMenuBar::new());
+    crate::actions::create_template_workbook(&app, &state, &menu_service, 3);
+    app.window().show().expect("show root window");
+
+    assert_eq!(
+        state.current.borrow().name,
+        "Checklist",
+        "the created template supplies the document identity"
+    );
+    let title = app.get_window_title().to_string();
+    assert!(
+        title.starts_with("Checklist"),
+        "the window title must name the created template, got {title:?}"
+    );
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+    pump_worker_until(&app, &state, || {
+        state.close_state.get() == close_operations::CloseState::DirtyDecision
+    });
+
+    assert!(
+        app.get_save_changes_open(),
+        "the dirty decision must be shown"
+    );
+    let document = app.get_save_changes_document().to_string();
+    let prompt = app.get_save_changes_prompt().to_string();
+    assert_eq!(
+        document, "Checklist",
+        "the close prompt must name the document the user is editing"
+    );
+    assert!(
+        prompt.contains("Checklist") && !prompt.contains("Untitled"),
+        "the prompt must agree with the title and tab, got {prompt:?}"
+    );
+
+    app.invoke_save_changes_cancel();
+    assert!(!app.get_save_changes_open());
+    assert!(
+        app.window().is_visible(),
+        "Cancel must keep the workbook open"
+    );
+}

@@ -9,8 +9,20 @@ struct TestDirectory(PathBuf);
 
 impl TestDirectory {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "loom-sheets-recovery-policy-{}-{}",
+        Self::create_in(short_test_root(), "loom-sheets-recovery-policy")
+    }
+
+    /// A fixture whose absolute path stays short enough to host a unix socket.
+    /// macOS caps `sun_path` at 104 bytes and its per-user temp directory alone
+    /// is longer than that, so a socket fixture built under the default temp
+    /// directory cannot be created there at all.
+    fn with_short_path() -> Self {
+        Self::create_in(short_test_root(), "lrp")
+    }
+
+    fn create_in(root: PathBuf, prefix: &str) -> Self {
+        let path = root.join(format!(
+            "{prefix}-{}-{}",
             std::process::id(),
             NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
         ));
@@ -22,6 +34,19 @@ impl TestDirectory {
     fn path(&self) -> &Path {
         &self.0
     }
+}
+
+/// The shortest writable root available. Unix socket fixtures need a short
+/// absolute path, so prefer the traditional short temp root when it exists.
+fn short_test_root() -> PathBuf {
+    #[cfg(unix)]
+    for candidate in ["/tmp", "/var/tmp"] {
+        let path = PathBuf::from(candidate);
+        if path.is_dir() {
+            return path;
+        }
+    }
+    std::env::temp_dir()
 }
 
 impl Drop for TestDirectory {
@@ -308,7 +333,7 @@ fn filesystem_inventory_fails_closed_on_symlinks_and_special_files() {
     use std::os::unix::fs::symlink;
     use std::os::unix::net::UnixListener;
 
-    let fixture = TestDirectory::new();
+    let fixture = TestDirectory::with_short_path();
     let versioned = fixture.path().join("versioned");
     let legacy = fixture.path().join("legacy");
     fs::create_dir_all(&versioned).expect("create versioned directory");
@@ -369,4 +394,42 @@ fn root_lock_symlinks_and_non_regular_entries_fail_closed() {
             }
         }
     }
+}
+
+/// A recovery store Loom owns must be a real directory, but the ancestors above
+/// it belong to the operating system and are legitimately symlinks on some
+/// platforms — macOS resolves `/var` and `/tmp` to `/private/...`. Rejecting
+/// those made recovery unusable on macOS, so the store is checked directly and
+/// its ancestors are resolved rather than refused.
+#[test]
+fn recovery_roots_resolve_operating_system_symlinks_but_reject_a_symlinked_store() {
+    // The real system temp directory is used on purpose: on macOS it is under
+    // `/var`, which is a symlink, and this path must still be accepted.
+    let temp = std::env::temp_dir();
+    validate_directory_path(&temp.join("loom-sheets-accepted-store"), "versioned")
+        .expect("an operating-system symlinked ancestor must not refuse recovery");
+
+    let fixture = TestDirectory::new();
+    let outside = fixture.path().join("outside");
+    fs::create_dir_all(&outside).expect("create the real store");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let linked = fixture.path().join("linked-store");
+        symlink(&outside, &linked).expect("create symlinked store");
+        let error = validate_directory_path(&linked, "versioned")
+            .expect_err("a symlinked recovery store must still fail closed");
+        assert!(error.contains("symlink"), "unexpected error: {error}");
+    }
+
+    // A plain file in the store's place is still refused.
+    let file = fixture.path().join("file-store");
+    fs::write(&file, b"not a directory").expect("write store placeholder");
+    let error = validate_directory_path(&file, "versioned")
+        .expect_err("a non-directory recovery store must fail closed");
+    assert!(
+        error.contains("not a directory"),
+        "unexpected error: {error}"
+    );
 }

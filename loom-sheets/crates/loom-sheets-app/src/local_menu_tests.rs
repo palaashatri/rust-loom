@@ -1,5 +1,9 @@
+#[cfg(not(target_os = "macos"))]
 use super::*;
 
+/// The popup is only drawn in a window, so these pixel probes only apply to the
+/// non-macOS in-window menu the tests below assert on.
+#[cfg(not(target_os = "macos"))]
 fn first_dark_menu_text_x(image: &image::RgbaImage) -> Option<u32> {
     (18..280).find(|&x| {
         (44..69).any(|y| {
@@ -9,6 +13,7 @@ fn first_dark_menu_text_x(image: &image::RgbaImage) -> Option<u32> {
     })
 }
 
+#[cfg(not(target_os = "macos"))]
 fn longest_white_menu_panel_run(image: &image::RgbaImage, x: u32) -> u32 {
     let mut longest = 0;
     let mut current = 0;

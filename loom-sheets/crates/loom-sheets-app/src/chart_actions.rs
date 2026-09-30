@@ -37,12 +37,12 @@ fn numeric_axis_value(raw: &str) -> Option<f64> {
     let text = raw.strip_suffix('%').unwrap_or(raw).trim();
     if text.contains(',') {
         let integer_end = text
-            .find(|ch| matches!(ch, '.' | 'e' | 'E'))
+            .find(['.', 'e', 'E'])
             .unwrap_or(text.len());
         if text[integer_end..].contains(',') {
             return None;
         }
-        let integer = text[..integer_end].trim_start_matches(|ch| ch == '+' || ch == '-');
+        let integer = text[..integer_end].trim_start_matches(['+', '-']);
         let groups: Vec<_> = integer.split(',').collect();
         if groups.is_empty()
             || !(1..=3).contains(&groups[0].len())

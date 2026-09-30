@@ -8,12 +8,20 @@ component SheetPropertyRow inherits HorizontalLayout {
     in property <string> label: "";
     spacing: Theme.tokens.space.sm;
     cross-axis-alignment: center;
+    // Control labels never truncate: desktop-ui.toml [truncation]
+    // allow-control-label = false. The band starts at the contract minimum
+    // (property-label-width-min) and stays below the width the row's own
+    // controls need, so a long localized label wraps instead of eliding.
     Text {
         text: root.label;
-        width: 70px;
+        min-width: 84px;
+        max-width: 100px;
         font-size: Theme.tokens.typography.caption;
         color: Theme.palette().ink-secondary;
-        overflow: elide;
+        wrap: char-wrap;
+        vertical-alignment: center;
+        accessible-role: text;
+        accessible-label: root.label;
     }
     @children
 }

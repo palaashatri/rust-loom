@@ -126,6 +126,35 @@ fn workbook_window_title_uses_the_saved_file_or_a_truthful_unsaved_name() {
     );
 }
 
+/// UI-30: the dirty-close prompt must name the same document the window title
+/// and the sheet tab show. A created template is identified by its sheet, not
+/// by a generic "Untitled workbook" fallback.
+#[test]
+fn close_prompt_names_the_same_document_as_the_window_title() {
+    let cases = [
+        // (save path, sheet name, expected identity)
+        (None, "Checklist", "Checklist"),
+        (None, "Untitled", "Untitled"),
+        (None, "Sheet1", "Untitled"),
+        (
+            Some(std::path::PathBuf::from("/tmp/Household.loomtable")),
+            "Checklist",
+            "Household.loomtable",
+        ),
+    ];
+    for (save_path, sheet_name, expected) in cases {
+        let state = state_with_identity(save_path.clone(), sheet_name);
+        let display = workbook_display_name(&state);
+        let title = workbook_window_title(save_path.as_deref(), sheet_name, false);
+        assert_eq!(display, expected, "display name for {sheet_name:?}");
+        assert_eq!(
+            display,
+            title.trim_end_matches(" *"),
+            "the close prompt and the window title must name one document"
+        );
+    }
+}
+
 #[test]
 fn formula_errors_are_visible_in_a_polite_live_region() {
     i_slint_backend_testing::init_no_event_loop();

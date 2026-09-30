@@ -238,6 +238,35 @@ pub(crate) fn preview_geometry(state: &GuiState) -> Option<(usize, CellRef, u32,
     ))
 }
 
+/// What the grid should do with its scroll position when a gesture preview
+/// ends. Two positional booleans at the call site were unreadable, and the
+/// pairing is what distinguishes a committed move from a cancelled one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct GestureScroll {
+    reveal_selection_on_cancel: bool,
+    preserve_scroll_after_commit: bool,
+}
+
+impl GestureScroll {
+    /// Keep the user's current scroll position through the commit.
+    const KEEP_ON_COMMIT: Self = Self {
+        reveal_selection_on_cancel: false,
+        preserve_scroll_after_commit: true,
+    };
+
+    /// Put the selected cell back on screen when a preview is cancelled.
+    const REVEAL_ON_CANCEL: Self = Self {
+        reveal_selection_on_cancel: true,
+        preserve_scroll_after_commit: false,
+    };
+
+    /// Neither: leave projection to the caller.
+    const UNCHANGED: Self = Self {
+        reveal_selection_on_cancel: false,
+        preserve_scroll_after_commit: false,
+    };
+}
+
 fn finish_gesture_state(
     app: &SheetsApp,
     state: &Rc<GuiState>,
@@ -245,8 +274,7 @@ fn finish_gesture_state(
     index: usize,
     mode: ObjectGestureMode,
     cancelled: bool,
-    reveal_selection_on_cancel: bool,
-    preserve_scroll_after_commit: bool,
+    scroll: GestureScroll,
 ) {
     let gesture = state.object_gesture.borrow_mut().take();
     let Some(gesture) = gesture else { return };
@@ -260,7 +288,7 @@ fn finish_gesture_state(
         return;
     }
     if cancelled {
-        if reveal_selection_on_cancel {
+        if scroll.reveal_selection_on_cancel {
             project_current(app, state);
         } else {
             project_current_without_reveal(app, state);
@@ -289,7 +317,7 @@ fn finish_gesture_state(
     let scroll_x = app.get_grid_scroll_x();
     let scroll_y = app.get_grid_scroll_y();
     apply_sheet(app, state);
-    if preserve_scroll_after_commit {
+    if scroll.preserve_scroll_after_commit {
         app.set_grid_scroll_x(scroll_x);
         app.set_grid_scroll_y(scroll_y);
         project_current_without_reveal(app, state);
@@ -361,7 +389,7 @@ fn handle_keyboard_action(
                 }
             }
         }
-        -1 | -2 | -3 | -4 => {
+        -4..=-1 => {
             let (mode, cancelled) = match action {
                 -1 => (ObjectGestureMode::Move, false),
                 -2 => (ObjectGestureMode::Resize, false),
@@ -376,8 +404,7 @@ fn handle_keyboard_action(
                 index,
                 mode,
                 cancelled,
-                false,
-                true,
+                GestureScroll::KEEP_ON_COMMIT,
             );
         }
         _ => {}
@@ -501,8 +528,11 @@ fn finish_gesture(
         index,
         mode,
         cancelled,
-        cancelled,
-        false,
+        if cancelled {
+            GestureScroll::REVEAL_ON_CANCEL
+        } else {
+            GestureScroll::UNCHANGED
+        },
     );
 }
 

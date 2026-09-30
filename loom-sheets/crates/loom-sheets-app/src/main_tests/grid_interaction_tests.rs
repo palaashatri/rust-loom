@@ -293,14 +293,44 @@ fn sparse_tail_scroll_materializes_tail_headers_and_values() {
     sheet.set_str("A1000", "tail");
     project_sheet_without_reveal(&app, &sheet);
 
+    // The last seeded row is 1000 and the window is 800 px tall, so the tail
+    // must be the final visible row. Derive the other indices from that instead
+    // of pinning magic numbers: removing the redundant heading above the grid
+    // (UI-32) gave the grid 32 more pixels and therefore two more visible rows,
+    // and this assertion follows the geometry rather than resisting it.
+    let last = 1000;
+    let first = last - (last_row_headers() - 1);
     let row_headers = app.get_row_headers();
-    assert_eq!(row_headers.row_data(0).as_deref(), Some("979"));
-    assert_eq!(row_headers.row_data(21).as_deref(), Some("1000"));
+    assert_eq!(
+        row_headers.row_data((last - first) as usize).as_deref(),
+        Some("1000"),
+        "row 1000 must be the last visible row header"
+    );
+    assert_eq!(row_headers.row_data(0).as_deref(), Some("977"));
     let cells = app.get_cells();
-    assert_eq!(cells.row_data(16 * 8).as_deref(), Some("10"));
-    assert_eq!(cells.row_data(17 * 8).as_deref(), Some("20"));
-    assert_eq!(cells.row_data(21 * 8).as_deref(), Some("tail"));
-    assert!((app.get_grid_scroll_y() + 23_478.0).abs() < 0.1);
+    assert_eq!(
+        cells.row_data(((995 - first) * 8) as usize).as_deref(),
+        Some("10")
+    );
+    assert_eq!(
+        cells.row_data(((996 - first) * 8) as usize).as_deref(),
+        Some("20")
+    );
+    assert_eq!(
+        cells.row_data(((last - first) * 8) as usize).as_deref(),
+        Some("tail")
+    );
+    // The requested -26_600 is clamped to the deepest scroll. That maximum is
+    // content height minus viewport height, so reclaiming the 32 px heading
+    // (UI-32) moved it up by exactly 32 px.
+    assert!((app.get_grid_scroll_y() + 23_446.0).abs() < 0.1);
+}
+
+/// The number of row headers a 1280x800 headless viewport materializes. The
+/// headless estimate removes the shell chrome, so this follows
+/// `apply_headless_viewport_size` rather than the native resize event.
+fn last_row_headers() -> u32 {
+    24
 }
 
 #[test]

@@ -123,7 +123,7 @@ const GRID_COLUMN_HEADER_HEIGHT: f32 = 26.0;
 const FIT_COLUMN_MAX_WIDTH: f32 = 160.0;
 const INSPECTOR_WIDTH: f32 = 320.0;
 const TABLE_HORIZONTAL_MARGIN: f32 = 48.0;
-const SHELL_VERTICAL_CHROME: f32 = 252.0;
+const SHELL_VERTICAL_CHROME: f32 = 220.0;
 const SAVE_FILENAME: &str = "loom-sheets-workbook.loomtable";
 const EXPORT_FILENAME: &str = "loom-sheets-export.csv";
 
@@ -2052,15 +2052,26 @@ pub(crate) fn wire_export_callbacks(app: &SheetsApp, state: &Rc<GuiState>) {
     }
 }
 
-pub(crate) fn workbook_display_name(state: &GuiState) -> String {
-    state
-        .save_path
-        .borrow()
-        .as_deref()
+/// The one document identity used by the window title, the close prompt, and
+/// the replacement prompt. A saved file is named by its filename; an unsaved
+/// document is named by its sheet so a created template never contradicts the
+/// tab and title the user is looking at.
+pub(crate) fn workbook_identity_name(save_path: Option<&Path>, sheet_name: &str) -> String {
+    save_path
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "Untitled workbook".to_string())
+        .unwrap_or_else(|| match sheet_name {
+            "" | "Sheet1" | "Sheet 1" => "Untitled".to_string(),
+            name => name.to_string(),
+        })
+}
+
+pub(crate) fn workbook_display_name(state: &GuiState) -> String {
+    workbook_identity_name(
+        state.save_path.borrow().as_deref(),
+        state.current.borrow().name.as_str(),
+    )
 }
 
 pub(crate) fn workbook_window_title(
@@ -2068,14 +2079,7 @@ pub(crate) fn workbook_window_title(
     sheet_name: &str,
     dirty: bool,
 ) -> String {
-    let title = save_path
-        .and_then(Path::file_name)
-        .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| match sheet_name {
-            "" | "Sheet1" | "Sheet 1" => "Untitled".to_string(),
-            name => name.to_string(),
-        });
+    let title = workbook_identity_name(save_path, sheet_name);
     if dirty {
         format!("{title} *")
     } else {
