@@ -3,9 +3,7 @@
 //! layer hierarchy, SVG rendering, persistence, and macOS AppKit menu bar reflection.
 
 use super::*;
-use loom_motion_core::{
-    cubic_bezier_1d, cubic_bezier_2d, CompositionClock, MotionLayer,
-};
+use loom_motion_core::{cubic_bezier_1d, cubic_bezier_2d, CompositionClock, MotionLayer};
 
 #[test]
 fn audit_composition_clock_and_transport_determinism() {
@@ -37,12 +35,21 @@ fn audit_keyframe_bezier_interpolation_curves() {
     // 1D cubic bezier interpolation: p0=0, p1=30, p2=70, p3=100
     let v_start = cubic_bezier_1d(0.0, 30.0, 70.0, 100.0, 0.0);
     let v_end = cubic_bezier_1d(0.0, 30.0, 70.0, 100.0, 1.0);
-    assert!((v_start - 0.0).abs() < 1e-4, "Start should be 0.0, got {v_start}");
-    assert!((v_end - 100.0).abs() < 1e-4, "End should be 100.0, got {v_end}");
+    assert!(
+        (v_start - 0.0).abs() < 1e-4,
+        "Start should be 0.0, got {v_start}"
+    );
+    assert!(
+        (v_end - 100.0).abs() < 1e-4,
+        "End should be 100.0, got {v_end}"
+    );
 
     // Midpoint symmetry
     let v_mid = cubic_bezier_1d(0.0, 30.0, 70.0, 100.0, 0.5);
-    assert!((v_mid - 50.0).abs() < 1e-3, "Midpoint should be 50.0, got {v_mid}");
+    assert!(
+        (v_mid - 50.0).abs() < 1e-3,
+        "Midpoint should be 50.0, got {v_mid}"
+    );
 
     // 2D cubic bezier path
     let p_start = (0.0, 0.0);
@@ -67,7 +74,11 @@ fn audit_keyframe_sampling_and_boundary_interpolation() {
 
     // Midpoint between 0s (100) and 2s (500): 300
     let s1 = layer.sample(1.0);
-    assert!((s1.x - 300.0).abs() < 1e-3, "Expected 300.0 at 1.0s, got {}", s1.x);
+    assert!(
+        (s1.x - 300.0).abs() < 1e-3,
+        "Expected 300.0 at 1.0s, got {}",
+        s1.x
+    );
 
     // At second keyframe (2s)
     let s2 = layer.sample(2.0);
@@ -75,7 +86,11 @@ fn audit_keyframe_sampling_and_boundary_interpolation() {
 
     // Midpoint between 2s (500) and 4s (300): 400
     let s3 = layer.sample(3.0);
-    assert!((s3.x - 400.0).abs() < 1e-3, "Expected 400.0 at 3.0s, got {}", s3.x);
+    assert!(
+        (s3.x - 400.0).abs() < 1e-3,
+        "Expected 400.0 at 3.0s, got {}",
+        s3.x
+    );
 
     // Past last keyframe (4s): holds 300
     let s5 = layer.sample(5.0);
@@ -179,15 +194,44 @@ fn audit_macos_menu_bar_structure_and_reflection() {
     assert!(menu_bar.menus.iter().any(|m| m.title == "Help"));
 
     // Verify Layer menu items
-    let layer_menu = menu_bar.menus.iter().find(|m| m.title == "Layer").expect("Layer menu");
-    assert!(layer_menu.items.iter().any(|item| item.id() == Some("comp.add_layer")));
-    assert!(layer_menu.items.iter().any(|item| item.id() == Some("comp.duplicate_layer")));
-    assert!(layer_menu.items.iter().any(|item| item.id() == Some("comp.delete_layer")));
+    let layer_menu = menu_bar
+        .menus
+        .iter()
+        .find(|m| m.title == "Layer")
+        .expect("Layer menu");
+    assert!(layer_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("comp.add_layer")));
+    assert!(layer_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("comp.duplicate_layer")));
+    assert!(layer_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("comp.delete_layer")));
 
     // Verify Playback menu items
-    let playback_menu = menu_bar.menus.iter().find(|m| m.title == "Playback").expect("Playback menu");
-    assert!(playback_menu.items.iter().any(|item| item.id() == Some("playback.play_pause")));
-    assert!(playback_menu.items.iter().any(|item| item.id() == Some("playback.step_back")));
-    assert!(playback_menu.items.iter().any(|item| item.id() == Some("playback.step_forward")));
-    assert!(playback_menu.items.iter().any(|item| item.id() == Some("playback.toggle_loop")));
+    let playback_menu = menu_bar
+        .menus
+        .iter()
+        .find(|m| m.title == "Playback")
+        .expect("Playback menu");
+    assert!(playback_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("playback.play_pause")));
+    assert!(playback_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("playback.step_back")));
+    assert!(playback_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("playback.step_forward")));
+    assert!(playback_menu
+        .items
+        .iter()
+        .any(|item| item.id() == Some("playback.toggle_loop")));
 }

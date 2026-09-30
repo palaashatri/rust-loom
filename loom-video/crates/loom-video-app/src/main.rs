@@ -1,5 +1,8 @@
 //! Loom Video desktop application with local FFmpeg media workflows.
-#![cfg_attr(all(windows, not(test), not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(windows, not(test), not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use std::collections::VecDeque;
 use std::io::{BufReader, Read};
@@ -4379,7 +4382,9 @@ mod tests {
 
     #[test]
     fn audio_master_clock_tick_consumes_decoded_samples_and_stalls_without_them() {
-        let Some(tools) = test_media_tools() else { return };
+        let Some(tools) = test_media_tools() else {
+            return;
+        };
         let dir =
             std::env::temp_dir().join(format!("loom-video-audio-clock-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -4455,7 +4460,9 @@ mod tests {
 
     #[test]
     fn terminal_audio_eof_switches_playing_controller_to_monotonic_fallback() {
-        let Some(tools) = test_media_tools() else { return };
+        let Some(tools) = test_media_tools() else {
+            return;
+        };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-audio-eof-controller-{}",
             std::process::id()
@@ -4518,7 +4525,9 @@ mod tests {
 
     #[test]
     fn same_clip_fallback_seek_rebuilds_audio_clock_and_preserves_unavailable_fallback() {
-        let Some(tools) = test_media_tools() else { return };
+        let Some(tools) = test_media_tools() else {
+            return;
+        };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-audio-fallback-seek-{}",
             std::process::id()
@@ -4632,7 +4641,9 @@ mod tests {
 
     #[test]
     fn audio_master_boundary_rebuilds_consumer_for_next_clip() {
-        let Some(tools) = test_media_tools() else { return };
+        let Some(tools) = test_media_tools() else {
+            return;
+        };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-audio-boundary-controller-{}",
             std::process::id()
@@ -4724,7 +4735,9 @@ mod tests {
     #[test]
     fn preview_request_generates_waveform_and_serves_cached_frame() {
         set_platform();
-        let Some(tools) = test_media_tools() else { return };
+        let Some(tools) = test_media_tools() else {
+            return;
+        };
         let dir = std::env::temp_dir().join(format!(
             "loom-video-preview-cache-hit-{}",
             std::process::id()

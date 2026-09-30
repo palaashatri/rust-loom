@@ -1,5 +1,8 @@
 //! Loom Encode desktop batch transcoding application.
-#![cfg_attr(all(windows, not(test), not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(windows, not(test), not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;

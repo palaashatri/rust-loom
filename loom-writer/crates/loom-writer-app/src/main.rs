@@ -4,7 +4,10 @@
 //! (`--screenshot`, `--smoke`) render the same UI through the software
 //! renderer and write a PNG, which is what the Docker visual-QA pipeline
 //! and the offline test mode exercise.
-#![cfg_attr(all(windows, not(test), not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(windows, not(test), not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 mod document_formatting;
 mod local_menu;
