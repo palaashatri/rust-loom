@@ -195,3 +195,27 @@ fn the_checklist_card_previews_the_workbook_it_creates() {
     assert_eq!(raw("A3").as_deref(), Some("Pay rent"));
     assert_eq!(raw("B7").as_deref(), Some("=COUNTIF(B2:B5, \"x\")"));
 }
+
+/// Opening the chooser from the File menu while the grid has keyboard focus must
+/// move focus into the chooser; otherwise arrows and Return edit the workbook
+/// hidden behind the modal.
+#[test]
+fn opening_the_chooser_from_the_menu_takes_keyboard_focus_from_the_grid() {
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    crate::actions::wire_template_navigation(&app);
+    app.set_template_category(0);
+    app.invoke_focus_grid();
+    assert!(crate::command_dispatch::dispatch_command(
+        &app,
+        "file.new_template"
+    ));
+    assert!(app.get_template_chooser_open());
+    let before = app.get_template_selected();
+    press(&app, slint::platform::Key::RightArrow);
+    assert_ne!(
+        app.get_template_selected(),
+        before,
+        "Right must move the chooser selection, not the grid cursor behind it"
+    );
+}

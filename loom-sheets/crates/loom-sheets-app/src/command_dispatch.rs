@@ -21,6 +21,17 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "file.new" | "sheets.new" => app.invoke_new_sheet(),
         "file.new_template" | "sheets.new-template" => {
             app.set_template_chooser_open(true);
+            app.invoke_focus_template_chooser();
+            // The menu that dispatched this command hands focus back to the
+            // grid as it closes; take it again once that has happened.
+            let weak = slint::ComponentHandle::as_weak(app);
+            slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+                if let Some(app) = weak.upgrade() {
+                    if app.get_template_chooser_open() {
+                        app.invoke_focus_template_chooser();
+                    }
+                }
+            });
         }
         "file.open" | "sheets.open" => app.invoke_open_sheet(),
         "file.save" | "sheets.save" => app.invoke_save_sheet(),
