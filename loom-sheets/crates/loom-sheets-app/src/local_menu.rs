@@ -1,9 +1,8 @@
-use std::sync::Arc;
+//! The in-window menu for Sheets. The projection, keyboard navigation, and
+//! dispatch logic are shared (`loom_desktop::local_menu_bindings!`); this file
+//! only says which commands Sheets handles.
 
-use loom_desktop::{DesktopError, MenuBar, MenuBarService, MenuItem, NativeMenuBar};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-
-use crate::{LocalMenuEntry, SheetsApp};
+use crate::SheetsApp;
 
 pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "file.new",
@@ -39,227 +38,15 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "sheets.delete_sheet",
 ];
 
-fn project(menu_bar: &MenuBar) -> Result<(Vec<SharedString>, Vec<LocalMenuEntry>), DesktopError> {
-    let visible_menus: Vec<_> = menu_bar
-        .menus
-        .iter()
-        .filter(|menu| {
-            menu.items.iter().any(|item| {
-                item.id()
-                    .is_some_and(|id| SUPPORTED_COMMANDS.contains(&id) && item.is_enabled())
-            })
-        })
-        .collect();
-    let labels = visible_menus
-        .iter()
-        .map(|menu| SharedString::from(menu.title.as_str()))
-        .collect();
-    let mut entries = Vec::new();
-
-    for (menu_index, menu) in visible_menus.iter().enumerate() {
-        let mut separator_pending = false;
-        let mut menu_entries = Vec::new();
-        for item in &menu.items {
-            if item
-                .id()
-                .is_some_and(|id| !SUPPORTED_COMMANDS.contains(&id))
-            {
-                continue;
-            }
-            let entry = match item {
-                MenuItem::Action {
-                    id,
-                    label,
-                    shortcut,
-                    enabled,
-                } => Some((id, label, shortcut, *enabled, false)),
-                MenuItem::Check {
-                    id,
-                    label,
-                    shortcut,
-                    enabled,
-                    checked,
-                } => Some((id, label, shortcut, *enabled, *checked)),
-                MenuItem::Radio {
-                    id,
-                    label,
-                    shortcut,
-                    enabled,
-                    selected,
-                    ..
-                } => Some((id, label, shortcut, *enabled, *selected)),
-                MenuItem::Separator => {
-                    separator_pending = !menu_entries.is_empty();
-                    None
-                }
-                MenuItem::Submenu(submenu) => {
-                    return Err(DesktopError::InvalidRequest(format!(
-                        "local Sheets menu does not support nested menu {}",
-                        submenu.title
-                    )));
-                }
-            };
-            if let Some((id, label, shortcut, enabled, checked)) = entry {
-                if separator_pending {
-                    menu_entries.push(LocalMenuEntry {
-                        menu_index: menu_index as i32,
-                        label: SharedString::from(""),
-                        command_id: SharedString::from(""),
-                        shortcut: SharedString::from(""),
-                        enabled: false,
-                        checked: false,
-                        separator: true,
-                    });
-                    separator_pending = false;
-                }
-                menu_entries.push(LocalMenuEntry {
-                    menu_index: menu_index as i32,
-                    label: SharedString::from(label.as_str()),
-                    command_id: SharedString::from(id.as_str()),
-                    shortcut: SharedString::from(
-                        shortcut
-                            .as_ref()
-                            .map(|shortcut| shortcut.display_string())
-                            .unwrap_or_default(),
-                    ),
-                    enabled,
-                    checked,
-                    separator: false,
-                });
-            }
-        }
-        entries.extend(menu_entries);
-    }
-
-    Ok((labels, entries))
-}
-
-pub(crate) fn sync(app: &SheetsApp, menu_service: &NativeMenuBar) -> Result<(), DesktopError> {
-    let menu_bar = menu_service
-        .installed_menu_bar()
-        .ok_or_else(|| DesktopError::InvalidRequest("Sheets menu bar is not installed".into()))?;
-    let (labels, items) = project(&menu_bar)?;
-    app.set_local_menu_labels(ModelRc::new(VecModel::from(labels)));
-    app.set_local_menu_items(ModelRc::new(VecModel::from(items)));
-    Ok(())
-}
-
-pub(crate) fn wire_keyboard(app: &SheetsApp) {
-    let app_ref = app.as_weak();
-    app.on_local_menu_opened(move |menu_index| {
-        if let Some(app) = app_ref.upgrade() {
-            let items = app.get_local_menu_items();
-            let popup_items = (0..items.row_count())
-                .filter_map(|index| items.row_data(index))
-                .filter(|item| item.menu_index == menu_index)
-                .collect::<Vec<_>>();
-            let first = (0..items.row_count()).find(|index| {
-                items.row_data(*index).is_some_and(|item| {
-                    item.menu_index == menu_index && item.enabled && !item.separator
-                })
-            });
-            app.set_local_menu_selected_index(first.map_or(-1, |index| index as i32));
-            app.set_local_menu_popup_selected_index(first.map_or(-1, |index| {
-                items.row_data(index).map_or(-1, |_| {
-                    (0..=index)
-                        .filter(|position| {
-                            items
-                                .row_data(*position)
-                                .is_some_and(|item| item.menu_index == menu_index)
-                        })
-                        .count() as i32
-                        - 1
-                })
-            }));
-            app.set_local_menu_popup_items(ModelRc::new(VecModel::from(popup_items)));
-        }
-    });
-
-    let app_ref = app.as_weak();
-    app.on_local_menu_move(move |direction| {
-        if let Some(app) = app_ref.upgrade() {
-            let items = app.get_local_menu_items();
-            let count = items.row_count();
-            if count == 0 {
-                app.set_local_menu_selected_index(-1);
-                return;
-            }
-
-            let menu_index = app.get_local_menu_open_index();
-            let current = app.get_local_menu_selected_index();
-            let delta = if direction < 0 { -1 } else { 1 };
-            for offset in 1..=count {
-                let index = if current < 0 {
-                    if delta < 0 {
-                        count - offset
-                    } else {
-                        offset - 1
-                    }
-                } else {
-                    (current as isize + delta * offset as isize).rem_euclid(count as isize) as usize
-                };
-                if items.row_data(index).is_some_and(|item| {
-                    item.menu_index == menu_index && item.enabled && !item.separator
-                }) {
-                    app.set_local_menu_selected_index(index as i32);
-                    let popup_index = (0..=index)
-                        .filter(|position| {
-                            items
-                                .row_data(*position)
-                                .is_some_and(|item| item.menu_index == menu_index)
-                        })
-                        .count() as i32
-                        - 1;
-                    app.set_local_menu_popup_selected_index(popup_index);
-                    return;
-                }
-            }
-            app.set_local_menu_selected_index(-1);
-        }
-    });
-}
-
-pub(crate) fn wire_action(app: &SheetsApp, menu_service: Arc<NativeMenuBar>) {
-    wire_keyboard(app);
-    let app_ref = app.as_weak();
-    app.on_local_menu_action(move |id| {
-        if let Err(error) = menu_service.dispatch_action(id.as_str()) {
-            if let Some(app) = app_ref.upgrade() {
-                app.set_status_left(SharedString::from(format!("Menu action failed: {error}")));
-            }
-        }
-    });
-}
+loom_desktop::local_menu_bindings!(SheetsApp, SUPPORTED_COMMANDS, set_status_left);
 
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use loom_desktop::{build_standard_menu_bar, MenuBarService};
+    use loom_desktop::{build_standard_menu_bar, MenuBarService, NativeMenuBar};
 
     use super::*;
-
-    #[test]
-    fn projection_shows_only_menus_with_working_commands() {
-        let mut menu = build_standard_menu_bar("Loom Sheets", vec![], vec![], vec![], vec![]);
-        menu.disable_items_except(["file.open", "app.palette", "view.zoom_in", "help.shortcuts"]);
-
-        let (labels, entries) = project(&menu).expect("project local menus");
-        let labels: Vec<_> = labels.iter().map(ToString::to_string).collect();
-        assert_eq!(labels, ["File", "Edit", "View", "Help"]);
-        assert!(entries.iter().any(|entry| {
-            entry.command_id == "file.open" && entry.label == "Open..." && entry.enabled
-        }));
-        assert!(entries
-            .iter()
-            .any(|entry| { entry.command_id == "edit.undo" && !entry.enabled }));
-        assert!(!entries.iter().any(|entry| {
-            entry.command_id == "help.documentation" || entry.command_id == "help.feedback"
-        }));
-        assert!(!entries
-            .iter()
-            .any(|entry| entry.command_id == "window.minimize"));
-    }
 
     #[test]
     fn local_menu_action_uses_the_installed_menu_guard_and_sink() {

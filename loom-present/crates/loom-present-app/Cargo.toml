@@ -17,6 +17,7 @@ loom-storage = { path = "../../../loom-core/crates/loom-storage" }
 loom-test-support.workspace = true
 loom-ui.workspace = true
 slint = "1.7"
+i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 
 [build-dependencies]
 slint-build = "1.7"

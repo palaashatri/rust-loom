@@ -6,7 +6,9 @@
 //! and the offline test mode exercise.
 
 mod document_formatting;
+mod local_menu;
 mod recovery;
+mod window_chrome;
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -296,18 +298,18 @@ fn sample_document() -> WriterDocument {
     d.push(RichBlock::new(
         d.next_id(),
         "paragraph",
-        "Loom Writer is a calm, professional word processor. Everything is stored in an open, inspectable .loomdoc package on your computer — no account, no cloud, no telemetry.",
+        "Write, format, and export documents. Your files stay on your computer as open .loomdoc packages, and nothing is uploaded.",
     ));
     d.push(RichBlock::new(
         d.next_id(),
         "paragraph",
-        "Type and format local text, save an inspectable Loom document, and export a deterministic PDF or Markdown file. All implemented workflows work offline.",
+        "Select text to make it bold, italic, or underlined, change the alignment, and add headings and lists. Export to PDF or Markdown when you are done.",
     ));
     d.push(RichBlock::new(d.next_id(), "heading2", "Getting started"));
     d.push(RichBlock::new(
         d.next_id(),
         "paragraph",
-        "Use New to create a document, Open to load an existing .loomdoc file, and Export PDF to produce a deterministic PDF. Undo and redo are fully wired.",
+        "Use the File menu to create, open, and save documents. Press Ctrl+K to search every command.",
     ));
     d
 }
@@ -2238,7 +2240,8 @@ fn sync_menu_state_result(
         rebuild_palette_with_registry(app, &registry, app.get_palette_query().as_str());
     }
     let projection = menu_projection(menu_service, app)?;
-    menu_service.sync_command_states(&projection)
+    menu_service.sync_command_states(&projection)?;
+    local_menu::sync(app, menu_service)
 }
 
 fn sync_menu_state(menu_service: &NativeMenuBar, app: &WriterApp, state: &GuiState) {
@@ -2374,6 +2377,7 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
 fn render_headless(args: &Args, out: &str) -> Result<(), String> {
     set_platform();
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let mut doc = match &args.open {
@@ -3323,6 +3327,7 @@ fn wire_writer_inspector_toggle(
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
@@ -3420,23 +3425,12 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // Only commands with a registered Writer/controller sink are enabled.
     // Application/window/help entries remain disabled until a real native
     // host bridge is installed for them.
-    menu_bar.disable_items_except([
-        "file.new",
-        "file.open",
-        "file.save",
-        "file.save_as",
-        "file.export_pdf",
-        "edit.undo",
-        "edit.redo",
-        "app.palette",
-        "view.inspector",
-        "format.bold",
-        "format.italic",
-        "format.underline",
-    ]);
+    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
+    local_menu::wire_action(&app, menu_service.clone());
+    let _ = local_menu::sync(&app, &menu_service);
     let app_ref = app.as_weak();
     let registry_for_menu = state.registry.clone();
     menu_service
@@ -3944,6 +3938,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
     let app = WriterApp::new().map_err(|e| e.to_string())?;
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()

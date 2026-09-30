@@ -297,7 +297,7 @@ mod visual_tests {
         let light = theme.get_tokens();
         assert_eq!(
             light.palette.canvas,
-            slint::Color::from_argb_encoded(0xfff4f4f6)
+            slint::Color::from_argb_encoded(0xfff5f5f7)
         );
         assert!(!light.reduced_motion);
         assert_eq!(light.motion.standard_ms, 180);
@@ -307,11 +307,11 @@ mod visual_tests {
         let dark = theme.get_tokens();
         assert_eq!(
             dark.palette.canvas,
-            slint::Color::from_argb_encoded(0xff121214)
+            slint::Color::from_argb_encoded(0xff1c1c1e)
         );
         assert_eq!(
             dark.palette.ink_disabled,
-            slint::Color::from_argb_encoded(0xff8c8c94)
+            slint::Color::from_argb_encoded(0xff8e8e96)
         );
         assert!(!dark.reduced_motion);
         assert_eq!(dark.motion.standard_ms, 180);

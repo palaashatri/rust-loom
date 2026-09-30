@@ -20,6 +20,7 @@ loom-text = { path = "../../../loom-core/crates/loom-text" }
 loom-ui = { path = "../../../loom-core/crates/loom-ui" }
 loom-test-support = { path = "../../../loom-core/crates/loom-test-support" }
 slint = "1.17.1"
+i-slint-backend-winit = { version = "=1.17.1", default-features = false }
 
 [build-dependencies]
 slint-build = "1.17.1"

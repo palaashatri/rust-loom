@@ -1,6 +1,9 @@
 import { TemplateChooserModal } from "template_chooser.slint";
 import { CommandPalette, CommandPaletteItem } from "../../../../loom-core/crates/loom-ui/ui/components.slint";
-import { LoomButton } from "foundation.slint";
+import {
+    LoomButton, LoomTitleBar, LoomWindowResizeEdges,
+    LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+} from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
@@ -10,10 +13,29 @@ import {
 } from "writer_components.slint";
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
+export { LocalMenuEntry } from "foundation.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
     title: "Loom Writer";
+    default-font-family: "Inter";
+    // Windows and Linux draw their own frame so the menu and the title share
+    // one row. macOS keeps the native frame and global menu bar.
+    in property <bool> custom-chrome: false;
+    no-frame: root.custom-chrome;
+    callback window-drag;
+    callback window-close;
+    callback window-resize(int);
+    in property <bool> local-menu-visible: true;
+    in property <[string]> local-menu-labels: ["File", "Edit", "View", "Format"];
+    in property <[LocalMenuEntry]> local-menu-items: [];
+    in property <[LocalMenuEntry]> local-menu-popup-items: [];
+    in-out property <int> local-menu-open-index: -1;
+    in-out property <int> local-menu-selected-index: -1;
+    in-out property <int> local-menu-popup-selected-index: -1;
+    callback local-menu-opened(int);
+    callback local-menu-move(int);
+    callback local-menu-action(string);
     min-width: 900px;
     min-height: 680px;
     preferred-width: 1280px;
@@ -281,6 +303,20 @@ export component WriterApp inherits Window {
         VerticalLayout {
             spacing: 0px;
             padding: 0px;
+
+            if root.custom-chrome : LoomTitleBar {
+                title: root.doc-title + (root.document-dirty ? " \u{2022}" : "");
+                maximized: root.maximized;
+                drag-requested => { root.window-drag(); }
+                // `maximized` and `minimized` are Slint's own window properties.
+                toggle-maximize => { root.maximized = !root.maximized; }
+                minimize => { root.minimized = true; }
+                close => { root.window-close(); }
+                LocalMenuLabels {
+                    labels: root.local-menu-labels;
+                    open-index <=> root.local-menu-open-index;
+                }
+            }
 
             action-toolbar := WriterActionToolbar {
                 rtl: root.rtl;
@@ -589,6 +625,22 @@ export component WriterApp inherits Window {
         }
     }
 
+    LocalMenuPopup {
+        x: 0px;
+        y: 36px;
+        width: root.width;
+        height: root.height - 36px;
+        menu-enabled: root.local-menu-visible && root.custom-chrome;
+        labels: root.local-menu-labels;
+        items: root.local-menu-popup-items;
+        open-index <=> root.local-menu-open-index;
+        selected-index: root.local-menu-popup-selected-index;
+        menu-opened(index) => { root.local-menu-opened(index); }
+        menu-move(direction) => { root.local-menu-move(direction); }
+        menu-closed => { app-focus.focus(); }
+        menu-action(id) => { root.local-menu-action(id); }
+    }
+
     palette := CommandPalette {
         x: 0px;
         y: 0px;
@@ -610,5 +662,14 @@ export component WriterApp inherits Window {
             root.palette-open = false;
             root.palette-close();
         }
+    }
+
+    LoomWindowResizeEdges {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.custom-chrome && !root.maximized;
+        resize(direction) => { root.window-resize(direction); }
     }
 }

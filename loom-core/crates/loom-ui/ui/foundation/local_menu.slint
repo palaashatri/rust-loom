@@ -1,5 +1,9 @@
-import { LoomButton, LoomMenuItem } from "foundation.slint";
-import { Theme } from "theme.slint";
+// The in-window application menu used where there is no native global menu
+// (Windows and Linux). It is the visible face of the same command model the
+// macOS menu bar uses; the host owns which commands exist and what they do.
+import { LoomButton } from "controls.slint";
+import { LoomMenuItem } from "overlays.slint";
+import { Theme } from "../theme.slint";
 
 export struct LocalMenuEntry {
     menu_index: int,

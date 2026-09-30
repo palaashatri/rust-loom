@@ -7,12 +7,34 @@ import {
 import { PresentActionToolbar } from "toolbar.slint";
 import { PresentInspector } from "inspector.slint";
 import { PresentThemeChooser } from "theme_chooser.slint";
-import { LoomButton } from "foundation.slint";
+import {
+    LoomButton, LoomTitleBar, LoomWindowResizeEdges,
+    LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
+} from "foundation.slint";
 
 export { Theme, ResponsivePolicy } from "theme.slint";
+export { LocalMenuEntry } from "foundation.slint";
 
 export component PresentApp inherits Window {
     title: "Loom Present";
+    default-font-family: "Inter";
+    // Windows and Linux draw their own frame so the menu and the title share
+    // one row. macOS keeps the native frame and global menu bar.
+    in property <bool> custom-chrome: false;
+    no-frame: root.custom-chrome;
+    callback window-drag;
+    callback window-close;
+    callback window-resize(int);
+    in property <bool> local-menu-visible: true;
+    in property <[string]> local-menu-labels: ["File", "Edit", "View", "Slide"];
+    in property <[LocalMenuEntry]> local-menu-items: [];
+    in property <[LocalMenuEntry]> local-menu-popup-items: [];
+    in-out property <int> local-menu-open-index: -1;
+    in-out property <int> local-menu-selected-index: -1;
+    in-out property <int> local-menu-popup-selected-index: -1;
+    callback local-menu-opened(int);
+    callback local-menu-move(int);
+    callback local-menu-action(string);
     min-width: 1024px;
     min-height: 720px;
     preferred-width: 1280px;
@@ -227,6 +249,20 @@ export component PresentApp inherits Window {
             spacing: 0px;
             padding: 0px;
 
+            if root.custom-chrome && !root.is-preview-mode : LoomTitleBar {
+                title: root.deck-title;
+                maximized: root.maximized;
+                drag-requested => { root.window-drag(); }
+                // `maximized` and `minimized` are Slint's own window properties.
+                toggle-maximize => { root.maximized = !root.maximized; }
+                minimize => { root.minimized = true; }
+                close => { root.window-close(); }
+                LocalMenuLabels {
+                    labels: root.local-menu-labels;
+                    open-index <=> root.local-menu-open-index;
+                }
+            }
+
             if !root.is-preview-mode : PresentActionToolbar {
                 rtl: root.rtl;
                 overflow: root.overflow-toolbar;
@@ -285,7 +321,7 @@ export component PresentApp inherits Window {
                     set-transition(idx) => { root.set-transition(idx); }
                 }
 
-                if root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                if !root.rtl && !root.is-preview-mode : PresentSlideStrip {
                     titles: root.slide-titles;
                     active-index: root.active-slide-index;
                     select-slide(idx) => { root.select-slide(idx); }
@@ -377,7 +413,7 @@ export component PresentApp inherits Window {
                     }
                 }
 
-                if !root.rtl && !root.is-preview-mode : PresentSlideStrip {
+                if root.rtl && !root.is-preview-mode : PresentSlideStrip {
                     titles: root.slide-titles;
                     active-index: root.active-slide-index;
                     select-slide(idx) => { root.select-slide(idx); }
@@ -451,6 +487,22 @@ export component PresentApp inherits Window {
         create-theme(idx) => { root.create-theme(idx); }
     }
 
+    LocalMenuPopup {
+        x: 0px;
+        y: 36px;
+        width: root.width;
+        height: root.height - 36px;
+        menu-enabled: root.local-menu-visible && root.custom-chrome && !root.is-preview-mode;
+        labels: root.local-menu-labels;
+        items: root.local-menu-popup-items;
+        open-index <=> root.local-menu-open-index;
+        selected-index: root.local-menu-popup-selected-index;
+        menu-opened(index) => { root.local-menu-opened(index); }
+        menu-move(direction) => { root.local-menu-move(direction); }
+        menu-closed => { app-focus.focus(); }
+        menu-action(id) => { root.local-menu-action(id); }
+    }
+
     palette := CommandPalette {
         x: 0px;
         y: 0px;
@@ -505,5 +557,14 @@ export component PresentApp inherits Window {
         } else {
             app-focus.focus();
         }
+    }
+
+    LoomWindowResizeEdges {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        enabled: root.custom-chrome && !root.maximized && !root.is-preview-mode;
+        resize(direction) => { root.window-resize(direction); }
     }
 }

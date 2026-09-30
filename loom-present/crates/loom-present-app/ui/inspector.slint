@@ -69,8 +69,14 @@ export component PresentInspector inherits LoomPanel {
                 selected(idx) => { root.apply-template(idx); }
             }
 
-            LoomSectionHeader { title: "Selected Element"; }
-            Rectangle {
+            if root.selection-count == 0 : Text {
+                text: "Select an object to edit its position and style.";
+                wrap: word-wrap;
+                font-size: Theme.tokens.typography.body;
+                color: Theme.palette().ink-secondary;
+            }
+            if root.selection-count > 0 : LoomSectionHeader { title: "Selected Element"; }
+            if root.selection-count > 0 : Rectangle {
                 min-height: 48px;
                 border-radius: Theme.tokens.metrics.radius-small;
                 border-width: 1px;
@@ -119,8 +125,8 @@ export component PresentInspector inherits LoomPanel {
                 }
             }
 
-            LoomSectionHeader { title: "Geometry"; }
-            InspectorPropertyRow {
+            if root.selection-count > 0 : LoomSectionHeader { title: "Geometry"; }
+            if root.selection-count > 0 : InspectorPropertyRow {
                 label: "Position";
                 Text {
                     text: root.element-x-text + " × " + root.element-y-text;
@@ -130,7 +136,7 @@ export component PresentInspector inherits LoomPanel {
                     overflow: elide;
                 }
             }
-            InspectorPropertyRow {
+            if root.selection-count > 0 : InspectorPropertyRow {
                 label: "Size";
                 Text {
                     text: root.element-width-text + " × " + root.element-height-text;
@@ -140,7 +146,7 @@ export component PresentInspector inherits LoomPanel {
                     overflow: elide;
                 }
             }
-            InspectorPropertyRow {
+            if root.selection-count > 0 : InspectorPropertyRow {
                 label: "Rotation";
                 Text {
                     text: root.element-rotation-text;

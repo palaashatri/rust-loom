@@ -48,7 +48,7 @@ fn parse_args() -> Result<Args, String> {
         palette: false,
         journey: None,
         size: DEFAULT_SIZE,
-        theme: "dark".into(),
+        theme: "light".into(),
         rtl: false,
         open: None,
         theme_chooser: false,
@@ -781,6 +781,7 @@ fn wire_responsive_layout_with_state(app: &PresentApp, state: Rc<GuiState>) {
 fn render_headless(args: &Args, output: &str) -> Result<(), String> {
     set_platform();
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let inspector_available = configure_responsive_layout(&app, args.size);
@@ -982,6 +983,7 @@ fn run_journey(args: &Args, out_dir: &str) -> Result<(), String> {
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create journey output '{}': {error}", out_dir.display()))?;
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     let inspector_available = configure_responsive_layout(&app, args.size);
@@ -1299,6 +1301,7 @@ fn main() -> Result<(), String> {
 
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = PresentApp::new().map_err(|error| error.to_string())?;
+    window_chrome::install(&app);
     configure_direction(&app, args.rtl);
     apply_theme(&app, &args.theme);
     app.window()
@@ -1339,6 +1342,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     menu_service
         .install_menu_bar(&menu_bar)
         .map_err(|error| error.to_string())?;
+    local_menu::wire_action(&app, menu_service.clone());
+    let _ = local_menu::sync(&app, &menu_service);
 
     let app_ref = app.as_weak();
     menu_service
@@ -1388,22 +1393,7 @@ fn build_present_menu_bar() -> MenuBar {
             ],
         )],
     );
-    menu_bar.disable_items_except([
-        "file.new",
-        "file.open",
-        "file.save",
-        "file.save_as",
-        "file.export_pdf",
-        "edit.undo",
-        "edit.redo",
-        "slide.new",
-        "slide.duplicate",
-        "slide.delete",
-        "slide.prev",
-        "slide.next",
-        "view.inspector",
-        "app.palette",
-    ]);
+    menu_bar.disable_items_except(local_menu::SUPPORTED_COMMANDS);
     menu_bar
 }
 
@@ -1474,7 +1464,8 @@ fn sync_menu_state_result(
 ) -> Result<(), DesktopError> {
     rebuild_palette(app, app.get_palette_query().as_str());
     let projection = menu_projection(menu_service, app, state)?;
-    menu_service.sync_command_states(&projection)
+    menu_service.sync_command_states(&projection)?;
+    local_menu::sync(app, menu_service)
 }
 
 fn sync_menu_state(menu_service: &NativeMenuBar, app: &PresentApp, state: &GuiState) {
@@ -2784,3 +2775,6 @@ fn wire_palette(app: &PresentApp) {
 mod audit_tests;
 #[cfg(test)]
 mod desktop_tests;
+
+mod local_menu;
+mod window_chrome;

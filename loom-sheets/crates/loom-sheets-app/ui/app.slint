@@ -5,6 +5,7 @@ import { CloseDrainShield } from "close_drain_shield.slint";
 import { SheetsOperationStatusText } from "operation_status_text.slint";
 import {
     LoomToolbar, LoomStatusBar, LoomStatusText, LoomTitleBar, LoomWindowResizeEdges,
+    LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 import { SheetChartOverlay } from "chart.slint";
 import { SheetToolbarOverflow } from "toolbar_overflow.slint";
@@ -16,9 +17,8 @@ import {
 } from "components.slint";
 import { Icon } from "icons.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
-import { LocalMenuBar, LocalMenuLabels, LocalMenuEntry, LocalMenuPopup } from "local_menu.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
-export { LocalMenuEntry } from "local_menu.slint";
+export { LocalMenuEntry } from "foundation.slint";
 export component SheetsApp inherits Window {
     in-out property <string> window-title: "Untitled";
     title: root.window-title;

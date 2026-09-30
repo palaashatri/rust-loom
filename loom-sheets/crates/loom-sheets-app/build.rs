@@ -28,10 +28,6 @@ fn main() {
         "cargo:rerun-if-changed={}",
         ui.join("template_chooser.slint").display()
     );
-    println!(
-        "cargo:rerun-if-changed={}",
-        ui.join("local_menu.slint").display()
-    );
     // Slint's ElementHandle assertions need generated debug metadata. Enable it
     // for the normal dev/test profile so plain `cargo test` can inspect the
     // accessibility tree; release builds keep the metadata opt-in.
