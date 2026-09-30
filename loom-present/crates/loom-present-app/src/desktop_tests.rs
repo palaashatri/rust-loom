@@ -753,3 +753,37 @@ fn notes_edit_refreshes_undo_menu_state() {
         Some(MenuItem::Action { enabled: true, .. })
     ));
 }
+
+#[test]
+fn closing_a_dirty_deck_asks_before_the_window_goes_away() {
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = Rc::new(test_state());
+    state
+        .session
+        .borrow_mut()
+        .document
+        .add_slide("Changed", "content");
+    wire_app_callbacks(&app, &state);
+    wire_close_guard(&app, &state);
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+
+    assert!(
+        app.get_save_changes_open(),
+        "the unsaved-changes dialog must open"
+    );
+    assert_eq!(
+        state.pending_replacement.get(),
+        Some(PendingReplacement::CloseWindow)
+    );
+
+    app.invoke_save_changes_cancel();
+    assert!(!app.get_save_changes_open());
+    assert_eq!(
+        state.pending_replacement.get(),
+        None,
+        "cancel keeps the window open"
+    );
+}

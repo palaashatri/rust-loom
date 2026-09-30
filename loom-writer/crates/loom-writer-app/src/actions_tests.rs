@@ -1779,3 +1779,40 @@ fn inspector_commands_expose_a11y_labels() {
         );
     }
 }
+
+#[test]
+fn closing_a_dirty_document_asks_before_the_window_goes_away() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    wire_close_guard(&app, &state);
+    *state.current.borrow_mut() = text_document("edited since the last save");
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+
+    assert!(
+        app.get_save_changes_open(),
+        "the unsaved-changes dialog must open"
+    );
+    assert_eq!(
+        state.pending_replacement.get(),
+        Some(PendingReplacement::CloseWindow)
+    );
+}
+
+#[test]
+fn closing_a_clean_document_does_not_prompt() {
+    let (app, state) = test_state(
+        text_document("saved"),
+        Rc::new(loom_desktop::ScriptedFileDialogs::new([], [])),
+    );
+    wire_close_guard(&app, &state);
+
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+
+    assert!(!app.get_save_changes_open());
+    assert_eq!(state.pending_replacement.get(), None);
+}

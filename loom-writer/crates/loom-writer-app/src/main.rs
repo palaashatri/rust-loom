@@ -1211,6 +1211,8 @@ struct GuiState {
 enum PendingReplacement {
     NewDocument,
     OpenDocument,
+    /// Closing the window with unsaved changes.
+    CloseWindow,
 }
 
 fn document_content_equal(left: &WriterDocument, right: &WriterDocument) -> bool {
@@ -2418,6 +2420,22 @@ fn sync_writer_menu_if_present(
     }
 }
 
+/// Closing with unsaved work asks first, through the same Save / Discard /
+/// Cancel dialog New and Open use. The custom title bar's close button raises
+/// this same request.
+fn wire_close_guard(app: &WriterApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.window().on_close_requested(move || {
+        if let Some(app) = app_ref.upgrade() {
+            if request_document_replacement(&app, &state, PendingReplacement::CloseWindow) {
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+}
+
 fn begin_new_document(app: &WriterApp) {
     // Opening the chooser is safe: it does not replace the current document.
     // Replacement happens only after the user presses Create Document.
@@ -2473,6 +2491,9 @@ fn continue_pending_replacement(
         Some(PendingReplacement::NewDocument) => begin_new_document(app),
         Some(PendingReplacement::OpenDocument) => {
             open_document_from_picker(app, state, &Some(menu_service.clone()))
+        }
+        Some(PendingReplacement::CloseWindow) => {
+            let _ = slint::ComponentHandle::hide(app);
         }
         None => {}
     }
@@ -3395,6 +3416,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     // same Slint callbacks used by toolbar and palette controls.
     let menu_service = Arc::new(NativeMenuBar::new());
     wire_writer_shared_callbacks(&app, &state, Some(menu_service.clone()));
+    wire_close_guard(&app, &state);
 
     let mut menu_bar = build_standard_menu_bar(
         "Loom Writer",

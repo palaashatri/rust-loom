@@ -306,6 +306,8 @@ fn cancel_drag(
 enum PendingReplacement {
     NewDeck,
     OpenDeck,
+    /// Closing the window with unsaved changes.
+    CloseWindow,
 }
 
 struct GuiState {
@@ -1337,6 +1339,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
 
     wire_app_callbacks(&app, &state);
     wire_responsive_layout_with_state(&app, state.clone());
+    wire_close_guard(&app, &state);
 
     let menu_bar = build_present_menu_bar();
     menu_service
@@ -1559,10 +1562,29 @@ fn request_deck_replacement(
     true
 }
 
+/// Closing with unsaved work asks first, through the same Save / Discard /
+/// Cancel dialog New and Open use. The custom title bar's close button raises
+/// this same request.
+fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
+    let state = state.clone();
+    let app_ref = app.as_weak();
+    app.window().on_close_requested(move || {
+        if let Some(app) = app_ref.upgrade() {
+            if request_deck_replacement(&app, &state, PendingReplacement::CloseWindow) {
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+}
+
 fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
     match state.pending_replacement.take() {
         Some(PendingReplacement::NewDeck) => replace_with_empty_deck(app, state),
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
+        Some(PendingReplacement::CloseWindow) => {
+            let _ = slint::ComponentHandle::hide(app);
+        }
         None => {}
     }
 }
