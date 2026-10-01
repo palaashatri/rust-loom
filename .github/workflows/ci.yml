@@ -24,12 +24,19 @@ jobs:
         run: |
           python3 -m unittest discover -s loom-bootstrap/scripts -p test_audit_governance.py
           python3 loom-bootstrap/scripts/audit-governance.py
+      # Every audit runs even if an earlier one failed. A red ratchet used to
+      # hide a failing UI-foundation contract behind it for several commits.
       - name: Code structure ratchet
+        if: ${{ !cancelled() }}
         run: python3 loom-bootstrap/scripts/audit-code-structure.py
       - name: Commercial asset provenance
+        if: ${{ !cancelled() }}
         run: python3 loom-bootstrap/scripts/audit-assets.py
       - name: UI foundation source contract
-        run: python3 loom-bootstrap/scripts/audit-ui-foundation.py
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m unittest discover -s loom-bootstrap/scripts -p test_audit_ui_foundation.py
+          python3 loom-bootstrap/scripts/audit-ui-foundation.py
 
   sheets:
     runs-on: ubuntu-24.04
@@ -60,6 +67,79 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test Sheets workspace
         working-directory: loom-sheets
+        run: cargo test --workspace --locked
+
+  # Writer and Present are active applications too. Their suites run on Linux
+  # and Windows so a font- or platform-dependent geometry assertion cannot hide
+  # until a user finds it (the Sheets Linux failure did exactly that).
+  writer:
+    name: Writer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native UI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libfontconfig1-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+      - name: Select Rust stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loom-writer -> target
+            loom-core -> target
+          shared-key: loom-writer-${{ matrix.os }}
+      - name: Format Writer workspace
+        working-directory: loom-writer
+        run: cargo fmt --all --check
+      - name: Clippy Writer workspace
+        working-directory: loom-writer
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test Writer workspace
+        working-directory: loom-writer
+        run: cargo test --workspace --locked
+
+  present:
+    name: Present (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native UI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libfontconfig1-dev \
+            libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev
+      - name: Select Rust stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loom-present -> target
+            loom-core -> target
+          shared-key: loom-present-${{ matrix.os }}
+      - name: Format Present workspace
+        working-directory: loom-present
+        run: cargo fmt --all --check
+      - name: Clippy Present workspace
+        working-directory: loom-present
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test Present workspace
+        working-directory: loom-present
         run: cargo test --workspace --locked
 
   sheets-scroll-budget:

@@ -18,14 +18,14 @@ component LoomCaptionButton inherits Rectangle {
 
     width: 46px;
     background: touch.has-hover
-        ? (root.kind == "close" ? #e5484d : Theme.palette().surface-sunken)
+        ? (root.kind == "close" ? Theme.palette().danger : Theme.palette().surface-sunken)
         : transparent;
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.clicked(); }
 
     property <color> glyph: touch.has-hover && root.kind == "close"
-        ? #ffffff : Theme.palette().ink;
+        ? (Theme.active-theme == "light" ? Theme.palette().paper : Theme.palette().paper-ink) : Theme.palette().ink;
 
     if root.kind == "minimize" : Rectangle {
         x: (parent.width - 10px) / 2;

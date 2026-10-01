@@ -311,7 +311,7 @@ mod visual_tests {
         );
         assert_eq!(
             dark.palette.ink_disabled,
-            slint::Color::from_argb_encoded(0xff8e8e96)
+            slint::Color::from_argb_encoded(0xff9a9aa2)
         );
         assert!(!dark.reduced_motion);
         assert_eq!(dark.motion.standard_ms, 180);

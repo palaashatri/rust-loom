@@ -231,7 +231,7 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
         )
         component = code[component_start:component_end]
         repeater_declaration = (
-            r"for\s+idx\s+in\s+root\.kinds\.length\s*:\s*Rectangle\s*\{"
+            r"for\s+idx\s+in\s+root\.objects\.length\s*:\s*Rectangle\s*\{"
         )
         repeater_matches = list(re.finditer(repeater_declaration, component))
         if len(repeater_matches) != 1:
@@ -252,7 +252,7 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
     if len(text_nodes) != 1:
         result.append("Sheets shape object must define exactly one Text child")
         return result
-    shape_text_declaration = r"if\s+root\.kinds\[idx\].{0,40}:\s*Text\s*\{"
+    shape_text_declaration = r"if\s+root\.objects\[idx\]\.kind.{0,40}:\s*Text\s*\{"
     shape_text_matches = list(re.finditer(shape_text_declaration, shape_rectangle_code))
     if len(shape_text_matches) != 1 or shape_text_matches[0].end() != text_nodes[0].end():
         result.append("Sheets shape object must define exactly one shape label Text")
@@ -267,7 +267,7 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
         flags=re.DOTALL,
     )
     if not re.fullmatch(
-        r'\s*if\s+root\.kinds\[idx\]\s*==\s*"shape"\s*:\s*Text\s*\{\s*',
+        r'\s*if\s+root\.objects\[idx\]\.kind\s*==\s*"shape"\s*:\s*Text\s*\{\s*',
         declaration_without_comments,
     ):
         result.append("Sheets shape label Text must be conditioned on kind == shape")
@@ -282,7 +282,7 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
     else:
         expression = re.sub(r"\s+", " ", color_assignments[0].group(1)).strip()
         expected = re.compile(
-            r"idx < root\.fills\.length && root\.fills\[idx\] >= 0 && root\.fills\[idx\] <= 6 "
+            r"root\.objects\[idx\]\.fill >= 0 && root\.objects\[idx\]\.fill <= 6 "
             r"\? Theme\.palette\(\)\.paper-ink : Theme\.palette\(\)\.ink"
         )
         if not expected.fullmatch(expression):
@@ -298,7 +298,7 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
     background = backgrounds[0]
     background_expression = shape_rectangle_source[background.start(1) : background.end(1)]
     fill_branches = re.findall(
-        r"root\.fills\[idx\]\s*==\s*(\d+)\s*\?\s*(#[0-9a-fA-F]{6})",
+        r"root\.objects\[idx\]\.fill\s*==\s*(\d+)\s*\?\s*(#[0-9a-fA-F]{6})",
         background.group(1),
     )
     fill_indices = [int(index) for index, _ in fill_branches]
@@ -318,9 +318,9 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
         "#DDD6FE",
         "#E5E7EB",
     )
-    expected_mapping = "root.kinds[idx]==\"shape\"?("
+    expected_mapping = "root.objects[idx].kind==\"shape\"?("
     expected_mapping += ":".join(
-        f"idx<root.fills.length&&root.fills[idx]=={index}?{color}"
+        f"root.objects[idx].fill=={index}?{color}"
         for index, color in enumerate(expected_fills)
     )
     expected_mapping += ":Theme.palette().surface-raised):Theme.palette().surface"

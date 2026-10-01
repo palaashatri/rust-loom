@@ -71,7 +71,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         dark_source = source[dark_start:dark_end]
         corrupted_dark, count = re.subn(
             r"(\baccent-ink:\s*)#[0-9a-fA-F]{6}(,)",
-            r"\1#ffffff\2 // accent-ink: #000000,\n            /* } palette: { accent-ink: #000000 } */",
+            r"\1#000000\2 // accent-ink: #ffffff,\n            /* } palette: { accent-ink: #ffffff } */",
             dark_source,
             count=1,
             flags=re.DOTALL,
@@ -84,7 +84,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         result = self.run_audit()
         self.assertNotEqual(result.returncode, 0, "cross-theme color reuse must not pass")
         self.assertIn(
-            "runtime theme.slint dark accent-ink value #ffffff does not match token #000000",
+            "runtime theme.slint dark accent-ink value #000000 does not match token #ffffff",
             result.stderr,
         )
 
@@ -140,7 +140,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         light_end = source.index("export global ThemeDark {", light_start)
         light_source = source[light_start:light_end]
         corrupted_light, count = re.subn(
-            r"(\baccent:\s*)#c4441a(\s*,)",
+            r"(\baccent:\s*)#0071e3(\s*,)",
             r"\1#d95324\2",
             light_source,
             count=1,
@@ -153,7 +153,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         result = self.run_audit()
         self.assertNotEqual(result.returncode, 0, "ThemeBackup must not satisfy the Light check")
         self.assertIn(
-            "runtime theme.slint light accent value #d95324 does not match token #c4441a",
+            "runtime theme.slint light accent value #d95324 does not match token #0071e3",
             result.stderr,
         )
 
@@ -198,7 +198,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         result = self.run_audit()
         self.assertNotEqual(result.returncode, 0, "disabled runtime colors must match their tokens")
         self.assertIn(
-            "runtime theme.slint dark ink-disabled value #000000 does not match token #8c8c94",
+            "runtime theme.slint dark ink-disabled value #000000 does not match token #9a9aa2",
             result.stderr,
         )
 
@@ -225,7 +225,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         result = self.run_audit()
         self.assertNotEqual(result.returncode, 0, "transparent disabled buttons need their surface audited")
         self.assertIn(
-            "runtime theme.slint dark surface-raised value #ffffff does not match token #24242a",
+            "runtime theme.slint dark surface-raised value #ffffff does not match token #2c2c30",
             result.stderr,
         )
 
@@ -360,7 +360,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         result = self.run_audit()
         self.assertNotEqual(result.returncode, 0, "runtime ink must be tied to the approved token")
         self.assertIn(
-            "runtime theme.slint dark ink value #24242a does not match token #f4f4f6",
+            "runtime theme.slint dark ink value #24242a does not match token #f5f5f7",
             result.stderr,
         )
 
@@ -411,10 +411,10 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
 
         objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
         source = objects_path.read_text(encoding="utf-8")
-        original = "idx < root.fills.length && root.fills[idx] == 0 ? #FECACA"
+        original = "root.objects[idx].fill == 0 ? #FECACA"
         unsafe_duplicate = (
-            "idx < root.fills.length && root.fills[idx] == 0 ? #18181B\n"
-            "                : idx < root.fills.length && root.fills[idx] == 0 ? #FECACA"
+            "root.objects[idx].fill == 0 ? #18181B\n"
+            "                : root.objects[idx].fill == 0 ? #FECACA"
         )
         self.assertIn(original, source)
         objects_path.write_text(source.replace(original, unsafe_duplicate, 1), encoding="utf-8")
@@ -450,15 +450,15 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
         source = objects_path.read_text(encoding="utf-8")
         label_foreground = (
-            "idx < root.fills.length && root.fills[idx] >= 0 && root.fills[idx] <= 6 "
+            "root.objects[idx].fill >= 0 && root.objects[idx].fill <= 6 "
             "? Theme.palette().paper-ink : Theme.palette().ink"
         )
         decoy = (
-            '        if root.kinds[idx] == "shape" && false : Text {\n'
+            '        if root.objects[idx].kind == "shape" && false : Text {\n'
             f"            color: {label_foreground};\n"
             "        }\n\n"
         )
-        actual_label = '        if root.kinds[idx] == "shape" : Text {\n'
+        actual_label = '        if root.objects[idx].kind == "shape" : Text {\n'
         self.assertIn(actual_label, source)
         source = source.replace(actual_label, decoy + actual_label, 1)
         actual_label_start = source.rfind(actual_label)
@@ -481,10 +481,10 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
 
         objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
         source = objects_path.read_text(encoding="utf-8")
-        original = 'if root.kinds[idx] == "shape" : Text {'
+        original = 'if root.objects[idx].kind == "shape" : Text {'
         self.assertIn(original, source)
         objects_path.write_text(
-            source.replace(original, 'if root.kinds[idx] != "shape" : Text {', 1),
+            source.replace(original, 'if root.objects[idx].kind != "shape" : Text {', 1),
             encoding="utf-8",
         )
 
@@ -494,7 +494,7 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
 
         commented = source.replace(
             original,
-            'if root.kinds[idx] /* valid shape guard */ == "shape" : Text {',
+            'if root.objects[idx].kind /* valid shape guard */ == "shape" : Text {',
             1,
         )
         objects_path.write_text(commented, encoding="utf-8")
@@ -507,10 +507,10 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
 
         objects_path = self.root / "loom-sheets/crates/loom-sheets-app/ui/objects.slint"
         source = objects_path.read_text(encoding="utf-8")
-        original = 'if root.kinds[idx] == "shape" : Text {'
+        original = 'if root.objects[idx].kind == "shape" : Text {'
         self.assertIn(original, source)
         objects_path.write_text(
-            source.replace(original, 'if root.kinds[idx] == "shape/*hidden*/" : Text {', 1),
+            source.replace(original, 'if root.objects[idx].kind == "shape/*hidden*/" : Text {', 1),
             encoding="utf-8",
         )
 
@@ -532,13 +532,13 @@ class UiFoundationPaletteAuditTests(unittest.TestCase):
         self.assertGreater(component_end, 0, "fixture locates the component's closing brace")
         unsafe_repeater = '''
 
-    for idx in root.kinds.length : Rectangle {
-        x: idx < root.positions-x.length ? root.positions-x[idx] : 0px;
-        y: idx < root.positions-y.length ? root.positions-y[idx] : 0px;
-        width: idx < root.widths.length ? max(80px, root.widths[idx] * 1px) : 80px;
-        height: idx < root.heights.length ? max(48px, root.heights[idx] * 1px) : 48px;
-        if root.kinds[idx] == "shape" : Text {
-            text: idx < root.labels.length ? root.labels[idx] : "Shape";
+    for idx in root.objects.length : Rectangle {
+        x: root.objects[idx].x;
+        y: root.objects[idx].y;
+        width: max(80px, root.objects[idx].width * 1px);
+        height: max(48px, root.objects[idx].height * 1px);
+        if root.objects[idx].kind == "shape" : Text {
+            text: root.objects[idx].label;
             color: Theme.palette().ink;
         }
     }
