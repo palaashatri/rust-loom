@@ -85,7 +85,7 @@ export component PresentActionToolbar inherits LoomToolbar {
         LoomIconButton {
             icon: "play";
             label: "Play";
-            tooltip: "Play presentation (preview)";
+            tooltip: "Start slideshow (F5)";
             selected: root.is-preview-mode;
             clicked => { root.toggle-preview(); }
         }

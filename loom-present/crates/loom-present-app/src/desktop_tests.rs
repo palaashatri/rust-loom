@@ -923,3 +923,62 @@ fn a_transition_only_change_marks_the_deck_edited_until_saved() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn slideshow_keys_navigate_and_escape_exits() {
+    use slint::platform::WindowEvent;
+    use std::cell::Cell;
+
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let next = Rc::new(Cell::new(0));
+    let prev = Rc::new(Cell::new(0));
+    let toggles = Rc::new(Cell::new(0));
+    {
+        let next = next.clone();
+        app.on_next_slide(move || next.set(next.get() + 1));
+        let prev = prev.clone();
+        app.on_prev_slide(move || prev.set(prev.get() + 1));
+        let toggles = toggles.clone();
+        let weak = app.as_weak();
+        app.on_toggle_preview_mode(move || {
+            toggles.set(toggles.get() + 1);
+            if let Some(app) = weak.upgrade() {
+                app.set_is_preview_mode(!app.get_is_preview_mode());
+            }
+        });
+    }
+    app.show().expect("show");
+    let press = |text: &str| {
+        let text: slint::SharedString = text.into();
+        app.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text });
+    };
+
+    // F5 starts the slideshow from the editor.
+    press(&char::from(slint::platform::Key::F5).to_string());
+    assert!(app.get_is_preview_mode());
+    for key in [
+        slint::platform::Key::RightArrow,
+        slint::platform::Key::PageDown,
+    ] {
+        press(&char::from(key).to_string());
+    }
+    press(" ");
+    assert_eq!(next.get(), 3, "right arrow, page down and space advance");
+    for key in [
+        slint::platform::Key::LeftArrow,
+        slint::platform::Key::Backspace,
+    ] {
+        press(&char::from(key).to_string());
+    }
+    assert_eq!(prev.get(), 2, "left arrow and backspace go back");
+
+    // Escape leaves the slideshow and navigation keys no longer advance slides.
+    press(&char::from(slint::platform::Key::Escape).to_string());
+    assert!(!app.get_is_preview_mode());
+    press(&char::from(slint::platform::Key::RightArrow).to_string());
+    assert_eq!(next.get(), 3);
+}

@@ -2637,7 +2637,7 @@ fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
         PaletteCommand {
             action: PaletteAction::TogglePreview,
             id: "present.preview",
-            label: "Toggle Preview Mode",
+            label: "Start or Exit Slideshow",
             shortcut: "F5",
         },
         PaletteCommand {

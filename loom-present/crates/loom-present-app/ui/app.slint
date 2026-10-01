@@ -104,6 +104,9 @@ export component PresentApp inherits Window {
     in-out property <string> slide-notes: "";
     in-out property <bool> show-notes-drawer: false;
     in-out property <bool> is-preview-mode: false;
+    full-screen: root.is-preview-mode;
+    changed is-preview-mode => { app-focus.focus(); }
+    init => { app-focus.focus(); }
     in-out property <int> active-template-index: 1;
     in-out property <int> inspector-tab: 0;
     in-out property <int> transition-index: 0;
@@ -220,6 +223,13 @@ export component PresentApp inherits Window {
     app-focus := FocusScope {
         key-pressed(event) => {
             if (root.palette-open || root.theme-chooser-open || root.toolbar-overflow-open) { return reject; }
+            if (root.is-preview-mode) {
+                if (event.text == Key.Escape) { root.toggle-preview-mode(); }
+                else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == Key.Return || event.text == " ") { root.next-slide(); }
+                else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.prev-slide(); }
+                return accept;
+            }
+            if (event.text == Key.F5) { root.toggle-preview-mode(); return accept; }
             if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == Key.K || event.text == "k") {
                     root.open-palette();
@@ -344,6 +354,8 @@ export component PresentApp inherits Window {
 
                     PresentSlideCanvas {
                         editing-enabled: !root.is-preview-mode;
+                        fit-screen: root.is-preview-mode;
+                        background: root.is-preview-mode ? Colors.black : Theme.palette().canvas;
                         aspect-ratio-wide: root.aspect-ratio-wide;
                         element-labels: root.element-labels;
                         element-contents: root.element-contents;
@@ -452,7 +464,7 @@ export component PresentApp inherits Window {
             }
 
             // Standard Status Bar
-            PresentStatusBar {
+            if !root.is-preview-mode : PresentStatusBar {
                 leading-text: root.status-left;
                 trailing-text: root.status-right;
             }

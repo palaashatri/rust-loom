@@ -119,6 +119,8 @@ export component PresentSlideCanvas inherits Rectangle {
     in property <[bool]> element-selected: [];
     in property <int> selection-count: 0;
     in property <bool> editing-enabled: true;
+    /// Slideshow mode: the slide fills the window and text scales with it.
+    in property <bool> fit-screen: false;
     in property <[float]> snap-guides-x: [];
     in property <[float]> snap-guides-y: [];
     in property <float> marquee-x: 0;
@@ -153,10 +155,12 @@ export component PresentSlideCanvas inherits Rectangle {
 
         slide := Rectangle {
             property <float> slide-ratio: root.aspect-ratio-wide ? 0.5625 : 0.75;
-            x: max(Theme.tokens.space.xxl, (parent.width - self.width) / 2);
-            y: max(Theme.tokens.space.xxl, (parent.height - self.height) / 2);
-            width: min(840px, max(1px, parent.width - Theme.tokens.space.xxl * 2));
-            height: min(parent.height - Theme.tokens.space.xxl * 2, self.width * self.slide-ratio);
+            property <length> margin: root.fit-screen ? 0px : Theme.tokens.space.xxl;
+            property <float> text-scale: root.fit-screen ? self.width / 840px : 1.0;
+            x: max(self.margin, (parent.width - self.width) / 2);
+            y: max(self.margin, (parent.height - self.height) / 2);
+            width: min(root.fit-screen ? 100000px : 840px, max(1px, min(parent.width - self.margin * 2, (parent.height - self.margin * 2) / self.slide-ratio)));
+            height: min(parent.height - self.margin * 2, self.width * self.slide-ratio);
             border-radius: Theme.tokens.metrics.radius-small;
             border-width: 1px;
             border-color: Theme.palette().border;
@@ -247,8 +251,8 @@ export component PresentSlideCanvas inherits Rectangle {
                     width: max(1px, parent.width - Theme.tokens.space.lg * 2);
                     height: max(1px, parent.height - Theme.tokens.space.sm * 2);
                     text: root.element-contents[idx];
-                    font-size: root.element-types[idx] == 0 ? Theme.tokens.typography.display
-                        : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large;
+                    font-size: (root.element-types[idx] == 0 ? Theme.tokens.typography.display
+                        : root.element-types[idx] == 5 ? Theme.tokens.typography.heading : Theme.tokens.typography.body-large) * slide.text-scale;
                     font-weight: root.element-types[idx] == 0 || root.element-types[idx] == 5 ? 700 : 400;
                     color: root.element-types[idx] == 3 || root.element-types[idx] == 4 ? Theme.palette().ink
                         : root.element-types[idx] == 1 || root.element-types[idx] == 2 ? Theme.palette().paper-muted
@@ -466,7 +470,7 @@ export component PresentToolbarOverflow inherits Rectangle {
         }
         LoomButton {
             icon: "play";
-            label: "Play presentation";
+            label: "Start slideshow";
             variant: "ghost";
             clicked => { root.toggle-preview(); root.close-requested(); }
         }
