@@ -111,6 +111,8 @@ mod template_navigation;
 mod window_chrome;
 
 mod actions;
+mod clipboard_actions;
+mod system_clipboard;
 use actions::*;
 
 mod command_dispatch;

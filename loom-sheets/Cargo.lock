@@ -3073,6 +3073,7 @@ dependencies = [
 name = "loom-sheets-app"
 version = "0.1.0"
 dependencies = [
+ "copypasta",
  "fs2",
  "i-slint-backend-testing",
  "i-slint-backend-winit",

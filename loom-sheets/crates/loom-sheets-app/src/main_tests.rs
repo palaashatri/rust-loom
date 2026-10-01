@@ -20,6 +20,8 @@ mod local_menu_tests;
 
 #[path = "main_tests/app_startup_tests.rs"]
 mod app_startup_tests;
+#[path = "main_tests/clipboard_tests.rs"]
+mod clipboard_tests;
 #[path = "main_tests/close_operation_journeys.rs"]
 mod close_operation_journeys;
 #[path = "main_tests/command_dispatch_tests.rs"]
