@@ -61,16 +61,20 @@ pub(crate) fn editor_dimensions_with_preview(
     } else {
         (0, 0)
     };
+    // Room to keep scrolling past the last used or selected cell, so the
+    // grid never ends exactly where the user last looked.
     let mut rows = dimensions
         .rows
         .max(selected.row.saturating_add(1))
         .max(crate::DEFAULT_VISIBLE_ROWS)
-        .max(fill_rows + ahead_rows);
+        .max(fill_rows)
+        .saturating_add(ahead_rows);
     let mut cols = dimensions
         .cols
         .max(selected.col.saturating_add(1))
         .max(crate::DEFAULT_VISIBLE_COLS)
-        .max(fill_cols + ahead_cols);
+        .max(fill_cols)
+        .saturating_add(ahead_cols);
     let custom_cols: std::collections::BTreeMap<u32, f32> = sheet
         .col_widths
         .iter()

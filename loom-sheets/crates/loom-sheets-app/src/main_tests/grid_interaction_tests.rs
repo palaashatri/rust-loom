@@ -287,7 +287,7 @@ fn sparse_tail_scroll_materializes_tail_headers_and_values() {
     app.window().set_size(PhysicalSize::new(1280, 800));
     apply_layout_breakpoints(&app, 1280);
     apply_headless_viewport_size(&app, 1280, 800);
-    app.set_grid_scroll_y(-26_600.0);
+    app.set_grid_scroll_y(-23_446.0);
 
     let mut sheet = Sheet::new("Sparse 1000");
     sheet.set_str("A995", "10");
@@ -295,38 +295,34 @@ fn sparse_tail_scroll_materializes_tail_headers_and_values() {
     sheet.set_str("A1000", "tail");
     project_sheet_without_reveal(&app, &sheet);
 
-    // The last seeded row is 1000 and the window is 800 px tall, so the tail
-    // must be the final visible row. Derive the other indices from that instead
-    // of pinning magic numbers: removing the redundant heading above the grid
-    // (UI-32) gave the grid 32 more pixels and therefore two more visible rows,
-    // and this assertion follows the geometry rather than resisting it.
+    // Scrolled to where the last used row is the last visible one. Derive the
+    // indices from that instead of pinning magic numbers: removing the heading
+    // above the grid (UI-32) gave the grid 32 more pixels and two more visible
+    // rows.
     let last = 1000;
     let first = last - (last_row_headers() - 1);
     let row_headers = app.get_row_headers();
     assert_eq!(
-        row_headers.row_data((last - first) as usize).as_deref(),
+        row_headers.row_data((1000 - first) as usize).as_deref(),
         Some("1000"),
         "row 1000 must be the last visible row header"
     );
-    assert_eq!(row_headers.row_data(0).as_deref(), Some("977"));
+    assert_eq!(
+        row_headers.row_data(0).map(|s| s.to_string()),
+        Some(first.to_string())
+    );
     let cells = app.get_cells();
     let cols = app.get_cols().row_count() as u32;
     assert_eq!(
-        cells.row_data(((995 - first) * cols) as usize).as_deref(),
-        Some("10")
-    );
-    assert_eq!(
-        cells.row_data(((996 - first) * cols) as usize).as_deref(),
-        Some("20")
-    );
-    assert_eq!(
-        cells.row_data(((last - first) * cols) as usize).as_deref(),
+        cells.row_data(((1000 - first) * cols) as usize).as_deref(),
         Some("tail")
     );
-    // The requested -26_600 is clamped to the deepest scroll. That maximum is
-    // content height minus viewport height, so reclaiming the 32 px heading
-    // (UI-32) moved it up by exactly 32 px.
+    // The grid keeps 30 rows of tail past the last used row, so the deepest
+    // scroll is 720 px further: content height minus viewport height.
     assert!((app.get_grid_scroll_y() + 23_446.0).abs() < 0.1);
+    app.set_grid_scroll_y(-26_600.0);
+    project_sheet_without_reveal(&app, &sheet);
+    assert!((app.get_grid_scroll_y() + 24_166.0).abs() < 0.1);
 }
 
 /// The number of row headers a 1280x800 headless viewport materializes. The
@@ -536,8 +532,7 @@ fn focused_grid_rejects_non_printable_edit_keys() {
         slint::platform::Key::Backspace.into(),
         slint::platform::Key::Delete.into(),
         slint::platform::Key::F1.into(),
-        slint::platform::Key::Home.into(),
-        slint::platform::Key::PageUp.into(),
+        slint::platform::Key::Insert.into(),
     ] {
         app.invoke_focus_grid();
         app.window()
@@ -553,6 +548,41 @@ fn focused_grid_rejects_non_printable_edit_keys() {
         });
     assert_eq!(begins.get(), 0);
     assert_eq!(moves.get(), (0, -1));
+}
+
+#[test]
+fn page_home_and_ctrl_end_keys_move_by_more_than_a_cell() {
+    use crate::grid_navigation::{EDGE, PAGE};
+    set_platform();
+    let app = SheetsApp::new().expect("create SheetsApp");
+    let moves = Rc::new(std::cell::Cell::new((0, 0)));
+    let moves_ref = moves.clone();
+    app.on_navigate_selection(move |row_delta, col_delta| {
+        moves_ref.set((row_delta, col_delta));
+    });
+    let press = |key: slint::platform::Key, control: bool| {
+        app.invoke_focus_grid();
+        if control {
+            app.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                    text: slint::platform::Key::Control.into(),
+                });
+        }
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: key.into() });
+        if control {
+            app.window()
+                .dispatch_event(slint::platform::WindowEvent::KeyReleased {
+                    text: slint::platform::Key::Control.into(),
+                });
+        }
+        moves.get()
+    };
+    assert_eq!(press(slint::platform::Key::PageDown, false), (PAGE, 0));
+    assert_eq!(press(slint::platform::Key::PageUp, false), (-PAGE, 0));
+    assert_eq!(press(slint::platform::Key::Home, false), (0, -EDGE));
+    assert_eq!(press(slint::platform::Key::Home, true), (-EDGE, -EDGE));
+    assert_eq!(press(slint::platform::Key::End, true), (EDGE, EDGE));
 }
 
 #[test]

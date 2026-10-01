@@ -42,6 +42,7 @@ slint::include_modules!();
 pub mod formatting;
 
 mod analysis;
+mod grid_navigation;
 use analysis::{plan_chart, plan_chart_in_range};
 
 mod assets;
@@ -956,7 +957,7 @@ fn project_sheet_inner_with_preview(
     let mut viewport = viewport_from_app(app, sheet, preview);
     let projected_before_reveal = viewport;
     if reveal_selection {
-        viewport.reveal(selected);
+        grid_navigation::reveal_selected(app, sheet, &mut viewport, selected);
     }
     app.set_view_row_origin(viewport.first_row as i32);
     app.set_view_col_origin(viewport.first_col as i32);
@@ -1649,31 +1650,22 @@ pub(crate) fn select_cell(app: &SheetsApp, sheet: &Sheet, r: i32, c: i32) {
     update_selection(app, sheet, &vals, refr);
 }
 
-fn offset_coordinate(value: u32, delta: i32) -> u32 {
-    if delta < 0 {
-        value.saturating_sub(delta.unsigned_abs())
-    } else {
-        value.saturating_add(delta as u32)
-    }
+/// Where a key move of `delta` takes the active cell, counting a page as the
+/// rows that fit in the window.
+fn moved_focus(app: &SheetsApp, sheet: &Sheet, from: CellRef, delta: (i32, i32)) -> CellRef {
+    let page = window_fill(app, zoom_factor(app)).map_or(DEFAULT_VISIBLE_ROWS, |(_, rows)| rows);
+    grid_navigation::destination(sheet, from, delta, page)
 }
 
 fn navigate_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
     let selection = selection_from_app(app);
-    let selected = selection.focus;
-    let next = CellRef {
-        row: offset_coordinate(selected.row, row_delta),
-        col: offset_coordinate(selected.col, col_delta),
-    };
+    let next = moved_focus(app, sheet, selection.focus, (row_delta, col_delta));
     update_selection(app, sheet, &evaluate(sheet), next);
 }
 
 fn extend_selection(app: &SheetsApp, sheet: &Sheet, row_delta: i32, col_delta: i32) {
     let selection = selection_from_app(app);
-    let focus = selection.focus;
-    let next = CellRef {
-        row: offset_coordinate(focus.row, row_delta),
-        col: offset_coordinate(focus.col, col_delta),
-    };
+    let next = moved_focus(app, sheet, selection.focus, (row_delta, col_delta));
     update_selection_range(app, sheet, &evaluate(sheet), selection.extend(next));
 }
 

@@ -124,7 +124,7 @@ fn scrolled_viewport(
     sheet: &Sheet,
     zoom: f32,
 ) -> (SheetViewport, SheetDimensions) {
-    let dimensions = SheetDimensions::new(
+    let mut dimensions = SheetDimensions::new(
         app.get_workbook_rows().max(1) as u32,
         app.get_workbook_cols().max(1) as u32,
     );
@@ -164,7 +164,36 @@ fn scrolled_viewport(
         &scaled_rows,
         &scaled_cols,
     );
+    // Scrolling toward the end of the sheet makes more of it: a spreadsheet
+    // has no last row to hit.
+    let grown = grown_dimensions(dimensions, viewport);
+    if grown != dimensions {
+        app.set_workbook_rows(grown.rows as i32);
+        app.set_workbook_cols(grown.cols as i32);
+        dimensions = grown;
+    }
     (viewport, dimensions)
+}
+
+/// Rows and columns the grid keeps beyond the last visible one.
+const TAIL_ROWS: u32 = 30;
+const TAIL_COLS: u32 = 12;
+const MAX_GRID_ROWS: u32 = 1_048_576;
+const MAX_GRID_COLS: u32 = 16_384;
+
+/// `dimensions`, extended so at least a tail's worth of rows and columns lies
+/// past the visible window, up to the sheet limits.
+fn grown_dimensions(dimensions: SheetDimensions, viewport: SheetViewport) -> SheetDimensions {
+    let rows_needed = (viewport.first_row + viewport.visible_rows)
+        .saturating_add(TAIL_ROWS)
+        .min(MAX_GRID_ROWS);
+    let cols_needed = (viewport.first_col + viewport.visible_cols)
+        .saturating_add(TAIL_COLS)
+        .min(MAX_GRID_COLS);
+    SheetDimensions::new(
+        dimensions.rows.max(rows_needed),
+        dimensions.cols.max(cols_needed),
+    )
 }
 
 /// Handle a scroll event. Cell text is re-projected only when the set of
@@ -208,4 +237,39 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
     // The window changed underneath a live scroll; keep the pointer's offsets.
     app.set_grid_scroll_x(viewport_geometry.0);
     app.set_grid_scroll_y(viewport_geometry.1);
+}
+
+#[cfg(test)]
+mod tail_tests {
+    use super::*;
+
+    fn window(first_row: u32, first_col: u32) -> SheetViewport {
+        SheetViewport {
+            first_row,
+            first_col,
+            visible_rows: 24,
+            visible_cols: 10,
+        }
+    }
+
+    #[test]
+    fn scrolling_near_the_end_adds_rows_and_columns() {
+        let grown = grown_dimensions(SheetDimensions::new(60, 20), window(40, 12));
+        assert_eq!((grown.rows, grown.cols), (40 + 24 + 30, 12 + 10 + 12));
+    }
+
+    #[test]
+    fn a_window_well_inside_the_sheet_changes_nothing() {
+        let dims = SheetDimensions::new(500, 80);
+        assert_eq!(grown_dimensions(dims, window(10, 0)), dims);
+    }
+
+    #[test]
+    fn growth_stops_at_the_sheet_limits() {
+        let grown = grown_dimensions(
+            SheetDimensions::new(MAX_GRID_ROWS, MAX_GRID_COLS),
+            window(MAX_GRID_ROWS - 24, MAX_GRID_COLS - 10),
+        );
+        assert_eq!((grown.rows, grown.cols), (MAX_GRID_ROWS, MAX_GRID_COLS));
+    }
 }

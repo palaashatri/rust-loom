@@ -498,11 +498,12 @@ fn addressable_grid_fills_window_and_keeps_legacy_minimums() {
     // A measured window fills plus scroll-ahead margin into the void.
     let dims = editor_dimensions(&sheet, a1, Some((11, 21)));
     assert_eq!((dims.cols, dims.rows), (11 + 12, 21 + 30));
-    // Used cells still dominate sparse workbooks.
+    // Used cells still dominate sparse workbooks, with the scroll-ahead margin
+    // past the last one.
     let mut big = Sheet::new("big");
     big.set_str("AZ1000", "tail");
     let big_dims = editor_dimensions(&big, a1, Some((11, 21)));
-    assert_eq!((big_dims.rows, big_dims.cols), (1_000, 52));
+    assert_eq!((big_dims.rows, big_dims.cols), (1_000 + 30, 52 + 12));
 }
 
 #[test]
