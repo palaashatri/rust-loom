@@ -2388,36 +2388,35 @@ fn apply_capture_seeds(document: &mut WriterDocument, args: &Args) {
             let _ = document.add_comment_thread(block.id, 0, len, body);
         }
     }
-    if args.table {
-        if document
+    if args.table
+        && document
             .insert_table_block(
                 usize::MAX,
                 loom_writer_core::INSERT_ROWS,
                 loom_writer_core::INSERT_COLUMNS,
             )
             .is_ok()
+    {
+        // Populate sample cells so captures demonstrate cell text
+        // rendering, not just the empty skeleton.
+        if let Some(block) = document
+            .blocks
+            .iter_mut()
+            .rev()
+            .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
         {
-            // Populate sample cells so captures demonstrate cell text
-            // rendering, not just the empty skeleton.
-            if let Some(block) = document
-                .blocks
-                .iter_mut()
-                .rev()
-                .find(|block| block.kind == loom_writer_core::TABLE_BLOCK_KIND)
-            {
-                let mut table = loom_writer_core::parse_table_markdown(block.text.as_str());
-                let sample = [
-                    ["Region", "Sessions", "Change"],
-                    ["North", "1,204", "+8.1%"],
-                    ["South", "987", "+5.4%"],
-                ];
-                for (row, values) in sample.iter().enumerate() {
-                    for (column, value) in values.iter().enumerate() {
-                        table.set(row, column, *value);
-                    }
+            let mut table = loom_writer_core::parse_table_markdown(block.text.as_str());
+            let sample = [
+                ["Region", "Sessions", "Change"],
+                ["North", "1,204", "+8.1%"],
+                ["South", "987", "+5.4%"],
+            ];
+            for (row, values) in sample.iter().enumerate() {
+                for (column, value) in values.iter().enumerate() {
+                    table.set(row, column, *value);
                 }
-                block.text = Text::from_str(&table.to_markdown());
             }
+            block.text = Text::from_str(&table.to_markdown());
         }
     }
 }
@@ -4626,8 +4625,8 @@ fn wire_palette(app: &WriterApp) {
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]
-mod review_tests;
-#[cfg(test)]
 mod audit_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod review_tests;
