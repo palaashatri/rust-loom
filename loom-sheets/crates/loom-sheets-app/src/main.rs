@@ -1911,6 +1911,17 @@ impl GuiState {
         self.dirty_content.set(false);
     }
 
+    /// Recovered contents exist only in the recovery store, so they get no saved
+    /// baseline: every later dirty recheck keeps the workbook unsaved.
+    pub(crate) fn set_startup_baseline(&self, recovered_unsaved: bool) {
+        if recovered_unsaved {
+            *self.last_saved.borrow_mut() = None;
+            self.mark_content_dirty();
+        } else {
+            self.mark_saved();
+        }
+    }
+
     pub(crate) fn clear_dirty(&self) {
         self.dirty_content.set(false);
     }
@@ -2486,10 +2497,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let initial_generation = state.open_operations.borrow().document_generation();
     worker_failure::mark_full_resync_accepted(&state, initial_generation, initial_revision);
     state.install_workbook(initial_model.sheets, initial_model.active_sheet);
-    state.mark_saved();
-    if recovered_unsaved && startup_open.is_none() {
-        state.mark_content_dirty();
-    }
+    state.set_startup_baseline(recovered_unsaved && startup_open.is_none());
     *state.workbook_worker.borrow_mut() = Some(worker);
     if args.objects && startup_open.is_none() {
         app.set_selected_object(0);

@@ -167,3 +167,19 @@ fn dirty_title_marker_tracks_active_sheet_without_serializing_workbook() {
     *state.active_sheet_index.borrow_mut() = 0;
     assert!(!state.is_dirty());
 }
+
+#[test]
+fn a_recovered_workbook_stays_unsaved_through_dirty_rechecks() {
+    let state = cross_sheet_state();
+    state.set_startup_baseline(true);
+    assert!(state.is_dirty());
+    // Startup, undo and redo all recheck against the saved baseline; a
+    // recovered workbook has none, so none of them may report it clean.
+    state.recompute_dirty_from_saved();
+    assert!(state.is_dirty());
+
+    let fresh = cross_sheet_state();
+    fresh.set_startup_baseline(false);
+    fresh.recompute_dirty_from_saved();
+    assert!(!fresh.is_dirty());
+}
