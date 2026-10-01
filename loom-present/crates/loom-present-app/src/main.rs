@@ -1610,6 +1610,7 @@ fn request_deck_replacement(
     }
     state.pending_replacement.set(Some(operation));
     app.set_save_changes_document(state.session.borrow().document.title.as_str().into());
+    app.set_save_changes_closing(operation == PendingReplacement::CloseWindow);
     app.set_save_changes_open(true);
     set_status(app, "Unsaved changes — choose Save, Discard, or Cancel");
     true

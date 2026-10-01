@@ -88,6 +88,7 @@ export component WriterApp inherits Window {
     in-out property <bool> document-dirty: false;
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
+    in-out property <bool> save-changes-closing: false;
 
     in-out property <bool> is-bold: false;
     in-out property <bool> is-italic: false;
@@ -599,7 +600,7 @@ export component WriterApp inherits Window {
                     color: Theme.palette().ink;
                 }
                 Text {
-                    text: "Save changes to \"" + root.save-changes-document + "\" before replacing it?";
+                    text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?";
                     font-size: Theme.tokens.typography.body;
                     color: Theme.palette().ink-secondary;
                     wrap: word-wrap;

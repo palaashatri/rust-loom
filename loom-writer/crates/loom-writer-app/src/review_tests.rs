@@ -568,3 +568,25 @@ fn a_recovered_draft_reads_as_unsaved_but_a_fresh_start_does_not() {
         &template_document(TemplateId::Report)
     ));
 }
+
+#[test]
+fn the_save_prompt_says_closing_only_when_the_window_is_closing() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("Saved text"), dialogs);
+    state.current.borrow_mut().replace_paragraphs("Edited text");
+    assert!(document_is_dirty(&state));
+
+    assert!(request_document_replacement(
+        &app,
+        &state,
+        PendingReplacement::NewDocument
+    ));
+    assert!(!app.get_save_changes_closing(), "New says replacing");
+
+    assert!(request_document_replacement(
+        &app,
+        &state,
+        PendingReplacement::CloseWindow
+    ));
+    assert!(app.get_save_changes_closing(), "closing says closing");
+}

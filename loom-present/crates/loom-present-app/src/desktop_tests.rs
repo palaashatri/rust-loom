@@ -1254,3 +1254,30 @@ fn a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not() {
         "unreadable recovery data falls back to the sample"
     );
 }
+
+#[test]
+fn the_save_prompt_says_closing_only_when_the_window_is_closing() {
+    set_platform();
+    let app = PresentApp::new().expect("create PresentApp");
+    let state = test_state();
+    state
+        .session
+        .borrow_mut()
+        .document
+        .add_slide("Unsaved", "content");
+    assert!(deck_is_dirty(&state));
+
+    assert!(request_deck_replacement(
+        &app,
+        &state,
+        PendingReplacement::NewDeck
+    ));
+    assert!(!app.get_save_changes_closing(), "New says replacing");
+
+    assert!(request_deck_replacement(
+        &app,
+        &state,
+        PendingReplacement::CloseWindow
+    ));
+    assert!(app.get_save_changes_closing(), "closing says closing");
+}

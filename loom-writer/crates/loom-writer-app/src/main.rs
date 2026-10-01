@@ -2531,6 +2531,7 @@ fn request_document_replacement(
     state.pending_replacement.set(Some(operation));
     let title = state.current.borrow().title.clone();
     app.set_save_changes_document(SharedString::from(title));
+    app.set_save_changes_closing(operation == PendingReplacement::CloseWindow);
     app.set_save_changes_open(true);
     app.set_status_left("Unsaved changes — choose Save, Discard, or Cancel".into());
     true

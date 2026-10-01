@@ -101,6 +101,7 @@ export component PresentApp inherits Window {
     in property <string> status-right: "Offline";
     in-out property <bool> save-changes-open: false;
     in-out property <string> save-changes-document: "";
+    in-out property <bool> save-changes-closing: false;
 
     in-out property <string> slide-notes: "";
     in-out property <bool> show-notes-drawer: false;
@@ -588,7 +589,7 @@ export component PresentApp inherits Window {
         Rectangle { width: min(440px, root.width - 48px); height: 210px; x: (root.width - self.width)/2; y: (root.height - self.height)/2; background: Theme.palette().surface; border-width: 1px; border-color: Theme.palette().border; border-radius: 12px;
             VerticalLayout { padding: 24px; spacing: 12px;
                 Text { text: "Save changes?"; font-size: 22px; color: Theme.palette().ink; }
-                Text { text: "Save changes to \"" + root.save-changes-document + "\" before replacing it?"; color: Theme.palette().ink-secondary; wrap: word-wrap; vertical-stretch: 1; }
+                Text { text: "Save changes to \"" + root.save-changes-document + "\" before " + (root.save-changes-closing ? "closing" : "replacing it") + "?"; color: Theme.palette().ink-secondary; wrap: word-wrap; vertical-stretch: 1; }
                 HorizontalLayout { alignment: end; spacing: 8px;
                     LoomButton { label: "Cancel"; variant: "secondary"; clicked => { root.save-changes-cancel(); } }
                     LoomButton { label: "Discard"; variant: "danger"; clicked => { root.save-changes-discard(); } }
