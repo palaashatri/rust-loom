@@ -18,6 +18,7 @@ mod export;
 mod page_setup;
 mod style_json;
 mod tables;
+mod text_metrics;
 
 pub use export::{export_document_as_docx, export_pdf};
 pub use page_setup::PageSetup;
@@ -26,6 +27,7 @@ use style_json::{
     runs_json, selection_json,
 };
 pub use tables::{parse_table_markdown, INSERT_COLUMNS, INSERT_ROWS, TABLE_BLOCK_KIND};
+pub use text_metrics::{offset_at_x, text_advance};
 
 /// Stable document id.
 pub type DocId = String;
@@ -3562,10 +3564,8 @@ impl WriterDocument {
             // columns to every block) prevents long headings from producing
             // fragments that the renderer cannot fit on the page.
             let font_size = style.font_size_for_kind(block.kind.as_str());
-            let average_glyph_width = font_size * 0.52;
-            let columns = (usable_width / average_glyph_width).floor().max(1.0) as usize;
             let line_height = font_size * style.line_height;
-            let ranges = wrap_utf8_ranges(text, columns);
+            let ranges = text_metrics::wrap_by_width(text, &block.runs, font_size, usable_width);
             for (start, end) in ranges {
                 if !pages.last().is_some_and(|page| page.fragments.is_empty())
                     && height_used + line_height > usable_height + f32::EPSILON
@@ -3655,13 +3655,13 @@ impl WriterDocument {
                 let font_size = block
                     .map(|block| style.font_size_for_kind(block.kind.as_str()))
                     .unwrap_or(style.body_font_size_pt);
-                let glyph_width = font_size * 0.52 * zoom;
                 let line_height = font_size * style.line_height * zoom;
-                let character_count = source.text.graphemes(true).count();
+                let runs = block.map_or(&[][..], |block| block.runs.as_slice());
+                let line_width = text_advance(&source.text, source.start, runs, font_size) * zoom;
                 let fragment_bounds = PageRect {
                     x: content_x,
                     y: line_y,
-                    width: character_count as f32 * glyph_width,
+                    width: line_width,
                     height: line_height,
                 };
                 fragments.push(LayoutFragment {
@@ -3787,11 +3787,9 @@ impl WriterDocument {
                     continue;
                 };
                 let block = &self.blocks[block_index];
-                let fragment_graphemes = source.text.graphemes(true).count();
-                let glyph_width = if fragment_graphemes > 0 {
-                    fragment.bounds.width / fragment_graphemes as f32
-                } else {
-                    style.body_font_size_pt * 0.52 * zoom
+                let font_size = style.font_size_for_kind(block.kind.as_str());
+                let advance = |text: &str, start: usize| {
+                    text_advance(text, start, &block.runs, font_size) * zoom
                 };
                 let available_width =
                     (style.width_pt - style.margin_left_pt - style.margin_right_pt).max(1.0) * zoom;
@@ -3816,8 +3814,8 @@ impl WriterDocument {
                     let prefix = &source.text[..local_start.min(source.text.len())];
                     let selected = &source.text
                         [local_start.min(source.text.len())..local_end.min(source.text.len())];
-                    let x = fragment_x + prefix.graphemes(true).count() as f32 * glyph_width;
-                    let width = selected.graphemes(true).count() as f32 * glyph_width;
+                    let x = fragment_x + advance(prefix, source.start);
+                    let width = advance(selected, source.start + local_start);
                     result.push(SelectionRect {
                         page_index: page.index,
                         block_id: source.block_id,
@@ -3854,7 +3852,7 @@ impl WriterDocument {
                             start: source.start + local,
                             end: source.start + local,
                             rect: PageRect {
-                                x: fragment_x + prefix.graphemes(true).count() as f32 * glyph_width,
+                                x: fragment_x + advance(prefix, source.start),
                                 y: fragment.bounds.y,
                                 width: 1.0,
                                 height: fragment.bounds.height,
@@ -3867,46 +3865,6 @@ impl WriterDocument {
         }
         result
     }
-}
-
-fn wrap_utf8_ranges(text: &str, columns: usize) -> Vec<(usize, usize)> {
-    if text.is_empty() {
-        return vec![(0, 0)];
-    }
-    let mut ranges = Vec::new();
-    let mut line_start = 0usize;
-    let mut last_break = None;
-    let mut graphemes = 0usize;
-    for (index, grapheme) in text.grapheme_indices(true) {
-        if grapheme == "\n" {
-            // Hard line breaks close the current rendered line immediately
-            // (table blocks carry multi-line markdown).
-            ranges.push((line_start, index + 1));
-            line_start = index + 1;
-            graphemes = 0;
-            last_break = None;
-            continue;
-        }
-        graphemes += 1;
-        if grapheme.chars().any(char::is_whitespace) {
-            last_break = Some(index + grapheme.len());
-        }
-        if graphemes >= columns {
-            let end = last_break
-                .filter(|break_at| *break_at > line_start)
-                .unwrap_or(index + grapheme.len());
-            ranges.push((line_start, end));
-            line_start = end;
-            graphemes = text[line_start..index + grapheme.len()]
-                .graphemes(true)
-                .count();
-            last_break = None;
-        }
-    }
-    if line_start < text.len() {
-        ranges.push((line_start, text.len()));
-    }
-    ranges
 }
 
 /// A mail merge template containing `{{field}}` merge placeholders.

@@ -11,6 +11,7 @@
 
 mod document_formatting;
 mod local_menu;
+mod multi_click;
 mod recovery;
 mod window_chrome;
 
@@ -40,8 +41,8 @@ use loom_desktop::{
 use loom_test_support::capture::{set_platform, snapshot_component};
 use loom_test_support::journey::{record_keyboard_palette_journey, PaletteProbe};
 use loom_writer_core::{
-    floor_grapheme_boundary, grapheme_boundaries, grapheme_count, PageStyle, PageViewport,
-    RichBlock, Text, TextSelection, WriterDocument,
+    floor_grapheme_boundary, grapheme_count, PageStyle, PageViewport, RichBlock, Text,
+    TextSelection, WriterDocument,
 };
 use slint::{ComponentHandle, Model, PhysicalSize, SharedString, VecModel};
 
@@ -1840,7 +1841,6 @@ fn writer_pointer_offset(
             .position(|block| block.id == fragment.block_id)?;
         let block = &doc.blocks[block_index];
         let font_size = style.font_size_for_kind(block.kind.as_str());
-        let glyph_width = (font_size * 0.52).max(f32::EPSILON);
         let fragment_y = fragment.bounds.y - base_page.y - style.margin_top_pt;
         let fragment_height = fragment.bounds.height;
         let distance = if local_y < fragment_y {
@@ -1858,14 +1858,13 @@ fn writer_pointer_offset(
             loom_text::Alignment::Left | loom_text::Alignment::Justify => 0.0,
         };
         let fragment_x = fragment.bounds.x - base_page.x - style.margin_left_pt + alignment_offset;
-        let text_boundaries = grapheme_boundaries(&fragment.text);
-        let grapheme_count = text_boundaries.len().saturating_sub(1);
-        let relative_x = ((local_x - fragment_x) / glyph_width).clamp(0.0, grapheme_count as f32);
-        let grapheme_index = relative_x.round() as usize;
-        let local_byte = text_boundaries
-            .get(grapheme_index.min(grapheme_count))
-            .copied()
-            .unwrap_or(fragment.text.len());
+        let local_byte = loom_writer_core::offset_at_x(
+            &fragment.text,
+            fragment.start,
+            &block.runs,
+            font_size,
+            local_x - fragment_x,
+        );
         let offset = block_starts[block_index] + fragment.start + local_byte;
         if distance <= f32::EPSILON {
             return Some(offset);
@@ -3054,6 +3053,27 @@ fn wire_writer_shared_callbacks(
                     state.pointer_anchor.set(None);
                     return;
                 };
+                let clicks = if extend {
+                    1
+                } else {
+                    multi_click::register_press(x, y)
+                };
+                if clicks >= 2 {
+                    let text = current.editor_text();
+                    let (start, end) = if clicks == 2 {
+                        multi_click::word_range(&text, offset)
+                    } else {
+                        multi_click::paragraph_range(&text, offset)
+                    };
+                    drop(current);
+                    state.pointer_active.set(false);
+                    state.pointer_anchor.set(None);
+                    app.invoke_selection_changed(
+                        start.min(i32::MAX as usize) as i32,
+                        end.min(i32::MAX as usize) as i32,
+                    );
+                    return;
+                }
                 let anchor = if extend {
                     current.selection().anchor
                 } else {

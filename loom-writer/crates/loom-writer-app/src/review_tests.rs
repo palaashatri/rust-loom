@@ -590,3 +590,117 @@ fn the_save_prompt_says_closing_only_when_the_window_is_closing() {
     ));
     assert!(app.get_save_changes_closing(), "closing says closing");
 }
+
+#[test]
+fn a_caret_drawn_at_an_offset_is_hit_at_the_same_offset() {
+    use loom_text::{CharacterStyle, FontWeight, StyleRun};
+
+    // Headings, wrapped body text and a bold run: the cases where layout,
+    // selection geometry and hit-testing used to disagree about glyph widths.
+    let mut document = WriterDocument::new("hit", "Hit");
+    document.replace_paragraphs(
+        "Heading words here\nWrite, format, and export documents. Your files stay on your computer as open loomdoc packages, and nothing is uploaded.\nSecond paragraph with more text, punctuation; and numbers 12345.",
+    );
+    document.blocks[0].kind = "heading1".into();
+    document.blocks[1].runs.push(StyleRun {
+        start: 7,
+        end: 36,
+        style: CharacterStyle {
+            weight: FontWeight::Bold,
+            ..Default::default()
+        },
+    });
+
+    let style = document.page.page_style();
+    let viewport = PageViewport {
+        width: style.width_pt,
+        height: style.height_pt,
+        zoom: 1.0,
+        scroll_x: 0.0,
+        scroll_y: 0.0,
+    };
+    let length = document.editor_text().len();
+    let mut checked = 0;
+    for offset in 0..=length {
+        if !document.editor_text().is_char_boundary(offset) {
+            continue;
+        }
+        document.set_selection(TextSelection::caret(offset));
+        let layout = document.layout(&style, viewport).expect("layout");
+        let base = layout.page_bounds[0];
+        let caret = layout
+            .selection_rects
+            .iter()
+            .find(|rect| rect.start == rect.end)
+            .expect("a caret rectangle");
+        let x = caret.rect.x - base.x - style.margin_left_pt;
+        let y = caret.rect.y - base.y - style.margin_top_pt + caret.rect.height / 2.0;
+        assert_eq!(
+            writer_pointer_offset(&document, viewport, x, y),
+            Some(offset),
+            "a click on the caret drawn at offset {offset} must land on offset {offset}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 150,
+        "the whole text was exercised ({checked} offsets)"
+    );
+}
+
+#[test]
+fn double_and_triple_clicks_on_the_page_select_a_word_and_a_paragraph() {
+    let dialogs = Rc::new(loom_desktop::ScriptedFileDialogs::new([], [None]));
+    let (app, state) = test_state(text_document("Alpha beta gamma\nSecond paragraph"), dialogs);
+    wire_writer_shared_callbacks(&app, &state, None);
+
+    // Where the page draws the middle of "beta" (editor offset 8), as the
+    // pointer sees it: relative to the content area.
+    let (x, y) = {
+        let mut document = state.current.borrow().clone();
+        let style = document.page.page_style();
+        let viewport = PageViewport {
+            width: style.width_pt,
+            height: style.height_pt,
+            zoom: 1.0,
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        };
+        document.set_selection(TextSelection::caret(8));
+        let layout = document.layout(&style, viewport).expect("layout");
+        let base = layout.page_bounds[0];
+        let caret = layout
+            .selection_rects
+            .iter()
+            .find(|rect| rect.start == rect.end)
+            .expect("caret rectangle");
+        (
+            caret.rect.x - base.x - style.margin_left_pt,
+            caret.rect.y - base.y - style.margin_top_pt + caret.rect.height / 2.0,
+        )
+    };
+    let selection = || {
+        let current = state.current.borrow();
+        let selection = current.selection();
+        (
+            selection.anchor.min(selection.focus),
+            selection.anchor.max(selection.focus),
+        )
+    };
+
+    app.invoke_pointer_pressed(x, y, false);
+    app.invoke_pointer_released(x, y);
+    assert_eq!(selection(), (8, 8), "one click places the caret");
+
+    app.invoke_pointer_pressed(x, y, false);
+    app.invoke_pointer_released(x, y);
+    assert_eq!(
+        selection(),
+        (6, 10),
+        "a second click selects the word \"beta\""
+    );
+
+    app.invoke_pointer_pressed(x, y, false);
+    app.invoke_pointer_released(x, y);
+    assert_eq!(selection(), (0, 16), "a third click selects the paragraph");
+}

@@ -2,7 +2,8 @@ use super::*;
 use loom_desktop::CommandState;
 use loom_text::{CharacterStyle, FontWeight, StyleRun};
 use loom_writer_core::{
-    load_document, save_document, PageStyle, PageViewport, RichBlock, TextSelection, WriterDocument,
+    grapheme_boundaries, load_document, save_document, PageStyle, PageViewport, RichBlock,
+    TextSelection, WriterDocument,
 };
 
 fn test_audit_doc() -> WriterDocument {
