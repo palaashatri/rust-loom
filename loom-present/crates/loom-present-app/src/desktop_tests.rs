@@ -1220,3 +1220,37 @@ fn presenter_view_follows_the_deck_and_drives_navigation() {
     );
     presenter::forget();
 }
+
+#[test]
+fn a_recovered_deck_reads_as_unsaved_but_a_fresh_start_does_not() {
+    let (fresh, baseline) = startup_sessions(None, None).expect("fresh start");
+    assert!(
+        presentation_documents_match(&fresh.document, &baseline.document),
+        "fresh start is clean"
+    );
+
+    let mut draft = sample_session();
+    draft
+        .document
+        .add_slide("Added before the crash", "content");
+    let bytes = save_presentation_session(&draft).expect("serialize draft");
+    let (restored, baseline) = startup_sessions(Some(&bytes), None).expect("recovered start");
+    assert!(
+        presentation_documents_match(&restored.document, &draft.document),
+        "the draft is what opens"
+    );
+    assert!(
+        !presentation_documents_match(&restored.document, &baseline.document),
+        "a recovered deck must read as unsaved, so closing asks first"
+    );
+    assert!(
+        presentation_documents_match(&baseline.document, &sample_session().document),
+        "the baseline is what a start without recovery would show"
+    );
+
+    let (_, baseline) = startup_sessions(Some(b"not a deck"), None).expect("corrupt recovery");
+    assert!(
+        presentation_documents_match(&baseline.document, &sample_session().document),
+        "unreadable recovery data falls back to the sample"
+    );
+}

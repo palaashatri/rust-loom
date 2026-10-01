@@ -2477,8 +2477,17 @@ fn wire_close_guard(app: &WriterApp, state: &Rc<GuiState>) {
                 return slint::CloseRequestResponse::KeepWindowShown;
             }
         }
+        end_session_recovery();
         slint::CloseRequestResponse::HideWindow
     });
+}
+
+/// The window is really closing: drop the recovery data so it is not offered
+/// again. A failure only costs a stale draft, so it is reported, not fatal.
+fn end_session_recovery() {
+    if let Err(error) = recovery::discard_document_recovery() {
+        eprintln!("Writer could not clear its recovery data: {error}");
+    }
 }
 
 fn begin_new_document(app: &WriterApp) {
@@ -2538,6 +2547,7 @@ fn continue_pending_replacement(
             open_document_from_picker(app, state, &Some(menu_service.clone()))
         }
         Some(PendingReplacement::CloseWindow) => {
+            end_session_recovery();
             let _ = slint::ComponentHandle::hide(app);
         }
         None => {}
@@ -3391,6 +3401,29 @@ fn wire_writer_inspector_toggle(
     });
 }
 
+/// The document to show at startup and the snapshot "saved" is compared with.
+///
+/// A recovered draft was never saved, so its baseline is what the window would
+/// have shown without recovery (the requested file, the template, or the
+/// sample). The draft then reads as unsaved and closing it asks first; using
+/// the draft itself as the baseline would make restored work look clean.
+fn startup_documents(
+    recovered: Option<WriterDocument>,
+    open: Option<&str>,
+    template: Option<TemplateId>,
+) -> Result<(WriterDocument, WriterDocument), String> {
+    let fresh = match open {
+        Some(path) => load_file(Path::new(path))?,
+        None => template
+            .map(template_document)
+            .unwrap_or_else(sample_document),
+    };
+    Ok(match recovered {
+        Some(draft) => (draft, fresh),
+        None => (fresh.clone(), fresh),
+    })
+}
+
 fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Result<(), String> {
     let app = WriterApp::new().map_err(|e| e.to_string())?;
     window_chrome::install(&app);
@@ -3409,17 +3442,8 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     // Build the document once; both the GUI state and the initial registry
     // enablement are derived from this single loaded instance.
-    let initial_document = if let Some(document) = recovered.clone() {
-        document
-    } else {
-        match &args.open {
-            Some(p) => load_file(Path::new(p))?,
-            None => args
-                .template
-                .map(template_document)
-                .unwrap_or_else(sample_document),
-        }
-    };
+    let (initial_document, initial_saved_document) =
+        startup_documents(recovered.clone(), args.open.as_deref(), args.template)?;
     let mut initial_registry = build_writer_registry();
     {
         let provisional_history = EditorHistory::new();
@@ -3429,7 +3453,6 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
             &provisional_history,
         );
     }
-    let initial_saved_document = initial_document.clone();
     let state = Rc::new(GuiState {
         current: RefCell::new(initial_document),
         last_saved: RefCell::new(initial_saved_document),

@@ -32,3 +32,13 @@ pub(super) fn checkpoint_document(document: &WriterDocument) -> Result<(), Strin
         .map_err(|error| format!("could not prepare recovery checkpoint: {error}"))?;
     checkpoint_snapshot_recovery(payload)
 }
+
+/// Forget the recovery data when the user deliberately closes the document
+/// (clean, saved or discarded). A crash leaves it in place for the next launch;
+/// an intentional close must not, or a discarded draft comes back every time.
+pub(super) fn discard_document_recovery() -> Result<(), String> {
+    LOOM_SNAPSHOT_RECOVERY.with(|slot| match slot.borrow_mut().take() {
+        Some(recovery) => recovery.clear().map_err(|error| error.to_string()),
+        None => Ok(()),
+    })
+}

@@ -327,3 +327,63 @@ fn invalid_command_line_open_keeps_startup_errors_clear() {
     .success());
     std::fs::remove_dir_all(root).expect("remove isolated test data");
 }
+
+#[test]
+fn an_intentional_close_clears_recovery_but_a_crash_does_not() {
+    use std::thread;
+
+    let root = isolated_root();
+    let previous = std::env::var_os(STATE_HOME_ENV);
+    std::env::set_var(STATE_HOME_ENV, root.join("state"));
+
+    let session = |work: fn() -> Option<String>| thread::spawn(work).join().expect("session ran");
+    fn first_text(document: &WriterDocument) -> String {
+        document
+            .blocks
+            .first()
+            .map(|b| b.text.as_str().to_string())
+            .unwrap_or_default()
+    }
+
+    // Session 1 types a draft and then dies without closing: the slot is simply
+    // dropped, as in a crash.
+    let first = session(|| {
+        assert!(recovery::initialize_editing_session(false)
+            .expect("start")
+            .is_none());
+        let mut draft = WriterDocument::new("draft", "Draft");
+        draft.replace_paragraphs("typed before the crash");
+        recovery::record_document(&draft).expect("record");
+        None
+    });
+    assert!(first.is_none());
+
+    // Session 2 is offered the draft, then the user closes deliberately.
+    let second = session(|| {
+        let restored = recovery::initialize_editing_session(false).expect("restart");
+        recovery::discard_document_recovery().expect("clear on close");
+        restored.map(|document| first_text(&document))
+    });
+    assert_eq!(
+        second.as_deref(),
+        Some("typed before the crash"),
+        "a crash keeps the draft"
+    );
+
+    // Session 3 starts clean: the discarded draft does not come back.
+    let third = session(|| {
+        recovery::initialize_editing_session(false)
+            .expect("start again")
+            .map(|document| first_text(&document))
+    });
+    assert_eq!(
+        third, None,
+        "an intentional close must not resurrect the draft"
+    );
+
+    match previous {
+        Some(value) => std::env::set_var(STATE_HOME_ENV, value),
+        None => std::env::remove_var(STATE_HOME_ENV),
+    }
+    let _ = std::fs::remove_dir_all(root);
+}

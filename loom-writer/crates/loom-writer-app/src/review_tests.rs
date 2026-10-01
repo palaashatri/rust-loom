@@ -534,3 +534,37 @@ fn successful_save_clears_the_unsaved_marker() {
     assert!(!app.get_document_dirty(), "a saved document is not dirty");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn a_recovered_draft_reads_as_unsaved_but_a_fresh_start_does_not() {
+    // Nothing recovered: the sample is both the document and the baseline.
+    let (document, saved) = startup_documents(None, None, None).expect("fresh start");
+    assert!(document_content_equal(&document, &saved));
+
+    // Recovered text that differs from the baseline is unsaved work.
+    let mut draft = sample_document();
+    draft.replace_paragraphs("Words that only exist in a recovered draft");
+    let (document, saved) =
+        startup_documents(Some(draft.clone()), None, None).expect("recovered start");
+    assert!(
+        document_content_equal(&document, &draft),
+        "the draft is what opens"
+    );
+    assert!(
+        !document_content_equal(&document, &saved),
+        "a recovered draft must read as unsaved, so closing asks first"
+    );
+
+    // A recovered draft identical to the baseline has nothing to lose.
+    let (document, saved) =
+        startup_documents(Some(sample_document()), None, None).expect("identical draft");
+    assert!(document_content_equal(&document, &saved));
+
+    // The baseline follows the requested template, not always the sample.
+    let (_, report_saved) =
+        startup_documents(Some(draft), None, Some(TemplateId::Report)).expect("template baseline");
+    assert!(document_content_equal(
+        &report_saved,
+        &template_document(TemplateId::Report)
+    ));
+}

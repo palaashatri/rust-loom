@@ -198,6 +198,29 @@ fn initial_session(args: &Args) -> Result<PresentationSession, String> {
     }
 }
 
+/// The deck to show at startup and the snapshot "saved" is compared with.
+///
+/// A recovered deck was never saved, so it is compared with the deck the window
+/// would have opened without recovery: it then reads as unsaved and closing asks
+/// first. Using the recovered deck as its own baseline made restored work look
+/// clean. A requested file wins over recovery and is its own baseline.
+fn startup_sessions(
+    recovered: Option<&[u8]>,
+    open: Option<&Path>,
+) -> Result<(PresentationSession, PresentationSession), String> {
+    if let Some(path) = open {
+        let session = load_session(path)?;
+        return Ok((session.clone(), session));
+    }
+    let fresh = sample_session();
+    Ok(
+        match recovered.and_then(|bytes| load_presentation_session(bytes).ok()) {
+            Some(draft) => (draft, fresh),
+            None => (fresh.clone(), fresh),
+        },
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum HandleKind {
     #[default]
@@ -1344,21 +1367,15 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     let inspector_available = configure_responsive_layout(&app, args.size);
     let recovered = initialize_snapshot_recovery()?;
     let initial_path = args.open.as_ref().map(PathBuf::from);
-    let initial = if let Some(path) = initial_path.as_deref() {
-        load_session(path)?
-    } else {
-        recovered
-            .as_deref()
-            .and_then(|bytes| load_presentation_session(bytes).ok())
-            .unwrap_or_else(sample_session)
-    };
+    let (initial, saved_baseline) =
+        startup_sessions(recovered.as_deref(), initial_path.as_deref())?;
     let deck_filter =
         FileFilter::new("Loom Present deck", ["loomdeck"]).map_err(|error| error.to_string())?;
     let pdf_filter = FileFilter::new("PDF document", ["pdf"]).map_err(|error| error.to_string())?;
     let menu_service = Rc::new(NativeMenuBar::new());
     let state = Rc::new(GuiState {
-        last_saved: RefCell::new(initial.document.clone()),
-        last_saved_transitions: RefCell::new(initial.transitions.clone()),
+        last_saved: RefCell::new(saved_baseline.document),
+        last_saved_transitions: RefCell::new(saved_baseline.transitions),
         session: RefCell::new(initial),
         pending_replacement: Cell::new(None),
         selected_element: Cell::new(0),
@@ -1612,8 +1629,21 @@ fn wire_close_guard(app: &PresentApp, state: &Rc<GuiState>) {
         }
         // The presenter window must not keep the process alive after the deck closes.
         presenter::close();
+        end_session_recovery();
         slint::CloseRequestResponse::HideWindow
     });
+}
+
+/// The window is really closing: drop the recovery data so a discarded or saved
+/// deck is not offered again. A crash never reaches here, so it stays recoverable.
+fn end_session_recovery() {
+    let cleared = PRESENT_RECOVERY.with(|slot| match slot.borrow_mut().take() {
+        Some(recovery) => recovery.clear().map_err(|error| error.to_string()),
+        None => Ok(()),
+    });
+    if let Err(error) = cleared {
+        eprintln!("Present could not clear its recovery data: {error}");
+    }
 }
 
 fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
@@ -1622,6 +1652,7 @@ fn continue_deck_replacement(app: &PresentApp, state: &Rc<GuiState>) {
         Some(PendingReplacement::OpenDeck) => open_deck_from_picker(app, state),
         Some(PendingReplacement::CloseWindow) => {
             presenter::close();
+            end_session_recovery();
             let _ = slint::ComponentHandle::hide(app);
         }
         None => {}
