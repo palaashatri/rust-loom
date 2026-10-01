@@ -177,4 +177,34 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn export_pdf_keeps_headings_bold_and_accents_readable() {
+        let mut document = WriterDocument::new("export-fonts", "Fonts");
+        document.push(RichBlock::new(
+            document.next_id(),
+            "heading1",
+            "Caf\u{e9} menu",
+        ));
+        document.push(RichBlock::new(
+            document.next_id(),
+            "paragraph",
+            "It\u{2019}s a plain body line.",
+        ));
+
+        let pdf = export_pdf(&document);
+        let text: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        assert!(
+            text.contains("/F2 ") && text.contains("Tf BT") && text.contains("(Caf\u{e9} menu)"),
+            "heading must be a single WinAnsi byte string in the bold face"
+        );
+        assert!(
+            text.contains("/F1 ") && text.contains("(It\u{92}s a plain body line.)"),
+            "body keeps the regular face and a WinAnsi apostrophe"
+        );
+        assert!(
+            !text.contains('\u{c3}'),
+            "no UTF-8 lead byte may reach the PDF"
+        );
+    }
 }
