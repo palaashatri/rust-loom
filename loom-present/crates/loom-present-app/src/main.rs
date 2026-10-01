@@ -4,6 +4,7 @@
     windows_subsystem = "windows"
 )]
 
+use model_sync::synced;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -611,64 +612,72 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
                 })
             })
             .collect::<Vec<_>>();
-        app.set_element_labels(ModelRc::new(VecModel::from(labels)));
-        app.set_element_contents(ModelRc::new(VecModel::from(
+        app.set_element_labels(synced(app.get_element_labels(), labels));
+        app.set_element_contents(synced(
+            app.get_element_contents(),
             slide
                 .elements
                 .iter()
                 .map(|element| SharedString::from(element.content.as_str()))
                 .collect::<Vec<_>>(),
-        )));
-        app.set_element_xs(ModelRc::new(VecModel::from(
+        ));
+        app.set_element_xs(synced(
+            app.get_element_xs(),
             slide
                 .elements
                 .iter()
                 .map(|element| element.x)
                 .collect::<Vec<_>>(),
-        )));
-        app.set_element_ys(ModelRc::new(VecModel::from(
+        ));
+        app.set_element_ys(synced(
+            app.get_element_ys(),
             slide
                 .elements
                 .iter()
                 .map(|element| element.y)
                 .collect::<Vec<_>>(),
-        )));
-        app.set_element_widths(ModelRc::new(VecModel::from(
+        ));
+        app.set_element_widths(synced(
+            app.get_element_widths(),
             slide
                 .elements
                 .iter()
                 .map(|element| element.width)
                 .collect::<Vec<_>>(),
-        )));
-        app.set_element_heights(ModelRc::new(VecModel::from(
+        ));
+        app.set_element_heights(synced(
+            app.get_element_heights(),
             slide
                 .elements
                 .iter()
                 .map(|element| element.height)
                 .collect::<Vec<_>>(),
-        )));
-        app.set_element_rotations(ModelRc::new(VecModel::from(
+        ));
+        app.set_element_rotations(synced(
+            app.get_element_rotations(),
             slide
                 .elements
                 .iter()
                 .map(|element| element.rotation_deg)
                 .collect::<Vec<_>>(),
-        )));
-        app.set_element_types(ModelRc::new(VecModel::from(
+        ));
+        app.set_element_types(synced(
+            app.get_element_types(),
             slide
                 .elements
                 .iter()
                 .map(|element| element_type_index(&element.element_type))
                 .collect::<Vec<_>>(),
-        )));
+        ));
         let selected_ids = &session.selected_elements;
-        app.set_element_selected(ModelRc::new(VecModel::from(
+        app.set_element_selected(synced(
+            app.get_element_selected(),
             slide
                 .elements
                 .iter()
                 .map(|element| selected_ids.contains(&element.id))
                 .collect::<Vec<_>>(),
-        )));
+        ));
         let selected_indices = slide
             .elements
             .iter()
@@ -732,20 +741,22 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     app.set_status_left(SharedString::from(status));
     app.set_status_right(if deck_is_dirty(state) { "Edited" } else { "" }.into());
     let drag = state.drag_state.borrow();
-    app.set_snap_guides_x(ModelRc::new(VecModel::from(
+    app.set_snap_guides_x(synced(
+        app.get_snap_guides_x(),
         drag.guides
             .iter()
             .filter(|guide| guide.is_vertical)
             .map(|guide| guide.position)
             .collect::<Vec<_>>(),
-    )));
-    app.set_snap_guides_y(ModelRc::new(VecModel::from(
+    ));
+    app.set_snap_guides_y(synced(
+        app.get_snap_guides_y(),
         drag.guides
             .iter()
             .filter(|guide| !guide.is_vertical)
             .map(|guide| guide.position)
             .collect::<Vec<_>>(),
-    )));
+    ));
     app.set_marquee_x(drag.marquee_x);
     app.set_marquee_y(drag.marquee_y);
     app.set_marquee_width(drag.marquee_width);
@@ -2895,5 +2906,6 @@ mod audit_tests;
 mod desktop_tests;
 
 mod local_menu;
+mod model_sync;
 mod presenter;
 mod window_chrome;

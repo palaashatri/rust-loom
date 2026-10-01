@@ -425,6 +425,7 @@ export component PresentApp inherits Window {
                         handle-moved(idx, kind, dx, dy) => { root.handle-moved(idx, kind, dx, dy); }
                         handle-released(idx, kind) => { root.handle-released(idx, kind); }
                         handle-cancelled(idx, kind) => { root.handle-cancelled(idx, kind); }
+                        content-edited(text) => { root.update-element-content(text); }
                     }
                     }
 
