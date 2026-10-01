@@ -1,0 +1,95 @@
+import { LoomButton, LoomTextField } from "foundation.slint";
+import { Theme } from "theme.slint";
+
+/// Find and replace state shared between the window and the controller. A
+/// global keeps it out of the window's own property and callback lists.
+export global FindBar {
+    in-out property <bool> open: false;
+    in-out property <bool> show-replace: false;
+    in-out property <string> query: "";
+    in-out property <string> replacement: "";
+    in-out property <string> status: "";
+    /// Raised each time the bar is asked for, so an open bar takes focus again.
+    in-out property <int> focus-tick: 0;
+    /// Raised when the bar closes, so the page takes focus back.
+    in-out property <int> page-focus-tick: 0;
+    /// Ctrl+F (false) or Ctrl+H (true) was pressed.
+    callback open-requested(bool);
+    callback query-changed(string);
+    callback find-next;
+    callback find-previous;
+    callback close;
+    callback replace-current;
+    callback replace-all;
+}
+
+/// The find bar: a field with Previous and Next, and an optional replace row.
+export component FindBarOverlay inherits Rectangle {
+    in property <int> focus-tick: FindBar.focus-tick;
+    changed focus-tick => { query-field.focus-input(); }
+
+    width: 480px;
+    height: layout.preferred-height + 2 * Theme.tokens.space.sm;
+    background: Theme.palette().surface-raised;
+    border-width: 1px;
+    border-color: Theme.palette().border-strong;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    drop-shadow-blur: 12px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: Theme.palette().shadow;
+    accessible-role: groupbox;
+    accessible-label: "Find and replace";
+    init => { query-field.focus-input(); }
+
+    FocusScope {
+        // Escape closes the bar wherever focus is inside it.
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { FindBar.close(); return accept; }
+            return reject;
+        }
+
+    layout := VerticalLayout {
+        padding: Theme.tokens.space.sm;
+        spacing: Theme.tokens.space.xs;
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            query-field := LoomTextField {
+                label: "Find";
+                placeholder: "Find in document";
+                value <=> FindBar.query;
+                edited(text) => { FindBar.query-changed(text); }
+                accepted(text) => { FindBar.find-next(); }
+                cancelled => { FindBar.close(); }
+            }
+            Text {
+                text: FindBar.status;
+                min-width: 84px;
+                font-size: Theme.type.caption;
+                color: Theme.palette().ink-secondary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                accessible-role: text;
+                accessible-label: "Find results";
+                accessible-live-region: AccessibleLiveness.polite;
+            }
+            LoomButton { label: "Previous"; variant: "ghost"; clicked => { FindBar.find-previous(); } }
+            LoomButton { label: "Next"; variant: "ghost"; clicked => { FindBar.find-next(); } }
+            LoomButton { label: "Done"; variant: "ghost"; clicked => { FindBar.close(); } }
+        }
+
+        if FindBar.show-replace : HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            LoomTextField {
+                label: "Replace with";
+                placeholder: "Replace with";
+                value <=> FindBar.replacement;
+                accepted(text) => { FindBar.replace-current(); }
+                cancelled => { FindBar.close(); }
+            }
+            LoomButton { label: "Replace"; variant: "ghost"; clicked => { FindBar.replace-current(); } }
+            LoomButton { label: "Replace all"; variant: "ghost"; clicked => { FindBar.replace-all(); } }
+        }
+    }
+    }
+}

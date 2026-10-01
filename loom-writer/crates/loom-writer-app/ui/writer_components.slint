@@ -1,6 +1,7 @@
 import { LoomStatusBar, LoomStatusText, LoomButton } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
+import { FindBar } from "find_bar.slint";
 
 export { WriterToolbarBody, WriterActionToolbar } from "toolbar.slint";
 export { WriterInspector } from "inspector.slint";
@@ -75,6 +76,9 @@ component WriterDocumentEditor inherits Rectangle {
     accessible-placeholder-text: root.placeholder;
     accessible-action-default => { editor.focus(); }
     forward-focus: editor;
+    // Closing the find bar hands focus back to the page.
+    in property <int> find-focus-tick: FindBar.page-focus-tick;
+    changed find-focus-tick => { editor.focus(); }
 
     focus-touch := TouchArea { clicked => { editor.focus(); } }
 

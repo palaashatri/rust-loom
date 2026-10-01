@@ -1112,6 +1112,10 @@ fn every_visible_canvas_handle_in_sheets_wires_its_action() {
             include_str!("../../ui/components.slint"),
         ),
         ("ui/objects.slint", include_str!("../../ui/objects.slint")),
+        (
+            "ui/sheet_headers.slint",
+            include_str!("../../ui/sheet_headers.slint"),
+        ),
     ];
 
     let mut handles = 0usize;

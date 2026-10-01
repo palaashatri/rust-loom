@@ -5,6 +5,7 @@ import {
     LocalMenuLabels, LocalMenuEntry, LocalMenuPopup,
 } from "foundation.slint";
 import { Icon } from "icons.slint";
+import { FindBar, FindBarOverlay } from "find_bar.slint";
 import { Theme, ResponsivePolicy } from "theme.slint";
 import {
     WriterActionToolbar, WriterToolbarBody, WriterPageCanvas,
@@ -14,6 +15,7 @@ import {
 import { WriterInspector, WriterCommentEntry } from "inspector.slint";
 export { Theme, ResponsivePolicy } from "theme.slint";
 export { LocalMenuEntry } from "foundation.slint";
+export { FindBar } from "find_bar.slint";
 export { Palette as WidgetPalette } from "std-widgets.slint";
 
 export component WriterApp inherits Window {
@@ -300,6 +302,14 @@ export component WriterApp inherits Window {
                     if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
                     return accept;
                 }
+                if (event.text == "f" || event.text == "F") {
+                    FindBar.open-requested(false);
+                    return accept;
+                }
+                if (event.text == "h" || event.text == "H") {
+                    FindBar.open-requested(true);
+                    return accept;
+                }
             }
             return reject;
         }
@@ -393,6 +403,12 @@ export component WriterApp inherits Window {
                     pointer-released(x, y) => { root.pointer-released(x, y); }
                     pointer-cancelled => { root.pointer-cancelled(); }
                     key-pressed(event) => {
+                        // The text box has an undo of its own that knows nothing of formatting,
+                        // replace or table edits; the document history is the only one.
+                        if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
+                            if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                            return accept;
+                        }
                         if (event.text == Key.Tab) {
                             if (!event.modifiers.shift) { root.insert-tab(); }
                             return accept;
@@ -475,6 +491,12 @@ export component WriterApp inherits Window {
                     pointer-released(x, y) => { root.pointer-released(x, y); }
                     pointer-cancelled => { root.pointer-cancelled(); }
                     key-pressed(event) => {
+                        // The text box has an undo of its own that knows nothing of formatting,
+                        // replace or table edits; the document history is the only one.
+                        if ((event.modifiers.control || event.modifiers.meta) && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
+                            if (event.text == "y" || event.text == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                            return accept;
+                        }
                         if (event.text == Key.Tab) {
                             if (!event.modifiers.shift) { root.insert-tab(); }
                             return accept;
@@ -687,6 +709,11 @@ export component WriterApp inherits Window {
             root.palette-open = false;
             root.palette-close();
         }
+    }
+
+    if FindBar.open : FindBarOverlay {
+        x: root.width - self.width - 24px;
+        y: root.custom-chrome ? 96px : 64px;
     }
 
     LoomWindowResizeEdges {

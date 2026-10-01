@@ -11,6 +11,7 @@
 
 mod caret_scroll;
 mod document_formatting;
+mod find_bar;
 mod local_menu;
 mod multi_click;
 mod recovery;
@@ -2601,6 +2602,7 @@ fn wire_writer_shared_callbacks(
     state: &Rc<GuiState>,
     menu_service: Option<Arc<NativeMenuBar>>,
 ) {
+    find_bar::wire(app, state);
     {
         let state = state.clone();
         let app_ref = app.as_weak();
