@@ -47,6 +47,82 @@ pub fn export_document_as_docx(
     arch.to_bytes()
 }
 
+/// One laid-out line: an optional list marker, then `text`, which is the
+/// block's bytes starting at `text_start` so character runs can be matched.
+struct StyledLine<'a> {
+    x: f32,
+    y: f32,
+    marker: &'a str,
+    text: &'a str,
+    text_start: usize,
+    runs: &'a [loom_text::StyleRun],
+}
+
+/// Draw a line as consecutive segments, one per change of inline style, so
+/// bold, italic and underline survive the export instead of being flattened
+/// to the block's face.
+fn draw_styled_line(
+    pdf: &mut loom_pdf::PdfDocument,
+    page: loom_pdf::PageIndex,
+    line: &StyledLine<'_>,
+    base: &loom_pdf::TextStyle,
+) {
+    use loom_pdf::{text_width_pt, PathStyle};
+    use loom_text::FontWeight;
+
+    let mut x = line.x;
+    if !line.marker.is_empty() {
+        pdf.draw_text(page, x, line.y, line.marker, base);
+        x += text_width_pt(line.marker, base);
+    }
+    let end = line.text_start + line.text.len();
+    let mut cuts = vec![0, line.text.len()];
+    for run in line.runs {
+        for edge in [run.start, run.end] {
+            if (line.text_start..=end).contains(&edge)
+                && line.text.is_char_boundary(edge - line.text_start)
+            {
+                cuts.push(edge - line.text_start);
+            }
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let piece = &line.text[from..to];
+        let position = line.text_start + from;
+        let run = line
+            .runs
+            .iter()
+            .find(|run| run.start <= position && position < run.end);
+        let mut style = base.clone();
+        let mut underline = false;
+        if let Some(run) = run {
+            style.bold |= matches!(
+                run.style.weight,
+                FontWeight::Semibold | FontWeight::Bold | FontWeight::Black
+            );
+            style.italic |= run.style.italic;
+            underline = run.style.underline;
+        }
+        pdf.draw_text(page, x, line.y, piece, &style);
+        let width = text_width_pt(piece, &style);
+        if underline && !piece.trim().is_empty() {
+            let rule_y = line.y - style.size_pt * 0.12;
+            pdf.draw_line(
+                page,
+                x,
+                rule_y,
+                x + width,
+                rule_y,
+                PathStyle::stroked(style.fill_rgb, (style.size_pt / 24.0).max(0.5)),
+            );
+        }
+        x += width;
+    }
+}
+
 /// Render the document to a paginated PDF using the same deterministic page
 /// fragments as the editor preview. Output is byte-for-byte deterministic for
 /// the same document.
@@ -114,15 +190,12 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
             } else {
                 None
             };
-            let text = match marker {
-                Some(prefix) => format!("{prefix}{}", fragment.text),
-                None => fragment.text.clone(),
-            };
+            let marker = marker.unwrap_or_default();
             // `wrap_utf8_ranges` includes a hard newline in the fragment that
             // precedes it.  The newline consumes the line box but must not be
             // emitted as a second PDF text line.
-            let line = text.strip_suffix('\n').unwrap_or(&text);
-            if !line.is_empty() {
+            let line = fragment.text.strip_suffix('\n').unwrap_or(&fragment.text);
+            if !marker.is_empty() || !line.is_empty() {
                 let style = match block.kind.as_str() {
                     "heading1" => TextStyle {
                         size_pt: 15.0,
@@ -136,7 +209,15 @@ pub fn export_pdf(doc: &WriterDocument) -> Vec<u8> {
                     },
                     _ => body.clone(),
                 };
-                pdf.draw_text(page, page_style.margin_left_pt, y, line, &style);
+                let start = StyledLine {
+                    x: page_style.margin_left_pt,
+                    y,
+                    marker: &marker,
+                    text: line,
+                    text_start: fragment.start,
+                    runs: &block.runs,
+                };
+                draw_styled_line(&mut pdf, page, &start, &style);
             }
             y -= line_height;
             previous_block_id = Some(fragment.block_id);
@@ -176,6 +257,55 @@ mod tests {
                 "missing or duplicated {text}"
             );
         }
+    }
+
+    #[test]
+    fn export_pdf_keeps_inline_bold_italic_and_underline_runs() {
+        use loom_text::{CharacterStyle, FontWeight, StyleRun};
+
+        let mut document = WriterDocument::new("export-runs", "Runs");
+        let mut block = RichBlock::new(document.next_id(), "paragraph", "one two three four");
+        block.runs = vec![
+            StyleRun {
+                start: 4,
+                end: 7,
+                style: CharacterStyle {
+                    weight: FontWeight::Bold,
+                    ..Default::default()
+                },
+            },
+            StyleRun {
+                start: 8,
+                end: 13,
+                style: CharacterStyle {
+                    italic: true,
+                    underline: true,
+                    ..Default::default()
+                },
+            },
+        ];
+        document.push(block);
+
+        let pdf = export_pdf(&document);
+        let text: String = pdf.iter().map(|&byte| char::from(byte)).collect();
+        assert!(text.contains("(one )"), "leading plain run: {text}");
+        assert!(
+            text.contains("/F2 ") && text.contains("(two)"),
+            "bold run uses the bold face"
+        );
+        assert!(
+            text.contains("/F3 ") && text.contains("(three)"),
+            "italic run uses the oblique face"
+        );
+        assert!(
+            text.contains("( four)"),
+            "trailing plain run keeps its space"
+        );
+        assert_eq!(
+            text.matches(" l S").count(),
+            1,
+            "only the underlined word draws a stroked rule"
+        );
     }
 
     #[test]

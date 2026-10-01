@@ -377,6 +377,69 @@ fn fmt3(v: f32) -> String {
     format!("{:.3}", (v * 1000.0).round() / 1000.0)
 }
 
+/// Adobe Helvetica advance widths (1/1000 em) for ASCII 32..=126.
+const HELVETICA_WIDTHS: [u16; 95] = [
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+    556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667,
+    611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
+    667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500,
+    222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+
+/// Adobe Helvetica-Bold advance widths (1/1000 em) for ASCII 32..=126.
+const HELVETICA_BOLD_WIDTHS: [u16; 95] = [
+    278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+    556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667,
+    611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
+    667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
+    278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
+];
+
+/// Width of `text` in points when set in the face `style` selects.
+///
+/// Uses the published Helvetica metrics for ASCII and the typographic marks
+/// this writer maps to WinAnsi; other Latin-1 letters use a typical letter
+/// width. Oblique faces share their upright widths. Kerning is not applied,
+/// matching how PDF viewers set a plain `Tj`.
+pub fn text_width_pt(text: &str, style: &TextStyle) -> f32 {
+    let table = if style.bold {
+        &HELVETICA_BOLD_WIDTHS
+    } else {
+        &HELVETICA_WIDTHS
+    };
+    let units: u32 = text
+        .chars()
+        .map(|ch| match ch {
+            ' '..='~' => u32::from(table[ch as usize - 32]),
+            '\u{2013}' | '\u{20AC}' => 556,
+            '\u{2014}' | '\u{2026}' | '\u{2122}' => 1000,
+            '\u{2018}' | '\u{2019}' => {
+                if style.bold {
+                    278
+                } else {
+                    222
+                }
+            }
+            '\u{201C}' | '\u{201D}' => {
+                if style.bold {
+                    500
+                } else {
+                    333
+                }
+            }
+            '\u{2022}' => 350,
+            _ => {
+                if style.bold {
+                    611
+                } else {
+                    556
+                }
+            }
+        })
+        .sum();
+    units as f32 * style.size_pt / 1000.0
+}
+
 /// The four base-14 Helvetica faces, registered as `/F1`..`/F4` on every page.
 const FONT_BASES: [&str; 4] = [
     "Helvetica",
@@ -598,6 +661,28 @@ mod tests {
         let declared = format!("<< /Length {} >>", body.len());
         assert!(String::from_utf8_lossy(&bytes).contains(&declared));
         assert!(String::from_utf8_lossy(&bytes).contains("/Encoding /WinAnsiEncoding"));
+    }
+
+    #[test]
+    fn text_width_uses_helvetica_metrics_per_face() {
+        let regular = TextStyle {
+            size_pt: 10.0,
+            ..Default::default()
+        };
+        let bold = TextStyle {
+            size_pt: 10.0,
+            bold: true,
+            ..Default::default()
+        };
+        // H 722 + e 556 + l 222 + l 222 + o 556 = 2278 units.
+        assert!((text_width_pt("Hello", &regular) - 22.78).abs() < 0.001);
+        // Bold: H 722 + e 556 + l 278 + l 278 + o 611 = 2445 units.
+        assert!((text_width_pt("Hello", &bold) - 24.45).abs() < 0.001);
+        assert!((text_width_pt("", &regular)).abs() < f32::EPSILON);
+        assert!(
+            text_width_pt("Caf\u{e9}", &regular) > text_width_pt("Caf", &regular),
+            "non-ASCII letters still take width"
+        );
     }
 
     #[test]
